@@ -1,0 +1,3 @@
+{"timestamp": "2026-01-29T16:18:31.086946", "messages": [{"role": "user", "content": "Привет"}, {"role": "assistant", "content": "Привет! Рада тебя видеть. Чем занимаешься на свете?"}], "metadata": {"user_id": 785375382}}
+{"timestamp": "2026-01-29T16:19:10.875191", "messages": [{"role": "user", "content": "Скажи что-то"}, {"role": "assistant", "content": "Привет! Я Clawd. Рада знакомству! Что ты сейчас делаешь или о чем думаешь? Я всегда готов выслушать."}], "metadata": {"user_id": 785375382}}
+{"timestamp": "2026-01-29T16:19:46.013508", "messages": [{"role": "user", "content": "Скажи что нибудь"}, {"role": "assistant", "content": "Привет! Я Clawd. Чем я могу быть полезен? Расскажи, как прошел твой день?"}], "metadata": {"user_id": 785375382}}
