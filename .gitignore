@@ -25,3 +25,12 @@ Thumbs.db
 credentials.json
 token.pickle
 *.pickle
+
+# Training data (personal)
+training_data/
+
+# Serena
+.serena/
+
+# User data
+user_data.json
