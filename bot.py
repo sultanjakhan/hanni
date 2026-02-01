@@ -3,15 +3,18 @@ Clawd Bot - Telegram bot with LM Studio backend + Data Collection for Fine-tunin
 """
 import asyncio
 import logging
+import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import httpx
+from dotenv import load_dotenv
 
 # Data collector for fine-tuning
 from data_collector import collector, log, correct, stats, export
 
 # Config
-TELEGRAM_TOKEN = "REDACTED"
+load_dotenv()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LM_STUDIO_URL = "http://localhost:8000/v1/chat/completions"
 
 SYSTEM_PROMPT = """You are Clawd, a helpful AI assistant. You are running locally on the user's machine.
