@@ -34,3 +34,6 @@ training_data/
 
 # User data
 user_data.json
+
+# APK
+*.apk

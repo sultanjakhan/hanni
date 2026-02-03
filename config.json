@@ -1,23 +1,11 @@
 {
-  "mode": "local",
-  "local": {
-    "url": "http://localhost:8000/v1/chat/completions",
-    "model": "auto"
-  },
-  "api": {
-    "provider": "anthropic",
-    "api_key": "",
-    "model": "claude-3-haiku-20240307"
-  },
-  "notes": {
-    "local_models": [
-      "GLM-4.7-Flash - текущий, медленный (~40 сек)",
-      "Qwen2.5-3B-Instruct-MLX - рекомендую скачать (~5 сек)",
-      "Phi-3-mini-4k-instruct-MLX - самый быстрый (~2 сек)"
-    ],
-    "api_options": [
-      "anthropic - Claude (нужен API key)",
-      "openai - GPT (нужен API key)"
-    ]
-  }
+  "mlx_url": "http://localhost:8000/v1/chat/completions",
+  "model": "/Users/sultanbekjakhanov/.lmstudio/models/mlx-community/GLM-4.7-Flash-6bit",
+  "version": "2.0.0",
+  "timeout": 30,
+  "max_tokens": 300,
+  "listen_timeout": 10,
+  "phrase_timeout": 15,
+  "auto_listen": false,
+  "wake_word": "ханни"
 }
