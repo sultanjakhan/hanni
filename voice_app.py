@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -147,7 +148,9 @@ class HanniVoiceApp(rumps.App):
             subprocess.run(["say", "-v", "Milena", "-r", "210", text[:500]], check=False)
 
     def _ask_mlx(self, text):
-        system = "Ты голосовой ассистент Ханни. Отвечай кратко на русском, 1-2 предложения."
+        # Простой промпт для быстрого ответа
+        system = """Ты голосовой ассистент. Отвечай ТОЛЬКО на русском языке.
+Давай короткий прямой ответ, 1-2 предложения. Не объясняй свои рассуждения."""
 
         try:
             log.info(f"MLX: {text[:50]}")
@@ -160,20 +163,32 @@ class HanniVoiceApp(rumps.App):
                         {"role": "user", "content": text}
                     ],
                     "max_tokens": CONFIG.get("max_tokens", 300),
-                    "temperature": 0.5
+                    "temperature": 0.7
                 },
                 timeout=CONFIG.get("timeout", 30)
             )
 
             if r.status_code == 200:
                 msg = r.json()["choices"][0]["message"]
-                answer = msg.get("content", "")
+                answer = msg.get("content", "").strip()
+
+                # Для reasoning моделей - ищем русский текст
                 if not answer and msg.get("reasoning"):
-                    # Reasoning модель - берём последнюю строку
-                    lines = msg["reasoning"].strip().split("\n")
-                    answer = lines[-1] if lines else "Не понял"
+                    reasoning = msg["reasoning"]
+                    # Ищем строки на русском (содержат кириллицу)
+                    import re
+                    russian_lines = [l.strip() for l in reasoning.split("\n")
+                                   if re.search('[а-яА-ЯёЁ]', l) and not l.startswith('*')]
+                    if russian_lines:
+                        answer = russian_lines[-1]
+                    else:
+                        answer = "Не могу ответить"
+
+                # Убираем маркеры списков
+                answer = re.sub(r'^[\*\-\d\.]+\s*', '', answer).strip()
+
                 log.info(f"Response: {answer[:50]}")
-                return answer
+                return answer if answer else "Не понял вопрос"
             return f"Ошибка {r.status_code}"
         except requests.Timeout:
             return "Модель думает слишком долго"
