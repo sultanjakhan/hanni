@@ -9,7 +9,7 @@ MLX_URL = "http://127.0.0.1:8234/v1/chat/completions"
 MODEL = "mlx-community/Qwen3-30B-A3B-4bit"
 SYSTEM_PROMPT = (
     "You are Hanni, a helpful AI assistant. "
-    "Answer concisely and directly. Use the same language as the user. /no_think"
+    "Answer concisely and directly. Use the same language as the user."
 )
 
 # In-memory conversation history per session (simple dict by session id)
@@ -30,14 +30,20 @@ async def chat(request: web.Request) -> web.StreamResponse:
     history = sessions.setdefault(session_id, [])
     history.append({"role": "user", "content": user_msg})
 
-    # Keep last 20 messages to avoid context overflow
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-20:]
+    # Keep last 10 messages to reduce prefill time
+    recent = history[-10:]
+    # Append /no_think to the last user message for reliable thinking suppression
+    if recent and recent[-1]["role"] == "user":
+        recent = recent[:]  # shallow copy to avoid mutating history
+        recent[-1] = {**recent[-1], "content": recent[-1]["content"] + " /no_think"}
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + recent
 
     payload = {
         "model": MODEL,
         "messages": messages,
         "max_tokens": 1024,
         "stream": True,
+        "temperature": 0.7,
     }
 
     response = web.StreamResponse()

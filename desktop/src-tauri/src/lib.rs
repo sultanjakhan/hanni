@@ -1,40 +1,19 @@
 use futures_util::StreamExt;
 use reqwest;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use std::path::PathBuf;
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
 
-const SYSTEM_PROMPT: &str = r#"You are Hanni, a helpful AI assistant running locally on Mac.
-Answer concisely and directly. Use the same language as the user.
-
-You have access to a Life Tracker app. When the user wants to track something, respond with a JSON action block:
-```action
+const SYSTEM_PROMPT: &str = r#"You are Hanni, a helpful AI assistant running locally on Mac. Answer concisely. Use the user's language.
+You can track life data via ```action``` JSON blocks with types: add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), add_note(title,content), get_stats.
+Example: ```action
 {"type": "add_purchase", "amount": 5000, "category": "food", "description": "обед"}
 ```
-```action
-{"type": "add_time", "activity": "работа", "duration": 120, "category": "work", "productive": true}
-```
-```action
-{"type": "add_goal", "title": "Выучить Rust", "category": "learning"}
-```
-```action
-{"type": "add_note", "title": "Идея", "content": "текст заметки"}
-```
-```action
-{"type": "get_stats"}
-```
-
-Available categories:
-- purchase: food, transport, entertainment, health, education, shopping, bills, other
-- time: work, learning, exercise, rest, social, entertainment, chores, other
-- goal: health, career, finance, personal, learning, other
-
-Always confirm the action before and after executing. If a file is attached, analyze its contents.
-/no_think"#;
+Confirm actions. If a file is attached, analyze it."#;
 
 fn data_file_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join("Documents/life-tracker/data.json")
@@ -67,6 +46,7 @@ struct ChatRequest {
     messages: Vec<ChatMessage>,
     max_tokens: u32,
     stream: bool,
+    temperature: f32,
 }
 
 #[derive(Deserialize)]
@@ -96,21 +76,29 @@ struct ActionPayload {
     success: bool,
 }
 
+struct HttpClient(reqwest::Client);
+
 // ── Chat command ──
 
 #[tauri::command]
 async fn chat(app: AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = &app.state::<HttpClient>().0;
 
     let mut chat_messages = vec![ChatMessage {
         role: "system".into(),
         content: SYSTEM_PROMPT.into(),
     }];
 
-    for (role, content) in &messages {
+    let msg_count = messages.len();
+    for (i, (role, content)) in messages.iter().enumerate() {
+        let mut c = content.clone();
+        // Append /no_think to the last user message for reliable thinking suppression
+        if i == msg_count - 1 && role == "user" {
+            c.push_str(" /no_think");
+        }
         chat_messages.push(ChatMessage {
             role: role.clone(),
-            content: content.clone(),
+            content: c,
         });
     }
 
@@ -119,6 +107,7 @@ async fn chat(app: AppHandle, messages: Vec<(String, String)>) -> Result<String,
         messages: chat_messages,
         max_tokens: 1024,
         stream: true,
+        temperature: 0.7,
     };
 
     let response = client
@@ -530,6 +519,7 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(HttpClient(reqwest::Client::new()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())

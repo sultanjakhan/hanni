@@ -239,7 +239,7 @@ async function send() {
   const unlistenDone = await listen('chat-done', () => {});
 
   try {
-    const msgs = history.slice(-20);
+    const msgs = history.slice(-10);
     await invoke('chat', { messages: msgs });
   } catch (e) {
     if (!fullReply) {
