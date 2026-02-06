@@ -717,31 +717,49 @@ async fn get_integrations(app: AppHandle) -> Result<IntegrationsInfo, String> {
     let activity = mac_state.0.lock().map_err(|e| e.to_string())?;
 
     let activity_detail = if activity.current_app.is_empty() {
-        "Сбор данных...".to_string()
+        "Ожидание первого снапшота...".to_string()
     } else {
-        format!("{}{}", activity.current_app, if activity.is_afk { " (AFK)" } else { "" })
+        let cat = classify_app(&activity.current_app);
+        let idle = if activity.is_afk {
+            " · AFK".to_string()
+        } else {
+            String::new()
+        };
+        format!("{} · {}{}", activity.current_app, cat, idle)
+    };
+
+    let log_count = activity.log.len();
+    let tracking_detail = if log_count == 0 {
+        "Нет данных".to_string()
+    } else {
+        format!("{} снапшотов · ~{} мин", log_count, log_count / 2)
     };
 
     let macos = vec![
         IntegrationItem {
-            name: "Активность".into(),
+            name: "Сейчас".into(),
             status: if activity.current_app.is_empty() { "inactive" } else { "active" }.into(),
             detail: activity_detail,
         },
         IntegrationItem {
-            name: "Календарь".into(),
+            name: "Трекинг".into(),
             status: "active".into(),
-            detail: "Calendar.app".into(),
+            detail: tracking_detail,
+        },
+        IntegrationItem {
+            name: "Календарь".into(),
+            status: "ready".into(),
+            detail: "Calendar.app · по запросу".into(),
         },
         IntegrationItem {
             name: "Музыка".into(),
-            status: "active".into(),
-            detail: "Music / Spotify".into(),
+            status: "ready".into(),
+            detail: "Music / Spotify · по запросу".into(),
         },
         IntegrationItem {
             name: "Браузер".into(),
-            status: "active".into(),
-            detail: "Safari / Chrome / Arc".into(),
+            status: "ready".into(),
+            detail: "Safari / Chrome / Arc · по запросу".into(),
         },
     ];
 
