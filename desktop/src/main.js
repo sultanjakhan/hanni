@@ -168,6 +168,18 @@ async function executeAction(actionJson) {
       case 'get_stats':
         result = await invoke('tracker_get_stats');
         break;
+      case 'get_activity':
+        result = await invoke('get_activity_summary');
+        break;
+      case 'get_calendar':
+        result = await invoke('get_calendar_events');
+        break;
+      case 'get_music':
+        result = await invoke('get_now_playing');
+        break;
+      case 'get_browser':
+        result = await invoke('get_browser_tab');
+        break;
       default:
         result = 'Unknown action: ' + action.type;
     }
@@ -322,6 +334,11 @@ async function loadIntegrations() {
 
     const blockerBadge = `<span class="panel-status-badge ${info.blocker_active ? 'on' : 'off'}">${info.blocker_active ? 'Активна' : 'Неактивна'}</span>`;
 
+    let macosItems = '';
+    if (info.macos) {
+      for (const item of info.macos) macosItems += panelItem(item);
+    }
+
     integrationsContent.innerHTML = `
       <div class="integrations-grid">
         <div class="integration-card">
@@ -331,6 +348,10 @@ async function loadIntegrations() {
         <div class="integration-card">
           <div class="integration-card-title">Трекинг</div>
           ${trackingItems}
+        </div>
+        <div class="integration-card">
+          <div class="integration-card-title">macOS</div>
+          ${macosItems}
         </div>
         <div class="integration-card">
           <div class="integration-card-title">Приложения</div>
@@ -381,5 +402,12 @@ async function loadSettings() {
     settingsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
 }
+
+// ── Activity update listener ──
+listen('activity-update', () => {
+  if (currentTab === 'integrations') {
+    loadIntegrations();
+  }
+});
 
 input.focus();
