@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 
 let busy = false;
 let history = [];
@@ -339,8 +339,19 @@ async function loadIntegrations() {
       for (const item of info.macos) macosItems += panelItem(item);
     }
 
+    const legend = `<div class="macos-legend">
+      <span><span class="legend-dot active"></span> Активно</span>
+      <span><span class="legend-dot ready"></span> По запросу</span>
+      <span><span class="legend-dot inactive"></span> Ожидание</span>
+    </div>`;
+
     integrationsContent.innerHTML = `
       <div class="integrations-grid">
+        <div class="integration-card macos-card">
+          <div class="integration-card-title">macOS интеграции</div>
+          ${legend}
+          ${macosItems}
+        </div>
         <div class="integration-card">
           <div class="integration-card-title">Доступ</div>
           ${accessItems}
@@ -348,10 +359,6 @@ async function loadIntegrations() {
         <div class="integration-card">
           <div class="integration-card-title">Трекинг</div>
           ${trackingItems}
-        </div>
-        <div class="integration-card">
-          <div class="integration-card-title">macOS</div>
-          ${macosItems}
         </div>
         <div class="integration-card">
           <div class="integration-card-title">Приложения</div>
