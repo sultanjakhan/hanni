@@ -7,10 +7,61 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
+const integrationsContent = document.getElementById('integrations-content');
+const settingsContent = document.getElementById('settings-content');
+
+const APP_VERSION = '0.2.0';
 
 let busy = false;
 let history = [];
 let attachedFile = null; // {name, content}
+let currentTab = 'chat';
+let integrationsTimer = null;
+
+// ── Auto-update notification ──
+listen('update-available', (event) => {
+  const version = event.payload;
+  const banner = document.createElement('div');
+  banner.style.cssText = 'padding:8px 16px;background:#161616;color:#888;font-size:12px;text-align:center;border-bottom:1px solid #222;';
+  banner.textContent = `Обновление до v${version}...`;
+  document.querySelector('main').prepend(banner);
+});
+
+// ── Tab navigation ──
+
+function switchTab(tab) {
+  currentTab = tab;
+
+  // Update sidebar buttons
+  document.querySelectorAll('.sidebar-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  // Update views
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(`view-${tab}`).classList.add('active');
+
+  // Clear integrations timer
+  if (integrationsTimer) {
+    clearInterval(integrationsTimer);
+    integrationsTimer = null;
+  }
+
+  if (tab === 'integrations') {
+    loadIntegrations();
+    integrationsTimer = setInterval(loadIntegrations, 5000);
+  } else if (tab === 'settings') {
+    loadSettings();
+  } else if (tab === 'chat') {
+    input.focus();
+  }
+}
+
+document.querySelectorAll('.sidebar-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+// ── Chat helpers ──
 
 function scrollDown() {
   chat.scrollTop = chat.scrollHeight;
@@ -239,5 +290,96 @@ input.addEventListener('keydown', e => {
     send();
   }
 });
+
+// ── Integrations page ──
+
+function panelItem(item) {
+  return `<div class="panel-item">
+    <span class="panel-dot ${item.status}"></span>
+    <div class="panel-item-info">
+      <div class="panel-item-name">${item.name}</div>
+      <div class="panel-item-detail">${item.detail}</div>
+    </div>
+  </div>`;
+}
+
+async function loadIntegrations() {
+  integrationsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
+  try {
+    const info = await invoke('get_integrations');
+
+    let accessItems = '';
+    for (const item of info.access) accessItems += panelItem(item);
+
+    let trackingItems = '';
+    for (const item of info.tracking) trackingItems += panelItem(item);
+
+    let appsItems = '';
+    for (const item of info.blocked_apps) appsItems += panelItem(item);
+
+    let sitesItems = '';
+    for (const item of info.blocked_sites) sitesItems += panelItem(item);
+
+    const blockerBadge = `<span class="panel-status-badge ${info.blocker_active ? 'on' : 'off'}">${info.blocker_active ? 'Активна' : 'Неактивна'}</span>`;
+
+    integrationsContent.innerHTML = `
+      <div class="integrations-grid">
+        <div class="integration-card">
+          <div class="integration-card-title">Доступ</div>
+          ${accessItems}
+        </div>
+        <div class="integration-card">
+          <div class="integration-card-title">Трекинг</div>
+          ${trackingItems}
+        </div>
+        <div class="integration-card">
+          <div class="integration-card-title">Приложения</div>
+          ${blockerBadge}
+          ${appsItems}
+        </div>
+        <div class="integration-card">
+          <div class="integration-card-title">Сайты</div>
+          ${blockerBadge}
+          ${sitesItems}
+        </div>
+      </div>`;
+  } catch (e) {
+    integrationsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
+  }
+}
+
+// ── Settings page ──
+
+async function loadSettings() {
+  settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
+  try {
+    const info = await invoke('get_model_info');
+    settingsContent.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">Модель</div>
+        <div class="settings-row">
+          <span class="settings-label">Название</span>
+          <span class="settings-value">${info.model_name}</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Сервер</span>
+          <span class="settings-value">${info.server_url}</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Статус</span>
+          <span class="settings-value ${info.server_online ? 'online' : 'offline'}">${info.server_online ? 'Онлайн' : 'Офлайн'}</span>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Приложение</div>
+        <div class="settings-row">
+          <span class="settings-label">Версия</span>
+          <span class="settings-value">${APP_VERSION}</span>
+        </div>
+      </div>`;
+  } catch (e) {
+    settingsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
+  }
+}
 
 input.focus();
