@@ -4,14 +4,19 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
 
 const SYSTEM_PROMPT: &str = r#"You are Hanni, a helpful AI assistant running locally on Mac. Answer concisely. Use the user's language.
 You can track life data via ```action``` JSON blocks with types: add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), add_note(title,content), get_stats.
+macOS integrations: get_activity (app usage today), get_calendar (upcoming events), get_music (now playing), get_browser (current tab).
 Example: ```action
 {"type": "add_purchase", "amount": 5000, "category": "food", "description": "обед"}
+```
+Example: ```action
+{"type": "get_calendar"}
 ```
 Confirm actions. If a file is attached, analyze it."#;
 
@@ -77,6 +82,79 @@ struct ActionPayload {
 }
 
 struct HttpClient(reqwest::Client);
+
+// ── macOS Activity tracking ──
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ActivityEntry {
+    timestamp: String,
+    app: String,
+    idle_seconds: u64,
+    is_afk: bool,
+    category: String,
+}
+
+#[derive(Default, Clone, Debug)]
+struct ActivityState {
+    log: Vec<ActivityEntry>,
+    current_app: String,
+    is_afk: bool,
+}
+
+struct MacState(Arc<Mutex<ActivityState>>);
+
+fn run_osascript(script: &str) -> Result<String, String> {
+    let output = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .map_err(|e| format!("osascript error: {}", e))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn get_idle_seconds() -> u64 {
+    let output = std::process::Command::new("ioreg")
+        .args(["-c", "IOHIDSystem", "-d", "4"])
+        .output()
+        .ok();
+    if let Some(out) = output {
+        let text = String::from_utf8_lossy(&out.stdout);
+        for line in text.lines() {
+            if line.contains("HIDIdleTime") {
+                if let Some(val) = line.split('=').last() {
+                    let val = val.trim().trim_end_matches(|c: char| !c.is_ascii_digit());
+                    if let Ok(ns) = val.parse::<u64>() {
+                        return ns / 1_000_000_000;
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
+fn classify_app(name: &str) -> &'static str {
+    let lower = name.to_lowercase();
+    let productive = [
+        "code", "cursor", "terminal", "iterm", "xcode", "intellij", "webstorm",
+        "sublime", "vim", "neovim", "warp", "alacritty", "kitty", "notion",
+        "obsidian", "figma", "linear", "github", "postman",
+    ];
+    let distraction = [
+        "telegram", "discord", "slack", "whatsapp", "instagram", "twitter",
+        "tiktok", "youtube", "reddit", "netflix", "twitch", "facebook",
+    ];
+    if productive.iter().any(|p| lower.contains(p)) {
+        "productive"
+    } else if distraction.iter().any(|d| lower.contains(d)) {
+        "distraction"
+    } else {
+        "neutral"
+    }
+}
 
 // ── Chat command ──
 
@@ -342,6 +420,164 @@ async fn tracker_get_recent(entry_type: String, limit: usize) -> Result<String, 
         .map_err(|e| format!("Serialize error: {}", e))
 }
 
+// ── macOS commands ──
+
+#[tauri::command]
+async fn get_activity_summary(app: AppHandle) -> Result<String, String> {
+    let state = app.state::<MacState>();
+    let activity = state.0.lock().map_err(|e| e.to_string())?;
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today_entries: Vec<&ActivityEntry> = activity.log.iter()
+        .filter(|e| e.timestamp.starts_with(&today))
+        .collect();
+
+    if today_entries.is_empty() {
+        return Ok("No activity recorded today yet.".into());
+    }
+
+    let mut productive_min: u64 = 0;
+    let mut distraction_min: u64 = 0;
+    let mut neutral_min: u64 = 0;
+    let mut afk_min: u64 = 0;
+    let mut app_minutes: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
+    for entry in &today_entries {
+        if entry.is_afk {
+            afk_min += 1; // each entry ~30s, but we report as half-minutes
+        } else {
+            match entry.category.as_str() {
+                "productive" => productive_min += 1,
+                "distraction" => distraction_min += 1,
+                _ => neutral_min += 1,
+            }
+            *app_minutes.entry(entry.app.clone()).or_insert(0) += 1;
+        }
+    }
+
+    // Convert from 30s intervals to minutes
+    let to_min = |count: u64| count / 2;
+
+    let mut top_apps: Vec<(String, u64)> = app_minutes.into_iter().collect();
+    top_apps.sort_by(|a, b| b.1.cmp(&a.1));
+    top_apps.truncate(5);
+
+    let top_str: Vec<String> = top_apps.iter()
+        .map(|(name, count)| format!("  {} — {} min", name, to_min(*count)))
+        .collect();
+
+    Ok(format!(
+        "Activity today ({} snapshots):\n\
+         Productive: {} min\nDistraction: {} min\nNeutral: {} min\nAFK: {} min\n\n\
+         Top apps:\n{}",
+        today_entries.len(),
+        to_min(productive_min), to_min(distraction_min),
+        to_min(neutral_min), to_min(afk_min),
+        top_str.join("\n")
+    ))
+}
+
+#[tauri::command]
+async fn get_current_activity(app: AppHandle) -> Result<String, String> {
+    let state = app.state::<MacState>();
+    let activity = state.0.lock().map_err(|e| e.to_string())?;
+    if activity.current_app.is_empty() {
+        return Ok("No activity data yet. Tracking starts in ~30 seconds.".into());
+    }
+    Ok(format!(
+        "Current app: {}\nAFK: {}",
+        activity.current_app,
+        if activity.is_afk { "yes" } else { "no" }
+    ))
+}
+
+#[tauri::command]
+async fn get_calendar_events() -> Result<String, String> {
+    let script = r#"
+        set output to ""
+        set today to current date
+        set endDate to today + (2 * days)
+        tell application "Calendar"
+            repeat with cal in calendars
+                set evts to (every event of cal whose start date >= today and start date <= endDate)
+                repeat with evt in evts
+                    set evtStart to start date of evt
+                    set evtName to summary of evt
+                    set output to output & (evtStart as string) & " | " & evtName & linefeed
+                end repeat
+            end repeat
+        end tell
+        if output is "" then
+            return "No upcoming events in the next 2 days."
+        end if
+        return output
+    "#;
+    run_osascript(script)
+}
+
+#[tauri::command]
+async fn get_now_playing() -> Result<String, String> {
+    // Check Music.app
+    let music_check = run_osascript(
+        "tell application \"System Events\" to (name of processes) contains \"Music\""
+    );
+    if let Ok(ref val) = music_check {
+        if val == "true" {
+            let result = run_osascript(
+                "tell application \"Music\" to if player state is playing then \
+                 return (name of current track) & \" — \" & (artist of current track) \
+                 else return \"Music paused\" end if"
+            );
+            if let Ok(info) = result {
+                return Ok(format!("Apple Music: {}", info));
+            }
+        }
+    }
+
+    // Check Spotify
+    let spotify_check = run_osascript(
+        "tell application \"System Events\" to (name of processes) contains \"Spotify\""
+    );
+    if let Ok(ref val) = spotify_check {
+        if val == "true" {
+            let result = run_osascript(
+                "tell application \"Spotify\" to if player state is playing then \
+                 return (name of current track) & \" — \" & (artist of current track) \
+                 else return \"Spotify paused\" end if"
+            );
+            if let Ok(info) = result {
+                return Ok(format!("Spotify: {}", info));
+            }
+        }
+    }
+
+    Ok("No music app is currently playing.".into())
+}
+
+#[tauri::command]
+async fn get_browser_tab() -> Result<String, String> {
+    let browsers = [
+        ("Arc", "tell application \"Arc\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
+        ("Google Chrome", "tell application \"Google Chrome\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
+        ("Safari", "tell application \"Safari\" to return URL of front document & \" | \" & name of front document"),
+    ];
+
+    for (name, script) in &browsers {
+        let check = run_osascript(&format!(
+            "tell application \"System Events\" to (name of processes) contains \"{}\"", name
+        ));
+        if let Ok(ref val) = check {
+            if val == "true" {
+                if let Ok(info) = run_osascript(script) {
+                    return Ok(format!("{}: {}", name, info));
+                }
+            }
+        }
+    }
+
+    Ok("No supported browser is currently open.".into())
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -358,10 +594,11 @@ struct IntegrationsInfo {
     blocked_apps: Vec<IntegrationItem>,
     blocked_sites: Vec<IntegrationItem>,
     blocker_active: bool,
+    macos: Vec<IntegrationItem>,
 }
 
 #[tauri::command]
-async fn get_integrations() -> Result<IntegrationsInfo, String> {
+async fn get_integrations(app: AppHandle) -> Result<IntegrationsInfo, String> {
     // ── Access ──
     let tracker_path = data_file_path();
     let tracker_exists = tracker_path.exists();
@@ -475,12 +712,48 @@ async fn get_integrations() -> Result<IntegrationsInfo, String> {
         detail: if blocker_active { "Заблокирован" } else { "Не заблокирован" }.into(),
     }).collect();
 
+    // ── macOS integrations ──
+    let mac_state = app.state::<MacState>();
+    let activity = mac_state.0.lock().map_err(|e| e.to_string())?;
+
+    let activity_detail = if activity.current_app.is_empty() {
+        "Сбор данных...".to_string()
+    } else {
+        format!("{}{}", activity.current_app, if activity.is_afk { " (AFK)" } else { "" })
+    };
+
+    let macos = vec![
+        IntegrationItem {
+            name: "Активность".into(),
+            status: if activity.current_app.is_empty() { "inactive" } else { "active" }.into(),
+            detail: activity_detail,
+        },
+        IntegrationItem {
+            name: "Календарь".into(),
+            status: "active".into(),
+            detail: "Calendar.app".into(),
+        },
+        IntegrationItem {
+            name: "Музыка".into(),
+            status: "active".into(),
+            detail: "Music / Spotify".into(),
+        },
+        IntegrationItem {
+            name: "Браузер".into(),
+            status: "active".into(),
+            detail: "Safari / Chrome / Arc".into(),
+        },
+    ];
+
+    drop(activity); // release lock
+
     Ok(IntegrationsInfo {
         access,
         tracking,
         blocked_apps,
         blocked_sites,
         blocker_active,
+        macos,
     })
 }
 
@@ -518,8 +791,12 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mac_state = MacState(Arc::new(Mutex::new(ActivityState::default())));
+    let activity_arc = mac_state.0.clone();
+
     tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
+        .manage(mac_state)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -537,8 +814,14 @@ pub fn run() {
             tracker_get_recent,
             get_integrations,
             get_model_info,
+            get_activity_summary,
+            get_current_activity,
+            get_calendar_events,
+            get_now_playing,
+            get_browser_tab,
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            // Auto-updater
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 match handle.updater().expect("updater not configured").check().await {
@@ -552,6 +835,46 @@ pub fn run() {
                     _ => {}
                 }
             });
+
+            // Background activity tracker
+            let tracker_handle = app.handle().clone();
+            let tracker_state = activity_arc;
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+
+                    let app_name = run_osascript(
+                        "tell application \"System Events\" to get name of first application process whose frontmost is true"
+                    ).unwrap_or_default();
+
+                    let idle = get_idle_seconds();
+                    let is_afk = idle > 300;
+                    let category = classify_app(&app_name).to_string();
+                    let timestamp = chrono::Local::now().to_rfc3339();
+
+                    let entry = ActivityEntry {
+                        timestamp,
+                        app: app_name.clone(),
+                        idle_seconds: idle,
+                        is_afk,
+                        category,
+                    };
+
+                    if let Ok(mut state) = tracker_state.lock() {
+                        state.current_app = app_name;
+                        state.is_afk = is_afk;
+                        state.log.push(entry);
+                        // Keep max 2880 entries (~24h at 30s intervals)
+                        if state.log.len() > 2880 {
+                            state.log.remove(0);
+                        }
+                    }
+
+                    let _ = tracker_handle.emit("activity-update", ());
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())
