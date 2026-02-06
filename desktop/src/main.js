@@ -202,6 +202,55 @@ function parseAndExecuteActions(text) {
   return actions;
 }
 
+// ── Stream chat helper ──
+
+async function streamChat(botDiv, t0) {
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  botDiv.appendChild(cursor);
+
+  let firstToken = 0;
+  let tokens = 0;
+  let fullReply = '';
+
+  const unlisten = await listen('chat-token', (event) => {
+    if (!firstToken) firstToken = performance.now() - t0;
+    tokens++;
+    const token = event.payload.token;
+    fullReply += token;
+    botDiv.insertBefore(document.createTextNode(token), cursor);
+    scrollDown();
+  });
+
+  const unlistenDone = await listen('chat-done', () => {});
+
+  try {
+    const msgs = history.slice(-16);
+    await invoke('chat', { messages: msgs });
+  } catch (e) {
+    if (!fullReply) {
+      botDiv.textContent = 'MLX сервер недоступен';
+    }
+  }
+
+  unlisten();
+  unlistenDone();
+  cursor.remove();
+
+  return { fullReply, tokens, firstToken };
+}
+
+// ── Agent step indicator ──
+
+function showAgentIndicator(step) {
+  const div = document.createElement('div');
+  div.className = 'agent-step';
+  div.textContent = `шаг ${step}...`;
+  chat.appendChild(div);
+  scrollDown();
+  return div;
+}
+
 // ── Send message ──
 
 async function send() {
@@ -225,60 +274,58 @@ async function send() {
 
   history.push(['user', userContent]);
 
-  // Create bot message with cursor
-  const botDiv = document.createElement('div');
-  botDiv.className = 'msg bot';
-  const cursor = document.createElement('span');
-  cursor.className = 'cursor';
-  botDiv.appendChild(cursor);
-  chat.appendChild(botDiv);
-  scrollDown();
-
+  const MAX_ITERATIONS = 5;
   const t0 = performance.now();
+  let totalTokens = 0;
   let firstToken = 0;
-  let tokens = 0;
-  let fullReply = '';
+  let iteration = 0;
 
-  const unlisten = await listen('chat-token', (event) => {
-    if (!firstToken) firstToken = performance.now() - t0;
-    tokens++;
-    const token = event.payload.token;
-    fullReply += token;
-    botDiv.insertBefore(document.createTextNode(token), cursor);
-    scrollDown();
-  });
+  while (iteration < MAX_ITERATIONS) {
+    iteration++;
 
-  const unlistenDone = await listen('chat-done', () => {});
-
-  try {
-    const msgs = history.slice(-10);
-    await invoke('chat', { messages: msgs });
-  } catch (e) {
-    if (!fullReply) {
-      botDiv.textContent = 'MLX сервер недоступен';
+    // Show step indicator for iterations after the first
+    if (iteration > 1) {
+      showAgentIndicator(iteration);
     }
-  }
 
-  unlisten();
-  unlistenDone();
-  cursor.remove();
+    // Create bot message div
+    const botDiv = document.createElement('div');
+    botDiv.className = 'msg bot';
+    chat.appendChild(botDiv);
+    scrollDown();
 
-  if (fullReply) {
-    history.push(['assistant', fullReply]);
+    // Stream model response
+    const result = await streamChat(botDiv, t0);
+    if (!firstToken && result.firstToken) firstToken = result.firstToken;
+    totalTokens += result.tokens;
 
-    // Parse and execute any life-tracker actions
-    const actions = parseAndExecuteActions(fullReply);
+    if (!result.fullReply) break;
+
+    history.push(['assistant', result.fullReply]);
+
+    // Parse actions from response
+    const actions = parseAndExecuteActions(result.fullReply);
+
+    // No actions — this is the final answer, stop the loop
+    if (actions.length === 0) break;
+
+    // Mark this response as intermediate (it contained actions, not a final answer)
+    botDiv.classList.add('intermediate');
+
+    // Execute actions and show results
+    const results = [];
     for (const actionJson of actions) {
-      const { success, result } = await executeAction(actionJson);
+      const { success, result: actionResult } = await executeAction(actionJson);
       const actionDiv = document.createElement('div');
       actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
-      actionDiv.textContent = result;
+      actionDiv.textContent = actionResult;
       chat.appendChild(actionDiv);
       scrollDown();
-
-      // Add result to history so model knows
-      history.push(['user', `[Action result: ${result}]`]);
+      results.push(actionResult);
     }
+
+    // Feed results back into history so the model sees them
+    history.push(['user', `[Action result: ${results.join('; ')}]`]);
   }
 
   // Show timing
@@ -286,7 +333,8 @@ async function send() {
   const ttft = firstToken ? (firstToken / 1000).toFixed(1) : '?';
   const timing = document.createElement('div');
   timing.className = 'timing';
-  timing.textContent = `${ttft}s first token · ${total}s total · ${tokens} tokens`;
+  const stepInfo = iteration > 1 ? ` · ${iteration} steps` : '';
+  timing.textContent = `${ttft}s first token · ${total}s total · ${totalTokens} tokens${stepInfo}`;
   chat.appendChild(timing);
   scrollDown();
 
