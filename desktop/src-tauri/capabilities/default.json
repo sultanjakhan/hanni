@@ -8,6 +8,8 @@
     "opener:default",
     "fs:default",
     "shell:default",
+    "updater:default",
+    "process:default",
     {
       "identifier": "fs:allow-read-text-file",
       "allow": [{ "path": "$HOME/**" }]

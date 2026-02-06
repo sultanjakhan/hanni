@@ -7,18 +7,43 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div class="header">
-  <span class="title">Hanni</span>
-  <span class="subtitle">Qwen3 30B · local</span>
-</div>
-<div id="chat"></div>
-<div id="attach-preview"></div>
-<div id="input-area">
-  <button id="attach" title="Прикрепить файл">+</button>
-  <input id="file-input" type="file" style="display:none">
-  <input id="input" type="text" placeholder="Напиши сообщение..." autocomplete="off">
-  <button id="send">→</button>
-</div>
+<nav id="sidebar">
+  <div class="sidebar-top">
+    <button class="sidebar-btn active" data-tab="chat" title="Чат">H</button>
+    <button class="sidebar-btn" data-tab="integrations" title="Интеграции">&#9670;</button>
+  </div>
+  <div class="sidebar-bottom">
+    <button class="sidebar-btn" data-tab="settings" title="Настройки">&#9881;</button>
+  </div>
+</nav>
+<main>
+  <div class="header">
+    <span class="title">Hanni</span>
+    <span class="subtitle">Qwen3 30B · local</span>
+  </div>
+
+  <!-- Chat view -->
+  <div id="view-chat" class="view active">
+    <div id="chat"></div>
+    <div id="attach-preview"></div>
+    <div id="input-area">
+      <button id="attach" title="Прикрепить файл">+</button>
+      <input id="file-input" type="file" style="display:none">
+      <input id="input" type="text" placeholder="Напиши сообщение..." autocomplete="off">
+      <button id="send">&rarr;</button>
+    </div>
+  </div>
+
+  <!-- Integrations view -->
+  <div id="view-integrations" class="view">
+    <div id="integrations-content"></div>
+  </div>
+
+  <!-- Settings view -->
+  <div id="view-settings" class="view">
+    <div id="settings-content"></div>
+  </div>
+</main>
 <script type="module" src="main.js"></script>
 </body>
 </html>

@@ -2,6 +2,7 @@ use futures_util::StreamExt;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_updater::UpdaterExt;
 use std::path::PathBuf;
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
@@ -352,6 +353,178 @@ async fn tracker_get_recent(entry_type: String, limit: usize) -> Result<String, 
         .map_err(|e| format!("Serialize error: {}", e))
 }
 
+// ── Integrations info ──
+
+#[derive(Serialize)]
+struct IntegrationItem {
+    name: String,
+    status: String,  // "active", "inactive", "blocked"
+    detail: String,
+}
+
+#[derive(Serialize)]
+struct IntegrationsInfo {
+    access: Vec<IntegrationItem>,
+    tracking: Vec<IntegrationItem>,
+    blocked_apps: Vec<IntegrationItem>,
+    blocked_sites: Vec<IntegrationItem>,
+    blocker_active: bool,
+}
+
+#[tauri::command]
+async fn get_integrations() -> Result<IntegrationsInfo, String> {
+    // ── Access ──
+    let tracker_path = data_file_path();
+    let tracker_exists = tracker_path.exists();
+    let access = vec![
+        IntegrationItem {
+            name: "Life Tracker".into(),
+            status: if tracker_exists { "active" } else { "inactive" }.into(),
+            detail: if tracker_exists {
+                "~/Documents/life-tracker/data.json".into()
+            } else {
+                "Файл не найден".into()
+            },
+        },
+        IntegrationItem {
+            name: "File System".into(),
+            status: "active".into(),
+            detail: "$HOME/** — чтение файлов".into(),
+        },
+        IntegrationItem {
+            name: "Shell".into(),
+            status: "active".into(),
+            detail: "Выполнение команд".into(),
+        },
+    ];
+
+    // ── Tracking ──
+    let tracking = if tracker_exists {
+        let data = load_tracker_data().unwrap_or(TrackerData {
+            purchases: vec![], time_entries: vec![], goals: vec![], notes: vec![],
+            settings: serde_json::Value::Null,
+        });
+        vec![
+            IntegrationItem {
+                name: "Расходы".into(),
+                status: "active".into(),
+                detail: format!("{} записей", data.purchases.len()),
+            },
+            IntegrationItem {
+                name: "Время".into(),
+                status: "active".into(),
+                detail: format!("{} записей", data.time_entries.len()),
+            },
+            IntegrationItem {
+                name: "Цели".into(),
+                status: "active".into(),
+                detail: format!("{} целей", data.goals.len()),
+            },
+            IntegrationItem {
+                name: "Заметки".into(),
+                status: "active".into(),
+                detail: format!("{} заметок", data.notes.len()),
+            },
+        ]
+    } else {
+        vec![IntegrationItem {
+            name: "Life Tracker".into(),
+            status: "inactive".into(),
+            detail: "Не подключен".into(),
+        }]
+    };
+
+    // ── Blocker config ──
+    let blocker_config_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join("hanni/blocker_config.json");
+
+    let default_apps = vec!["Telegram", "Discord", "Slack", "Safari"];
+    let default_sites = vec![
+        "youtube.com", "twitter.com", "x.com", "instagram.com",
+        "facebook.com", "tiktok.com", "reddit.com", "vk.com", "netflix.com",
+    ];
+
+    let (apps, sites) = if blocker_config_path.exists() {
+        let content = std::fs::read_to_string(&blocker_config_path).unwrap_or_default();
+        if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&content) {
+            let apps: Vec<String> = cfg["apps"].as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_else(|| default_apps.iter().map(|s| s.to_string()).collect());
+            let sites: Vec<String> = cfg["sites"].as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_else(|| default_sites.iter().map(|s| s.to_string()).collect());
+            (apps, sites)
+        } else {
+            (default_apps.iter().map(|s| s.to_string()).collect(),
+             default_sites.iter().map(|s| s.to_string()).collect())
+        }
+    } else {
+        (default_apps.iter().map(|s| s.to_string()).collect(),
+         default_sites.iter().map(|s| s.to_string()).collect())
+    };
+
+    // Check if blocking is active via /etc/hosts
+    let blocker_active = std::fs::read_to_string("/etc/hosts")
+        .map(|c| c.contains("# === HANNI FOCUS BLOCKER ==="))
+        .unwrap_or(false);
+
+    let blocked_apps = apps.iter().map(|a| IntegrationItem {
+        name: a.clone(),
+        status: if blocker_active { "blocked" } else { "inactive" }.into(),
+        detail: format!("/Applications/{}.app", a),
+    }).collect();
+
+    // Deduplicate sites (remove www. variants for display)
+    let unique_sites: Vec<&String> = sites.iter()
+        .filter(|s| !s.starts_with("www."))
+        .collect();
+
+    let blocked_sites = unique_sites.iter().map(|s| IntegrationItem {
+        name: s.to_string(),
+        status: if blocker_active { "blocked" } else { "inactive" }.into(),
+        detail: if blocker_active { "Заблокирован" } else { "Не заблокирован" }.into(),
+    }).collect();
+
+    Ok(IntegrationsInfo {
+        access,
+        tracking,
+        blocked_apps,
+        blocked_sites,
+        blocker_active,
+    })
+}
+
+// ── Model info ──
+
+#[derive(Serialize)]
+struct ModelInfo {
+    model_name: String,
+    server_url: String,
+    server_online: bool,
+}
+
+#[tauri::command]
+async fn get_model_info() -> Result<ModelInfo, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let online = client
+        .get("http://127.0.0.1:8234/v1/models")
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    Ok(ModelInfo {
+        model_name: MODEL.to_string(),
+        server_url: MLX_URL.to_string(),
+        server_online: online,
+    })
+}
+
 // ── App setup ──
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -360,6 +533,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             chat,
             read_file,
@@ -370,7 +545,25 @@ pub fn run() {
             tracker_add_note,
             tracker_get_stats,
             tracker_get_recent,
+            get_integrations,
+            get_model_info,
         ])
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match handle.updater().expect("updater not configured").check().await {
+                    Ok(Some(update)) => {
+                        let version = update.version.clone();
+                        let _ = handle.emit("update-available", &version);
+                        if let Ok(()) = update.download_and_install(|_, _| {}, || {}).await {
+                            handle.restart();
+                        }
+                    }
+                    _ => {}
+                }
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Hanni");
 }

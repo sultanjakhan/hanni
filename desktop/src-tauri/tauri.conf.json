@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Hanni",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.sultanjakhan.hanni",
   "build": {
     "frontendDist": "../src"
@@ -11,9 +11,9 @@
     "windows": [
       {
         "title": "Hanni",
-        "width": 480,
+        "width": 560,
         "height": 720,
-        "minWidth": 380,
+        "minWidth": 440,
         "minHeight": 500,
         "decorations": true,
         "transparent": false
@@ -32,6 +32,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/sultanjakhan/hanni/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZCQTIzMjY4NzQ3MDI3NTgKUldSWUozQjBhREtpYTBUVkNhRVR0UTdRMDMzV3dEbUVsR2pGRDFQRXFiYXJEVkI1VjF2MEFNVCsK"
+    }
   }
 }
