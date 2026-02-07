@@ -458,11 +458,4 @@ async function loadSettings() {
   }
 }
 
-// ── Activity update listener ──
-listen('activity-update', () => {
-  if (currentTab === 'integrations') {
-    loadIntegrations();
-  }
-});
-
 input.focus();
