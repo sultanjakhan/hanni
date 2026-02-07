@@ -36,6 +36,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          UPDATER_GITHUB_TOKEN: ${{ secrets.UPDATER_GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Hanni ${{ github.ref_name }}'
@@ -43,3 +44,28 @@ jobs:
           releaseDraft: false
           prerelease: false
           projectPath: desktop
+
+      - name: Update gist with latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GIST_PAT }}
+          GIST_ID: ${{ secrets.UPDATER_GIST_ID }}
+        run: |
+          TAG="${{ github.ref_name }}"
+
+          # Get release info and asset IDs
+          RELEASE=$(gh api repos/${{ github.repository }}/releases/tags/$TAG)
+          TAR_ASSET_ID=$(echo "$RELEASE" | jq -r '.assets[] | select(.name | endswith(".app.tar.gz")) | select(.name | endswith(".sig") | not) | .id')
+          SIG_CONTENT=$(gh api repos/${{ github.repository }}/releases/assets/$(echo "$RELEASE" | jq -r '.assets[] | select(.name | endswith(".tar.gz.sig")) | .id') -H "Accept: application/octet-stream" --raw-field "")
+
+          # Download original latest.json from release
+          LATEST_ASSET_ID=$(echo "$RELEASE" | jq -r '.assets[] | select(.name=="latest.json") | .id')
+          gh api repos/${{ github.repository }}/releases/assets/$LATEST_ASSET_ID -H "Accept: application/octet-stream" > /tmp/latest.json
+
+          # Rewrite download URLs to GitHub API format
+          API_URL="https://api.github.com/repos/${{ github.repository }}/releases/assets/${TAR_ASSET_ID}"
+          jq --arg url "$API_URL" '
+            .platforms |= with_entries(.value.url = $url)
+          ' /tmp/latest.json > /tmp/latest_final.json
+
+          # Update gist
+          gh gist edit "$GIST_ID" -f latest.json /tmp/latest_final.json

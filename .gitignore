@@ -4,7 +4,8 @@ client_secret*.json
 *.secret
 *.key
 .env
-.env.*
+.env.local
+.env.production
 
 # Python
 __pycache__/

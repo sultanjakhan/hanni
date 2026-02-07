@@ -763,11 +763,23 @@ async fn get_model_info() -> Result<ModelInfo, String> {
     })
 }
 
-// ── Updater command ──
+// ── Updater ──
+
+const UPDATER_PAT: &str = env!("UPDATER_GITHUB_TOKEN");
+
+fn updater_with_headers(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    app.updater_builder()
+        .header("Authorization", &format!("token {}", UPDATER_PAT))
+        .map_err(|e| format!("Header error: {}", e))?
+        .header("Accept", "application/octet-stream")
+        .map_err(|e| format!("Header error: {}", e))?
+        .build()
+        .map_err(|e| format!("Updater error: {}", e))
+}
 
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<String, String> {
-    let updater = app.updater().map_err(|e| format!("Updater error: {}", e))?;
+    let updater = updater_with_headers(&app)?;
     match updater.check().await {
         Ok(Some(update)) => {
             let version = update.version.clone();
@@ -816,7 +828,11 @@ pub fn run() {
             // Auto-updater
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match handle.updater().expect("updater not configured").check().await {
+                let updater = match updater_with_headers(&handle) {
+                    Ok(u) => u,
+                    Err(_) => return,
+                };
+                match updater.check().await {
                     Ok(Some(update)) => {
                         let version = update.version.clone();
                         let _ = handle.emit("update-available", &version);
