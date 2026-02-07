@@ -495,6 +495,28 @@ main {
   letter-spacing: 0.3px;
 }
 
+.settings-btn {
+  background: #1a1a2e;
+  color: #818cf8;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settings-btn:hover {
+  background: #252548;
+  border-color: #818cf8;
+}
+
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 /* ── Drag & drop overlay ── */
 
 body.dragover::after {
