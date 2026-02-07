@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
@@ -85,26 +84,6 @@ struct ActionPayload {
 
 struct HttpClient(reqwest::Client);
 
-// ── macOS Activity tracking ──
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ActivityEntry {
-    timestamp: String,
-    app: String,
-    idle_seconds: u64,
-    is_afk: bool,
-    category: String,
-}
-
-#[derive(Default, Clone, Debug)]
-struct ActivityState {
-    log: Vec<ActivityEntry>,
-    current_app: String,
-    is_afk: bool,
-}
-
-struct MacState(Arc<Mutex<ActivityState>>);
-
 fn run_osascript(script: &str) -> Result<String, String> {
     let output = std::process::Command::new("osascript")
         .args(["-e", script])
@@ -115,27 +94,6 @@ fn run_osascript(script: &str) -> Result<String, String> {
     } else {
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
-}
-
-fn get_idle_seconds() -> u64 {
-    let output = std::process::Command::new("ioreg")
-        .args(["-c", "IOHIDSystem", "-d", "4"])
-        .output()
-        .ok();
-    if let Some(out) = output {
-        let text = String::from_utf8_lossy(&out.stdout);
-        for line in text.lines() {
-            if line.contains("HIDIdleTime") {
-                if let Some(val) = line.split('=').last() {
-                    let val = val.trim().trim_end_matches(|c: char| !c.is_ascii_digit());
-                    if let Ok(ns) = val.parse::<u64>() {
-                        return ns / 1_000_000_000;
-                    }
-                }
-            }
-        }
-    }
-    0
 }
 
 fn classify_app(name: &str) -> &'static str {
@@ -425,71 +383,98 @@ async fn tracker_get_recent(entry_type: String, limit: usize) -> Result<String, 
 // ── macOS commands ──
 
 #[tauri::command]
-async fn get_activity_summary(app: AppHandle) -> Result<String, String> {
-    let state = app.state::<MacState>();
-    let activity = state.0.lock().map_err(|e| e.to_string())?;
+async fn get_activity_summary() -> Result<String, String> {
+    let db_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join("Library/Application Support/Knowledge/knowledgeC.db");
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let today_entries: Vec<&ActivityEntry> = activity.log.iter()
-        .filter(|e| e.timestamp.starts_with(&today))
-        .collect();
-
-    if today_entries.is_empty() {
-        return Ok("No activity recorded today yet.".into());
+    if !db_path.exists() {
+        return Err(
+            "Screen Time data unavailable. Grant Full Disk Access: \
+             System Settings → Privacy & Security → Full Disk Access → add Hanni"
+                .into(),
+        );
     }
 
-    let mut productive_min: u64 = 0;
-    let mut distraction_min: u64 = 0;
-    let mut neutral_min: u64 = 0;
-    let mut afk_min: u64 = 0;
-    let mut app_minutes: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-
-    for entry in &today_entries {
-        if entry.is_afk {
-            afk_min += 1; // each entry ~30s, but we report as half-minutes
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| {
+        if e.to_string().contains("unable to open") || e.to_string().contains("authorization denied") {
+            "Screen Time data unavailable. Grant Full Disk Access: \
+             System Settings → Privacy & Security → Full Disk Access → add Hanni"
+                .to_string()
         } else {
-            match entry.category.as_str() {
-                "productive" => productive_min += 1,
-                "distraction" => distraction_min += 1,
-                _ => neutral_min += 1,
-            }
-            *app_minutes.entry(entry.app.clone()).or_insert(0) += 1;
+            format!("Cannot open knowledgeC.db: {}", e)
+        }
+    })?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                ZSOURCE.ZNAME as app_name,
+                ZSOURCE.ZBUNDLEID as bundle_id,
+                ROUND(SUM(CAST((ZOBJECT.ZENDDATE - ZOBJECT.ZSTARTDATE) AS REAL)) / 60, 1) as minutes
+            FROM ZOBJECT
+            JOIN ZSOURCE ON ZOBJECT.ZSOURCE = ZSOURCE.Z_PK
+            WHERE
+                DATE(datetime(ZOBJECT.ZSTARTDATE + 978307200, 'unixepoch', 'localtime')) = DATE('now')
+                AND ZOBJECT.ZSTREAMNAME = '/app/inFocus'
+                AND ZOBJECT.ZENDDATE > ZOBJECT.ZSTARTDATE
+            GROUP BY ZSOURCE.ZBUNDLEID
+            ORDER BY minutes DESC",
+        )
+        .map_err(|e| format!("SQL error: {}", e))?;
+
+    struct AppRow {
+        app_name: String,
+        minutes: f64,
+        category: String,
+    }
+
+    let rows: Vec<AppRow> = stmt
+        .query_map([], |row| {
+            let app_name: String = row.get::<_, Option<String>>(0)?.unwrap_or_default();
+            let minutes: f64 = row.get(2)?;
+            Ok((app_name, minutes))
+        })
+        .map_err(|e| format!("Query error: {}", e))?
+        .filter_map(|r| r.ok())
+        .map(|(app_name, minutes)| {
+            let category = classify_app(&app_name).to_string();
+            AppRow { app_name, minutes, category }
+        })
+        .collect();
+
+    if rows.is_empty() {
+        return Ok("No Screen Time data for today yet.".into());
+    }
+
+    let mut productive: f64 = 0.0;
+    let mut distraction: f64 = 0.0;
+    let mut neutral: f64 = 0.0;
+
+    for r in &rows {
+        match r.category.as_str() {
+            "productive" => productive += r.minutes,
+            "distraction" => distraction += r.minutes,
+            _ => neutral += r.minutes,
         }
     }
 
-    // Convert from 30s intervals to minutes
-    let to_min = |count: u64| count / 2;
-
-    let mut top_apps: Vec<(String, u64)> = app_minutes.into_iter().collect();
-    top_apps.sort_by(|a, b| b.1.cmp(&a.1));
-    top_apps.truncate(5);
-
-    let top_str: Vec<String> = top_apps.iter()
-        .map(|(name, count)| format!("  {} — {} min", name, to_min(*count)))
+    let top_apps: Vec<String> = rows
+        .iter()
+        .take(5)
+        .map(|r| format!("  {} — {:.0} min ({})", r.app_name, r.minutes, r.category))
         .collect();
 
     Ok(format!(
-        "Activity today ({} snapshots):\n\
-         Productive: {} min\nDistraction: {} min\nNeutral: {} min\nAFK: {} min\n\n\
+        "Activity today (Screen Time):\n\
+         Productive: {:.0} min | Distraction: {:.0} min | Neutral: {:.0} min\n\n\
          Top apps:\n{}",
-        today_entries.len(),
-        to_min(productive_min), to_min(distraction_min),
-        to_min(neutral_min), to_min(afk_min),
-        top_str.join("\n")
-    ))
-}
-
-#[tauri::command]
-async fn get_current_activity(app: AppHandle) -> Result<String, String> {
-    let state = app.state::<MacState>();
-    let activity = state.0.lock().map_err(|e| e.to_string())?;
-    if activity.current_app.is_empty() {
-        return Ok("No activity data yet. Tracking starts in ~30 seconds.".into());
-    }
-    Ok(format!(
-        "Current app: {}\nAFK: {}",
-        activity.current_app,
-        if activity.is_afk { "yes" } else { "no" }
+        productive, distraction, neutral,
+        top_apps.join("\n")
     ))
 }
 
@@ -600,7 +585,7 @@ struct IntegrationsInfo {
 }
 
 #[tauri::command]
-async fn get_integrations(app: AppHandle) -> Result<IntegrationsInfo, String> {
+async fn get_integrations() -> Result<IntegrationsInfo, String> {
     // ── Access ──
     let tracker_path = data_file_path();
     let tracker_exists = tracker_path.exists();
@@ -715,38 +700,11 @@ async fn get_integrations(app: AppHandle) -> Result<IntegrationsInfo, String> {
     }).collect();
 
     // ── macOS integrations ──
-    let mac_state = app.state::<MacState>();
-    let activity = mac_state.0.lock().map_err(|e| e.to_string())?;
-
-    let activity_detail = if activity.current_app.is_empty() {
-        "Ожидание первого снапшота...".to_string()
-    } else {
-        let cat = classify_app(&activity.current_app);
-        let idle = if activity.is_afk {
-            " · AFK".to_string()
-        } else {
-            String::new()
-        };
-        format!("{} · {}{}", activity.current_app, cat, idle)
-    };
-
-    let log_count = activity.log.len();
-    let tracking_detail = if log_count == 0 {
-        "Нет данных".to_string()
-    } else {
-        format!("{} снапшотов · ~{} мин", log_count, log_count / 2)
-    };
-
     let macos = vec![
         IntegrationItem {
-            name: "Сейчас".into(),
-            status: if activity.current_app.is_empty() { "inactive" } else { "active" }.into(),
-            detail: activity_detail,
-        },
-        IntegrationItem {
-            name: "Трекинг".into(),
-            status: "active".into(),
-            detail: tracking_detail,
+            name: "Screen Time".into(),
+            status: "ready".into(),
+            detail: "knowledgeC.db · по запросу".into(),
         },
         IntegrationItem {
             name: "Календарь".into(),
@@ -764,8 +722,6 @@ async fn get_integrations(app: AppHandle) -> Result<IntegrationsInfo, String> {
             detail: "Safari / Chrome / Arc · по запросу".into(),
         },
     ];
-
-    drop(activity); // release lock
 
     Ok(IntegrationsInfo {
         access,
@@ -811,12 +767,8 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mac_state = MacState(Arc::new(Mutex::new(ActivityState::default())));
-    let activity_arc = mac_state.0.clone();
-
     tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
-        .manage(mac_state)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -835,12 +787,11 @@ pub fn run() {
             get_integrations,
             get_model_info,
             get_activity_summary,
-            get_current_activity,
             get_calendar_events,
             get_now_playing,
             get_browser_tab,
         ])
-        .setup(move |app| {
+        .setup(|app| {
             // Auto-updater
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -853,45 +804,6 @@ pub fn run() {
                         }
                     }
                     _ => {}
-                }
-            });
-
-            // Background activity tracker
-            let tracker_handle = app.handle().clone();
-            let tracker_state = activity_arc;
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-                loop {
-                    interval.tick().await;
-
-                    let app_name = run_osascript(
-                        "tell application \"System Events\" to get name of first application process whose frontmost is true"
-                    ).unwrap_or_default();
-
-                    let idle = get_idle_seconds();
-                    let is_afk = idle > 300;
-                    let category = classify_app(&app_name).to_string();
-                    let timestamp = chrono::Local::now().to_rfc3339();
-
-                    let entry = ActivityEntry {
-                        timestamp,
-                        app: app_name.clone(),
-                        idle_seconds: idle,
-                        is_afk,
-                        category,
-                    };
-
-                    if let Ok(mut state) = tracker_state.lock() {
-                        state.current_app = app_name;
-                        state.is_afk = is_afk;
-                        state.log.push(entry);
-                        // Keep max 2880 entries (~24h at 30s intervals)
-                        if state.log.len() > 2880 {
-                            state.log.remove(0);
-                        }
-                    }
-
-                    let _ = tracker_handle.emit("activity-update", ());
                 }
             });
 
