@@ -1,6 +1,8 @@
 # Secrets
+secrets/
 client_secret*.json
 *.secret
+*.key
 .env
 .env.*
 
