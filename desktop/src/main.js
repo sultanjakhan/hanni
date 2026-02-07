@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 
 let busy = false;
 let history = [];
@@ -450,7 +450,7 @@ async function loadSettings() {
         <div class="settings-section-title">Приложение</div>
         <div class="settings-row">
           <span class="settings-label">Версия</span>
-          <span class="settings-value">${APP_VERSION}</span>
+          <span class="settings-version">v${APP_VERSION}</span>
         </div>
       </div>`;
   } catch (e) {
