@@ -19,7 +19,7 @@ import httpx
 from data_collector import collector, log, stats, export
 
 # Config
-TELEGRAM_TOKEN = "REDACTED"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 LM_STUDIO_URL = "http://localhost:8000/v1/chat/completions"
 
 SYSTEM_PROMPT = """You are Clawd, a friendly AI companion with voice capabilities.
