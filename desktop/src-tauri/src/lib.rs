@@ -763,6 +763,26 @@ async fn get_model_info() -> Result<ModelInfo, String> {
     })
 }
 
+// ── Updater command ──
+
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<String, String> {
+    let updater = app.updater().map_err(|e| format!("Updater error: {}", e))?;
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            let _ = app.emit("update-available", &version);
+            update
+                .download_and_install(|_, _| {}, || {})
+                .await
+                .map_err(|e| format!("Install error: {}", e))?;
+            app.restart();
+        }
+        Ok(None) => Ok("Вы на последней версии.".into()),
+        Err(e) => Err(format!("Не удалось проверить обновления: {}", e)),
+    }
+}
+
 // ── App setup ──
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -790,6 +810,7 @@ pub fn run() {
             get_calendar_events,
             get_now_playing,
             get_browser_tab,
+            check_update,
         ])
         .setup(|app| {
             // Auto-updater

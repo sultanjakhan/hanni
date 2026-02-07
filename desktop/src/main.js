@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.3.5';
+const APP_VERSION = '0.3.6';
 
 let busy = false;
 let history = [];
@@ -452,7 +452,24 @@ async function loadSettings() {
           <span class="settings-label">Версия</span>
           <span class="settings-version">v${APP_VERSION}</span>
         </div>
+        <div class="settings-row">
+          <span class="settings-label">Обновления</span>
+          <button class="settings-btn" id="check-update-btn">Проверить</button>
+        </div>
       </div>`;
+    document.getElementById('check-update-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.textContent = 'Проверяю...';
+      btn.disabled = true;
+      try {
+        const result = await invoke('check_update');
+        btn.textContent = result;
+      } catch (err) {
+        btn.textContent = 'Ошибка';
+        btn.title = String(err);
+      }
+      setTimeout(() => { btn.textContent = 'Проверить'; btn.disabled = false; }, 4000);
+    });
   } catch (e) {
     settingsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
