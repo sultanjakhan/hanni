@@ -38,7 +38,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/sultanjakhan/hanni/releases/latest/download/latest.json"
+        "https://gist.githubusercontent.com/sultanjakhan/19c45003936df5c74d7c0af5a86f8b9b/raw/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEREQTM5MTg4MEQ1QTMzRkYKUldUL00xb05pSkdqM1RLdU5RRDNtTjZCeXZBNjdmaTR5cjA2RlRNWjkrdkdXKzlrcW9jd3hheWoK"
     }
