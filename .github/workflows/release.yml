@@ -47,12 +47,13 @@ jobs:
 
       - name: Update gist with latest.json
         env:
-          GH_TOKEN: ${{ secrets.GIST_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIST_PAT: ${{ secrets.GIST_PAT }}
           GIST_ID: ${{ secrets.UPDATER_GIST_ID }}
         run: |
           TAG="${{ github.ref_name }}"
 
-          # Get release info and asset IDs
+          # Get release info and asset IDs (uses GITHUB_TOKEN for repo access)
           RELEASE=$(gh api repos/${{ github.repository }}/releases/tags/$TAG)
           TAR_ASSET_ID=$(echo "$RELEASE" | jq -r '.assets[] | select(.name | endswith(".app.tar.gz")) | select(.name | endswith(".sig") | not) | .id')
 
@@ -66,5 +67,5 @@ jobs:
             .platforms |= with_entries(.value.url = $url)
           ' /tmp/latest.json > /tmp/latest_final.json
 
-          # Update gist
-          gh gist edit "$GIST_ID" -f latest.json /tmp/latest_final.json
+          # Update gist (uses GIST_PAT for gist access)
+          GH_TOKEN="$GIST_PAT" gh gist edit "$GIST_ID" -f latest.json /tmp/latest_final.json
