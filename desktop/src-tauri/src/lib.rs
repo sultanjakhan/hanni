@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Mutex;
+use chrono::Timelike;
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
@@ -36,6 +40,79 @@ struct TrackerData {
     notes: Vec<serde_json::Value>,
     #[serde(default)]
     settings: serde_json::Value,
+}
+
+// ── Proactive messaging types ──
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ProactiveSettings {
+    enabled: bool,
+    voice_enabled: bool,
+    voice_name: String,
+    interval_minutes: u64,
+    quiet_hours_start: u32,
+    quiet_hours_end: u32,
+}
+
+impl Default for ProactiveSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            voice_enabled: false,
+            voice_name: "Milena".into(),
+            interval_minutes: 10,
+            quiet_hours_start: 23,
+            quiet_hours_end: 8,
+        }
+    }
+}
+
+struct ProactiveState {
+    settings: ProactiveSettings,
+    last_message_time: Option<chrono::DateTime<chrono::Local>>,
+    last_message_text: String,
+    consecutive_skips: u32,
+    user_is_typing: bool,
+}
+
+impl ProactiveState {
+    fn new(settings: ProactiveSettings) -> Self {
+        Self {
+            settings,
+            last_message_time: None,
+            last_message_text: String::new(),
+            consecutive_skips: 0,
+            user_is_typing: false,
+        }
+    }
+}
+
+fn proactive_settings_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("Documents/Hanni/proactive_settings.json")
+}
+
+fn load_proactive_settings() -> ProactiveSettings {
+    let path = proactive_settings_path();
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+            .unwrap_or_default()
+    } else {
+        ProactiveSettings::default()
+    }
+}
+
+fn save_proactive_settings(settings: &ProactiveSettings) -> Result<(), String> {
+    let path = proactive_settings_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create dir: {}", e))?;
+    }
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Cannot serialize: {}", e))?;
+    std::fs::write(&path, content).map_err(|e| format!("Cannot write: {}", e))
 }
 
 // ── Chat types ──
@@ -83,6 +160,7 @@ struct ActionPayload {
 }
 
 struct HttpClient(reqwest::Client);
+struct LlmBusy(AtomicBool);
 
 fn run_osascript(script: &str) -> Result<String, String> {
     let output = std::process::Command::new("osascript")
@@ -120,6 +198,14 @@ fn classify_app(name: &str) -> &'static str {
 
 #[tauri::command]
 async fn chat(app: AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
+    let busy = &app.state::<LlmBusy>().0;
+    busy.store(true, Ordering::Relaxed);
+    let result = chat_inner(&app, messages).await;
+    busy.store(false, Ordering::Relaxed);
+    result
+}
+
+async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
     let client = &app.state::<HttpClient>().0;
 
     let mut chat_messages = vec![ChatMessage {
@@ -763,6 +849,160 @@ async fn get_model_info() -> Result<ModelInfo, String> {
     })
 }
 
+// ── Proactive messaging logic ──
+
+const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion running locally on Mac. You are considering whether to proactively message the user.
+
+RULES:
+- Only message if you have a SPECIFIC, context-based reason:
+  • Calendar event starting within 15 minutes
+  • 60+ minutes of distraction apps today (offer encouragement)
+  • Natural transition moment (new music, switched to productive app after break)
+  • Something genuinely interesting in their current activity
+- NEVER send generic messages like "how are you?" or "what are you up to?"
+- NEVER repeat or paraphrase your last message
+- Keep it 1-2 sentences max, warm but not excessive
+- Default to Russian unless context suggests otherwise
+- If in doubt, reply with exactly: [SKIP]
+- Better to stay silent than be annoying
+
+Reply with ONLY your message text, or [SKIP] if there's no good reason to message."#;
+
+async fn gather_context() -> String {
+    let now = chrono::Local::now();
+    let mut ctx = format!("Current time: {}\n", now.format("%H:%M %A, %d %B %Y"));
+
+    if let Ok(activity) = get_activity_summary().await {
+        ctx.push_str(&format!("\n--- Screen Time ---\n{}\n", activity));
+    }
+
+    if let Ok(calendar) = get_calendar_events().await {
+        ctx.push_str(&format!("\n--- Calendar ---\n{}\n", calendar));
+    }
+
+    if let Ok(music) = get_now_playing().await {
+        ctx.push_str(&format!("\n--- Music ---\n{}\n", music));
+    }
+
+    if let Ok(browser) = get_browser_tab().await {
+        ctx.push_str(&format!("\n--- Browser ---\n{}\n", browser));
+    }
+
+    ctx
+}
+
+#[derive(Deserialize)]
+struct NonStreamChoice {
+    message: NonStreamMessage,
+}
+
+#[derive(Deserialize)]
+struct NonStreamMessage {
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct NonStreamResponse {
+    choices: Vec<NonStreamChoice>,
+}
+
+async fn proactive_llm_call(
+    client: &reqwest::Client,
+    context: &str,
+    last_message: &str,
+    consecutive_skips: u32,
+) -> Result<Option<String>, String> {
+    let mut user_content = format!("{}\n", context);
+    if !last_message.is_empty() {
+        user_content.push_str(&format!("Your last proactive message was: \"{}\"\n", last_message));
+    }
+    user_content.push_str(&format!(
+        "You've skipped {} times in a row since your last message.\n/no_think",
+        consecutive_skips
+    ));
+
+    let request = ChatRequest {
+        model: MODEL.into(),
+        messages: vec![
+            ChatMessage {
+                role: "system".into(),
+                content: PROACTIVE_SYSTEM_PROMPT.into(),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: user_content,
+            },
+        ],
+        max_tokens: 200,
+        stream: false,
+        temperature: 0.7,
+    };
+
+    let response = client
+        .post(MLX_URL)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("LLM error: {}", e))?;
+
+    let parsed: NonStreamResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let raw = parsed
+        .choices
+        .first()
+        .map(|c| c.message.content.clone())
+        .unwrap_or_default();
+
+    // Strip <think>...</think> tags
+    let re = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+    let text = re.replace_all(&raw, "").trim().to_string();
+
+    if text.contains("[SKIP]") || text.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text))
+    }
+}
+
+fn speak_tts(text: &str, voice: &str) {
+    let clean = text.replace('"', "'");
+    let _ = std::process::Command::new("say")
+        .args(["-v", voice, "-r", "210", &clean])
+        .spawn();
+}
+
+// ── Proactive messaging commands ──
+
+#[tauri::command]
+async fn get_proactive_settings(state: tauri::State<'_, Arc<Mutex<ProactiveState>>>) -> Result<ProactiveSettings, String> {
+    let state = state.lock().await;
+    Ok(state.settings.clone())
+}
+
+#[tauri::command]
+async fn set_proactive_settings(
+    settings: ProactiveSettings,
+    state: tauri::State<'_, Arc<Mutex<ProactiveState>>>,
+) -> Result<(), String> {
+    save_proactive_settings(&settings)?;
+    let mut state = state.lock().await;
+    state.settings = settings;
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_user_typing(
+    typing: bool,
+    state: tauri::State<'_, Arc<Mutex<ProactiveState>>>,
+) -> Result<(), String> {
+    let mut state = state.lock().await;
+    state.user_is_typing = typing;
+    Ok(())
+}
+
 // ── Updater ──
 
 const UPDATER_PAT: &str = env!("UPDATER_GITHUB_TOKEN");
@@ -799,8 +1039,13 @@ async fn check_update(app: AppHandle) -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let proactive_settings = load_proactive_settings();
+    let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
+
     tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
+        .manage(LlmBusy(AtomicBool::new(false)))
+        .manage(proactive_state.clone())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -823,8 +1068,11 @@ pub fn run() {
             get_now_playing,
             get_browser_tab,
             check_update,
+            get_proactive_settings,
+            set_proactive_settings,
+            set_user_typing,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             // Auto-updater
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -841,6 +1089,74 @@ pub fn run() {
                         }
                     }
                     _ => {}
+                }
+            });
+
+            // Proactive messaging background loop
+            let proactive_handle = app.handle().clone();
+            let proactive_state_ref = proactive_state.clone();
+            tauri::async_runtime::spawn(async move {
+                let client = reqwest::Client::new();
+
+                // Initial delay — let the app fully start
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+
+                loop {
+                    // Read current settings
+                    let (enabled, interval, quiet_start, quiet_end, is_typing, last_msg, skips, voice_enabled, voice_name) = {
+                        let state = proactive_state_ref.lock().await;
+                        (
+                            state.settings.enabled,
+                            state.settings.interval_minutes,
+                            state.settings.quiet_hours_start,
+                            state.settings.quiet_hours_end,
+                            state.user_is_typing,
+                            state.last_message_text.clone(),
+                            state.consecutive_skips,
+                            state.settings.voice_enabled,
+                            state.settings.voice_name.clone(),
+                        )
+                    };
+
+                    if enabled {
+                        let hour = chrono::Local::now().hour();
+                        let in_quiet = if quiet_start > quiet_end {
+                            hour >= quiet_start || hour < quiet_end
+                        } else {
+                            hour >= quiet_start && hour < quiet_end
+                        };
+
+                        let llm_busy = proactive_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);
+
+                        if !in_quiet && !is_typing && !llm_busy {
+                            let context = gather_context().await;
+                            match proactive_llm_call(&client, &context, &last_msg, skips).await {
+                                Ok(Some(message)) => {
+                                    let _ = proactive_handle.emit("proactive-message", &message);
+                                    if voice_enabled {
+                                        speak_tts(&message, &voice_name);
+                                    }
+                                    let mut state = proactive_state_ref.lock().await;
+                                    state.last_message_time = Some(chrono::Local::now());
+                                    state.last_message_text = message;
+                                    state.consecutive_skips = 0;
+                                }
+                                Ok(None) => {
+                                    let mut state = proactive_state_ref.lock().await;
+                                    state.consecutive_skips += 1;
+                                }
+                                Err(_) => {
+                                    // LLM server not running — back off silently
+                                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    // Adaptive interval: double if 6+ consecutive skips
+                    let sleep_mins = if skips >= 6 { interval * 2 } else { interval };
+                    tokio::time::sleep(std::time::Duration::from_secs(sleep_mins * 60)).await;
                 }
             });
 
