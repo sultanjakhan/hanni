@@ -10,13 +10,15 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.5.0';
 
 let busy = false;
 let history = [];
 let attachedFile = null; // {name, content}
 let currentTab = 'chat';
 let integrationsTimer = null;
+let isRecording = false;
+let focusTimer = null;
 
 // ── Auto-update notification ──
 listen('update-available', (event) => {
@@ -58,6 +60,75 @@ input.addEventListener('input', () => {
   typingTimeout = setTimeout(() => {
     invoke('set_user_typing', { typing: false }).catch(() => {});
   }, 5000);
+});
+
+// ── Voice recording ──
+
+const recordBtn = document.getElementById('record');
+
+recordBtn.addEventListener('click', async () => {
+  if (isRecording) {
+    // Stop recording
+    isRecording = false;
+    recordBtn.classList.remove('recording');
+    recordBtn.title = 'Голосовой ввод';
+    try {
+      const text = await invoke('stop_recording');
+      if (text) {
+        input.value = (input.value ? input.value + ' ' : '') + text;
+        input.focus();
+      }
+    } catch (e) {
+      addMsg('bot', 'Ошибка транскрипции: ' + e);
+    }
+  } else {
+    // Check if whisper model exists
+    try {
+      const hasModel = await invoke('check_whisper_model');
+      if (!hasModel) {
+        if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
+          addMsg('bot', 'Скачиваю модель Whisper...');
+          const unlisten = await listen('whisper-download-progress', (event) => {
+            // Update last bot message with progress
+            const msgs = chat.querySelectorAll('.msg.bot');
+            const last = msgs[msgs.length - 1];
+            if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
+          });
+          try {
+            await invoke('download_whisper_model');
+            addMsg('bot', 'Whisper загружен! Можете записывать голос.');
+          } catch (e) {
+            addMsg('bot', 'Ошибка загрузки: ' + e);
+          }
+          unlisten();
+        }
+        return;
+      }
+    } catch (e) {
+      addMsg('bot', 'Ошибка: ' + e);
+      return;
+    }
+
+    // Start recording
+    try {
+      await invoke('start_recording');
+      isRecording = true;
+      recordBtn.classList.add('recording');
+      recordBtn.title = 'Остановить запись';
+    } catch (e) {
+      addMsg('bot', 'Ошибка записи: ' + e);
+    }
+  }
+});
+
+// ── Focus mode listener ──
+
+listen('focus-ended', () => {
+  addMsg('bot', 'Фокус-режим завершён!');
+  if (focusTimer) {
+    clearInterval(focusTimer);
+    focusTimer = null;
+  }
 });
 
 // ── Tab navigation ──
@@ -232,6 +303,45 @@ async function executeAction(actionJson) {
           key: action.key || ''
         });
         break;
+      case 'search_memory':
+        result = await invoke('memory_search', {
+          query: action.query || '',
+          limit: action.limit || null
+        });
+        break;
+      // Focus mode actions
+      case 'start_focus':
+        result = await invoke('start_focus', {
+          durationMinutes: action.duration || 30,
+          apps: action.apps || null,
+          sites: action.sites || null,
+        });
+        break;
+      case 'stop_focus':
+        result = await invoke('stop_focus');
+        break;
+      // System actions
+      case 'run_shell':
+        result = await invoke('run_shell', { command: action.command || '' });
+        break;
+      case 'open_url':
+        result = await invoke('open_url', { url: action.url || '' });
+        break;
+      case 'send_notification':
+        result = await invoke('send_notification', {
+          title: action.title || 'Hanni',
+          body: action.body || ''
+        });
+        break;
+      case 'set_volume':
+        result = await invoke('set_volume', { level: action.level || 50 });
+        break;
+      case 'get_clipboard':
+        result = await invoke('get_clipboard');
+        break;
+      case 'set_clipboard':
+        result = await invoke('set_clipboard', { text: action.text || '' });
+        break;
       default:
         result = 'Unknown action: ' + action.type;
     }
@@ -390,10 +500,38 @@ async function send() {
   chat.appendChild(timing);
   scrollDown();
 
+  // Post-chat: save conversation and extract facts in background
+  if (history.length >= 4) {
+    (async () => {
+      try {
+        const convId = await invoke('save_conversation', { messages: history });
+        await invoke('process_conversation_end', { messages: history, conversationId: convId });
+      } catch (_) {}
+    })();
+  }
+
   busy = false;
   sendBtn.disabled = false;
   input.focus();
 }
+
+// ── New Chat ──
+
+async function newChat() {
+  if (busy) return;
+  // Save current conversation before clearing
+  if (history.length >= 4) {
+    try {
+      const convId = await invoke('save_conversation', { messages: history });
+      await invoke('process_conversation_end', { messages: history, conversationId: convId });
+    } catch (_) {}
+  }
+  history = [];
+  chat.innerHTML = '';
+  input.focus();
+}
+
+document.getElementById('new-chat')?.addEventListener('click', newChat);
 
 sendBtn.addEventListener('click', send);
 input.addEventListener('keydown', e => {
@@ -445,8 +583,33 @@ async function loadIntegrations() {
       <span><span class="legend-dot inactive"></span> Ожидание</span>
     </div>`;
 
+    // Get focus status
+    let focusStatus = { active: false, remaining_seconds: 0, blocked_apps: [], blocked_sites: [] };
+    try { focusStatus = await invoke('get_focus_status'); } catch(_) {}
+
+    const focusRemaining = focusStatus.active
+      ? `${Math.floor(focusStatus.remaining_seconds / 60)}м ${focusStatus.remaining_seconds % 60}с`
+      : '';
+
+    const focusCard = `
+      <div class="integration-card focus-card">
+        <div class="integration-card-title">Фокус-режим</div>
+        <span class="panel-status-badge ${focusStatus.active ? 'on' : 'off'}">${focusStatus.active ? 'Активен · ' + focusRemaining : 'Неактивен'}</span>
+        <div class="focus-controls">
+          <select id="focus-duration" class="settings-select" ${focusStatus.active ? 'disabled' : ''}>
+            <option value="15">15 мин</option>
+            <option value="30" selected>30 мин</option>
+            <option value="60">60 мин</option>
+            <option value="90">90 мин</option>
+            <option value="120">120 мин</option>
+          </select>
+          <button class="settings-btn" id="focus-toggle-btn">${focusStatus.active ? 'Остановить' : 'Запустить'}</button>
+        </div>
+      </div>`;
+
     integrationsContent.innerHTML = `
       <div class="integrations-grid">
+        ${focusCard}
         <div class="integration-card macos-card">
           <div class="integration-card-title">macOS интеграции</div>
           ${legend}
@@ -471,6 +634,27 @@ async function loadIntegrations() {
           ${sitesItems}
         </div>
       </div>`;
+
+    // Focus toggle handler
+    document.getElementById('focus-toggle-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.disabled = true;
+      try {
+        if (focusStatus.active) {
+          await invoke('stop_focus');
+          btn.textContent = 'Запустить';
+        } else {
+          const dur = parseInt(document.getElementById('focus-duration').value);
+          await invoke('start_focus', { durationMinutes: dur, apps: null, sites: null });
+          btn.textContent = 'Остановить';
+        }
+        loadIntegrations();
+      } catch (err) {
+        btn.textContent = 'Ошибка';
+        btn.title = String(err);
+      }
+      btn.disabled = false;
+    });
   } catch (e) {
     integrationsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
@@ -481,9 +665,10 @@ async function loadIntegrations() {
 async function loadSettings() {
   settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
-    const [info, proactive] = await Promise.all([
+    const [info, proactive, trainingStats] = await Promise.all([
       invoke('get_model_info'),
       invoke('get_proactive_settings'),
+      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
     ]);
     settingsContent.innerHTML = `
       <div class="settings-section">
@@ -546,6 +731,32 @@ async function loadSettings() {
           <span class="settings-label">Обновления</span>
           <button class="settings-btn" id="check-update-btn">Проверить</button>
         </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Тренировочные данные</div>
+        <div class="settings-row">
+          <span class="settings-label">Диалогов</span>
+          <span class="settings-value">${trainingStats.conversations}</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Сообщений</span>
+          <span class="settings-value">${trainingStats.total_messages}</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Экспорт</span>
+          <button class="settings-btn" id="export-training-btn">Экспорт JSONL</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">HTTP API</div>
+        <div class="settings-row">
+          <span class="settings-label">Адрес</span>
+          <span class="settings-value">127.0.0.1:8235</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Статус</span>
+          <span class="settings-value" id="api-status">Проверяю...</span>
+        </div>
       </div>`;
 
     // Proactive settings change handlers
@@ -564,6 +775,31 @@ async function loadSettings() {
     document.getElementById('proactive-voice')?.addEventListener('change', saveProactive);
     document.getElementById('proactive-voice-name')?.addEventListener('change', saveProactive);
     document.getElementById('proactive-interval')?.addEventListener('change', saveProactive);
+
+    // Training data export
+    document.getElementById('export-training-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.textContent = 'Экспорт...';
+      btn.disabled = true;
+      try {
+        const result = await invoke('export_training_data');
+        btn.textContent = `${result.train_count} train + ${result.valid_count} valid`;
+      } catch (err) {
+        btn.textContent = String(err).substring(0, 30);
+      }
+      setTimeout(() => { btn.textContent = 'Экспорт JSONL'; btn.disabled = false; }, 4000);
+    });
+
+    // Check API status
+    try {
+      const resp = await fetch('http://127.0.0.1:8235/api/status');
+      const apiEl = document.getElementById('api-status');
+      if (apiEl) apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен';
+      if (apiEl) apiEl.className = 'settings-value ' + (resp.ok ? 'online' : 'offline');
+    } catch (_) {
+      const apiEl = document.getElementById('api-status');
+      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
+    }
 
     document.getElementById('check-update-btn')?.addEventListener('click', async (e) => {
       const btn = e.target;

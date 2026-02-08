@@ -1,6 +1,6 @@
 [package]
 name = "hanni"
-version = "0.3.8"
+version = "0.5.0"
 description = "Hanni — personal AI assistant"
 authors = ["sultanjakhan"]
 edition = "2021"
@@ -28,3 +28,10 @@ chrono = "0.4"
 dirs = "6"
 rusqlite = { version = "0.31", features = ["bundled"] }
 regex = "1"
+whisper-rs = "0.12"
+cpal = "0.15"
+hound = "3"
+axum = "0.8"
+tower = "0.5"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
