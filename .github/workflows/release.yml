@@ -26,6 +26,9 @@ jobs:
         with:
           workspaces: desktop/src-tauri
 
+      - name: Install system dependencies
+        run: brew install cmake
+
       - name: Install dependencies
         working-directory: desktop
         run: npm install
