@@ -1,3 +1,0 @@
-{"timestamp": "2026-01-29T15:20:22.500963", "messages": [{"role": "user", "content": "R"}, {"role": "assistant", "content": "Hey there! How can I help you today? Did you need assistance with something specific?"}], "metadata": {"user_id": 785375382}}
-{"timestamp": "2026-01-29T15:21:09.231825", "messages": [{"role": "user", "content": "Ты понимешь русский?"}, {"role": "assistant", "content": "Да, я понимаю русский язык. Чем могу вам помочь?"}], "metadata": {"user_id": 785375382}}
-{"timestamp": "2026-01-29T15:21:22.599046", "messages": [{"role": "user", "content": "Какая ты модель?"}, {"role": "assistant", "content": "Я Clawd, искусственный интеллект, созданный, чтобы помогать вам в любых задачах."}], "metadata": {"user_id": 785375382}}

@@ -7,13 +7,6 @@ client_secret*.json
 .env.local
 .env.production
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-
 # Logs
 *.log
 
@@ -21,22 +14,20 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Playwright
-.playwright-mcp/
-
-# Google credentials
-credentials.json
-token.pickle
-*.pickle
-
-# Training data (personal)
-training_data/
+# Build
+desktop/src-tauri/target/
 
 # Serena
 .serena/
 
+# Playwright
+.playwright-mcp/
+
 # User data
 user_data.json
+credentials.json
+token.pickle
+*.pickle
 
 # APK
 *.apk

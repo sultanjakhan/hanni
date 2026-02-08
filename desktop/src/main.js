@@ -213,6 +213,25 @@ async function executeAction(actionJson) {
       case 'get_browser':
         result = await invoke('get_browser_tab');
         break;
+      case 'remember':
+        result = await invoke('memory_remember', {
+          category: action.category || 'user',
+          key: action.key || '',
+          value: action.value || ''
+        });
+        break;
+      case 'recall':
+        result = await invoke('memory_recall', {
+          category: action.category || 'user',
+          key: action.key || null
+        });
+        break;
+      case 'forget':
+        result = await invoke('memory_forget', {
+          category: action.category || 'user',
+          key: action.key || ''
+        });
+        break;
       default:
         result = 'Unknown action: ' + action.type;
     }
