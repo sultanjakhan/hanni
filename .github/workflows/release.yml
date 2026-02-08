@@ -55,7 +55,6 @@ jobs:
           # Get release info and asset IDs
           RELEASE=$(gh api repos/${{ github.repository }}/releases/tags/$TAG)
           TAR_ASSET_ID=$(echo "$RELEASE" | jq -r '.assets[] | select(.name | endswith(".app.tar.gz")) | select(.name | endswith(".sig") | not) | .id')
-          SIG_CONTENT=$(gh api repos/${{ github.repository }}/releases/assets/$(echo "$RELEASE" | jq -r '.assets[] | select(.name | endswith(".tar.gz.sig")) | .id') -H "Accept: application/octet-stream" --raw-field "")
 
           # Download original latest.json from release
           LATEST_ASSET_ID=$(echo "$RELEASE" | jq -r '.assets[] | select(.name=="latest.json") | .id')
