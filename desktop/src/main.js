@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
 
 let busy = false;
 let history = [];
