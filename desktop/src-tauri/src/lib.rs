@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use chrono::Timelike;
+use std::collections::HashMap;
+use std::process::{Child, Command};
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
@@ -17,13 +19,15 @@ const SYSTEM_PROMPT: &str = r#"You are Hanni, a helpful AI assistant running loc
 You can execute actions using ```action JSON blocks:
 Life tracking: add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), add_note(title,content), get_stats.
 macOS: get_activity (app usage today), get_calendar (upcoming events), get_music (now playing), get_browser (current tab).
+Memory: remember(category,key,value), recall(category), forget(category,key). Categories: user, preferences, world, tasks.
 
 IMPORTANT:
 - You can chain actions. After each action, you receive results as [Action result: ...].
 - Call one action at a time. After getting the result, call another or give your final answer.
 - First gather data via actions, then answer the user WITHOUT action blocks.
 - Do NOT repeat raw results. Analyze and summarize naturally.
-- If a file is attached, analyze it."#;
+- If a file is attached, analyze it.
+- Proactively remember important facts the user shares (name, preferences, habits, language). You always have your memories in context — no need to recall before answering."#;
 
 fn data_file_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join("Documents/life-tracker/data.json")
@@ -85,6 +89,69 @@ impl ProactiveState {
             user_is_typing: false,
         }
     }
+}
+
+// ── Memory system ──
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct MemoryEntry {
+    value: String,
+    category: String,
+    timestamp: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+struct HanniMemory {
+    facts: HashMap<String, HashMap<String, MemoryEntry>>,
+}
+
+fn memory_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("Documents/Hanni/memory.json")
+}
+
+fn load_memory() -> HanniMemory {
+    let path = memory_path();
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+            .unwrap_or_default()
+    } else {
+        HanniMemory::default()
+    }
+}
+
+fn save_memory(memory: &HanniMemory) -> Result<(), String> {
+    let path = memory_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create dir: {}", e))?;
+    }
+    let content = serde_json::to_string_pretty(memory)
+        .map_err(|e| format!("Cannot serialize: {}", e))?;
+    std::fs::write(&path, content).map_err(|e| format!("Cannot write: {}", e))
+}
+
+fn build_memory_context(memory: &HanniMemory) -> String {
+    if memory.facts.is_empty() {
+        return String::new();
+    }
+    let mut lines = Vec::new();
+    for (category, entries) in &memory.facts {
+        if entries.is_empty() {
+            continue;
+        }
+        let pairs: Vec<String> = entries
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v.value))
+            .collect();
+        lines.push(format!("{}: {}", category, pairs.join(", ")));
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    lines.join("\n")
 }
 
 fn proactive_settings_path() -> PathBuf {
@@ -152,15 +219,47 @@ struct TokenPayload {
     token: String,
 }
 
-#[derive(Clone, Serialize)]
-struct ActionPayload {
-    action_type: String,
-    result: String,
-    success: bool,
-}
-
 struct HttpClient(reqwest::Client);
 struct LlmBusy(AtomicBool);
+
+struct MlxProcess(std::sync::Mutex<Option<Child>>);
+
+fn find_python() -> Option<String> {
+    // Try common locations for python3 with mlx_lm
+    let candidates = [
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+    ];
+    for path in &candidates {
+        if std::path::Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
+fn start_mlx_server() -> Option<Child> {
+    let python = find_python()?;
+
+    // Check if server is already running
+    let check = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build()
+        .ok()?;
+    if check.get("http://127.0.0.1:8234/v1/models").send().map(|r| r.status().is_success()).unwrap_or(false) {
+        return None; // Already running
+    }
+
+    let child = Command::new(&python)
+        .args(["-m", "mlx_lm.server", "--model", MODEL, "--port", "8234"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+
+    Some(child)
+}
 
 fn run_osascript(script: &str) -> Result<String, String> {
     let output = std::process::Command::new("osascript")
@@ -212,6 +311,19 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<
         role: "system".into(),
         content: SYSTEM_PROMPT.into(),
     }];
+
+    // Inject memory context
+    {
+        let memory = app.state::<Arc<Mutex<HanniMemory>>>();
+        let mem = memory.lock().await;
+        let ctx = build_memory_context(&mem);
+        if !ctx.is_empty() {
+            chat_messages.push(ChatMessage {
+                role: "system".into(),
+                content: format!("[Your memories]\n{}", ctx),
+            });
+        }
+    }
 
     let msg_count = messages.len();
     for (i, (role, content)) in messages.iter().enumerate() {
@@ -651,6 +763,77 @@ async fn get_browser_tab() -> Result<String, String> {
     Ok("No supported browser is currently open.".into())
 }
 
+// ── Memory commands ──
+
+#[tauri::command]
+async fn memory_remember(
+    category: String,
+    key: String,
+    value: String,
+    state: tauri::State<'_, Arc<Mutex<HanniMemory>>>,
+) -> Result<String, String> {
+    let mut memory = state.lock().await;
+    let total: usize = memory.facts.values().map(|m| m.len()).sum();
+    if total >= 200 {
+        return Err("Memory full (200 facts max). Forget something first.".into());
+    }
+    let entry = MemoryEntry {
+        value: value.clone(),
+        category: category.clone(),
+        timestamp: chrono::Local::now().to_rfc3339(),
+    };
+    memory
+        .facts
+        .entry(category.clone())
+        .or_default()
+        .insert(key.clone(), entry);
+    save_memory(&memory)?;
+    Ok(format!("Remembered {}/{}={}", category, key, value))
+}
+
+#[tauri::command]
+async fn memory_recall(
+    category: String,
+    key: Option<String>,
+    state: tauri::State<'_, Arc<Mutex<HanniMemory>>>,
+) -> Result<String, String> {
+    let memory = state.lock().await;
+    let entries = memory.facts.get(&category);
+    match (entries, key) {
+        (Some(map), Some(k)) => match map.get(&k) {
+            Some(e) => Ok(format!("{}={}", k, e.value)),
+            None => Ok(format!("No memory for {}/{}", category, k)),
+        },
+        (Some(map), None) => {
+            if map.is_empty() {
+                return Ok(format!("No memories in category '{}'", category));
+            }
+            let pairs: Vec<String> = map.iter().map(|(k, v)| format!("{}={}", k, v.value)).collect();
+            Ok(pairs.join(", "))
+        }
+        (None, _) => Ok(format!("No memories in category '{}'", category)),
+    }
+}
+
+#[tauri::command]
+async fn memory_forget(
+    category: String,
+    key: String,
+    state: tauri::State<'_, Arc<Mutex<HanniMemory>>>,
+) -> Result<String, String> {
+    let mut memory = state.lock().await;
+    if let Some(map) = memory.facts.get_mut(&category) {
+        if map.remove(&key).is_some() {
+            if map.is_empty() {
+                memory.facts.remove(&category);
+            }
+            save_memory(&memory)?;
+            return Ok(format!("Forgot {}/{}", category, key));
+        }
+    }
+    Ok(format!("No memory for {}/{}", category, key))
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -851,22 +1034,26 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 
 // ── Proactive messaging logic ──
 
-const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion running locally on Mac. You are considering whether to proactively message the user.
+const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion living on the user's Mac. You're like a close friend who shares the same space. You see what's on the screen, what music is playing, what's in the calendar.
+
+Your job: write a short message to the user. Be natural, like texting a friend.
+
+WHAT YOU CAN DO:
+- Comment on what they're doing, listening to, browsing
+- Mention an upcoming calendar event
+- React to their screen time (too much distraction? productive streak?)
+- Share a thought, observation, or gentle nudge
+- Just say hi if it's been a while — you live here, it's natural
+- Be playful, curious, warm
 
 RULES:
-- Only message if you have a SPECIFIC, context-based reason:
-  • Calendar event starting within 15 minutes
-  • 60+ minutes of distraction apps today (offer encouragement)
-  • Natural transition moment (new music, switched to productive app after break)
-  • Something genuinely interesting in their current activity
-- NEVER send generic messages like "how are you?" or "what are you up to?"
-- NEVER repeat or paraphrase your last message
-- Keep it 1-2 sentences max, warm but not excessive
-- Default to Russian unless context suggests otherwise
-- If in doubt, reply with exactly: [SKIP]
-- Better to stay silent than be annoying
+- 1-2 sentences max
+- Default to Russian
+- NEVER repeat your last message (it's shown below if exists)
+- Be yourself — a companion, not a notification bot
+- Only reply [SKIP] if you literally just sent a message and nothing changed
 
-Reply with ONLY your message text, or [SKIP] if there's no good reason to message."#;
+Reply with your message text, or [SKIP]."#;
 
 async fn gather_context() -> String {
     let now = chrono::Local::now();
@@ -911,8 +1098,13 @@ async fn proactive_llm_call(
     context: &str,
     last_message: &str,
     consecutive_skips: u32,
+    memory_context: &str,
 ) -> Result<Option<String>, String> {
-    let mut user_content = format!("{}\n", context);
+    let mut user_content = String::new();
+    if !memory_context.is_empty() {
+        user_content.push_str(&format!("[Your memories]\n{}\n\n", memory_context));
+    }
+    user_content.push_str(&format!("{}\n", context));
     if !last_message.is_empty() {
         user_content.push_str(&format!("Your last proactive message was: \"{}\"\n", last_message));
     }
@@ -1041,11 +1233,18 @@ async fn check_update(app: AppHandle) -> Result<String, String> {
 pub fn run() {
     let proactive_settings = load_proactive_settings();
     let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
+    let memory = Arc::new(Mutex::new(load_memory()));
+
+    // Start MLX server if not already running
+    let mlx_child = start_mlx_server();
+    let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
+    let mlx_cleanup = mlx_process.clone();
 
     tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
         .manage(LlmBusy(AtomicBool::new(false)))
         .manage(proactive_state.clone())
+        .manage(memory.clone())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -1071,6 +1270,9 @@ pub fn run() {
             get_proactive_settings,
             set_proactive_settings,
             set_user_typing,
+            memory_remember,
+            memory_recall,
+            memory_forget,
         ])
         .setup(move |app| {
             // Auto-updater
@@ -1095,14 +1297,20 @@ pub fn run() {
             // Proactive messaging background loop
             let proactive_handle = app.handle().clone();
             let proactive_state_ref = proactive_state.clone();
+            let proactive_memory = memory.clone();
             tauri::async_runtime::spawn(async move {
                 let client = reqwest::Client::new();
 
                 // Initial delay — let the app fully start
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+                let mut last_check = std::time::Instant::now();
+                let mut first_run = true;
 
                 loop {
-                    // Read current settings
+                    // Poll every 5 seconds so we react quickly to settings changes
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
                     let (enabled, interval, quiet_start, quiet_end, is_typing, last_msg, skips, voice_enabled, voice_name) = {
                         let state = proactive_state_ref.lock().await;
                         (
@@ -1118,50 +1326,73 @@ pub fn run() {
                         )
                     };
 
-                    if enabled {
-                        let hour = chrono::Local::now().hour();
-                        let in_quiet = if quiet_start > quiet_end {
-                            hour >= quiet_start || hour < quiet_end
-                        } else {
-                            hour >= quiet_start && hour < quiet_end
-                        };
-
-                        let llm_busy = proactive_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);
-
-                        if !in_quiet && !is_typing && !llm_busy {
-                            let context = gather_context().await;
-                            match proactive_llm_call(&client, &context, &last_msg, skips).await {
-                                Ok(Some(message)) => {
-                                    let _ = proactive_handle.emit("proactive-message", &message);
-                                    if voice_enabled {
-                                        speak_tts(&message, &voice_name);
-                                    }
-                                    let mut state = proactive_state_ref.lock().await;
-                                    state.last_message_time = Some(chrono::Local::now());
-                                    state.last_message_text = message;
-                                    state.consecutive_skips = 0;
-                                }
-                                Ok(None) => {
-                                    let mut state = proactive_state_ref.lock().await;
-                                    state.consecutive_skips += 1;
-                                }
-                                Err(_) => {
-                                    // LLM server not running — back off silently
-                                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                                    continue;
-                                }
-                            }
-                        }
+                    if !enabled {
+                        first_run = true;
+                        continue;
                     }
 
-                    // Adaptive interval: double if 6+ consecutive skips
-                    let sleep_mins = if skips >= 6 { interval * 2 } else { interval };
-                    tokio::time::sleep(std::time::Duration::from_secs(sleep_mins * 60)).await;
+                    // On first run after enabling, fire immediately; otherwise wait for interval
+                    let interval_secs = if skips >= 6 { interval * 2 * 60 } else { interval * 60 };
+                    if !first_run && last_check.elapsed().as_secs() < interval_secs {
+                        continue;
+                    }
+
+                    let hour = chrono::Local::now().hour();
+                    let in_quiet = if quiet_start > quiet_end {
+                        hour >= quiet_start || hour < quiet_end
+                    } else {
+                        hour >= quiet_start && hour < quiet_end
+                    };
+
+                    let llm_busy = proactive_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);
+
+                    if in_quiet || is_typing || llm_busy {
+                        continue;
+                    }
+
+                    last_check = std::time::Instant::now();
+                    first_run = false;
+
+                    let context = gather_context().await;
+                    let mem_ctx = {
+                        let mem = proactive_memory.lock().await;
+                        build_memory_context(&mem)
+                    };
+                    match proactive_llm_call(&client, &context, &last_msg, skips, &mem_ctx).await {
+                        Ok(Some(message)) => {
+                            let _ = proactive_handle.emit("proactive-message", &message);
+                            if voice_enabled {
+                                speak_tts(&message, &voice_name);
+                            }
+                            let mut state = proactive_state_ref.lock().await;
+                            state.last_message_time = Some(chrono::Local::now());
+                            state.last_message_text = message;
+                            state.consecutive_skips = 0;
+                        }
+                        Ok(None) => {
+                            let mut state = proactive_state_ref.lock().await;
+                            state.consecutive_skips += 1;
+                        }
+                        Err(_) => {
+                            // LLM server not running — back off
+                            last_check = std::time::Instant::now();
+                        }
+                    }
                 }
             });
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Hanni");
+        .build(tauri::generate_context!())
+        .expect("error while building Hanni")
+        .run(move |_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Kill MLX server process on app exit
+                if let Ok(mut child) = mlx_cleanup.0.lock() {
+                    if let Some(ref mut proc) = *child {
+                        let _ = proc.kill();
+                    }
+                }
+            }
+        });
 }
