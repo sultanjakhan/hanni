@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.3.7';
+const APP_VERSION = '0.3.8';
 
 let busy = false;
 let history = [];
@@ -25,6 +25,39 @@ listen('update-available', (event) => {
   banner.style.cssText = 'padding:8px 16px;background:#161616;color:#888;font-size:12px;text-align:center;border-bottom:1px solid #222;';
   banner.textContent = `Обновление до v${version}...`;
   document.querySelector('main').prepend(banner);
+});
+
+// ── Proactive message listener ──
+listen('proactive-message', (event) => {
+  const text = event.payload;
+  const div = document.createElement('div');
+  div.className = 'msg bot proactive';
+  div.textContent = text;
+  chat.appendChild(div);
+
+  const ts = document.createElement('div');
+  ts.className = 'proactive-time';
+  ts.textContent = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  chat.appendChild(ts);
+
+  // Add to history so user can reply naturally
+  history.push(['assistant', text]);
+  scrollDown();
+
+  // Desktop notification if window not focused
+  if (!document.hasFocus()) {
+    new Notification('Hanni', { body: text });
+  }
+});
+
+// ── Typing signal ──
+let typingTimeout = null;
+input.addEventListener('input', () => {
+  invoke('set_user_typing', { typing: true }).catch(() => {});
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    invoke('set_user_typing', { typing: false }).catch(() => {});
+  }, 5000);
 });
 
 // ── Tab navigation ──
@@ -429,7 +462,10 @@ async function loadIntegrations() {
 async function loadSettings() {
   settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
-    const info = await invoke('get_model_info');
+    const [info, proactive] = await Promise.all([
+      invoke('get_model_info'),
+      invoke('get_proactive_settings'),
+    ]);
     settingsContent.innerHTML = `
       <div class="settings-section">
         <div class="settings-section-title">Модель</div>
@@ -447,6 +483,41 @@ async function loadSettings() {
         </div>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Автономный режим</div>
+        <div class="settings-row">
+          <span class="settings-label">Включён</span>
+          <label class="toggle">
+            <input type="checkbox" id="proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Голос</span>
+          <label class="toggle">
+            <input type="checkbox" id="proactive-voice" ${proactive.voice_enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Голос TTS</span>
+          <select class="settings-select" id="proactive-voice-name">
+            <option value="Milena" ${proactive.voice_name === 'Milena' ? 'selected' : ''}>Milena (RU)</option>
+            <option value="Yuri" ${proactive.voice_name === 'Yuri' ? 'selected' : ''}>Yuri (RU)</option>
+            <option value="Samantha" ${proactive.voice_name === 'Samantha' ? 'selected' : ''}>Samantha (EN)</option>
+            <option value="Daniel" ${proactive.voice_name === 'Daniel' ? 'selected' : ''}>Daniel (EN-GB)</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Интервал (мин)</span>
+          <select class="settings-select" id="proactive-interval">
+            <option value="5" ${proactive.interval_minutes === 5 ? 'selected' : ''}>5</option>
+            <option value="10" ${proactive.interval_minutes === 10 ? 'selected' : ''}>10</option>
+            <option value="15" ${proactive.interval_minutes === 15 ? 'selected' : ''}>15</option>
+            <option value="30" ${proactive.interval_minutes === 30 ? 'selected' : ''}>30</option>
+          </select>
+        </div>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">Приложение</div>
         <div class="settings-row">
           <span class="settings-label">Версия</span>
@@ -457,6 +528,24 @@ async function loadSettings() {
           <button class="settings-btn" id="check-update-btn">Проверить</button>
         </div>
       </div>`;
+
+    // Proactive settings change handlers
+    const saveProactive = () => {
+      const settings = {
+        enabled: document.getElementById('proactive-enabled').checked,
+        voice_enabled: document.getElementById('proactive-voice').checked,
+        voice_name: document.getElementById('proactive-voice-name').value,
+        interval_minutes: parseInt(document.getElementById('proactive-interval').value),
+        quiet_hours_start: 23,
+        quiet_hours_end: 8,
+      };
+      invoke('set_proactive_settings', { settings }).catch(() => {});
+    };
+    document.getElementById('proactive-enabled')?.addEventListener('change', saveProactive);
+    document.getElementById('proactive-voice')?.addEventListener('change', saveProactive);
+    document.getElementById('proactive-voice-name')?.addEventListener('change', saveProactive);
+    document.getElementById('proactive-interval')?.addEventListener('change', saveProactive);
+
     document.getElementById('check-update-btn')?.addEventListener('click', async (e) => {
       const btn = e.target;
       btn.textContent = 'Проверяю...';
