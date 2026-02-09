@@ -672,6 +672,53 @@ main {
   white-space: nowrap;
 }
 
+/* ── Header version ── */
+
+.header-version {
+  font-size: 11px;
+  color: #444;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: color 0.15s;
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+.header-version:hover {
+  color: #818cf8;
+  background: #1a1a2e;
+}
+
+/* ── Pill buttons ── */
+
+.pill-group {
+  display: flex;
+  gap: 4px;
+}
+
+.pill {
+  padding: 4px 12px;
+  border-radius: 16px;
+  border: 1px solid #333;
+  background: transparent;
+  color: #666;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pill:hover {
+  border-color: #555;
+  color: #aaa;
+}
+
+.pill.active {
+  background: #1a1a2e;
+  border-color: #818cf8;
+  color: #818cf8;
+}
+
 /* ── Drag & drop overlay ── */
 
 body.dragover::after {

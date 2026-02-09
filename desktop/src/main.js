@@ -10,15 +10,14 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 
 let busy = false;
 let history = [];
 let attachedFile = null; // {name, content}
 let currentTab = 'chat';
-let integrationsTimer = null;
 let isRecording = false;
-let focusTimer = null;
+let integrationsLoaded = false;
 
 // ── Auto-update notification ──
 listen('update-available', (event) => {
@@ -145,15 +144,8 @@ function switchTab(tab) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(`view-${tab}`).classList.add('active');
 
-  // Clear integrations timer
-  if (integrationsTimer) {
-    clearInterval(integrationsTimer);
-    integrationsTimer = null;
-  }
-
   if (tab === 'integrations') {
-    loadIntegrations();
-    integrationsTimer = setInterval(loadIntegrations, 5000);
+    if (!integrationsLoaded) loadIntegrations();
   } else if (tab === 'settings') {
     loadSettings();
   } else if (tab === 'chat') {
@@ -553,8 +545,8 @@ function panelItem(item) {
   </div>`;
 }
 
-async function loadIntegrations() {
-  integrationsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
+async function loadIntegrations(force) {
+  if (!force) integrationsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
     const info = await invoke('get_integrations');
 
@@ -648,13 +640,15 @@ async function loadIntegrations() {
           await invoke('start_focus', { durationMinutes: dur, apps: null, sites: null });
           btn.textContent = 'Остановить';
         }
-        loadIntegrations();
+        loadIntegrations(true);
       } catch (err) {
         btn.textContent = 'Ошибка';
         btn.title = String(err);
       }
       btn.disabled = false;
     });
+
+    integrationsLoaded = true;
   } catch (e) {
     integrationsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
@@ -704,32 +698,19 @@ async function loadSettings() {
         </div>
         <div class="settings-row">
           <span class="settings-label">Голос TTS</span>
-          <select class="settings-select" id="proactive-voice-name">
-            <option value="Milena" ${proactive.voice_name === 'Milena' ? 'selected' : ''}>Milena (RU)</option>
-            <option value="Yuri" ${proactive.voice_name === 'Yuri' ? 'selected' : ''}>Yuri (RU)</option>
-            <option value="Samantha" ${proactive.voice_name === 'Samantha' ? 'selected' : ''}>Samantha (EN)</option>
-            <option value="Daniel" ${proactive.voice_name === 'Daniel' ? 'selected' : ''}>Daniel (EN-GB)</option>
-          </select>
+          <div class="pill-group" id="proactive-voice-name">
+            ${['Milena', 'Yuri', 'Samantha', 'Daniel'].map(v =>
+              `<button class="pill${proactive.voice_name === v ? ' active' : ''}" data-value="${v}">${v}</button>`
+            ).join('')}
+          </div>
         </div>
         <div class="settings-row">
-          <span class="settings-label">Интервал (мин)</span>
-          <select class="settings-select" id="proactive-interval">
-            <option value="5" ${proactive.interval_minutes === 5 ? 'selected' : ''}>5</option>
-            <option value="10" ${proactive.interval_minutes === 10 ? 'selected' : ''}>10</option>
-            <option value="15" ${proactive.interval_minutes === 15 ? 'selected' : ''}>15</option>
-            <option value="30" ${proactive.interval_minutes === 30 ? 'selected' : ''}>30</option>
-          </select>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Приложение</div>
-        <div class="settings-row">
-          <span class="settings-label">Версия</span>
-          <span class="settings-version">v${APP_VERSION}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Обновления</span>
-          <button class="settings-btn" id="check-update-btn">Проверить</button>
+          <span class="settings-label">Интервал</span>
+          <div class="pill-group" id="proactive-interval">
+            ${[5, 10, 15, 30].map(v =>
+              `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
+            ).join('')}
+          </div>
         </div>
       </div>
       <div class="settings-section">
@@ -760,21 +741,29 @@ async function loadSettings() {
       </div>`;
 
     // Proactive settings change handlers
-    const saveProactive = () => {
-      const settings = {
-        enabled: document.getElementById('proactive-enabled').checked,
-        voice_enabled: document.getElementById('proactive-voice').checked,
-        voice_name: document.getElementById('proactive-voice-name').value,
-        interval_minutes: parseInt(document.getElementById('proactive-interval').value),
-        quiet_hours_start: 23,
-        quiet_hours_end: 8,
-      };
-      invoke('set_proactive_settings', { settings }).catch(() => {});
-    };
+    const getProactiveValues = () => ({
+      enabled: document.getElementById('proactive-enabled').checked,
+      voice_enabled: document.getElementById('proactive-voice').checked,
+      voice_name: document.querySelector('#proactive-voice-name .pill.active')?.dataset.value || 'Milena',
+      interval_minutes: parseInt(document.querySelector('#proactive-interval .pill.active')?.dataset.value || '10'),
+      quiet_hours_start: 23,
+      quiet_hours_end: 8,
+    });
+    const saveProactive = () => invoke('set_proactive_settings', { settings: getProactiveValues() }).catch(() => {});
+
     document.getElementById('proactive-enabled')?.addEventListener('change', saveProactive);
     document.getElementById('proactive-voice')?.addEventListener('change', saveProactive);
-    document.getElementById('proactive-voice-name')?.addEventListener('change', saveProactive);
-    document.getElementById('proactive-interval')?.addEventListener('change', saveProactive);
+
+    // Pill group click handlers
+    document.querySelectorAll('.pill-group').forEach(group => {
+      group.addEventListener('click', (e) => {
+        const pill = e.target.closest('.pill');
+        if (!pill) return;
+        group.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        saveProactive();
+      });
+    });
 
     // Training data export
     document.getElementById('export-training-btn')?.addEventListener('click', async (e) => {
@@ -801,22 +790,23 @@ async function loadSettings() {
       if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
     }
 
-    document.getElementById('check-update-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target;
-      btn.textContent = 'Проверяю...';
-      btn.disabled = true;
-      try {
-        const result = await invoke('check_update');
-        btn.textContent = result;
-      } catch (err) {
-        btn.textContent = 'Ошибка';
-        btn.title = String(err);
-      }
-      setTimeout(() => { btn.textContent = 'Проверить'; btn.disabled = false; }, 4000);
-    });
   } catch (e) {
     settingsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
 }
+
+// ── Header version + update ──
+const headerVersion = document.getElementById('header-version');
+headerVersion.textContent = `v${APP_VERSION}`;
+headerVersion.addEventListener('click', async () => {
+  headerVersion.textContent = 'Проверяю...';
+  try {
+    const result = await invoke('check_update');
+    headerVersion.textContent = result;
+  } catch (err) {
+    headerVersion.textContent = 'Ошибка';
+  }
+  setTimeout(() => { headerVersion.textContent = `v${APP_VERSION}`; }, 4000);
+});
 
 input.focus();

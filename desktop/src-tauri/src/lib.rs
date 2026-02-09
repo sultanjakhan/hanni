@@ -361,6 +361,7 @@ struct MlxProcess(std::sync::Mutex<Option<Child>>);
 struct WhisperState {
     recording: bool,
     audio_buffer: Vec<f32>,
+    capture_running: bool,
 }
 
 struct AudioRecording(std::sync::Mutex<WhisperState>);
@@ -408,18 +409,26 @@ async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn start_recording(state: tauri::State<'_, AudioRecording>) -> Result<String, String> {
-    let mut ws = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
-    if ws.recording {
-        return Err("Already recording".into());
+fn start_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String, String> {
+    let needs_capture = {
+        let mut ws = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+        if ws.recording {
+            return Err("Already recording".into());
+        }
+        ws.recording = true;
+        ws.audio_buffer.clear();
+        let needs = !ws.capture_running;
+        if needs { ws.capture_running = true; }
+        needs
+    };
+    if needs_capture {
+        start_audio_capture(state.inner().clone());
     }
-    ws.recording = true;
-    ws.audio_buffer.clear();
     Ok("Recording started".into())
 }
 
 #[tauri::command]
-fn stop_recording(state: tauri::State<'_, AudioRecording>) -> Result<String, String> {
+fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String, String> {
     let mut ws = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
     ws.recording = false;
 
@@ -504,15 +513,18 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
 
         if let Ok(stream) = stream {
             let _ = stream.play();
-            // Keep the stream alive while recording is active
+            // Keep stream alive while recording, exit when done
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if let Ok(ws) = recording_state.0.lock() {
                     if !ws.recording {
-                        // Check if no recording for 2 seconds, then this thread can exit
-                        // But we'll keep it alive since it'll be restarted
+                        break;
                     }
                 }
+            }
+            // Mark capture as stopped so it can be restarted
+            if let Ok(mut ws) = recording_state.0.lock() {
+                ws.capture_running = false;
             }
         }
     });
@@ -981,15 +993,12 @@ async fn spawn_api_server(app_handle: AppHandle) {
     }
 
     async fn api_status(
-        headers: HeaderMap,
         AxumState(state): AxumState<ApiState>,
-    ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-        check_auth(&headers, &state.token)?;
+    ) -> Json<serde_json::Value> {
+        // No auth required for status — allows frontend health check
         let busy = state.app.state::<LlmBusy>().0.load(Ordering::Relaxed);
-        let focus = state.app.state::<FocusManager>();
-        let focus_active = focus.0.lock().map(|s| s.active).unwrap_or(false);
+        let focus_active = state.app.state::<FocusManager>().0.lock().map(|s| s.active).unwrap_or(false);
 
-        // Check MLX server
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .build()
@@ -1001,12 +1010,12 @@ async fn spawn_api_server(app_handle: AppHandle) {
             .map(|r| r.status().is_success())
             .unwrap_or(false);
 
-        Ok(Json(serde_json::json!({
+        Json(serde_json::json!({
             "status": "ok",
             "model_online": model_online,
             "llm_busy": busy,
             "focus_active": focus_active,
-        })))
+        }))
     }
 
     async fn api_chat(
@@ -2331,15 +2340,12 @@ pub fn run() {
     let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
     let mlx_cleanup = mlx_process.clone();
 
-    // Audio recording state
+    // Audio recording state (capture starts lazily on first recording)
     let audio_state = Arc::new(AudioRecording(std::sync::Mutex::new(WhisperState {
         recording: false,
         audio_buffer: Vec::new(),
+        capture_running: false,
     })));
-
-    // Start audio capture thread
-    let audio_state_capture = audio_state.clone();
-    start_audio_capture(audio_state_capture);
 
     // Focus mode state
     let focus_monitor_flag = Arc::new(AtomicBool::new(false));
