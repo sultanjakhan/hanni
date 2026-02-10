@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Hanni Design System</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+  background: #09090b;
+  color: #e0e0e0;
+  padding: 40px;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+.subtitle { font-size: 14px; color: #555; margin-bottom: 40px; }
+
+.section {
+  margin-bottom: 48px;
+}
+
+.section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #555;
+  margin-bottom: 20px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1a1a1a;
+}
+
+.variants {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.variant-card {
+  background: #0e0e10;
+  border: 1px solid #1a1a1a;
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 300px;
+  max-width: 400px;
+  flex: 1;
+}
+
+.variant-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #444;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-current {
+  background: #332200;
+  color: #ffaa00;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+}
+
+.tag-proposed {
+  background: #003322;
+  color: #00cc66;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+}
+
+.demo-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.spacer { height: 12px; }
+
+/* ============================================
+   CURRENT STYLES (how it looks now)
+   ============================================ */
+
+/* Current buttons */
+.cur-btn-primary {
+  background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.06));
+  color: #e0e0e0;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cur-btn-secondary {
+  background: #161616;
+  color: #888;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cur-btn-danger {
+  background: #1a1a1a;
+  color: #999;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cur-btn-settings {
+  background: #1a1a1a;
+  color: #fff;
+  border: 1px solid #333;
+  border-radius: 10px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cur-btn-small {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #888;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cur-send {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #fff, #e0e0e0);
+  color: #000;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cur-pill {
+  padding: 4px 12px;
+  border-radius: 16px;
+  border: 1px solid #333;
+  background: transparent;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cur-pill.active {
+  background: #1a1a1a;
+  border-color: #fff;
+  color: #fff;
+}
+
+/* Current inputs */
+.cur-input {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.cur-chat-input {
+  padding: 10px 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: #fff;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+}
+
+.cur-select {
+  background: #161616;
+  color: #e0e0e0;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.cur-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+}
+
+/* Current cards */
+.cur-card-settings {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 22px;
+}
+
+.cur-card-module {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.cur-card-integration {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.cur-card-hobby {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+}
+
+/* Current toggle */
+.cur-toggle {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  display: inline-block;
+}
+.cur-toggle input { opacity: 0; width: 0; height: 0; }
+.cur-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #333;
+  border-radius: 26px;
+  cursor: pointer;
+}
+.cur-toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  background: #888;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.cur-toggle input:checked + .cur-toggle-slider { background: rgba(255,255,255,0.15); }
+.cur-toggle input:checked + .cur-toggle-slider::before { transform: translateX(22px); background: #fff; }
+
+/* Current messages */
+.cur-msg-user {
+  padding: 11px 16px;
+  border-radius: 18px;
+  border-bottom-right-radius: 4px;
+  background: linear-gradient(135deg, #fff, #e0e0e0);
+  color: #111;
+  font-size: 14px;
+  max-width: 260px;
+  align-self: flex-end;
+  box-shadow: 0 2px 8px rgba(255,255,255,0.1);
+}
+
+.cur-msg-bot {
+  padding: 11px 16px;
+  border-radius: 18px;
+  border-bottom-left-radius: 4px;
+  background: #141416;
+  color: #e0e0e0;
+  font-size: 14px;
+  max-width: 260px;
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+/* Current badges */
+.cur-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #333;
+}
+
+/* Current modal */
+.cur-modal {
+  background: #141416;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  padding: 26px;
+  max-width: 380px;
+}
+
+/* ============================================
+   PROPOSED STYLES (clean, unified)
+   ============================================ */
+
+/* Design tokens */
+:root {
+  --bg-0: #09090b;
+  --bg-1: #111113;
+  --bg-2: #19191b;
+  --bg-3: #222224;
+  --border: #222224;
+  --border-hover: #333336;
+  --border-focus: #555;
+  --text-0: #fafafa;
+  --text-1: #a1a1a6;
+  --text-2: #63636a;
+  --text-3: #3f3f44;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* Proposed buttons */
+.new-btn-primary {
+  background: #fafafa;
+  color: #09090b;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.new-btn-primary:hover { opacity: 0.85; }
+
+.new-btn-secondary {
+  background: transparent;
+  color: #a1a1a6;
+  border: 1px solid #222224;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.new-btn-secondary:hover { border-color: #333336; color: #fafafa; }
+
+.new-btn-ghost {
+  background: transparent;
+  color: #63636a;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.new-btn-ghost:hover { background: #19191b; color: #a1a1a6; }
+
+.new-btn-danger {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #331111;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.new-btn-danger:hover { background: #1a0808; border-color: #ef4444; }
+
+.new-btn-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #222224;
+  background: transparent;
+  color: #63636a;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.new-btn-icon:hover { border-color: #333336; color: #fafafa; }
+
+.new-send {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: #fafafa;
+  color: #09090b;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s;
+}
+.new-send:hover { opacity: 0.85; }
+
+.new-pill {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid #222224;
+  background: transparent;
+  color: #63636a;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.new-pill:hover { border-color: #333336; color: #a1a1a6; }
+.new-pill.active {
+  background: #fafafa;
+  border-color: #fafafa;
+  color: #09090b;
+}
+
+/* Proposed inputs */
+.new-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #222224;
+  background: #111113;
+  color: #fafafa;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.new-input:focus { border-color: #555; }
+.new-input::placeholder { color: #3f3f44; }
+
+.new-chat-input {
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid #222224;
+  background: #111113;
+  color: #fafafa;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+.new-chat-input:focus { border-color: #555; }
+.new-chat-input::placeholder { color: #3f3f44; }
+
+.new-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #111113 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' stroke='%2363636a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  color: #fafafa;
+  border: 1px solid #222224;
+  border-radius: 8px;
+  padding: 8px 32px 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.new-select:focus { border-color: #555; }
+
+.new-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #222224;
+  background: #111113;
+  color: #fafafa;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+  transition: border-color 0.15s;
+}
+.new-textarea:focus { border-color: #555; }
+.new-textarea::placeholder { color: #3f3f44; }
+
+/* Proposed cards */
+.new-card {
+  background: #111113;
+  border: 1px solid #222224;
+  border-radius: 12px;
+  padding: 16px;
+  transition: border-color 0.15s;
+}
+.new-card:hover { border-color: #333336; }
+
+.new-card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #63636a;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #222224;
+}
+
+/* Proposed toggle */
+.new-toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  display: inline-block;
+}
+.new-toggle input { opacity: 0; width: 0; height: 0; }
+.new-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #222224;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.new-toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  background: #63636a;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+.new-toggle input:checked + .new-toggle-slider { background: #fafafa; }
+.new-toggle input:checked + .new-toggle-slider::before { transform: translateX(20px); background: #09090b; }
+
+/* Proposed messages */
+.new-msg-user {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border-bottom-right-radius: 4px;
+  background: #fafafa;
+  color: #09090b;
+  font-size: 14px;
+  max-width: 260px;
+}
+
+.new-msg-bot {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  background: #111113;
+  color: #e0e0e0;
+  font-size: 14px;
+  max-width: 260px;
+  border: 1px solid #222224;
+}
+
+/* Proposed badges */
+.new-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #19191b;
+  color: #a1a1a6;
+  border: 1px solid #222224;
+}
+
+.new-badge-accent {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #fafafa;
+  color: #09090b;
+}
+
+/* Proposed modal */
+.new-modal {
+  background: #111113;
+  border: 1px solid #222224;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 380px;
+}
+
+/* Proposed settings row */
+.new-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+}
+.new-settings-row + .new-settings-row { border-top: 1px solid #1a1a1c; }
+.new-settings-label { font-size: 13px; color: #a1a1a6; }
+.new-settings-value { font-size: 13px; color: #fafafa; font-weight: 500; }
+
+/* Proposed table */
+.new-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.new-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: #63636a;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #222224;
+}
+.new-table td {
+  padding: 10px 12px;
+  color: #a1a1a6;
+  border-bottom: 1px solid #19191b;
+}
+.new-table tr:hover td { background: #19191b; }
+
+/* ============================================
+   Layout helpers
+   ============================================ */
+
+.side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.demo-label {
+  font-size: 11px;
+  color: #3f3f44;
+  margin-bottom: 6px;
+}
+
+.color-swatch {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  vertical-align: middle;
+}
+
+.color-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.color-name { font-size: 12px; color: #888; min-width: 80px; }
+.color-hex { font-size: 11px; color: #555; font-family: 'SF Mono', monospace; }
+</style>
+</head>
+<body>
+
+<h1>Hanni Design System</h1>
+<p class="subtitle">Слева — текущие стили, справа — предложение. Скажи, что нравится, что нет.</p>
+
+<!-- ═══════════════ COLORS ═══════════════ -->
+<div class="section">
+  <div class="section-title">Цветовая палитра (предложение)</div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#09090b"></div>
+    <span class="color-name">bg-0</span>
+    <span class="color-hex">#09090b — основной фон</span>
+  </div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#111113"></div>
+    <span class="color-name">bg-1</span>
+    <span class="color-hex">#111113 — карточки, инпуты</span>
+  </div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#19191b"></div>
+    <span class="color-name">bg-2</span>
+    <span class="color-hex">#19191b — hover, active</span>
+  </div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#222224"></div>
+    <span class="color-name">border</span>
+    <span class="color-hex">#222224 — все бордеры</span>
+  </div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#fafafa"></div>
+    <span class="color-name">accent</span>
+    <span class="color-hex">#fafafa — акцент (белый)</span>
+  </div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#a1a1a6"></div>
+    <span class="color-name">text-1</span>
+    <span class="color-hex">#a1a1a6 — вторичный текст</span>
+  </div>
+  <div class="color-row">
+    <div class="color-swatch" style="background:#63636a"></div>
+    <span class="color-name">text-2</span>
+    <span class="color-hex">#63636a — мутный текст</span>
+  </div>
+</div>
+
+<!-- ═══════════════ BUTTONS ═══════════════ -->
+<div class="section">
+  <div class="section-title">Кнопки</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span> Кнопки</div>
+      <div class="demo-row">
+        <button class="cur-btn-primary">Primary</button>
+        <button class="cur-btn-secondary">Secondary</button>
+        <button class="cur-btn-danger">Danger</button>
+      </div>
+      <div class="demo-row">
+        <button class="cur-btn-settings">Settings Btn</button>
+        <button class="cur-btn-small">Small</button>
+      </div>
+      <div class="demo-row">
+        <button class="cur-send">↑</button>
+        <span style="font-size:11px;color:#555">Send (gradient)</span>
+      </div>
+      <div class="demo-row">
+        <button class="cur-pill">5м</button>
+        <button class="cur-pill active">10м</button>
+        <button class="cur-pill">15м</button>
+        <button class="cur-pill">30м</button>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        Проблемы: градиенты, 5+ разных стилей, разные border-radius (4/10/16/50%)
+      </div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span> Кнопки</div>
+      <div class="demo-row">
+        <button class="new-btn-primary">Primary</button>
+        <button class="new-btn-secondary">Secondary</button>
+        <button class="new-btn-danger">Danger</button>
+      </div>
+      <div class="demo-row">
+        <button class="new-btn-ghost">Ghost</button>
+        <button class="new-btn-icon">+</button>
+        <button class="new-btn-icon">×</button>
+      </div>
+      <div class="demo-row">
+        <button class="new-send">↑</button>
+        <span style="font-size:11px;color:#555">Send (flat white)</span>
+      </div>
+      <div class="demo-row">
+        <button class="new-pill">5м</button>
+        <button class="new-pill active">10м</button>
+        <button class="new-pill">15м</button>
+        <button class="new-pill">30м</button>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        Единый radius 8px, без градиентов, 4 типа: primary/secondary/ghost/danger
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ INPUTS ═══════════════ -->
+<div class="section">
+  <div class="section-title">Инпуты</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span> Инпуты</div>
+      <div class="demo-label">Text input (rgba bg, radius 10)</div>
+      <input class="cur-input" placeholder="Название..." style="margin-bottom:12px">
+      <div class="demo-label">Chat input (radius 22, pill shape)</div>
+      <input class="cur-chat-input" placeholder="Сообщение..." style="margin-bottom:12px">
+      <div class="demo-label">Select (different bg #161616, radius 8)</div>
+      <select class="cur-select" style="margin-bottom:12px">
+        <option>ru-RU-SvetlanaNeural</option>
+        <option>en-US-JennyNeural</option>
+      </select>
+      <div class="demo-label">Textarea (rgba bg, radius 10)</div>
+      <textarea class="cur-textarea" placeholder="Заметка..."></textarea>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        Проблемы: 3 разных bg, 3 разных radius (8/10/22), чат-инпут — пилюля
+      </div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span> Инпуты</div>
+      <div class="demo-label">Text input</div>
+      <input class="new-input" placeholder="Название..." style="margin-bottom:12px">
+      <div class="demo-label">Chat input (тот же стиль)</div>
+      <input class="new-chat-input" placeholder="Сообщение..." style="margin-bottom:12px">
+      <div class="demo-label">Select</div>
+      <select class="new-select" style="margin-bottom:12px">
+        <option>ru-RU-SvetlanaNeural</option>
+        <option>en-US-JennyNeural</option>
+      </select>
+      <div class="demo-label">Textarea</div>
+      <textarea class="new-textarea" placeholder="Заметка..."></textarea>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        Единый стиль: bg #111113, border #222224, radius 8px для всего
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ CARDS ═══════════════ -->
+<div class="section">
+  <div class="section-title">Карточки</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span> 4 разных стиля карточек</div>
+      <div style="margin-bottom:12px">
+        <div class="demo-label">Settings section (rgba bg, radius 16)</div>
+        <div class="cur-card-settings">
+          <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #1e1e1e">Модель</div>
+          <div style="font-size:13px;color:#888">Название: <span style="color:#e0e0e0">Qwen3-32B</span></div>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <div class="demo-label">Module card (rgba bg, radius 14)</div>
+        <div class="cur-card-module">
+          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #1a1a1a">Расходы</div>
+          <div style="font-size:13px;color:#ccc">12,500 ₸</div>
+        </div>
+      </div>
+      <div>
+        <div class="demo-label">Integration card (#111 bg, radius 12)</div>
+        <div class="cur-card-integration">
+          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #1a1a1a">MLX Server</div>
+          <div style="font-size:13px;color:#e0e0e0">Онлайн</div>
+        </div>
+      </div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span> 1 единый стиль</div>
+      <div style="margin-bottom:12px">
+        <div class="demo-label">Один стиль для всех карточек</div>
+        <div class="new-card">
+          <div class="new-card-title">Модель</div>
+          <div class="new-settings-row">
+            <span class="new-settings-label">Название</span>
+            <span class="new-settings-value">Qwen3-32B</span>
+          </div>
+          <div class="new-settings-row">
+            <span class="new-settings-label">Статус</span>
+            <span class="new-settings-value">Онлайн</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="demo-label">Тот же стиль для другого модуля</div>
+        <div class="new-card">
+          <div class="new-card-title">Расходы</div>
+          <div style="font-size:20px;font-weight:700;color:#fafafa;padding:8px 0">12,500 ₸</div>
+          <div style="font-size:12px;color:#63636a">за февраль</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        Единый: bg #111113, border #222224, radius 12px
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ TOGGLE ═══════════════ -->
+<div class="section">
+  <div class="section-title">Тогглы</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span></div>
+      <div class="demo-row">
+        <label class="cur-toggle"><input type="checkbox"><span class="cur-toggle-slider"></span></label>
+        <span style="font-size:13px;color:#888">Выкл</span>
+      </div>
+      <div class="demo-row">
+        <label class="cur-toggle"><input type="checkbox" checked><span class="cur-toggle-slider"></span></label>
+        <span style="font-size:13px;color:#888">Вкл (полупрозрачный белый)</span>
+      </div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span></div>
+      <div class="demo-row">
+        <label class="new-toggle"><input type="checkbox"><span class="new-toggle-slider"></span></label>
+        <span style="font-size:13px;color:#a1a1a6">Выкл</span>
+      </div>
+      <div class="demo-row">
+        <label class="new-toggle"><input type="checkbox" checked><span class="new-toggle-slider"></span></label>
+        <span style="font-size:13px;color:#a1a1a6">Вкл (чёткий белый/чёрный)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MESSAGES ═══════════════ -->
+<div class="section">
+  <div class="section-title">Сообщения чата</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="cur-msg-bot">Привет! Как дела?</div>
+        <div class="cur-msg-user" style="align-self:flex-end">Отлично, спасибо!</div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        User: gradient bg + box-shadow, radius 18. Bot: #141416, radius 18
+      </div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="new-msg-bot">Привет! Как дела?</div>
+        <div class="new-msg-user" style="align-self:flex-end">Отлично, спасибо!</div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#444">
+        User: solid #fafafa, radius 12. Bot: #111113 + border, radius 12. Без теней.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ BADGES ═══════════════ -->
+<div class="section">
+  <div class="section-title">Бейджи / Теги</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span></div>
+      <div class="demo-row">
+        <span class="cur-badge">Watching</span>
+        <span class="cur-badge">Completed</span>
+        <span class="cur-badge">Planned</span>
+      </div>
+      <div style="font-size:11px;color:#444">Все одинаковые (B&W), radius 10</div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span></div>
+      <div class="demo-row">
+        <span class="new-badge">Watching</span>
+        <span class="new-badge">Planned</span>
+        <span class="new-badge-accent">Active</span>
+      </div>
+      <div style="font-size:11px;color:#444">Единый стиль, radius 6. Акцентный для активного.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MODAL ═══════════════ -->
+<div class="section">
+  <div class="section-title">Модалки</div>
+  <div class="side-by-side">
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-current">Текущее</span></div>
+      <div class="cur-modal">
+        <div style="font-size:16px;font-weight:600;color:#fff;margin-bottom:12px">Добавить расход</div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:12px;color:#888;margin-bottom:4px">Сумма</div>
+          <input class="cur-input" placeholder="0">
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:12px;color:#888;margin-bottom:4px">Категория</div>
+          <select class="cur-select" style="width:100%"><option>Еда</option></select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="cur-btn-secondary">Отмена</button>
+          <button class="cur-btn-primary">Добавить</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#444;margin-top:8px">radius 18, gradient btn, разные стили инпутов</div>
+    </div>
+    <div class="variant-card">
+      <div class="variant-label"><span class="tag-proposed">Предложение</span></div>
+      <div class="new-modal">
+        <div style="font-size:15px;font-weight:600;color:#fafafa;margin-bottom:12px">Добавить расход</div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:12px;color:#63636a;margin-bottom:4px">Сумма</div>
+          <input class="new-input" placeholder="0">
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:12px;color:#63636a;margin-bottom:4px">Категория</div>
+          <select class="new-select" style="width:100%"><option>Еда</option></select>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="new-btn-ghost">Отмена</button>
+          <button class="new-btn-primary">Добавить</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#444;margin-top:8px">radius 12, единый стиль кнопок и инпутов</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ TABLE ═══════════════ -->
+<div class="section">
+  <div class="section-title">Таблицы</div>
+  <div class="variant-card" style="max-width:600px">
+    <div class="variant-label"><span class="tag-proposed">Предложение</span></div>
+    <table class="new-table">
+      <thead>
+        <tr><th>Название</th><th>Статус</th><th>Рейтинг</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="color:#fafafa;font-weight:500">Attack on Titan</td><td><span class="new-badge-accent">Watching</span></td><td>9.5</td></tr>
+        <tr><td style="color:#fafafa;font-weight:500">Steins;Gate</td><td><span class="new-badge">Completed</span></td><td>9.8</td></tr>
+        <tr><td style="color:#fafafa;font-weight:500">Chainsaw Man</td><td><span class="new-badge">Planned</span></td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════ SETTINGS FORM ═══════════════ -->
+<div class="section">
+  <div class="section-title">Страница настроек (пример)</div>
+  <div class="variant-card" style="max-width:500px">
+    <div class="variant-label"><span class="tag-proposed">Предложение</span></div>
+    <div class="new-card" style="margin-bottom:12px">
+      <div class="new-card-title">Автономный режим</div>
+      <div class="new-settings-row">
+        <span class="new-settings-label">Включён</span>
+        <label class="new-toggle"><input type="checkbox" checked><span class="new-toggle-slider"></span></label>
+      </div>
+      <div class="new-settings-row">
+        <span class="new-settings-label">Интервал</span>
+        <div style="display:flex;gap:4px">
+          <button class="new-pill">5м</button>
+          <button class="new-pill active">10м</button>
+          <button class="new-pill">15м</button>
+          <button class="new-pill">30м</button>
+        </div>
+      </div>
+    </div>
+    <div class="new-card">
+      <div class="new-card-title">Голос</div>
+      <div class="new-settings-row">
+        <span class="new-settings-label">Включён</span>
+        <label class="new-toggle"><input type="checkbox"><span class="new-toggle-slider"></span></label>
+      </div>
+      <div class="new-settings-row">
+        <span class="new-settings-label">Голос TTS</span>
+        <select class="new-select">
+          <option>ru-RU-SvetlanaNeural</option>
+          <option>en-US-JennyNeural</option>
+        </select>
+      </div>
+      <div class="new-settings-row">
+        <span class="new-settings-label"></span>
+        <button class="new-btn-secondary">Прослушать</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ SUMMARY ═══════════════ -->
+<div class="section">
+  <div class="section-title">Ключевые изменения</div>
+  <div class="new-card" style="max-width:600px">
+    <table class="new-table">
+      <thead><tr><th>Что</th><th>Было</th><th>Стало</th></tr></thead>
+      <tbody>
+        <tr><td style="color:#fafafa">Border-radius</td><td>4/8/10/12/14/16/18/22px</td><td>6/8/12px (3 значения)</td></tr>
+        <tr><td style="color:#fafafa">Градиенты</td><td>На кнопках, send, сообщениях</td><td>Нигде. Flat solid colors.</td></tr>
+        <tr><td style="color:#fafafa">Box-shadow</td><td>На send, user msg, toggles</td><td>Нигде</td></tr>
+        <tr><td style="color:#fafafa">Стили кнопок</td><td>7+ вариантов</td><td>4: primary/secondary/ghost/danger</td></tr>
+        <tr><td style="color:#fafafa">Фон карточек</td><td>4+ разных (rgba, #111, #161616...)</td><td>1: #111113</td></tr>
+        <tr><td style="color:#fafafa">Бордеры</td><td>rgba(...), #222, #333, #1a1a1a</td><td>1: #222224</td></tr>
+        <tr><td style="color:#fafafa">Акцент</td><td>Белый с opacity</td><td>Solid #fafafa</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>
