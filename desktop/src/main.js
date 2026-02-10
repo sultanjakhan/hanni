@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 
 let busy = false;
 let history = [];
@@ -21,6 +21,9 @@ let integrationsLoaded = false;
 let currentConversationId = null; // Active conversation ID in SQLite
 let isSpeaking = false;
 let convSearchTimeout = null;
+
+// Track which tabs have been loaded
+const tabLoaded = {};
 
 // ── Auto-update notification ──
 listen('update-available', (event) => {
@@ -128,9 +131,9 @@ recordBtn.addEventListener('click', async () => {
 
 listen('focus-ended', () => {
   addMsg('bot', 'Фокус-режим завершён!');
-  if (focusTimer) {
-    clearInterval(focusTimer);
-    focusTimer = null;
+  if (focusTimerInterval) {
+    clearInterval(focusTimerInterval);
+    focusTimerInterval = null;
   }
 });
 
@@ -243,17 +246,65 @@ function switchTab(tab) {
 
   // Update views
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(`view-${tab}`).classList.add('active');
+  const view = document.getElementById(`view-${tab}`);
+  if (view) view.classList.add('active');
 
-  if (tab === 'integrations') {
-    if (!integrationsLoaded) loadIntegrations();
-  } else if (tab === 'settings') {
-    loadSettings();
-  } else if (tab === 'chat') {
-    loadConversationsList();
-    input.focus();
+  // Show/hide chat-specific UI
+  const newChatBtn = document.getElementById('new-chat');
+  if (newChatBtn) newChatBtn.style.display = tab === 'chat' ? '' : 'none';
+
+  // Lazy-load tab content
+  switch (tab) {
+    case 'chat':
+      loadConversationsList();
+      input.focus();
+      break;
+    case 'dashboard':
+      loadDashboard();
+      break;
+    case 'calendar':
+      loadCalendar();
+      break;
+    case 'focus':
+      loadFocus();
+      break;
+    case 'notes':
+      loadNotes();
+      break;
+    case 'work':
+      loadWork();
+      break;
+    case 'development':
+      loadDevelopment();
+      break;
+    case 'hobbies':
+      loadHobbies();
+      break;
+    case 'sports':
+      loadSports();
+      break;
+    case 'health':
+      loadHealth();
+      break;
+    case 'integrations':
+      if (!integrationsLoaded) loadIntegrations();
+      break;
+    case 'settings':
+      loadSettings();
+      break;
   }
 }
+
+// Keyboard shortcuts: Cmd+1..0 for tabs
+document.addEventListener('keydown', (e) => {
+  if (!e.metaKey && !e.ctrlKey) return;
+  const tabMap = { '1': 'chat', '2': 'dashboard', '3': 'calendar', '4': 'focus', '5': 'notes',
+                   '6': 'work', '7': 'development', '8': 'hobbies', '9': 'sports', '0': 'health' };
+  if (tabMap[e.key]) {
+    e.preventDefault();
+    switchTab(tabMap[e.key]);
+  }
+});
 
 document.querySelectorAll('.sidebar-btn').forEach(btn => {
   btn.addEventListener('click', () => switchTab(btn.dataset.tab));
@@ -747,33 +798,8 @@ async function loadIntegrations(force) {
       <span><span class="legend-dot inactive"></span> Ожидание</span>
     </div>`;
 
-    // Get focus status
-    let focusStatus = { active: false, remaining_seconds: 0, blocked_apps: [], blocked_sites: [] };
-    try { focusStatus = await invoke('get_focus_status'); } catch(_) {}
-
-    const focusRemaining = focusStatus.active
-      ? `${Math.floor(focusStatus.remaining_seconds / 60)}м ${focusStatus.remaining_seconds % 60}с`
-      : '';
-
-    const focusCard = `
-      <div class="integration-card focus-card">
-        <div class="integration-card-title">Фокус-режим</div>
-        <span class="panel-status-badge ${focusStatus.active ? 'on' : 'off'}">${focusStatus.active ? 'Активен · ' + focusRemaining : 'Неактивен'}</span>
-        <div class="focus-controls">
-          <select id="focus-duration" class="settings-select" ${focusStatus.active ? 'disabled' : ''}>
-            <option value="15">15 мин</option>
-            <option value="30" selected>30 мин</option>
-            <option value="60">60 мин</option>
-            <option value="90">90 мин</option>
-            <option value="120">120 мин</option>
-          </select>
-          <button class="settings-btn" id="focus-toggle-btn">${focusStatus.active ? 'Остановить' : 'Запустить'}</button>
-        </div>
-      </div>`;
-
     integrationsContent.innerHTML = `
       <div class="integrations-grid">
-        ${focusCard}
         <div class="integration-card macos-card">
           <div class="integration-card-title">macOS интеграции</div>
           ${legend}
@@ -797,33 +823,60 @@ async function loadIntegrations(force) {
           ${blockerBadge}
           ${sitesItems}
         </div>
+        <div class="integration-card macos-card">
+          <div class="integration-card-title">Память Hanni</div>
+          <div class="memory-search-box">
+            <input class="form-input" id="memory-search" placeholder="Поиск по памяти..." autocomplete="off">
+          </div>
+          <div class="memory-browser" id="memory-browser-list"></div>
+        </div>
       </div>`;
 
-    // Focus toggle handler
-    document.getElementById('focus-toggle-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target;
-      btn.disabled = true;
-      try {
-        if (focusStatus.active) {
-          await invoke('stop_focus');
-          btn.textContent = 'Запустить';
-        } else {
-          const dur = parseInt(document.getElementById('focus-duration').value);
-          await invoke('start_focus', { durationMinutes: dur, apps: null, sites: null });
-          btn.textContent = 'Остановить';
-        }
-        loadIntegrations(true);
-      } catch (err) {
-        btn.textContent = 'Ошибка';
-        btn.title = String(err);
-      }
-      btn.disabled = false;
-    });
+    // Load memory browser
+    loadMemoryBrowser();
 
     integrationsLoaded = true;
   } catch (e) {
     integrationsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
+}
+
+// ── Memory browser ──
+
+async function loadMemoryBrowser(search) {
+  const list = document.getElementById('memory-browser-list');
+  if (!list) return;
+  try {
+    const memories = await invoke('get_all_memories', { search: search || null });
+    list.innerHTML = '';
+    for (const m of memories) {
+      const item = document.createElement('div');
+      item.className = 'memory-item';
+      item.innerHTML = `
+        <span class="memory-item-category">${escapeHtml(m.category)}</span>
+        <span class="memory-item-key">${escapeHtml(m.key)}</span>
+        <span class="memory-item-value">${escapeHtml(m.value)}</span>
+        <div class="memory-item-actions">
+          <button class="memory-item-btn" data-id="${m.id}" title="Удалить">&times;</button>
+        </div>`;
+      item.querySelector('.memory-item-btn').addEventListener('click', async (e) => {
+        if (confirm(`Удалить "${m.key}"?`)) {
+          await invoke('delete_memory', { id: m.id }).catch(() => {});
+          loadMemoryBrowser(search);
+        }
+      });
+      list.appendChild(item);
+    }
+    if (memories.length === 0) {
+      list.innerHTML = '<div style="color:#555;font-size:12px;padding:8px;">Нет фактов</div>';
+    }
+  } catch (_) {}
+
+  // Bind search
+  document.getElementById('memory-search')?.addEventListener('input', (e) => {
+    clearTimeout(convSearchTimeout);
+    convSearchTimeout = setTimeout(() => loadMemoryBrowser(e.target.value), 300);
+  });
 }
 
 // ── Settings page ──
@@ -965,6 +1018,872 @@ async function loadSettings() {
   } catch (e) {
     settingsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
   }
+}
+
+// ── Tab loaders (stubs until implemented) ──
+
+function showStub(containerId, icon, label) {
+  const el = document.getElementById(containerId);
+  if (el) el.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">${icon}</div>${label}</div>`;
+}
+
+// ── Dashboard ──
+async function loadDashboard() {
+  const el = document.getElementById('dashboard-content');
+  if (!el) return;
+  el.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
+  try {
+    const data = await invoke('get_dashboard_data');
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const greeting = now.getHours() < 12 ? 'Доброе утро' : now.getHours() < 18 ? 'Добрый день' : 'Добрый вечер';
+
+    let focusBanner = '';
+    if (data.current_activity) {
+      focusBanner = `<div class="dashboard-focus-banner">
+        <div class="dashboard-focus-indicator"></div>
+        <div class="dashboard-focus-text">${escapeHtml(data.current_activity.title)}</div>
+        <div class="dashboard-focus-time">${data.current_activity.elapsed || ''}</div>
+      </div>`;
+    }
+
+    el.innerHTML = `
+      <div class="dashboard-greeting">${greeting}!</div>
+      <div class="dashboard-date">${dateStr}</div>
+      ${focusBanner}
+      <div class="dashboard-stats">
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.activities_today || 0}</div><div class="dashboard-stat-label">Активности</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.focus_minutes || 0}м</div><div class="dashboard-stat-label">Фокус</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.notes_count || 0}</div><div class="dashboard-stat-label">Заметки</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.events_today || 0}</div><div class="dashboard-stat-label">События</div></div>
+      </div>
+      ${data.events && data.events.length > 0 ? `
+        <div class="dashboard-section-title">События сегодня</div>
+        ${data.events.map(e => `<div class="calendar-event-item">
+          <span class="calendar-event-time">${e.time || ''}</span>
+          <span class="calendar-event-title">${escapeHtml(e.title)}</span>
+        </div>`).join('')}` : ''}
+      ${data.recent_notes && data.recent_notes.length > 0 ? `
+        <div class="dashboard-section-title">Последние заметки</div>
+        ${data.recent_notes.map(n => `<div class="calendar-event-item">
+          <span class="calendar-event-title">${escapeHtml(n.title)}</span>
+        </div>`).join('')}` : ''}
+      <div class="dashboard-section-title">Быстрые действия</div>
+      <div class="dashboard-quick-actions">
+        <button class="btn-primary" onclick="switchTab('notes')">Новая заметка</button>
+        <button class="btn-primary" onclick="switchTab('focus')">Начать активность</button>
+        <button class="btn-primary" onclick="switchTab('health')">Залогировать</button>
+      </div>`;
+  } catch (e) {
+    // Fallback for when backend command doesn't exist yet
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const greeting = now.getHours() < 12 ? 'Доброе утро' : now.getHours() < 18 ? 'Добрый день' : 'Добрый вечер';
+    el.innerHTML = `
+      <div class="dashboard-greeting">${greeting}!</div>
+      <div class="dashboard-date">${dateStr}</div>
+      <div class="dashboard-stats">
+        <div class="dashboard-stat"><div class="dashboard-stat-value">0</div><div class="dashboard-stat-label">Активности</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">0м</div><div class="dashboard-stat-label">Фокус</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">0</div><div class="dashboard-stat-label">Заметки</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">0</div><div class="dashboard-stat-label">События</div></div>
+      </div>
+      <div class="dashboard-section-title">Быстрые действия</div>
+      <div class="dashboard-quick-actions">
+        <button class="btn-primary" onclick="switchTab('notes')">Новая заметка</button>
+        <button class="btn-primary" onclick="switchTab('focus')">Начать активность</button>
+        <button class="btn-primary" onclick="switchTab('health')">Залогировать</button>
+      </div>`;
+  }
+}
+
+// ── Focus ──
+let focusTimerInterval = null;
+
+async function loadFocus() {
+  const el = document.getElementById('focus-content');
+  if (!el) return;
+  el.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
+  try {
+    const current = await invoke('get_current_activity').catch(() => null);
+    const log = await invoke('get_activity_log', { date: null }).catch(() => []);
+
+    let currentHtml = '';
+    if (current) {
+      currentHtml = `<div class="focus-current">
+        <div class="focus-current-title">Сейчас</div>
+        <div class="focus-current-activity">${escapeHtml(current.title)}</div>
+        <div class="focus-current-timer" id="focus-timer">${current.elapsed || '00:00'}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;">
+          <button class="btn-danger" id="stop-activity-btn">Завершить</button>
+        </div>
+      </div>`;
+    } else {
+      currentHtml = `<div class="focus-current">
+        <div class="focus-current-title">Чем занимаешься?</div>
+        <div style="margin-top:12px;">
+          <input id="activity-title" class="form-input" placeholder="Название активности..." style="max-width:300px;margin:0 auto 12px;display:block;text-align:center;">
+          <div class="focus-presets" id="activity-presets">
+            <button class="focus-preset" data-category="work">Работа</button>
+            <button class="focus-preset" data-category="study">Учёба</button>
+            <button class="focus-preset" data-category="sport">Спорт</button>
+            <button class="focus-preset" data-category="rest">Отдых</button>
+            <button class="focus-preset" data-category="hobby">Хобби</button>
+            <button class="focus-preset" data-category="other">Другое</button>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;">
+            <label style="font-size:12px;color:#888;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="focus-block-check"> Блокировать отвлечения
+            </label>
+          </div>
+          <button class="btn-primary" id="start-activity-btn" style="margin-top:12px;">Начать</button>
+        </div>
+      </div>`;
+    }
+
+    const logHtml = log.length > 0 ? `
+      <div class="module-card-title" style="margin-top:8px;">Лог за сегодня</div>
+      <div class="focus-log">
+        ${log.map(item => `<div class="focus-log-item">
+          <span class="focus-log-time">${item.time || ''}</span>
+          <span class="focus-log-title">${escapeHtml(item.title)}</span>
+          <span class="focus-log-category">${item.category || ''}</span>
+          <span class="focus-log-duration">${item.duration || ''}</span>
+        </div>`).join('')}
+      </div>` : '';
+
+    el.innerHTML = currentHtml + logHtml;
+
+    // Bind events
+    let selectedCategory = 'other';
+    document.querySelectorAll('#activity-presets .focus-preset')?.forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#activity-presets .focus-preset').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedCategory = btn.dataset.category;
+        const titleInput = document.getElementById('activity-title');
+        if (titleInput && !titleInput.value) titleInput.value = btn.textContent;
+      });
+    });
+
+    document.getElementById('start-activity-btn')?.addEventListener('click', async () => {
+      const title = document.getElementById('activity-title')?.value?.trim() || selectedCategory;
+      const focusMode = document.getElementById('focus-block-check')?.checked || false;
+      try {
+        await invoke('start_activity', { title, category: selectedCategory, focusMode, duration: null, apps: null, sites: null });
+        loadFocus();
+      } catch (err) {
+        alert('Ошибка: ' + err);
+      }
+    });
+
+    document.getElementById('stop-activity-btn')?.addEventListener('click', async () => {
+      try {
+        await invoke('stop_activity');
+        loadFocus();
+      } catch (err) {
+        alert('Ошибка: ' + err);
+      }
+    });
+
+    // Update timer
+    if (current && current.started_at) {
+      if (focusTimerInterval) clearInterval(focusTimerInterval);
+      const startedAt = new Date(current.started_at).getTime();
+      focusTimerInterval = setInterval(() => {
+        const timerEl = document.getElementById('focus-timer');
+        if (!timerEl || currentTab !== 'focus') { clearInterval(focusTimerInterval); return; }
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        const h = Math.floor(elapsed / 3600);
+        const m = Math.floor((elapsed % 3600) / 60);
+        const s = elapsed % 60;
+        timerEl.textContent = h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      }, 1000);
+    }
+  } catch (e) {
+    showStub('focus-content', '&#9673;', 'Фокус — скоро');
+  }
+}
+
+// ── Notes ──
+let currentNoteId = null;
+let noteAutoSaveTimeout = null;
+
+async function loadNotes() {
+  const el = document.getElementById('notes-content');
+  if (!el) return;
+  try {
+    const notes = await invoke('get_notes', { filter: null, search: null });
+    const notesList = notes || [];
+
+    el.innerHTML = `<div class="notes-layout">
+      <div class="notes-list">
+        <div class="notes-list-header">
+          <input class="form-input" id="notes-search" placeholder="Поиск заметок..." autocomplete="off">
+          <button class="btn-primary" id="new-note-btn" style="width:100%;">+ Новая заметка</button>
+        </div>
+        <div class="notes-list-items" id="notes-list-items"></div>
+      </div>
+      <div class="notes-editor" id="notes-editor-panel">
+        <div class="notes-empty">Выберите заметку или создайте новую</div>
+      </div>
+    </div>`;
+
+    renderNotesList(notesList);
+
+    document.getElementById('new-note-btn')?.addEventListener('click', async () => {
+      try {
+        const id = await invoke('create_note', { title: 'Без названия', content: '', tags: '' });
+        currentNoteId = id;
+        loadNotes();
+      } catch (err) { alert('Ошибка: ' + err); }
+    });
+
+    document.getElementById('notes-search')?.addEventListener('input', async (e) => {
+      clearTimeout(noteAutoSaveTimeout);
+      noteAutoSaveTimeout = setTimeout(async () => {
+        try {
+          const results = await invoke('get_notes', { filter: null, search: e.target.value || null });
+          renderNotesList(results || []);
+        } catch (_) {}
+      }, 300);
+    });
+  } catch (e) {
+    showStub('notes-content', '&#9998;', 'Заметки — скоро');
+  }
+}
+
+function renderNotesList(notes) {
+  const list = document.getElementById('notes-list-items');
+  if (!list) return;
+  list.innerHTML = '';
+  for (const note of notes) {
+    const item = document.createElement('div');
+    item.className = 'note-list-item' + (note.id === currentNoteId ? ' active' : '');
+    const date = new Date(note.updated_at || note.created_at);
+    const dateStr = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    item.innerHTML = `
+      <div class="note-list-item-title">${note.pinned ? '<span class="note-pinned-icon">&#x1F4CC;</span> ' : ''}${escapeHtml(note.title || 'Без названия')}</div>
+      <div class="note-list-item-preview">${escapeHtml((note.content || '').substring(0, 60))}</div>
+      <div class="note-list-item-meta">${dateStr}</div>`;
+    item.addEventListener('click', () => openNote(note.id));
+    list.appendChild(item);
+  }
+}
+
+async function openNote(id) {
+  currentNoteId = id;
+  try {
+    const note = await invoke('get_note', { id });
+    const panel = document.getElementById('notes-editor-panel');
+    if (!panel) return;
+    panel.innerHTML = `
+      <input class="notes-editor-title" id="note-title" value="${escapeHtml(note.title || '')}" placeholder="Заголовок...">
+      <div class="notes-editor-tags">
+        ${(note.tags || '').split(',').filter(t => t.trim()).map(t =>
+          `<span class="note-tag">${escapeHtml(t.trim())}</span>`
+        ).join('')}
+        <input class="form-input" id="note-tags-input" placeholder="Теги через запятую..." value="${escapeHtml(note.tags || '')}" style="font-size:11px;padding:2px 8px;width:auto;min-width:120px;">
+      </div>
+      <textarea class="notes-editor-body" id="note-body" placeholder="Начните писать...">${escapeHtml(note.content || '')}</textarea>
+      <div class="notes-editor-actions">
+        <button class="btn-secondary" id="note-pin-btn">${note.pinned ? 'Открепить' : 'Закрепить'}</button>
+        <button class="btn-secondary" id="note-archive-btn">${note.archived ? 'Разархивировать' : 'Архивировать'}</button>
+        <button class="btn-danger" id="note-delete-btn">Удалить</button>
+      </div>`;
+
+    // Auto-save on typing
+    const autoSave = () => {
+      clearTimeout(noteAutoSaveTimeout);
+      noteAutoSaveTimeout = setTimeout(async () => {
+        const title = document.getElementById('note-title')?.value || '';
+        const content = document.getElementById('note-body')?.value || '';
+        const tags = document.getElementById('note-tags-input')?.value || '';
+        await invoke('update_note', { id, title, content, tags }).catch(() => {});
+      }, 1000);
+    };
+    document.getElementById('note-title')?.addEventListener('input', autoSave);
+    document.getElementById('note-body')?.addEventListener('input', autoSave);
+    document.getElementById('note-tags-input')?.addEventListener('input', autoSave);
+
+    document.getElementById('note-pin-btn')?.addEventListener('click', async () => {
+      await invoke('update_note', { id, title: note.title, content: note.content, tags: note.tags, pinned: !note.pinned }).catch(() => {});
+      loadNotes();
+    });
+    document.getElementById('note-archive-btn')?.addEventListener('click', async () => {
+      await invoke('update_note', { id, title: note.title, content: note.content, tags: note.tags, archived: !note.archived }).catch(() => {});
+      loadNotes();
+    });
+    document.getElementById('note-delete-btn')?.addEventListener('click', async () => {
+      if (confirm('Удалить заметку?')) {
+        await invoke('delete_note', { id }).catch(() => {});
+        currentNoteId = null;
+        loadNotes();
+      }
+    });
+
+    // Highlight active item in list
+    document.querySelectorAll('.note-list-item').forEach(item => item.classList.remove('active'));
+    document.querySelectorAll('.note-list-item').forEach((item, idx) => {
+      // Re-select the clicked item
+    });
+  } catch (e) {
+    alert('Ошибка: ' + e);
+  }
+}
+
+// ── Calendar ──
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth();
+let selectedCalendarDate = null;
+
+async function loadCalendar() {
+  const el = document.getElementById('calendar-content');
+  if (!el) return;
+  try {
+    const events = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
+    renderCalendar(el, events || []);
+  } catch (e) {
+    renderCalendar(el, []);
+  }
+}
+
+function renderCalendar(el, events) {
+  const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+  const firstDay = new Date(calendarYear, calendarMonth, 1);
+  const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
+  let startDay = firstDay.getDay() - 1;
+  if (startDay < 0) startDay = 6;
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+  // Group events by date
+  const eventsByDate = {};
+  for (const ev of events) {
+    const d = ev.date;
+    if (!eventsByDate[d]) eventsByDate[d] = [];
+    eventsByDate[d].push(ev);
+  }
+
+  let daysHtml = '';
+  // Prev month days
+  const prevLast = new Date(calendarYear, calendarMonth, 0).getDate();
+  for (let i = startDay - 1; i >= 0; i--) {
+    daysHtml += `<div class="calendar-day other-month"><span class="calendar-day-number">${prevLast - i}</span></div>`;
+  }
+  // Current month days
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const dateStr = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = dateStr === todayStr;
+    const isSelected = dateStr === selectedCalendarDate;
+    const dayEvents = eventsByDate[dateStr] || [];
+    const dots = dayEvents.slice(0, 3).map(e => `<span class="calendar-event-dot" style="background:${e.color || '#818cf8'}"></span>`).join('');
+    daysHtml += `<div class="calendar-day${isToday ? ' today' : ''}${isSelected ? ' selected' : ''}" data-date="${dateStr}">
+      <span class="calendar-day-number">${d}</span>
+      <div class="calendar-day-dots">${dots}</div>
+    </div>`;
+  }
+  // Next month days
+  const totalCells = startDay + lastDay.getDate();
+  const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+  for (let i = 1; i <= remaining; i++) {
+    daysHtml += `<div class="calendar-day other-month"><span class="calendar-day-number">${i}</span></div>`;
+  }
+
+  let dayPanelHtml = '';
+  if (selectedCalendarDate && eventsByDate[selectedCalendarDate]) {
+    const dayEvts = eventsByDate[selectedCalendarDate];
+    dayPanelHtml = `<div class="calendar-day-panel">
+      <div class="calendar-day-panel-title">${selectedCalendarDate}</div>
+      ${dayEvts.map(e => `<div class="calendar-event-item">
+        <span class="calendar-event-time">${e.time || ''}</span>
+        <span class="calendar-event-title">${escapeHtml(e.title)}</span>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div class="calendar-nav">
+      <button class="calendar-nav-btn" id="cal-prev">&lt;</button>
+      <div class="calendar-month-label">${monthNames[calendarMonth]} ${calendarYear}</div>
+      <button class="calendar-nav-btn" id="cal-next">&gt;</button>
+      <button class="btn-primary" id="cal-add-event" style="margin-left:16px;">+ Событие</button>
+    </div>
+    <div class="calendar-weekdays">${weekdays.map(d => `<div class="calendar-weekday">${d}</div>`).join('')}</div>
+    <div class="calendar-grid">${daysHtml}</div>
+    ${dayPanelHtml}`;
+
+  document.getElementById('cal-prev')?.addEventListener('click', () => {
+    calendarMonth--;
+    if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+    loadCalendar();
+  });
+  document.getElementById('cal-next')?.addEventListener('click', () => {
+    calendarMonth++;
+    if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+    loadCalendar();
+  });
+  document.querySelectorAll('.calendar-day:not(.other-month)').forEach(day => {
+    day.addEventListener('click', () => {
+      selectedCalendarDate = day.dataset.date;
+      loadCalendar();
+    });
+  });
+  document.getElementById('cal-add-event')?.addEventListener('click', () => showAddEventModal());
+}
+
+function showAddEventModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Новое событие</div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="event-title"></div>
+    <div class="form-group"><label class="form-label">Дата</label><input class="form-input" id="event-date" type="date" value="${selectedCalendarDate || new Date().toISOString().split('T')[0]}"></div>
+    <div class="form-group"><label class="form-label">Время</label><input class="form-input" id="event-time" type="time"></div>
+    <div class="form-group"><label class="form-label">Описание</label><textarea class="form-textarea" id="event-desc"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="event-cancel">Отмена</button>
+      <button class="btn-primary" id="event-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('event-cancel')?.addEventListener('click', () => overlay.remove());
+  document.getElementById('event-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('event-title')?.value?.trim();
+    if (!title) return;
+    try {
+      await invoke('create_event', {
+        title,
+        description: document.getElementById('event-desc')?.value || '',
+        date: document.getElementById('event-date')?.value || '',
+        time: document.getElementById('event-time')?.value || '',
+        durationMinutes: 60,
+        category: 'general',
+        color: '#818cf8',
+      });
+      overlay.remove();
+      loadCalendar();
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+// ── Work ──
+let currentProjectId = null;
+
+async function loadWork() {
+  const el = document.getElementById('work-content');
+  if (!el) return;
+  try {
+    const projects = await invoke('get_projects').catch(() => []);
+    renderWork(el, projects || []);
+  } catch (e) {
+    showStub('work-content', '&#9642;', 'Работа — скоро');
+  }
+}
+
+async function renderWork(el, projects) {
+  if (!currentProjectId && projects.length > 0) currentProjectId = projects[0].id;
+  const tasks = currentProjectId ? await invoke('get_tasks', { projectId: currentProjectId }).catch(() => []) : [];
+
+  el.innerHTML = `<div class="work-layout">
+    <div class="work-projects">
+      <div class="work-projects-header">
+        <button class="btn-primary" id="new-project-btn" style="width:100%;">+ Проект</button>
+      </div>
+      <div class="work-projects-list" id="work-projects-list"></div>
+    </div>
+    <div class="work-tasks">
+      <div class="work-tasks-header">
+        <h2 style="font-size:16px;color:#fff;">${currentProjectId ? escapeHtml(projects.find(p => p.id === currentProjectId)?.name || '') : 'Выберите проект'}</h2>
+        ${currentProjectId ? '<button class="btn-primary" id="new-task-btn">+ Задача</button>' : ''}
+      </div>
+      <div id="work-tasks-list"></div>
+    </div>
+  </div>`;
+
+  const projectList = document.getElementById('work-projects-list');
+  for (const p of projects) {
+    const item = document.createElement('div');
+    item.className = 'work-project-item' + (p.id === currentProjectId ? ' active' : '');
+    const taskCount = (p.task_count || 0);
+    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || '#818cf8'}"></span>
+      <span class="work-project-name">${escapeHtml(p.name)}</span>
+      <span class="work-project-count">${taskCount}</span>`;
+    item.addEventListener('click', () => { currentProjectId = p.id; loadWork(); });
+    projectList.appendChild(item);
+  }
+
+  const taskList = document.getElementById('work-tasks-list');
+  for (const t of (tasks || [])) {
+    const item = document.createElement('div');
+    item.className = 'work-task-item';
+    const isDone = t.status === 'done';
+    const priorityClass = `priority-${t.priority || 'normal'}`;
+    item.innerHTML = `
+      <div class="work-task-check${isDone ? ' done' : ''}" data-id="${t.id}"></div>
+      <span class="work-task-title${isDone ? ' done' : ''}">${escapeHtml(t.title)}</span>
+      <span class="work-task-priority ${priorityClass}">${t.priority || 'normal'}</span>`;
+    item.querySelector('.work-task-check').addEventListener('click', async () => {
+      const newStatus = isDone ? 'todo' : 'done';
+      await invoke('update_task_status', { id: t.id, status: newStatus }).catch(() => {});
+      loadWork();
+    });
+    taskList.appendChild(item);
+  }
+
+  document.getElementById('new-project-btn')?.addEventListener('click', () => {
+    const name = prompt('Название проекта:');
+    if (name) invoke('create_project', { name, description: '', color: '#818cf8' }).then(() => loadWork()).catch(e => alert(e));
+  });
+
+  document.getElementById('new-task-btn')?.addEventListener('click', () => {
+    const title = prompt('Задача:');
+    if (title) invoke('create_task', { projectId: currentProjectId, title, description: '', priority: 'normal', dueDate: null }).then(() => loadWork()).catch(e => alert(e));
+  });
+}
+
+// ── Development ──
+let devFilter = 'all';
+
+async function loadDevelopment() {
+  const el = document.getElementById('development-content');
+  if (!el) return;
+  try {
+    const items = await invoke('get_learning_items', { typeFilter: devFilter === 'all' ? null : devFilter }).catch(() => []);
+    renderDevelopment(el, items || []);
+  } catch (e) {
+    showStub('development-content', '&#9636;', 'Развитие — скоро');
+  }
+}
+
+function renderDevelopment(el, items) {
+  const filters = ['all', 'course', 'book', 'skill', 'article'];
+  const filterLabels = { all: 'Все', course: 'Курсы', book: 'Книги', skill: 'Навыки', article: 'Статьи' };
+  const statusLabels = { planned: 'Запланировано', in_progress: 'В процессе', completed: 'Завершено' };
+  const statusColors = { planned: 'badge-gray', in_progress: 'badge-blue', completed: 'badge-green' };
+
+  el.innerHTML = `
+    <div class="module-header"><h2>Развитие</h2><button class="btn-primary" id="dev-add-btn">+ Добавить</button></div>
+    <div class="dev-filters">
+      ${filters.map(f => `<button class="pill${devFilter === f ? ' active' : ''}" data-filter="${f}">${filterLabels[f]}</button>`).join('')}
+    </div>
+    <div class="dev-grid" id="dev-grid"></div>`;
+
+  const grid = document.getElementById('dev-grid');
+  for (const item of items) {
+    const card = document.createElement('div');
+    card.className = 'dev-card';
+    card.innerHTML = `
+      <div class="dev-card-title">${escapeHtml(item.title)}</div>
+      <div class="dev-card-meta">
+        <span class="badge ${statusColors[item.status] || 'badge-gray'}">${statusLabels[item.status] || item.status}</span>
+        <span class="badge badge-purple">${filterLabels[item.type] || item.type}</span>
+      </div>
+      ${item.description ? `<div style="font-size:12px;color:#666;margin-bottom:6px;">${escapeHtml(item.description.substring(0, 100))}</div>` : ''}
+      <div class="dev-progress"><div class="dev-progress-bar" style="width:${item.progress || 0}%"></div></div>
+      <div style="font-size:11px;color:#555;margin-top:4px;">${item.progress || 0}%</div>`;
+    grid.appendChild(card);
+  }
+
+  el.querySelectorAll('.dev-filters .pill').forEach(btn => {
+    btn.addEventListener('click', () => { devFilter = btn.dataset.filter; loadDevelopment(); });
+  });
+
+  document.getElementById('dev-add-btn')?.addEventListener('click', () => showAddLearningModal());
+}
+
+function showAddLearningModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Добавить</div>
+    <div class="form-group"><label class="form-label">Тип</label>
+      <select class="form-select" id="learn-type" style="width:100%;">
+        <option value="course">Курс</option><option value="book">Книга</option>
+        <option value="skill">Навык</option><option value="article">Статья</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="learn-title"></div>
+    <div class="form-group"><label class="form-label">Описание</label><textarea class="form-textarea" id="learn-desc"></textarea></div>
+    <div class="form-group"><label class="form-label">URL</label><input class="form-input" id="learn-url"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="learn-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('learn-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('learn-title')?.value?.trim();
+    if (!title) return;
+    try {
+      await invoke('create_learning_item', {
+        itemType: document.getElementById('learn-type')?.value || 'course',
+        title,
+        description: document.getElementById('learn-desc')?.value || '',
+        url: document.getElementById('learn-url')?.value || '',
+      });
+      overlay.remove();
+      loadDevelopment();
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+// ── Hobbies ──
+async function loadHobbies() {
+  const el = document.getElementById('hobbies-content');
+  if (!el) return;
+  try {
+    const hobbies = await invoke('get_hobbies').catch(() => []);
+    renderHobbies(el, hobbies || []);
+  } catch (e) {
+    showStub('hobbies-content', '&#9670;', 'Хобби — скоро');
+  }
+}
+
+function renderHobbies(el, hobbies) {
+  el.innerHTML = `
+    <div class="module-header"><h2>Хобби</h2><button class="btn-primary" id="hobby-add-btn">+ Добавить</button></div>
+    <div class="hobby-grid" id="hobby-grid"></div>`;
+
+  const grid = document.getElementById('hobby-grid');
+  for (const h of hobbies) {
+    const card = document.createElement('div');
+    card.className = 'hobby-card';
+    card.innerHTML = `
+      <div class="hobby-card-icon">${h.icon || '&#9670;'}</div>
+      <div class="hobby-card-name">${escapeHtml(h.name)}</div>
+      <div class="hobby-card-hours">${h.total_hours || 0}</div>
+      <div class="hobby-card-label">часов</div>`;
+    card.addEventListener('click', () => showHobbyDetail(h));
+    grid.appendChild(card);
+  }
+
+  document.getElementById('hobby-add-btn')?.addEventListener('click', () => {
+    const name = prompt('Название хобби:');
+    if (name) invoke('create_hobby', { name, category: 'general', icon: '&#9670;', color: '#818cf8' }).then(() => loadHobbies()).catch(e => alert(e));
+  });
+}
+
+async function showHobbyDetail(hobby) {
+  const entries = await invoke('get_hobby_entries', { hobbyId: hobby.id }).catch(() => []);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">${escapeHtml(hobby.name)}</div>
+    <div class="form-group">
+      <label class="form-label">Длительность (мин)</label>
+      <input class="form-input" id="hobby-duration" type="number" value="30">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Заметки</label>
+      <input class="form-input" id="hobby-notes">
+    </div>
+    <button class="btn-primary" id="hobby-log-btn" style="width:100%;margin-bottom:16px;">Залогировать</button>
+    <div class="module-card-title">История</div>
+    ${(entries || []).map(e => `<div class="focus-log-item">
+      <span class="focus-log-time">${e.date || ''}</span>
+      <span class="focus-log-title">${e.notes || ''}</span>
+      <span class="focus-log-duration">${e.duration_minutes || 0} мин</span>
+    </div>`).join('')}
+    <div class="modal-actions"><button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('hobby-log-btn')?.addEventListener('click', async () => {
+    const dur = parseInt(document.getElementById('hobby-duration')?.value || '30');
+    const notes = document.getElementById('hobby-notes')?.value || '';
+    try {
+      await invoke('log_hobby_entry', { hobbyId: hobby.id, durationMinutes: dur, notes });
+      overlay.remove();
+      loadHobbies();
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+// ── Sports ──
+async function loadSports() {
+  const el = document.getElementById('sports-content');
+  if (!el) return;
+  try {
+    const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
+    const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
+    renderSports(el, workouts || [], stats);
+  } catch (e) {
+    showStub('sports-content', '&#9829;', 'Спорт — скоро');
+  }
+}
+
+function renderSports(el, workouts, stats) {
+  const typeLabels = { gym: 'Зал', cardio: 'Кардио', yoga: 'Йога', swimming: 'Плавание', martial_arts: 'Единоборства', other: 'Другое' };
+
+  el.innerHTML = `
+    <div class="module-header"><h2>Спорт</h2><button class="btn-primary" id="new-workout-btn">+ Тренировка</button></div>
+    <div class="sports-stats">
+      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.count || 0}</div><div class="dashboard-stat-label">Тренировок</div></div>
+      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_minutes || 0}м</div><div class="dashboard-stat-label">Общее время</div></div>
+      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_calories || 0}</div><div class="dashboard-stat-label">Калории</div></div>
+    </div>
+    <div id="workouts-list"></div>`;
+
+  const list = document.getElementById('workouts-list');
+  for (const w of workouts) {
+    const card = document.createElement('div');
+    card.className = 'workout-card';
+    card.innerHTML = `
+      <div class="workout-card-header">
+        <span class="workout-card-title">${escapeHtml(w.title || typeLabels[w.type] || w.type)}</span>
+        <span class="workout-card-date">${w.date || ''}</span>
+      </div>
+      <div class="workout-card-meta">
+        <span class="badge badge-purple">${typeLabels[w.type] || w.type}</span>
+        <span>${w.duration_minutes || 0} мин</span>
+        ${w.calories ? `<span>${w.calories} ккал</span>` : ''}
+      </div>`;
+    list.appendChild(card);
+  }
+
+  document.getElementById('new-workout-btn')?.addEventListener('click', () => showAddWorkoutModal());
+}
+
+function showAddWorkoutModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Новая тренировка</div>
+    <div class="form-group"><label class="form-label">Тип</label>
+      <select class="form-select" id="workout-type" style="width:100%;">
+        <option value="gym">Зал</option><option value="cardio">Кардио</option>
+        <option value="yoga">Йога</option><option value="swimming">Плавание</option>
+        <option value="martial_arts">Единоборства</option><option value="other">Другое</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="workout-title"></div>
+    <div class="form-group"><label class="form-label">Длительность (мин)</label><input class="form-input" id="workout-duration" type="number" value="60"></div>
+    <div class="form-group"><label class="form-label">Калории</label><input class="form-input" id="workout-calories" type="number"></div>
+    <div class="form-group"><label class="form-label">Заметки</label><textarea class="form-textarea" id="workout-notes"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="workout-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('workout-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('workout-title')?.value?.trim();
+    try {
+      await invoke('create_workout', {
+        workoutType: document.getElementById('workout-type')?.value || 'other',
+        title: title || '',
+        durationMinutes: parseInt(document.getElementById('workout-duration')?.value || '60'),
+        calories: parseInt(document.getElementById('workout-calories')?.value || '0') || null,
+        notes: document.getElementById('workout-notes')?.value || '',
+      });
+      overlay.remove();
+      loadSports();
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+// ── Health ──
+async function loadHealth() {
+  const el = document.getElementById('health-content');
+  if (!el) return;
+  try {
+    const today = await invoke('get_health_today').catch(() => ({}));
+    const habits = await invoke('get_habits_today').catch(() => []);
+    renderHealth(el, today, habits);
+  } catch (e) {
+    showStub('health-content', '&#10010;', 'Здоровье — скоро');
+  }
+}
+
+function renderHealth(el, today, habits) {
+  const sleep = today.sleep || null;
+  const water = today.water || null;
+  const mood = today.mood || null;
+  const weight = today.weight || null;
+
+  function metricClass(type, val) {
+    if (val === null) return '';
+    if (type === 'sleep') return val >= 7 ? 'good' : val >= 5 ? 'warning' : 'bad';
+    if (type === 'water') return val >= 8 ? 'good' : val >= 4 ? 'warning' : 'bad';
+    if (type === 'mood') return val >= 4 ? 'good' : val >= 3 ? 'warning' : 'bad';
+    return '';
+  }
+
+  el.innerHTML = `
+    <div class="module-header"><h2>Здоровье</h2><button class="btn-primary" id="health-log-btn">+ Записать</button></div>
+    <div class="health-metrics">
+      <div class="health-metric ${metricClass('sleep', sleep)}" data-type="sleep">
+        <div class="health-metric-icon">&#x1F634;</div>
+        <div class="health-metric-value">${sleep !== null ? sleep + 'ч' : '—'}</div>
+        <div class="health-metric-label">Сон</div>
+      </div>
+      <div class="health-metric ${metricClass('water', water)}" data-type="water">
+        <div class="health-metric-icon">&#x1F4A7;</div>
+        <div class="health-metric-value">${water !== null ? water : '—'}</div>
+        <div class="health-metric-label">Вода (стаканов)</div>
+      </div>
+      <div class="health-metric ${metricClass('mood', mood)}" data-type="mood">
+        <div class="health-metric-icon">${mood >= 4 ? '&#x1F60A;' : mood >= 3 ? '&#x1F610;' : mood ? '&#x1F641;' : '&#x1F636;'}</div>
+        <div class="health-metric-value">${mood !== null ? mood + '/5' : '—'}</div>
+        <div class="health-metric-label">Настроение</div>
+      </div>
+      <div class="health-metric" data-type="weight">
+        <div class="health-metric-icon">&#x2696;</div>
+        <div class="health-metric-value">${weight !== null ? weight + 'кг' : '—'}</div>
+        <div class="health-metric-label">Вес</div>
+      </div>
+    </div>
+    <div class="habits-section">
+      <div class="module-card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        Привычки
+        <button class="btn-secondary" id="add-habit-btn" style="padding:4px 10px;font-size:11px;">+ Добавить</button>
+      </div>
+      <div id="habits-list"></div>
+    </div>`;
+
+  const habitsList = document.getElementById('habits-list');
+  for (const h of habits) {
+    const item = document.createElement('div');
+    item.className = 'habit-item';
+    item.innerHTML = `
+      <div class="habit-check${h.completed ? ' checked' : ''}" data-id="${h.id}">${h.completed ? '&#10003;' : ''}</div>
+      <span class="habit-name">${escapeHtml(h.name)}</span>
+      ${h.streak > 0 ? `<span class="habit-streak">${h.streak} дн.</span>` : ''}`;
+    item.querySelector('.habit-check').addEventListener('click', async () => {
+      await invoke('check_habit', { habitId: h.id, date: null }).catch(() => {});
+      loadHealth();
+    });
+    habitsList.appendChild(item);
+  }
+
+  // Click on metric to log
+  el.querySelectorAll('.health-metric').forEach(m => {
+    m.addEventListener('click', () => {
+      const type = m.dataset.type;
+      const labels = { sleep: 'Сон (часы)', water: 'Вода (стаканы)', mood: 'Настроение (1-5)', weight: 'Вес (кг)' };
+      const val = prompt(labels[type] + ':');
+      if (val) {
+        invoke('log_health', { healthType: type, value: parseFloat(val), notes: null }).then(() => loadHealth()).catch(e => alert(e));
+      }
+    });
+  });
+
+  document.getElementById('health-log-btn')?.addEventListener('click', () => {
+    const type = prompt('Тип (sleep/water/mood/weight):');
+    if (!type) return;
+    const val = prompt('Значение:');
+    if (val) invoke('log_health', { healthType: type, value: parseFloat(val), notes: null }).then(() => loadHealth()).catch(e => alert(e));
+  });
+
+  document.getElementById('add-habit-btn')?.addEventListener('click', () => {
+    const name = prompt('Название привычки:');
+    if (name) invoke('create_habit', { name, icon: '', frequency: 'daily' }).then(() => loadHealth()).catch(e => alert(e));
+  });
 }
 
 // ── Header version + update ──
