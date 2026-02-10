@@ -1934,11 +1934,23 @@ async function loadSettings(subTab) {
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
-    const [info, proactive, trainingStats] = await Promise.all([
+    const [info, proactive, trainingStats, ttsVoices] = await Promise.all([
       invoke('get_model_info'),
       invoke('get_proactive_settings'),
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_tts_voices').catch(() => []),
     ]);
+    // Group voices by language for display
+    const voicesByLang = {};
+    for (const v of ttsVoices) {
+      const lang = v.lang || 'other';
+      if (!voicesByLang[lang]) voicesByLang[lang] = [];
+      voicesByLang[lang].push(v);
+    }
+    // Prioritize: ru, kk, en, then rest
+    const langOrder = ['ru-RU', 'kk-KZ', 'en-US'];
+    const sortedLangs = [...langOrder.filter(l => voicesByLang[l]), ...Object.keys(voicesByLang).filter(l => !langOrder.includes(l)).sort()];
+
     settingsContent.innerHTML = `
       <div class="settings-section">
         <div class="settings-section-title">Модель</div>
@@ -1973,11 +1985,19 @@ async function loadSettings(subTab) {
         </div>
         <div class="settings-row">
           <span class="settings-label">Голос TTS</span>
-          <div class="pill-group" id="proactive-voice-name">
-            ${['Milena', 'Yuri', 'Samantha', 'Daniel'].map(v =>
-              `<button class="pill${proactive.voice_name === v ? ' active' : ''}" data-value="${v}">${v}</button>`
-            ).join('')}
-          </div>
+          <select class="form-select" id="proactive-voice-name" style="width:260px">
+            ${sortedLangs.map(lang => `
+              <optgroup label="${lang}">
+                ${(voicesByLang[lang] || []).map(v =>
+                  `<option value="${v.name}" ${proactive.voice_name === v.name ? 'selected' : ''}>${v.name} (${v.gender})</option>`
+                ).join('')}
+              </optgroup>
+            `).join('')}
+          </select>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Тест голоса</span>
+          <button class="settings-btn" id="test-voice-btn">Прослушать</button>
         </div>
         <div class="settings-row">
           <span class="settings-label">Интервал</span>
@@ -2019,7 +2039,7 @@ async function loadSettings(subTab) {
     const getProactiveValues = () => ({
       enabled: document.getElementById('proactive-enabled').checked,
       voice_enabled: document.getElementById('proactive-voice').checked,
-      voice_name: document.querySelector('#proactive-voice-name .pill.active')?.dataset.value || 'Milena',
+      voice_name: document.getElementById('proactive-voice-name')?.value || 'Milena',
       interval_minutes: parseInt(document.querySelector('#proactive-interval .pill.active')?.dataset.value || '10'),
       quiet_hours_start: 23,
       quiet_hours_end: 8,
@@ -2028,6 +2048,19 @@ async function loadSettings(subTab) {
 
     document.getElementById('proactive-enabled')?.addEventListener('change', saveProactive);
     document.getElementById('proactive-voice')?.addEventListener('change', saveProactive);
+    document.getElementById('proactive-voice-name')?.addEventListener('change', saveProactive);
+
+    // Test voice button
+    document.getElementById('test-voice-btn')?.addEventListener('click', async () => {
+      const voice = document.getElementById('proactive-voice-name')?.value || 'Milena';
+      const btn = document.getElementById('test-voice-btn');
+      btn.textContent = 'Говорю...';
+      btn.disabled = true;
+      try {
+        await invoke('speak_text', { text: 'Привет! Я Ханни, твой персональный ассистент.', voice });
+      } catch (e) { console.error(e); }
+      setTimeout(() => { btn.textContent = 'Прослушать'; btn.disabled = false; }, 3000);
+    });
 
     // Pill group click handlers
     document.querySelectorAll('.pill-group').forEach(group => {

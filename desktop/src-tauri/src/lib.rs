@@ -4726,26 +4726,96 @@ async fn proactive_llm_call(
 
 fn speak_tts(text: &str, voice: &str) {
     let clean = text.replace('"', "'");
-    let _ = std::process::Command::new("say")
-        .args(["-v", voice, "-r", "210", &clean])
-        .spawn();
+    // Check if voice is an edge-tts voice (contains "Neural")
+    if voice.contains("Neural") {
+        let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
+        let tmp2 = tmp.clone();
+        let voice_owned = voice.to_string();
+        let clean_owned = clean.to_string();
+        std::thread::spawn(move || {
+            let status = std::process::Command::new("edge-tts")
+                .args(["--voice", &voice_owned, "--text", &clean_owned, "--write-media", &tmp2])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Ok(s) = status {
+                if s.success() {
+                    let _ = std::process::Command::new("afplay").arg(&tmp2).status();
+                    let _ = std::fs::remove_file(&tmp2);
+                }
+            }
+        });
+    } else {
+        let _ = std::process::Command::new("say")
+            .args(["-v", voice, "-r", "210", &clean])
+            .spawn();
+    }
 }
 
 #[tauri::command]
 async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "Milena".into());
     let clean = text.replace('"', "'");
-    std::process::Command::new("say")
-        .args(["-v", &v, "-r", "210", &clean])
-        .spawn()
-        .map_err(|e| format!("TTS error: {}", e))?;
+    if v.contains("Neural") {
+        let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
+        let tmp2 = tmp.clone();
+        tokio::task::spawn_blocking(move || {
+            let status = std::process::Command::new("edge-tts")
+                .args(["--voice", &v, "--text", &clean, "--write-media", &tmp2])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Ok(s) = status {
+                if s.success() {
+                    let _ = std::process::Command::new("afplay").arg(&tmp2).status();
+                    let _ = std::fs::remove_file(&tmp2);
+                }
+            }
+        });
+    } else {
+        std::process::Command::new("say")
+            .args(["-v", &v, "-r", "210", &clean])
+            .spawn()
+            .map_err(|e| format!("TTS error: {}", e))?;
+    }
     Ok(())
 }
 
 #[tauri::command]
 async fn stop_speaking() -> Result<(), String> {
     let _ = std::process::Command::new("killall").arg("say").output();
+    let _ = std::process::Command::new("killall").arg("afplay").output();
     Ok(())
+}
+
+#[tauri::command]
+async fn get_tts_voices() -> Result<serde_json::Value, String> {
+    // Get edge-tts voices
+    let output = std::process::Command::new("edge-tts")
+        .arg("--list-voices")
+        .output()
+        .map_err(|e| format!("edge-tts error: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut voices: Vec<serde_json::Value> = Vec::new();
+    // Add macOS voices first
+    voices.push(serde_json::json!({"name": "Milena", "gender": "Female", "lang": "ru-RU", "engine": "macos"}));
+    voices.push(serde_json::json!({"name": "Yuri", "gender": "Male", "lang": "ru-RU", "engine": "macos"}));
+    // Parse edge-tts output
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 2 && parts[0].contains("Neural") {
+            let name = parts[0];
+            let gender = if parts.len() > 1 { parts[1] } else { "" };
+            let lang = name.split('-').take(2).collect::<Vec<_>>().join("-");
+            voices.push(serde_json::json!({
+                "name": name,
+                "gender": gender,
+                "lang": lang,
+                "engine": "edge-tts"
+            }));
+        }
+    }
+    Ok(serde_json::json!(voices))
 }
 
 // ── Proactive messaging commands ──
@@ -4895,6 +4965,7 @@ pub fn run() {
             // Phase 2: TTS
             speak_text,
             stop_speaking,
+            get_tts_voices,
             // Phase 1: Voice
             download_whisper_model,
             start_recording,
