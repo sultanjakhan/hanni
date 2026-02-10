@@ -15,31 +15,63 @@ use std::io::Write;
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
 
-const SYSTEM_PROMPT: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses — don't repeat patterns. Use the user's language.
+const SYSTEM_PROMPT: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language.
 
-You can execute actions using ```action JSON blocks:
-Life tracking: add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), add_note(title,content), get_stats.
-macOS: get_activity (app usage today), get_calendar (upcoming events), get_music (now playing), get_browser (current tab).
-Memory: remember(category,key,value), recall(category), forget(category,key), search_memory(query,limit?). Categories: user, preferences, world, tasks, people, habits.
-Focus: start_focus(duration,apps?,sites?), stop_focus. Block distracting apps and sites for focused work.
-System: run_shell(command), open_url(url), send_notification(title,body), set_volume(level), get_clipboard, set_clipboard(text).
-Media: add_media_item(media_type,title,status?,rating?,progress?,total_episodes?). Types: music,anime,manga,movie,series,cartoon,game,book,podcast. Status: planned,in_progress,completed,on_hold,dropped.
-Food: log_food(meal_type,name,calories?,protein?,carbs?,fat?). Meal types: breakfast,lunch,dinner,snack.
-Products: add_product(name,category?,expiry_date?,location?). Location: fridge,freezer,pantry. get_expiring_products(days?) — check what's about to expire.
-Money: add_transaction(transaction_type,amount,category,description?,currency?). Types: expense,income.
-Mindset: log_mood(mood,note?,trigger?). Mood: 1-5. save_journal_entry(mood,energy,stress,gratitude?,reflection?,wins?,struggles?).
-Goals: create_goal(tab_name,title,target_value,unit?,deadline?), update_goal(id,current_value?).
-Voice: (automatic — user speaks, text appears).
+You execute actions using ```action blocks. EXAMPLES:
 
-IMPORTANT:
-- You can chain actions. After each action, you receive results as [Action result: ...].
-- Call one action at a time. After getting the result, call another or give your final answer.
-- First gather data via actions, then answer the user WITHOUT action blocks.
-- Do NOT repeat raw results. Analyze and summarize naturally.
-- If a file is attached, analyze it.
-- Proactively remember important facts the user shares (name, preferences, habits, language, people they mention). You always have your memories in context — no need to recall before answering.
-- Use search_memory(query) to find specific memories when the user asks about something that might be stored.
-- Be warm but not boring. Add personality — a light joke, genuine curiosity, playful sarcasm (in a loving way). Never be robotic."#;
+User: "Запомни, я учусь в КБТУ"
+You: "Запомнила!"
+```action
+{"action": "remember", "category": "user", "key": "university", "value": "Учится в КБТУ"}
+```
+
+User: "Запиши заметку: купить молоко"
+You: "Записала!"
+```action
+{"action": "add_note", "title": "Купить молоко", "content": "Купить молоко"}
+```
+
+User: "Заблокируй youtube на час"
+You: "Заблокировала YouTube на час!"
+```action
+{"action": "start_focus", "duration": 60, "sites": ["youtube.com"]}
+```
+
+User: "Потратил 5000 на еду"
+You: "Записала расход!"
+```action
+{"action": "add_transaction", "transaction_type": "expense", "amount": 5000, "category": "food", "description": "Еда"}
+```
+
+User: "Настроение 4, день был хороший"
+You: "Записала!"
+```action
+{"action": "log_mood", "mood": 4, "note": "День был хороший"}
+```
+
+ALL ACTIONS:
+- remember(category,key,value) — ALWAYS use when user shares personal info. Categories: user, preferences, world, tasks, people, habits
+- recall(category), forget(category,key), search_memory(query,limit?)
+- add_note(title,content) — notes, lists, reminders
+- add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), get_stats
+- start_focus(duration,apps?,sites?), stop_focus — block sites/apps
+- run_shell(command), open_url(url), send_notification(title,body), set_volume(level), get_clipboard, set_clipboard(text)
+- get_activity, get_calendar, get_music, get_browser
+- add_media_item(media_type,title,status?,rating?,progress?,total_episodes?) — types: music,anime,manga,movie,series,cartoon,game,book,podcast
+- log_food(meal_type,name,calories?,protein?,carbs?,fat?) — meals: breakfast,lunch,dinner,snack
+- add_product(name,category?,expiry_date?,location?), get_expiring_products(days?)
+- add_transaction(transaction_type,amount,category,description?,currency?) — types: expense,income
+- log_mood(mood,note?,trigger?) — mood: 1-5
+- save_journal_entry(mood,energy,stress,gratitude?,reflection?,wins?,struggles?)
+- create_goal(tab_name,title,target_value,unit?,deadline?), update_goal(id,current_value?)
+
+CRITICAL RULES:
+- When the user asks to remember, note, track, block, add, or DO anything — ALWAYS output a ```action block. NEVER just say "ok" without an action!
+- Call one action per message. After [Action result: ...], call another or give final answer.
+- Do NOT repeat raw action results. Summarize naturally.
+- Proactively remember important user facts (name, preferences, habits, people, language).
+- Your memories are already in context — use search_memory only for specific lookups.
+- Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly)."#;
 
 fn data_file_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join("Documents/life-tracker/data.json")
@@ -1620,7 +1652,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
-            build_memory_context_from_db(&conn, last_user_msg, 50)
+            build_memory_context_from_db(&conn, last_user_msg, 80)
         };
         if !ctx.is_empty() {
             chat_messages.push(ChatMessage {
@@ -2339,11 +2371,18 @@ async fn process_conversation_end(
         .join("\n");
 
     let prompt = format!(
-        "Analyze this conversation and extract key facts about the user.\n\
-        Return a JSON object with exactly this format (no other text):\n\
-        {{\"summary\": \"1-2 sentence summary\", \"facts\": [{{\"category\": \"...\", \"key\": \"...\", \"value\": \"...\"}}]}}\n\
-        Categories: user, preferences, world, tasks, people, habits.\n\
-        Only extract genuinely new/important facts. If none, return empty facts array.\n\n\
+        "Extract ALL facts about the user from this conversation. Be thorough — extract everything the user revealed.\n\n\
+        Return ONLY a JSON object (no other text):\n\
+        {{\"summary\": \"1-2 sentence summary\", \"facts\": [{{\"category\": \"...\", \"key\": \"...\", \"value\": \"...\"}}]}}\n\n\
+        Categories and what to extract:\n\
+        - user: name, age, city, university, job, language, nationality, anything personal\n\
+        - preferences: likes, dislikes, favorite things, habits, routines\n\
+        - world: external facts, events, places, things they mentioned\n\
+        - tasks: things they need to do, plans, deadlines\n\
+        - people: friends, family, colleagues — names and relationships\n\
+        - habits: daily routines, sports, sleep, diet patterns\n\n\
+        Example output:\n\
+        {{\"summary\": \"User talked about university\", \"facts\": [{{\"category\": \"user\", \"key\": \"university\", \"value\": \"Studies at KBTU\"}}]}}\n\n\
         Conversation:\n{}\n/no_think", conv_text
     );
 
@@ -2353,7 +2392,7 @@ async fn process_conversation_end(
             ChatMessage { role: "system".into(), content: "You extract structured data from conversations. Return only valid JSON.".into() },
             ChatMessage { role: "user".into(), content: prompt },
         ],
-        max_tokens: 512,
+        max_tokens: 800,
         stream: false,
         temperature: 0.3,
     };
