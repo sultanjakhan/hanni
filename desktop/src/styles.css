@@ -32,8 +32,15 @@ body {
   height: 100%;
   align-items: stretch;
   overflow-x: auto;
+  min-width: 0;
+}
+
+#tab-bar > .tab-bar-left {
+  display: flex;
+  align-items: center;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 #tab-list::-webkit-scrollbar { height: 0; }
@@ -68,6 +75,7 @@ body {
   border-bottom: 2px solid #fff;
 }
 
+.tab-item-icon { font-size: 13px; flex-shrink: 0; }
 .tab-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 
 .tab-item-close {
@@ -104,7 +112,8 @@ body {
   align-items: center;
   justify-content: center;
   -webkit-app-region: no-drag;
-  margin: 0 4px;
+  margin: 0 2px;
+  flex-shrink: 0;
   transition: all 0.1s;
 }
 
@@ -113,10 +122,18 @@ body {
 #tab-bar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding-right: 12px;
   -webkit-app-region: no-drag;
 }
+
+#tab-settings-btn {
+  width: 28px; height: 28px; border-radius: 6px; border: none;
+  background: transparent; color: #555; font-size: 15px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.1s;
+}
+#tab-settings-btn:hover { background: #1a1a1a; color: #fff; }
 
 /* ── Tab Dropdown ── */
 
@@ -242,6 +259,25 @@ body {
   border-radius: 2px;
 }
 
+/* ── Inline Goals (content area) ── */
+.goals-inline {
+  background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
+}
+.goals-inline-header {
+  display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+}
+.goals-inline-title { font-size: 13px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+.goal-inline-item { margin-bottom: 6px; }
+.goal-inline-info { display: flex; justify-content: space-between; font-size: 12px; color: #ccc; margin-bottom: 2px; }
+.goal-inline-pct { color: #666; }
+.btn-small {
+  padding: 3px 10px; font-size: 11px; border-radius: 4px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  color: #888; cursor: pointer; transition: all 0.1s;
+}
+.btn-small:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
 /* ── Content area ── */
 
 #content-area {
@@ -291,6 +327,18 @@ body {
   flex-direction: column;
   overflow: hidden;
 }
+
+#conv-header {
+  padding: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+#new-chat-btn {
+  width: 100%; padding: 7px 12px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04);
+  color: #888; font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: all 0.1s; text-align: left;
+}
+#new-chat-btn:hover { background: rgba(255,255,255,0.08); color: #ccc; }
 
 #conv-search-box {
   padding: 8px;
@@ -366,6 +414,16 @@ body {
 
 .conv-item:hover .conv-delete { display: flex; }
 .conv-item .conv-delete:hover { color: #999; background: #1a1a1a; }
+
+.conv-group-header {
+  padding: 8px 12px 4px; font-size: 10px; font-weight: 600; color: #555;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.conv-auto-badge {
+  display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  background: rgba(255,255,255,0.06); color: #555; margin-bottom: 2px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
 
 /* ── Chat ── */
 
@@ -1073,6 +1131,23 @@ body.dragover::after {
   color: #fff;
 }
 
+/* ── Data Table ── */
+.data-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.data-table thead th {
+  text-align: left; padding: 8px 12px; color: #666; font-weight: 500;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.data-table tbody tr {
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.1s;
+}
+.data-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.data-table td { padding: 10px 12px; color: #ccc; }
+.data-table-title { font-weight: 500; color: #e0e0e0; }
+
 .module-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1563,6 +1638,37 @@ body.dragover::after {
   font-size: 13px;
   color: #e0e0e0;
   flex: 1;
+}
+
+/* ── Week Calendar ── */
+.week-grid {
+  display: grid; grid-template-columns: 50px repeat(7, 1fr); gap: 0;
+  border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; overflow: hidden;
+}
+.week-header-day {
+  padding: 8px 4px; text-align: center;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+}
+.week-header-day.today { background: rgba(255,255,255,0.06); }
+.week-header-weekday { font-size: 11px; color: #666; text-transform: uppercase; }
+.week-header-date { font-size: 16px; font-weight: 600; color: #ccc; }
+.week-header-day.today .week-header-date { color: #fff; }
+.week-time-label {
+  padding: 4px 6px; font-size: 10px; color: #555; text-align: right;
+  border-top: 1px solid rgba(255,255,255,0.03);
+}
+.week-cell {
+  border-top: 1px solid rgba(255,255,255,0.03);
+  border-left: 1px solid rgba(255,255,255,0.03);
+  min-height: 36px; padding: 2px; cursor: pointer;
+  transition: background 0.1s;
+}
+.week-cell:hover { background: rgba(255,255,255,0.03); }
+.week-event {
+  font-size: 10px; padding: 2px 4px; border-radius: 3px;
+  background: rgba(255,255,255,0.08); color: #ccc; margin-bottom: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* ── Dashboard tab ── */
@@ -2251,3 +2357,11 @@ body.dragover::after {
   color: #888;
   margin-bottom: 4px;
 }
+
+.modal-compact { max-width: 420px; }
+.modal-compact .modal-title { font-size: 15px; margin-bottom: 12px; }
+.form-row {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 10px;
+}
+.form-row .form-input, .form-row .form-select { flex: 1; }
+.form-hint { font-size: 11px; color: #555; flex-shrink: 0; }

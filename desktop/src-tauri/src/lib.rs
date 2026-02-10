@@ -107,7 +107,7 @@ impl Default for ProactiveSettings {
         Self {
             enabled: false,
             voice_enabled: false,
-            voice_name: "Milena".into(),
+            voice_name: "ru-RU-SvetlanaNeural".into(),
             interval_minutes: 10,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
@@ -4800,7 +4800,7 @@ fn speak_tts(text: &str, voice: &str) {
 
 #[tauri::command]
 async fn speak_text(text: String, voice: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let v = voice.unwrap_or_else(|| "Milena".into());
+    let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
     let clean = text.replace('"', "'");
     // Check for remote TTS server
     let remote_url = {
