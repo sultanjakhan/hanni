@@ -42,6 +42,7 @@ const TAB_REGISTRY = {
   mindset:     { label: 'Mindset',     closable: true,  subTabs: ['Journal', 'Mood', 'Principles'] },
   food:        { label: 'Food',        closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
+  people:      { label: 'People',      closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
   memory:      { label: 'Memory',      closable: true,  subTabs: ['All Facts', 'Search'] },
   settings:    { label: 'Settings',    closable: true,  subTabs: ['General', 'Blocklist', 'Integrations', 'About'] },
 };
@@ -414,6 +415,7 @@ function loadSubTabContent(tabId, subTab) {
     case 'mindset': loadMindset(subTab); break;
     case 'food': loadFood(subTab); break;
     case 'money': loadMoney(subTab); break;
+    case 'people': loadPeople(subTab); break;
     case 'memory': loadMemoryTab(subTab); break;
     case 'settings': loadSettings(subTab); break;
   }
@@ -1584,6 +1586,108 @@ async function loadDebts(el) {
       if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
     });
   } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+// ── People Tab ──
+async function loadPeople(subTab) {
+  const el = document.getElementById('people-content');
+  if (!el) return;
+  const filter = subTab === 'Blocked' ? { blocked: true } : subTab === 'Favorites' ? {} : {};
+  try {
+    const items = await invoke('get_contacts', filter);
+    let contacts = Array.isArray(items) ? items : [];
+    if (subTab === 'Favorites') contacts = contacts.filter(c => c.favorite);
+    el.innerHTML = `
+      <div class="module-header">
+        <h2>${subTab === 'Blocked' ? 'Blocked' : subTab === 'Favorites' ? 'Favorites' : 'All Contacts'}</h2>
+        <button class="btn-primary" id="add-contact-btn">+ Add</button>
+      </div>
+      <div class="contacts-list">
+        ${contacts.length === 0 ? '<div class="tab-stub"><div class="tab-stub-icon">👤</div>No contacts yet</div>' :
+          contacts.map(c => `
+            <div class="contact-item${c.blocked ? ' blocked' : ''}${c.favorite ? ' favorite' : ''}">
+              <div class="contact-avatar">${c.name.charAt(0).toUpperCase()}</div>
+              <div class="contact-info">
+                <div class="contact-name">${c.name}${c.favorite ? ' ★' : ''}</div>
+                <div class="contact-detail">${c.relationship || c.category || ''}${c.phone ? ' · ' + c.phone : ''}${c.email ? ' · ' + c.email : ''}</div>
+                ${c.blocked ? '<span class="badge badge-red">Blocked</span>' : ''}
+                ${c.block_reason ? '<div class="contact-detail" style="color:#f87171">' + c.block_reason + '</div>' : ''}
+                ${c.notes ? '<div class="contact-detail">' + c.notes + '</div>' : ''}
+              </div>
+              <div class="contact-actions">
+                <button class="btn-secondary" onclick="toggleContactFav(${c.id})" title="${c.favorite ? 'Unfavorite' : 'Favorite'}">${c.favorite ? '★' : '☆'}</button>
+                <button class="btn-secondary" onclick="toggleContactBlock(${c.id})" title="${c.blocked ? 'Unblock' : 'Block'}">${c.blocked ? '🔓' : '🚫'}</button>
+                <button class="btn-danger" onclick="deleteContact(${c.id})" style="padding:8px 12px">✕</button>
+              </div>
+            </div>
+          `).join('')}
+      </div>`;
+    document.getElementById('add-contact-btn')?.addEventListener('click', showAddContactModal);
+  } catch (e) {
+    el.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">⚠️</div>${e}</div>`;
+  }
+}
+
+window.toggleContactFav = async (id) => {
+  await invoke('toggle_contact_favorite', { id });
+  loadPeople(activeSubTab.people || 'All');
+};
+window.toggleContactBlock = async (id) => {
+  await invoke('toggle_contact_blocked', { id });
+  loadPeople(activeSubTab.people || 'All');
+};
+window.deleteContact = async (id) => {
+  if (confirm('Delete this contact?')) {
+    await invoke('delete_contact', { id });
+    loadPeople(activeSubTab.people || 'All');
+  }
+};
+
+function showAddContactModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Add Contact</div>
+      <div class="form-group"><label class="form-label">Name *</label><input class="form-input" id="mc-name" placeholder="Name"></div>
+      <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="mc-phone" placeholder="Phone"></div>
+      <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="mc-email" placeholder="Email"></div>
+      <div class="form-group"><label class="form-label">Category</label>
+        <select class="form-select" id="mc-category" style="width:100%">
+          <option value="friend">Friend</option><option value="family">Family</option><option value="work">Work</option>
+          <option value="spammer">Spammer</option><option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Relationship</label><input class="form-input" id="mc-rel" placeholder="e.g. College friend"></div>
+      <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="mc-notes" placeholder="Notes"></textarea></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="mc-blocked"><label for="mc-blocked" style="color:#888;font-size:13px">Block this contact</label>
+      </div>
+      <div class="form-group"><label class="form-label">Block reason</label><input class="form-input" id="mc-reason" placeholder="Why blocked?"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="mc-cancel">Cancel</button>
+        <button class="btn-primary" id="mc-save">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#mc-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#mc-save').onclick = async () => {
+    const name = document.getElementById('mc-name').value.trim();
+    if (!name) return;
+    await invoke('add_contact', {
+      name,
+      phone: document.getElementById('mc-phone').value.trim() || null,
+      email: document.getElementById('mc-email').value.trim() || null,
+      category: document.getElementById('mc-category').value,
+      relationship: document.getElementById('mc-rel').value.trim() || null,
+      notes: document.getElementById('mc-notes').value.trim() || null,
+      blocked: document.getElementById('mc-blocked').checked,
+      blockReason: document.getElementById('mc-reason').value.trim() || null,
+    });
+    overlay.remove();
+    loadPeople(activeSubTab.people || 'All');
+  };
 }
 
 // ── Memory Tab ──
