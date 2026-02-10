@@ -139,10 +139,52 @@ impl ProactiveState {
 
 struct HanniDb(std::sync::Mutex<rusqlite::Connection>);
 
+/// ~/Library/Application Support/Hanni/
+fn hanni_data_dir() -> PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Library/Application Support"))
+        .join("Hanni")
+}
+
 fn hanni_db_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("Documents/Hanni/hanni.db")
+    hanni_data_dir().join("hanni.db")
+}
+
+/// Migrate data from old ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
+fn migrate_old_data_dir() {
+    let old_dir = dirs::home_dir().unwrap_or_default().join("Documents/Hanni");
+    let new_dir = hanni_data_dir();
+    if !old_dir.exists() { return; }
+    if new_dir.exists() && new_dir.join("hanni.db").exists() { return; } // already migrated
+    let _ = std::fs::create_dir_all(&new_dir);
+    // Move all files from old to new
+    if let Ok(entries) = std::fs::read_dir(&old_dir) {
+        for entry in entries.flatten() {
+            let dest = new_dir.join(entry.file_name());
+            if !dest.exists() {
+                if entry.path().is_dir() {
+                    let _ = copy_dir_recursive(&entry.path(), &dest);
+                } else {
+                    let _ = std::fs::copy(&entry.path(), &dest);
+                }
+            }
+        }
+    }
+    eprintln!("Migrated data from {:?} to {:?}", old_dir, new_dir);
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let dest = dst.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir_recursive(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(&entry.path(), &dest)?;
+        }
+    }
+    Ok(())
 }
 
 fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
@@ -603,9 +645,7 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
 }
 
 fn migrate_memory_json(conn: &rusqlite::Connection) {
-    let json_path = dirs::home_dir()
-        .unwrap_or_default()
-        .join("Documents/Hanni/memory.json");
+    let json_path = hanni_data_dir().join("memory.json");
     if !json_path.exists() {
         return;
     }
@@ -742,9 +782,7 @@ fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, lim
 }
 
 fn proactive_settings_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("Documents/Hanni/proactive_settings.json")
+    hanni_data_dir().join("proactive_settings.json")
 }
 
 fn load_proactive_settings() -> ProactiveSettings {
@@ -822,9 +860,7 @@ struct WhisperState {
 struct AudioRecording(std::sync::Mutex<WhisperState>);
 
 fn whisper_model_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("Documents/Hanni/models/ggml-medium.bin")
+    hanni_data_dir().join("models/ggml-medium.bin")
 }
 
 #[tauri::command]
@@ -1344,9 +1380,7 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
     let (train, valid) = training_examples.split_at(split_idx);
 
     // Write files
-    let output_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join("Documents/Hanni/training");
+    let output_dir = hanni_data_dir().join("training");
     std::fs::create_dir_all(&output_dir).map_err(|e| format!("Dir error: {}", e))?;
 
     let train_path = output_dir.join("train.jsonl");
@@ -1376,9 +1410,7 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
 // ── Phase 4: HTTP API ──
 
 fn api_token_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("Documents/Hanni/api_token.txt")
+    hanni_data_dir().join("api_token.txt")
 }
 
 fn get_or_create_api_token() -> String {
@@ -5017,6 +5049,9 @@ pub fn run() {
             toggle_contact_block_active,
         ])
         .setup(move |app| {
+            // Migrate data from ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
+            migrate_old_data_dir();
+
             // Auto-updater
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
