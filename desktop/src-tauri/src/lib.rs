@@ -529,6 +529,18 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS home_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            quantity REAL,
+            unit TEXT,
+            location TEXT DEFAULT 'other',
+            needed INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -4071,6 +4083,65 @@ fn get_app_setting(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<
     Ok(result)
 }
 
+// ── Home Items ──
+
+#[tauri::command]
+fn add_home_item(name: String, category: String, quantity: Option<f64>, unit: Option<String>, location: String, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("INSERT INTO home_items (name,category,quantity,unit,location,notes) VALUES (?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![name, category, quantity, unit, location, notes]).map_err(|e| e.to_string())?;
+    Ok("added".into())
+}
+
+#[tauri::command]
+fn get_home_items(category: Option<String>, needed_only: bool, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut sql = "SELECT id,name,category,quantity,unit,location,needed,notes,created_at FROM home_items".to_string();
+    let mut conditions = Vec::new();
+    if let Some(ref c) = category { conditions.push(format!("category='{}'", c)); }
+    if needed_only { conditions.push("needed=1".to_string()); }
+    if !conditions.is_empty() { sql += &format!(" WHERE {}", conditions.join(" AND ")); }
+    sql += " ORDER BY needed DESC, name ASC";
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_,i64>(0)?, "name": row.get::<_,String>(1)?,
+            "category": row.get::<_,String>(2)?, "quantity": row.get::<_,Option<f64>>(3)?,
+            "unit": row.get::<_,Option<String>>(4)?, "location": row.get::<_,String>(5)?,
+            "needed": row.get::<_,i64>(6)? != 0, "notes": row.get::<_,Option<String>>(7)?,
+            "created_at": row.get::<_,String>(8)?,
+        }))
+    }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn update_home_item(id: i64, name: Option<String>, quantity: Option<f64>, location: Option<String>, notes: Option<String>, needed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut updates = vec!["updated_at=datetime('now')".to_string()];
+    if let Some(v) = &name { updates.push(format!("name='{}'", v)); }
+    if let Some(v) = quantity { updates.push(format!("quantity={}", v)); }
+    if let Some(v) = &location { updates.push(format!("location='{}'", v)); }
+    if let Some(v) = &notes { updates.push(format!("notes='{}'", v)); }
+    if let Some(v) = needed { updates.push(format!("needed={}", if v { 1 } else { 0 })); }
+    conn.execute(&format!("UPDATE home_items SET {} WHERE id=?1", updates.join(",")), rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("updated".into())
+}
+
+#[tauri::command]
+fn delete_home_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM home_items WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("deleted".into())
+}
+
+#[tauri::command]
+fn toggle_home_item_needed(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE home_items SET needed = CASE WHEN needed=1 THEN 0 ELSE 1 END, updated_at=datetime('now') WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("toggled".into())
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -4704,6 +4775,12 @@ pub fn run() {
             delete_goal,
             set_app_setting,
             get_app_setting,
+            // v0.8.0: Home Items
+            add_home_item,
+            get_home_items,
+            update_home_item,
+            delete_home_item,
+            toggle_home_item_needed,
         ])
         .setup(move |app| {
             // Auto-updater

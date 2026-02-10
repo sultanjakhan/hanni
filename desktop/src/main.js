@@ -35,6 +35,7 @@ const TAB_REGISTRY = {
   notes:       { label: 'Notes',       closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
   work:        { label: 'Work',        closable: true,  subTabs: ['Projects'] },
   development: { label: 'Development', closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
+  home:        { label: 'Home',        closable: true,  subTabs: ['Supplies', 'Shopping List'] },
   hobbies:     { label: 'Hobbies',     closable: true,  subTabs: ['Overview','Music','Anime','Manga','Movies','Series','Cartoons','Games','Books','Podcasts'] },
   sports:      { label: 'Sports',      closable: true,  subTabs: ['Workouts', 'Stats'] },
   health:      { label: 'Health',      closable: true,  subTabs: ['Today', 'Habits'] },
@@ -315,8 +316,10 @@ function renderSubSidebar() {
 
   sidebar.classList.remove('hidden');
   items.innerHTML = '';
-  const currentSub = activeSubTab[activeTab] || reg.subTabs[0];
-  for (const sub of reg.subTabs) {
+  // Don't show sub-tabs when settings is the active tab (settings uses its own sub-tabs)
+  const subTabs = (activeTab === 'settings') ? reg.subTabs : reg.subTabs;
+  const currentSub = activeSubTab[activeTab] || subTabs[0];
+  for (const sub of subTabs) {
     const item = document.createElement('div');
     item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
     item.textContent = sub;
@@ -327,6 +330,12 @@ function renderSubSidebar() {
       loadSubTabContent(activeTab, sub);
     });
     items.appendChild(item);
+  }
+  // Settings shortcut at bottom
+  const settingsBtn = document.getElementById('settings-shortcut');
+  if (settingsBtn) {
+    settingsBtn.className = 'sub-sidebar-item' + (activeTab === 'settings' ? ' active' : '');
+    settingsBtn.onclick = () => switchTab('settings');
   }
   loadGoalsWidget();
 }
@@ -398,6 +407,7 @@ function loadSubTabContent(tabId, subTab) {
     case 'notes': loadNotes(subTab); break;
     case 'work': loadWork(); break;
     case 'development': loadDevelopment(); break;
+    case 'home': loadHome(subTab); break;
     case 'hobbies': loadHobbies(subTab); break;
     case 'sports': loadSports(); break;
     case 'health': loadHealth(); break;
@@ -949,6 +959,107 @@ input.addEventListener('keydown', e => {
     send();
   }
 });
+
+// ── Home ──
+async function loadHome(subTab) {
+  const el = document.getElementById('home-content');
+  if (!el) return;
+  if (subTab === 'Shopping List') loadShoppingList(el);
+  else loadSupplies(el);
+}
+
+async function loadSupplies(el) {
+  try {
+    const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
+    const categories = { cleaning: 'Cleaning', hygiene: 'Hygiene', household: 'Household', electronics: 'Electronics', tools: 'Tools', other: 'Other' };
+    el.innerHTML = `
+      <div class="module-header"><h2>Supplies</h2><button class="btn-primary" id="home-add-btn">+ Add Item</button></div>
+      <div id="home-items-list">
+        ${items.map(i => `<div class="focus-log-item" style="${i.needed ? 'border-left:2px solid #f59e0b;' : ''}">
+          <span class="focus-log-title">${escapeHtml(i.name)}</span>
+          <span class="badge badge-gray">${categories[i.category] || i.category}</span>
+          ${i.quantity != null ? `<span style="color:#888;font-size:12px;">${i.quantity} ${i.unit||''}</span>` : ''}
+          <span style="color:#555;font-size:11px;">${i.location||''}</span>
+          <button class="btn-secondary" style="padding:2px 8px;font-size:10px;margin-left:4px;" data-need="${i.id}">${i.needed ? 'In stock' : 'Need'}</button>
+          <button class="memory-item-btn" data-hdel="${i.id}">&times;</button>
+        </div>`).join('')}
+      </div>`;
+    el.querySelectorAll('[data-need]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('toggle_home_item_needed', { id: parseInt(btn.dataset.need) }).catch(()=>{});
+        loadSupplies(el);
+      });
+    });
+    el.querySelectorAll('[data-hdel]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('delete_home_item', { id: parseInt(btn.dataset.hdel) }).catch(()=>{});
+        loadSupplies(el);
+      });
+    });
+    document.getElementById('home-add-btn')?.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal">
+        <div class="modal-title">Add Supply</div>
+        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="hi-name"></div>
+        <div class="form-group"><label class="form-label">Category</label>
+          <select class="form-select" id="hi-cat" style="width:100%;">
+            ${Object.entries(categories).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" id="hi-qty" type="number"></div>
+        <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="hi-unit" placeholder="pcs, kg, L..."></div>
+        <div class="form-group"><label class="form-label">Location</label>
+          <select class="form-select" id="hi-loc" style="width:100%;">
+            <option value="kitchen">Kitchen</option><option value="bathroom">Bathroom</option>
+            <option value="bedroom">Bedroom</option><option value="living_room">Living Room</option>
+            <option value="storage">Storage</option><option value="other">Other</option>
+          </select></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn-primary" id="hi-save">Save</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById('hi-save')?.addEventListener('click', async () => {
+        const name = document.getElementById('hi-name')?.value?.trim();
+        if (!name) return;
+        try {
+          await invoke('add_home_item', {
+            name, category: document.getElementById('hi-cat')?.value || 'other',
+            quantity: parseFloat(document.getElementById('hi-qty')?.value) || null,
+            unit: document.getElementById('hi-unit')?.value || null,
+            location: document.getElementById('hi-loc')?.value || 'other',
+            notes: null,
+          });
+          overlay.remove();
+          loadSupplies(el);
+        } catch (err) { alert('Error: ' + err); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadShoppingList(el) {
+  try {
+    const items = await invoke('get_home_items', { category: null, neededOnly: true }).catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Shopping List</h2></div>
+      ${items.length > 0 ? `<div id="shopping-list">
+        ${items.map(i => `<div class="habit-item">
+          <div class="habit-check" data-bought="${i.id}"></div>
+          <span class="habit-name">${escapeHtml(i.name)}</span>
+          ${i.quantity != null ? `<span style="color:#888;font-size:12px;margin-left:auto;">${i.quantity} ${i.unit||''}</span>` : ''}
+        </div>`).join('')}
+      </div>` : '<div style="color:#555;font-size:13px;padding:20px;text-align:center;">All stocked up!</div>'}`;
+    el.querySelectorAll('[data-bought]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('toggle_home_item_needed', { id: parseInt(btn.dataset.bought) }).catch(()=>{});
+        loadShoppingList(el);
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
 
 // ── Mindset ──
 async function loadMindset(subTab) {
