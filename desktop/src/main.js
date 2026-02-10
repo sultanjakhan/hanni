@@ -31,7 +31,7 @@ let mediaStatusFilter = 'all';
 const TAB_REGISTRY = {
   chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': '\u{1F4AC}', 'Настройки': '\u{2699}' } },
   dashboard:   { label: 'Dashboard',   icon: '\u{1F3E0}', closable: true,  subTabs: ['Overview'] },
-  calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Month', 'Week'] },
+  calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: '\u{1F3AF}', closable: true,  subTabs: ['Current', 'History'] },
   notes:       { label: 'Notes',       icon: '\u{1F4DD}', closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
   work:        { label: 'Work',        icon: '\u{1F4BC}', closable: true,  subTabs: ['Projects'] },
@@ -785,9 +785,10 @@ document.body.addEventListener('drop', async (e) => {
 async function executeAction(actionJson) {
   try {
     const action = JSON.parse(actionJson);
+    const actionType = action.action || action.type; // model uses "action", fallback to "type"
     let result;
 
-    switch (action.type) {
+    switch (actionType) {
       case 'add_purchase':
         result = await invoke('tracker_add_purchase', {
           amount: action.amount,
@@ -889,6 +890,7 @@ async function executeAction(actionJson) {
         result = await invoke('set_clipboard', { text: action.text || '' });
         break;
       // Media
+      case 'add_media_item':
       case 'add_media':
         result = await invoke('add_media_item', {
           mediaType: action.media_type || 'movie', title: action.title || '',
@@ -919,7 +921,7 @@ async function executeAction(actionJson) {
       // Money
       case 'add_transaction':
         result = await invoke('add_transaction', {
-          date: action.date || null, txType: action.tx_type || 'expense',
+          date: action.date || null, txType: action.transaction_type || action.tx_type || 'expense',
           amount: action.amount || 0, currency: action.currency || 'KZT',
           category: action.category || 'other', description: action.description || '',
           recurring: action.recurring || false, recurringPeriod: action.recurring_period || null,
@@ -939,6 +941,62 @@ async function executeAction(actionJson) {
           wins: action.wins || null, struggles: action.struggles || null,
         });
         break;
+      // Calendar events
+      case 'create_event':
+        result = await invoke('create_event', {
+          title: action.title || '', description: action.description || '',
+          date: action.date || new Date().toISOString().slice(0, 10),
+          time: action.time || '', durationMinutes: action.duration || action.duration_minutes || 60,
+          category: action.category || 'general', color: action.color || '#a1a1a6',
+        });
+        break;
+      case 'delete_event':
+        result = await invoke('delete_event', { id: action.id });
+        break;
+      case 'sync_calendar':
+        try {
+          const m = action.month || (new Date().getMonth() + 1);
+          const y = action.year || new Date().getFullYear();
+          result = await invoke('sync_apple_calendar', { month: m, year: y });
+        } catch (e) { result = 'Sync error: ' + e; }
+        break;
+      // Activities (time tracking)
+      case 'start_activity':
+        result = await invoke('start_activity', {
+          name: action.name || action.activity || '',
+          category: action.category || 'other',
+        });
+        break;
+      case 'stop_activity':
+        result = await invoke('stop_activity');
+        break;
+      case 'get_current_activity':
+        result = await invoke('get_current_activity');
+        break;
+      // Projects & Tasks
+      case 'create_task':
+        result = await invoke('create_task', {
+          projectId: action.project_id || 1, title: action.title || '',
+          description: action.description || '', priority: action.priority || 'medium',
+          dueDate: action.due_date || null,
+        });
+        break;
+      // Home items
+      case 'add_home_item':
+        result = await invoke('add_home_item', {
+          name: action.name || '', category: action.category || 'other',
+          quantity: action.quantity || null, unit: action.unit || null,
+          location: action.location || 'other', notes: action.notes || null,
+        });
+        break;
+      // Health
+      case 'log_health':
+        result = await invoke('log_health', {
+          sleep: action.sleep || null, water: action.water || null,
+          steps: action.steps || null, weight: action.weight || null,
+          notes: action.notes || null,
+        });
+        break;
       // Goals
       case 'create_goal':
         result = await invoke('create_goal', {
@@ -954,7 +1012,8 @@ async function executeAction(actionJson) {
         });
         break;
       default:
-        result = 'Unknown action: ' + action.type;
+        console.warn('Unknown action:', actionType, action);
+        result = 'Unknown action: ' + actionType;
     }
 
     return { success: true, result };
@@ -2675,18 +2734,36 @@ async function openNote(id) {
 }
 
 // ── Calendar ──
+let calendarSynced = false;
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
+  if (subTab === 'Интеграции') { renderCalendarIntegrations(el); return; }
+
+  // Auto-sync on first calendar open
+  if (!calendarSynced) {
+    calendarSynced = true;
+    const autoSync = await invoke('get_app_setting', { key: 'calendar_autosync' }).catch(() => 'false');
+    if (autoSync === 'true') {
+      const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
+      const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
+      if (appleEnabled !== 'false') invoke('sync_apple_calendar', { month: calendarMonth + 1, year: calendarYear }).catch(() => {});
+      if (googleUrl) invoke('sync_google_ics', { url: googleUrl, month: calendarMonth + 1, year: calendarYear }).catch(() => {});
+    }
+  }
+
   try {
     const events = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
-    if (subTab === 'Week') {
+    if (subTab === 'Неделя') {
       renderWeekCalendar(el, events || []);
+    } else if (subTab === 'День') {
+      renderDayCalendar(el, events || []);
     } else {
       renderCalendar(el, events || []);
     }
   } catch (e) {
-    if (subTab === 'Week') renderWeekCalendar(el, []);
+    if (subTab === 'Неделя') renderWeekCalendar(el, []);
+    else if (subTab === 'День') renderDayCalendar(el, []);
     else renderCalendar(el, []);
   }
 }
@@ -2868,9 +2945,9 @@ function renderWeekCalendar(el, events) {
       ${gridHtml}
     </div>`;
 
-  document.getElementById('week-prev')?.addEventListener('click', () => { calWeekOffset = (calWeekOffset || 0) - 1; loadCalendar('Week'); });
-  document.getElementById('week-next')?.addEventListener('click', () => { calWeekOffset = (calWeekOffset || 0) + 1; loadCalendar('Week'); });
-  document.getElementById('week-today')?.addEventListener('click', () => { calWeekOffset = 0; loadCalendar('Week'); });
+  document.getElementById('week-prev')?.addEventListener('click', () => { calWeekOffset = (calWeekOffset || 0) - 1; loadCalendar('Неделя'); });
+  document.getElementById('week-next')?.addEventListener('click', () => { calWeekOffset = (calWeekOffset || 0) + 1; loadCalendar('Неделя'); });
+  document.getElementById('week-today')?.addEventListener('click', () => { calWeekOffset = 0; loadCalendar('Неделя'); });
   document.getElementById('week-add-event')?.addEventListener('click', () => showAddEventModal());
   el.querySelectorAll('.week-cell').forEach(cell => {
     cell.addEventListener('click', () => {
@@ -2914,12 +2991,167 @@ function showAddEventModal() {
         time: document.getElementById('event-time')?.value || '',
         durationMinutes: 60,
         category: 'general',
-        color: '#e0e0e0',
+        color: '#a1a1a6',
       });
       overlay.remove();
       loadCalendar();
     } catch (err) { alert('Ошибка: ' + err); }
   });
+}
+
+// ── Day View ──
+let calDayDate = null;
+function renderDayCalendar(el, events) {
+  const today = new Date();
+  if (!calDayDate) calDayDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const dayEvents = events.filter(e => e.date === calDayDate).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  const d = new Date(calDayDate + 'T00:00:00');
+  const dayNames = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+  const monthNames = ['Января', 'Февраля', 'Марта', 'Апреля', 'Мая', 'Июня', 'Июля', 'Августа', 'Сентября', 'Октября', 'Ноября', 'Декабря'];
+
+  const hours = Array.from({length: 17}, (_, i) => i + 6); // 6:00 - 22:00
+  let timelineHtml = hours.map(h => {
+    const timeStr = `${String(h).padStart(2,'0')}:`;
+    const hourEvents = dayEvents.filter(e => e.time && e.time.startsWith(timeStr.slice(0,2)));
+    const evtHtml = hourEvents.map(e => {
+      const srcBadge = e.source && e.source !== 'manual' ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
+      return `<div class="day-event" style="border-left:3px solid ${e.color || '#a1a1a6'};">
+        <span class="day-event-title">${escapeHtml(e.title)}</span>${srcBadge}
+        <span class="day-event-dur">${e.duration_minutes || 60} мин</span>
+      </div>`;
+    }).join('');
+    return `<div class="day-hour-row">
+      <div class="day-hour-label">${String(h).padStart(2,'0')}:00</div>
+      <div class="day-hour-content" data-date="${calDayDate}" data-hour="${h}">${evtHtml}</div>
+    </div>`;
+  }).join('');
+
+  // All-day events (no time)
+  const allDay = dayEvents.filter(e => !e.time);
+  const allDayHtml = allDay.length ? `<div class="day-allday">
+    <div class="day-hour-label">Весь день</div>
+    <div class="day-hour-content">${allDay.map(e => `<div class="day-event" style="border-left:3px solid ${e.color || '#a1a1a6'};"><span class="day-event-title">${escapeHtml(e.title)}</span></div>`).join('')}</div>
+  </div>` : '';
+
+  el.innerHTML = `
+    <div class="calendar-nav">
+      <button class="calendar-nav-btn" id="day-prev">&lt;</button>
+      <div class="calendar-month-label">${d.getDate()} ${monthNames[d.getMonth()]} · ${dayNames[d.getDay()]}</div>
+      <button class="calendar-nav-btn" id="day-next">&gt;</button>
+      <button class="btn-secondary" id="day-today" style="margin-left:8px;">Сегодня</button>
+      <button class="btn-primary" id="day-add-event" style="margin-left:8px;">+ Событие</button>
+    </div>
+    ${allDayHtml}
+    <div class="day-timeline">${timelineHtml}</div>`;
+
+  document.getElementById('day-prev')?.addEventListener('click', () => {
+    const dd = new Date(calDayDate + 'T00:00:00'); dd.setDate(dd.getDate() - 1);
+    calDayDate = dd.toISOString().slice(0, 10);
+    calendarMonth = dd.getMonth(); calendarYear = dd.getFullYear();
+    loadCalendar('День');
+  });
+  document.getElementById('day-next')?.addEventListener('click', () => {
+    const dd = new Date(calDayDate + 'T00:00:00'); dd.setDate(dd.getDate() + 1);
+    calDayDate = dd.toISOString().slice(0, 10);
+    calendarMonth = dd.getMonth(); calendarYear = dd.getFullYear();
+    loadCalendar('День');
+  });
+  document.getElementById('day-today')?.addEventListener('click', () => {
+    calDayDate = null; calendarMonth = today.getMonth(); calendarYear = today.getFullYear();
+    loadCalendar('День');
+  });
+  document.getElementById('day-add-event')?.addEventListener('click', () => {
+    selectedCalendarDate = calDayDate;
+    showAddEventModal();
+  });
+  el.querySelectorAll('.day-hour-content').forEach(cell => {
+    cell.addEventListener('click', (e) => {
+      if (e.target.closest('.day-event')) return;
+      selectedCalendarDate = cell.dataset.date;
+      showAddEventModal();
+      setTimeout(() => {
+        const ti = document.getElementById('event-time');
+        if (ti) ti.value = `${String(cell.dataset.hour).padStart(2,'0')}:00`;
+      }, 50);
+    });
+  });
+}
+
+// ── Calendar Integrations sub-tab ──
+async function renderCalendarIntegrations(el) {
+  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  try {
+    const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
+    const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
+
+    el.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">Apple Calendar</div>
+        <div class="settings-row">
+          <span class="settings-label">Синхронизация с Calendar.app</span>
+          <label class="toggle"><input type="checkbox" id="calint-apple" ${appleEnabled !== 'false' ? 'checked' : ''}><span class="toggle-track"></span></label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label" style="color:#3f3f44;font-size:12px;">Включает все календари добавленные в macOS (iCloud, Google, Exchange и др.)</span>
+        </div>
+        <div class="settings-row">
+          <button class="btn-primary" id="calint-sync-apple">Синхронизировать сейчас</button>
+          <span class="settings-value" id="calint-apple-status">—</span>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Google Calendar (ICS)</div>
+        <div class="settings-row">
+          <span class="settings-label" style="color:#3f3f44;font-size:12px;">Приватный ICS URL: Google Calendar → Настройки → Настройки календаря → Секретный адрес в формате iCal</span>
+        </div>
+        <div style="display:flex;gap:8px;padding:8px 0;">
+          <input class="form-input" id="calint-google-url" placeholder="https://calendar.google.com/...basic.ics" value="${escapeHtml(googleUrl)}" style="flex:1">
+        </div>
+        <div class="settings-row">
+          <button class="btn-primary" id="calint-save-google">Сохранить и синхронизировать</button>
+          <span class="settings-value" id="calint-google-status">—</span>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Автосинхронизация</div>
+        <div class="settings-row">
+          <span class="settings-label">Синхронизировать при открытии календаря</span>
+          <label class="toggle"><input type="checkbox" id="calint-autosync" ${(await invoke('get_app_setting', { key: 'calendar_autosync' }).catch(() => 'false')) === 'true' ? 'checked' : ''}><span class="toggle-track"></span></label>
+        </div>
+      </div>`;
+
+    document.getElementById('calint-apple')?.addEventListener('change', async (e) => {
+      await invoke('set_app_setting', { key: 'apple_calendar_enabled', value: e.target.checked ? 'true' : 'false' });
+    });
+    document.getElementById('calint-autosync')?.addEventListener('change', async (e) => {
+      await invoke('set_app_setting', { key: 'calendar_autosync', value: e.target.checked ? 'true' : 'false' });
+    });
+    document.getElementById('calint-sync-apple')?.addEventListener('click', async () => {
+      const btn = document.getElementById('calint-sync-apple');
+      const status = document.getElementById('calint-apple-status');
+      if (btn) { btn.textContent = 'Синхронизация...'; btn.disabled = true; }
+      try {
+        const r = await invoke('sync_apple_calendar', { month: new Date().getMonth() + 1, year: new Date().getFullYear() });
+        if (status) status.textContent = `✓ ${r.synced} событий`;
+      } catch (e) { if (status) status.textContent = '✗ ' + e; }
+      setTimeout(() => { if (btn) { btn.textContent = 'Синхронизировать сейчас'; btn.disabled = false; } }, 2000);
+    });
+    document.getElementById('calint-save-google')?.addEventListener('click', async () => {
+      const url = document.getElementById('calint-google-url')?.value.trim() || '';
+      const btn = document.getElementById('calint-save-google');
+      const status = document.getElementById('calint-google-status');
+      await invoke('set_app_setting', { key: 'google_calendar_ics_url', value: url });
+      if (!url) { if (status) status.textContent = 'URL удалён'; return; }
+      if (btn) { btn.textContent = 'Синхронизация...'; btn.disabled = true; }
+      try {
+        const r = await invoke('sync_google_ics', { url, month: new Date().getMonth() + 1, year: new Date().getFullYear() });
+        if (status) status.textContent = `✓ ${r.synced} событий`;
+      } catch (e) { if (status) status.textContent = '✗ ' + e; }
+      setTimeout(() => { if (btn) { btn.textContent = 'Сохранить и синхронизировать'; btn.disabled = false; } }, 2000);
+    });
+  } catch (e) {
+    el.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`;
+  }
 }
 
 // ── Work ──
