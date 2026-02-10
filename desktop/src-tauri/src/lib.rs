@@ -573,6 +573,20 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             notes TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT,
+            email TEXT,
+            category TEXT NOT NULL DEFAULT 'other',
+            relationship TEXT,
+            notes TEXT,
+            blocked INTEGER NOT NULL DEFAULT 0,
+            block_reason TEXT,
+            favorite INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -4181,6 +4195,112 @@ fn toggle_home_item_needed(id: i64, db: tauri::State<'_, HanniDb>) -> Result<Str
     Ok("toggled".into())
 }
 
+// ── People / Contacts ──
+
+#[tauri::command]
+fn add_contact(
+    name: String,
+    phone: Option<String>,
+    email: Option<String>,
+    category: Option<String>,
+    relationship: Option<String>,
+    notes: Option<String>,
+    blocked: Option<bool>,
+    block_reason: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "INSERT INTO contacts (name, phone, email, category, relationship, notes, blocked, block_reason, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,datetime('now'),datetime('now'))",
+        rusqlite::params![name, phone, email, category.unwrap_or("other".into()), relationship, notes, blocked.unwrap_or(false) as i32, block_reason],
+    ).map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_contacts(category: Option<String>, blocked: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut sql = "SELECT id, name, phone, email, category, relationship, notes, blocked, block_reason, favorite, created_at, updated_at FROM contacts WHERE 1=1".to_string();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if let Some(ref cat) = category {
+        sql.push_str(&format!(" AND category=?{}", params.len() + 1));
+        params.push(Box::new(cat.clone()));
+    }
+    if let Some(b) = blocked {
+        sql.push_str(&format!(" AND blocked=?{}", params.len() + 1));
+        params.push(Box::new(b as i32));
+    }
+    sql.push_str(" ORDER BY favorite DESC, name ASC");
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "phone": row.get::<_, Option<String>>(2)?,
+            "email": row.get::<_, Option<String>>(3)?,
+            "category": row.get::<_, String>(4)?,
+            "relationship": row.get::<_, Option<String>>(5)?,
+            "notes": row.get::<_, Option<String>>(6)?,
+            "blocked": row.get::<_, i32>(7)? != 0,
+            "block_reason": row.get::<_, Option<String>>(8)?,
+            "favorite": row.get::<_, i32>(9)? != 0,
+            "created_at": row.get::<_, String>(10)?,
+            "updated_at": row.get::<_, String>(11)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    let items: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
+    Ok(serde_json::json!(items))
+}
+
+#[tauri::command]
+fn update_contact(
+    id: i64,
+    name: Option<String>,
+    phone: Option<String>,
+    email: Option<String>,
+    category: Option<String>,
+    relationship: Option<String>,
+    notes: Option<String>,
+    blocked: Option<bool>,
+    block_reason: Option<String>,
+    favorite: Option<bool>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(v) = name { conn.execute("UPDATE contacts SET name=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = phone { conn.execute("UPDATE contacts SET phone=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = email { conn.execute("UPDATE contacts SET email=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = category { conn.execute("UPDATE contacts SET category=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = relationship { conn.execute("UPDATE contacts SET relationship=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = notes { conn.execute("UPDATE contacts SET notes=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = blocked { conn.execute("UPDATE contacts SET blocked=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v as i32, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = block_reason { conn.execute("UPDATE contacts SET block_reason=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = favorite { conn.execute("UPDATE contacts SET favorite=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v as i32, id]).map_err(|e| e.to_string())?; }
+    Ok("updated".into())
+}
+
+#[tauri::command]
+fn delete_contact(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM contacts WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("deleted".into())
+}
+
+#[tauri::command]
+fn toggle_contact_blocked(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE contacts SET blocked = CASE WHEN blocked=1 THEN 0 ELSE 1 END, updated_at=datetime('now') WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("toggled".into())
+}
+
+#[tauri::command]
+fn toggle_contact_favorite(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE contacts SET favorite = CASE WHEN favorite=1 THEN 0 ELSE 1 END, updated_at=datetime('now') WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("toggled".into())
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -4820,6 +4940,13 @@ pub fn run() {
             update_home_item,
             delete_home_item,
             toggle_home_item_needed,
+            // v0.8.1: People / Contacts
+            add_contact,
+            get_contacts,
+            update_contact,
+            delete_contact,
+            toggle_contact_blocked,
+            toggle_contact_favorite,
         ])
         .setup(move |app| {
             // Auto-updater
