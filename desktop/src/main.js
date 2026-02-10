@@ -1934,11 +1934,12 @@ async function loadSettings(subTab) {
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
-    const [info, proactive, trainingStats, ttsVoices] = await Promise.all([
+    const [info, proactive, trainingStats, ttsVoices, ttsServerUrl] = await Promise.all([
       invoke('get_model_info'),
       invoke('get_proactive_settings'),
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
       invoke('get_tts_voices').catch(() => []),
+      invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
     ]);
     // Group voices by language for display
     const voicesByLang = {};
@@ -2009,6 +2010,21 @@ async function loadSettings(subTab) {
         </div>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">TTS Сервер (PC)</div>
+        <div class="settings-row">
+          <span class="settings-label">URL сервера</span>
+          <input class="form-input" id="tts-server-url" placeholder="http://192.168.x.x:8236" value="${ttsServerUrl || ''}" style="width:220px">
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Статус</span>
+          <span class="settings-value" id="tts-server-status">—</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label"></span>
+          <button class="settings-btn" id="tts-server-save">Сохранить</button>
+        </div>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">Тренировочные данные</div>
         <div class="settings-row">
           <span class="settings-label">Диалогов</span>
@@ -2061,6 +2077,30 @@ async function loadSettings(subTab) {
       } catch (e) { console.error(e); }
       setTimeout(() => { btn.textContent = 'Прослушать'; btn.disabled = false; }, 3000);
     });
+
+    // TTS server save & check
+    document.getElementById('tts-server-save')?.addEventListener('click', async () => {
+      const url = document.getElementById('tts-server-url')?.value.trim() || '';
+      await invoke('set_app_setting', { key: 'tts_server_url', value: url });
+      const statusEl = document.getElementById('tts-server-status');
+      if (!url) { if (statusEl) statusEl.textContent = 'Отключён (используется edge-tts)'; return; }
+      try {
+        const resp = await fetch(url.replace(/\/$/, '') + '/health');
+        const data = await resp.json();
+        if (statusEl) statusEl.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = 'Недоступен';
+      }
+    });
+    // Auto-check TTS server status
+    if (ttsServerUrl) {
+      try {
+        const resp = await fetch(ttsServerUrl.replace(/\/$/, '') + '/health');
+        const data = await resp.json();
+        const s = document.getElementById('tts-server-status');
+        if (s) s.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
+      } catch { const s = document.getElementById('tts-server-status'); if (s) s.textContent = 'Недоступен'; }
+    }
 
     // Pill group click handlers
     document.querySelectorAll('.pill-group').forEach(group => {
