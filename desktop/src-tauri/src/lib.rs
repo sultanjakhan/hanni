@@ -4836,29 +4836,54 @@ async fn stop_speaking() -> Result<(), String> {
 
 #[tauri::command]
 async fn get_tts_voices() -> Result<serde_json::Value, String> {
-    // Get edge-tts voices
-    let output = std::process::Command::new("edge-tts")
-        .arg("--list-voices")
-        .output()
-        .map_err(|e| format!("edge-tts error: {}", e))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut voices: Vec<serde_json::Value> = Vec::new();
-    // Add macOS voices first
+    // Add macOS voices first (always available)
     voices.push(serde_json::json!({"name": "Milena", "gender": "Female", "lang": "ru-RU", "engine": "macos"}));
     voices.push(serde_json::json!({"name": "Yuri", "gender": "Male", "lang": "ru-RU", "engine": "macos"}));
-    // Parse edge-tts output
-    for line in stdout.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 && parts[0].contains("Neural") {
-            let name = parts[0];
-            let gender = if parts.len() > 1 { parts[1] } else { "" };
-            let lang = name.split('-').take(2).collect::<Vec<_>>().join("-");
-            voices.push(serde_json::json!({
-                "name": name,
-                "gender": gender,
-                "lang": lang,
-                "engine": "edge-tts"
-            }));
+    // Try edge-tts (may not be in PATH for .app bundles)
+    let edge_tts_paths = [
+        "edge-tts",
+        "/opt/homebrew/bin/edge-tts",
+        "/usr/local/bin/edge-tts",
+    ];
+    let mut output_opt = None;
+    for path in &edge_tts_paths {
+        if let Ok(output) = std::process::Command::new(path)
+            .arg("--list-voices")
+            .output()
+        {
+            if output.status.success() {
+                output_opt = Some(output);
+                break;
+            }
+        }
+    }
+    // Also try via python3 -m edge_tts
+    if output_opt.is_none() {
+        if let Ok(output) = std::process::Command::new("python3")
+            .args(&["-m", "edge_tts", "--list-voices"])
+            .output()
+        {
+            if output.status.success() {
+                output_opt = Some(output);
+            }
+        }
+    }
+    if let Some(output) = output_opt {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 && parts[0].contains("Neural") {
+                let name = parts[0];
+                let gender = parts[1];
+                let lang = name.split('-').take(2).collect::<Vec<_>>().join("-");
+                voices.push(serde_json::json!({
+                    "name": name,
+                    "gender": gender,
+                    "lang": lang,
+                    "engine": "edge-tts"
+                }));
+            }
         }
     }
     Ok(serde_json::json!(voices))
