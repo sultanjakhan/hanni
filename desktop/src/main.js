@@ -29,7 +29,7 @@ let mediaStatusFilter = 'all';
 
 // ── Tab Registry ──
 const TAB_REGISTRY = {
-  chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: null },
+  chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': '\u{1F4AC}', 'Настройки': '\u{2699}' } },
   dashboard:   { label: 'Dashboard',   icon: '\u{1F3E0}', closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Month', 'Week'] },
   focus:       { label: 'Focus',       icon: '\u{1F3AF}', closable: true,  subTabs: ['Current', 'History'] },
@@ -343,7 +343,7 @@ function renderSubSidebar() {
   const items = document.getElementById('sub-sidebar-items');
   const reg = TAB_REGISTRY[activeTab];
 
-  if (!reg || !reg.subTabs || activeTab === 'chat') {
+  if (!reg || !reg.subTabs) {
     sidebar.classList.add('hidden');
     return;
   }
@@ -356,7 +356,8 @@ function renderSubSidebar() {
   for (const sub of subTabs) {
     const item = document.createElement('div');
     item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
-    item.textContent = sub;
+    const subIcon = reg.subIcons?.[sub];
+    item.textContent = subIcon ? `${subIcon} ${sub}` : sub;
     item.addEventListener('click', () => {
       activeSubTab[activeTab] = sub;
       saveTabs();
@@ -482,7 +483,10 @@ function activateView() {
 
 function loadSubTabContent(tabId, subTab) {
   switch (tabId) {
-    case 'chat': loadConversationsList(); input.focus(); break;
+    case 'chat':
+      if (subTab === 'Настройки') { showChatSettingsMode(); loadChatSettings(); }
+      else { hideChatSettingsMode(); loadConversationsList(); input.focus(); }
+      break;
     case 'dashboard': loadDashboard(); break;
     case 'calendar': loadCalendar(subTab); break;
     case 'focus': loadFocus(); break;
@@ -535,6 +539,161 @@ document.addEventListener('keydown', (e) => {
   if (num >= 1 && num <= 9 && num <= openTabs.length) { e.preventDefault(); switchTab(openTabs[num - 1]); }
 });
 
+// ── Chat settings mode ──
+
+function showChatSettingsMode() {
+  const view = document.getElementById('view-chat');
+  view.classList.add('chat-settings-mode');
+}
+
+function hideChatSettingsMode() {
+  const view = document.getElementById('view-chat');
+  view.classList.remove('chat-settings-mode');
+}
+
+async function loadChatSettings() {
+  const el = document.getElementById('chat-settings-content');
+  if (!el) return;
+  el.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
+  try {
+    const [proactive, ttsVoices, ttsServerUrl] = await Promise.all([
+      invoke('get_proactive_settings'),
+      invoke('get_tts_voices').catch(() => []),
+      invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
+    ]);
+    const voicesByLang = {};
+    for (const v of ttsVoices) {
+      const lang = v.lang || 'other';
+      if (!voicesByLang[lang]) voicesByLang[lang] = [];
+      voicesByLang[lang].push(v);
+    }
+    const langOrder = ['ru-RU', 'kk-KZ', 'en-US'];
+    const sortedLangs = [...langOrder.filter(l => voicesByLang[l]), ...Object.keys(voicesByLang).filter(l => !langOrder.includes(l)).sort()];
+
+    el.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">Автономный режим</div>
+        <div class="settings-row">
+          <span class="settings-label">Включён</span>
+          <label class="toggle">
+            <input type="checkbox" id="chat-proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Интервал</span>
+          <div class="pill-group" id="chat-proactive-interval">
+            ${[5, 10, 15, 30].map(v =>
+              `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
+            ).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Голос</div>
+        <div class="settings-row">
+          <span class="settings-label">Включён</span>
+          <label class="toggle">
+            <input type="checkbox" id="chat-voice-enabled" ${proactive.voice_enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Голос TTS</span>
+          <select class="form-select" id="chat-voice-name" style="width:260px">
+            ${sortedLangs.map(lang => `
+              <optgroup label="${lang}">
+                ${(voicesByLang[lang] || []).map(v =>
+                  `<option value="${v.name}" ${proactive.voice_name === v.name ? 'selected' : ''}>${v.name} (${v.gender})</option>`
+                ).join('')}
+              </optgroup>
+            `).join('')}
+          </select>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label"></span>
+          <button class="settings-btn" id="chat-test-voice">Прослушать</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">TTS Сервер (PC)</div>
+        <div class="settings-row">
+          <span class="settings-label">URL сервера</span>
+          <input class="form-input" id="chat-tts-server-url" placeholder="http://192.168.x.x:8236" value="${ttsServerUrl || ''}" style="width:220px">
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Статус</span>
+          <span class="settings-value" id="chat-tts-server-status">—</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label"></span>
+          <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
+        </div>
+      </div>`;
+
+    // Save handlers
+    const getChatProactiveValues = () => ({
+      enabled: document.getElementById('chat-proactive-enabled').checked,
+      voice_enabled: document.getElementById('chat-voice-enabled').checked,
+      voice_name: document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural',
+      interval_minutes: parseInt(document.querySelector('#chat-proactive-interval .pill.active')?.dataset.value || '10'),
+      quiet_hours_start: proactive.quiet_hours_start || 23,
+      quiet_hours_end: proactive.quiet_hours_end || 8,
+    });
+    const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
+
+    document.getElementById('chat-proactive-enabled')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-voice-enabled')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);
+
+    document.querySelectorAll('#chat-proactive-interval .pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('#chat-proactive-interval .pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        saveChatSettings();
+      });
+    });
+
+    document.getElementById('chat-test-voice')?.addEventListener('click', async () => {
+      const voice = document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural';
+      const btn = document.getElementById('chat-test-voice');
+      btn.textContent = 'Говорю...';
+      btn.disabled = true;
+      try {
+        await invoke('speak_text', { text: 'Привет! Я Ханни, твой персональный ассистент.', voice });
+      } catch (e) { console.error(e); }
+      setTimeout(() => { btn.textContent = 'Прослушать'; btn.disabled = false; }, 3000);
+    });
+
+    // TTS server
+    document.getElementById('chat-tts-server-save')?.addEventListener('click', async () => {
+      const url = document.getElementById('chat-tts-server-url')?.value.trim() || '';
+      await invoke('set_app_setting', { key: 'tts_server_url', value: url });
+      const statusEl = document.getElementById('chat-tts-server-status');
+      if (!url) { if (statusEl) statusEl.textContent = 'Отключён (edge-tts)'; return; }
+      try {
+        const resp = await fetch(url.replace(/\/$/, '') + '/health');
+        const data = await resp.json();
+        if (statusEl) statusEl.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = 'Недоступен';
+      }
+    });
+
+    // Auto-check TTS server
+    if (ttsServerUrl) {
+      try {
+        const resp = await fetch(ttsServerUrl.replace(/\/$/, '') + '/health');
+        const data = await resp.json();
+        const s = document.getElementById('chat-tts-server-status');
+        if (s) s.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
+      } catch { const s = document.getElementById('chat-tts-server-status'); if (s) s.textContent = 'Недоступен'; }
+    }
+  } catch (e) {
+    el.innerHTML = `<div style="color:#ff6b6b;font-size:13px;">Ошибка: ${e}</div>`;
+  }
+}
+
 // ── Chat helpers ──
 
 function scrollDown() {
@@ -549,10 +708,9 @@ function addMsg(role, text) {
     div.className = 'msg bot';
     div.textContent = text;
     wrapper.appendChild(div);
-    // TTS button
     const ttsBtn = document.createElement('button');
     ttsBtn.className = 'tts-btn';
-    ttsBtn.innerHTML = '&#9834;';
+    ttsBtn.innerHTML = '&#9654;';
     ttsBtn.title = 'Озвучить';
     ttsBtn.addEventListener('click', () => toggleTTS(ttsBtn, text));
     wrapper.appendChild(ttsBtn);
@@ -871,29 +1029,33 @@ function showAgentIndicator(step) {
 async function toggleTTS(btn, text) {
   if (isSpeaking) {
     await invoke('stop_speaking').catch(() => {});
-    document.querySelectorAll('.tts-btn.speaking').forEach(b => b.classList.remove('speaking'));
+    document.querySelectorAll('.tts-btn.speaking').forEach(b => {
+      b.classList.remove('speaking');
+      b.innerHTML = '&#9654;';
+    });
     isSpeaking = false;
     return;
   }
   isSpeaking = true;
   btn.classList.add('speaking');
+  btn.innerHTML = '&#9632;';
   try {
-    // Get voice from proactive settings
     let voice = 'ru-RU-SvetlanaNeural';
     try {
       const ps = await invoke('get_proactive_settings');
       voice = ps.voice_name || 'ru-RU-SvetlanaNeural';
     } catch (_) {}
     await invoke('speak_text', { text, voice });
-    // Auto-clear speaking state after estimated duration
     const wordCount = text.split(/\s+/).length;
     const durationMs = Math.max(2000, wordCount * 300);
     setTimeout(() => {
       btn.classList.remove('speaking');
+      btn.innerHTML = '&#9654;';
       isSpeaking = false;
     }, durationMs);
   } catch (_) {
     btn.classList.remove('speaking');
+    btn.innerHTML = '&#9654;';
     isSpeaking = false;
   }
 }
@@ -985,7 +1147,7 @@ async function send() {
     if (lastBotDiv) {
       const ttsBtn = document.createElement('button');
       ttsBtn.className = 'tts-btn';
-      ttsBtn.innerHTML = '&#9834;';
+      ttsBtn.innerHTML = '&#9654;';
       ttsBtn.title = 'Озвучить';
       const ttsText = lastBotDiv.textContent;
       ttsBtn.addEventListener('click', () => toggleTTS(ttsBtn, ttsText));
@@ -2018,23 +2180,10 @@ async function loadSettings(subTab) {
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
-    const [info, proactive, trainingStats, ttsVoices, ttsServerUrl] = await Promise.all([
+    const [info, trainingStats] = await Promise.all([
       invoke('get_model_info'),
-      invoke('get_proactive_settings'),
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
-      invoke('get_tts_voices').catch(() => []),
-      invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
     ]);
-    // Group voices by language for display
-    const voicesByLang = {};
-    for (const v of ttsVoices) {
-      const lang = v.lang || 'other';
-      if (!voicesByLang[lang]) voicesByLang[lang] = [];
-      voicesByLang[lang].push(v);
-    }
-    // Prioritize: ru, kk, en, then rest
-    const langOrder = ['ru-RU', 'kk-KZ', 'en-US'];
-    const sortedLangs = [...langOrder.filter(l => voicesByLang[l]), ...Object.keys(voicesByLang).filter(l => !langOrder.includes(l)).sort()];
 
     settingsContent.innerHTML = `
       <div class="settings-section">
@@ -2050,62 +2199,6 @@ async function loadSettings(subTab) {
         <div class="settings-row">
           <span class="settings-label">Статус</span>
           <span class="settings-value ${info.server_online ? 'online' : 'offline'}">${info.server_online ? 'Онлайн' : 'Офлайн'}</span>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Автономный режим</div>
-        <div class="settings-row">
-          <span class="settings-label">Включён</span>
-          <label class="toggle">
-            <input type="checkbox" id="proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Голос</span>
-          <label class="toggle">
-            <input type="checkbox" id="proactive-voice" ${proactive.voice_enabled ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Голос TTS</span>
-          <select class="form-select" id="proactive-voice-name" style="width:260px">
-            ${sortedLangs.map(lang => `
-              <optgroup label="${lang}">
-                ${(voicesByLang[lang] || []).map(v =>
-                  `<option value="${v.name}" ${proactive.voice_name === v.name ? 'selected' : ''}>${v.name} (${v.gender})</option>`
-                ).join('')}
-              </optgroup>
-            `).join('')}
-          </select>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Тест голоса</span>
-          <button class="settings-btn" id="test-voice-btn">Прослушать</button>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Интервал</span>
-          <div class="pill-group" id="proactive-interval">
-            ${[5, 10, 15, 30].map(v =>
-              `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
-            ).join('')}
-          </div>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">TTS Сервер (PC)</div>
-        <div class="settings-row">
-          <span class="settings-label">URL сервера</span>
-          <input class="form-input" id="tts-server-url" placeholder="http://192.168.x.x:8236" value="${ttsServerUrl || ''}" style="width:220px">
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Статус</span>
-          <span class="settings-value" id="tts-server-status">—</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label"></span>
-          <button class="settings-btn" id="tts-server-save">Сохранить</button>
         </div>
       </div>
       <div class="settings-section">
@@ -2134,68 +2227,6 @@ async function loadSettings(subTab) {
           <span class="settings-value" id="api-status">Проверяю...</span>
         </div>
       </div>`;
-
-    // Proactive settings change handlers
-    const getProactiveValues = () => ({
-      enabled: document.getElementById('proactive-enabled').checked,
-      voice_enabled: document.getElementById('proactive-voice').checked,
-      voice_name: document.getElementById('proactive-voice-name')?.value || 'ru-RU-SvetlanaNeural',
-      interval_minutes: parseInt(document.querySelector('#proactive-interval .pill.active')?.dataset.value || '10'),
-      quiet_hours_start: 23,
-      quiet_hours_end: 8,
-    });
-    const saveProactive = () => invoke('set_proactive_settings', { settings: getProactiveValues() }).catch(() => {});
-
-    document.getElementById('proactive-enabled')?.addEventListener('change', saveProactive);
-    document.getElementById('proactive-voice')?.addEventListener('change', saveProactive);
-    document.getElementById('proactive-voice-name')?.addEventListener('change', saveProactive);
-
-    // Test voice button
-    document.getElementById('test-voice-btn')?.addEventListener('click', async () => {
-      const voice = document.getElementById('proactive-voice-name')?.value || 'ru-RU-SvetlanaNeural';
-      const btn = document.getElementById('test-voice-btn');
-      btn.textContent = 'Говорю...';
-      btn.disabled = true;
-      try {
-        await invoke('speak_text', { text: 'Привет! Я Ханни, твой персональный ассистент.', voice });
-      } catch (e) { console.error(e); }
-      setTimeout(() => { btn.textContent = 'Прослушать'; btn.disabled = false; }, 3000);
-    });
-
-    // TTS server save & check
-    document.getElementById('tts-server-save')?.addEventListener('click', async () => {
-      const url = document.getElementById('tts-server-url')?.value.trim() || '';
-      await invoke('set_app_setting', { key: 'tts_server_url', value: url });
-      const statusEl = document.getElementById('tts-server-status');
-      if (!url) { if (statusEl) statusEl.textContent = 'Отключён (используется edge-tts)'; return; }
-      try {
-        const resp = await fetch(url.replace(/\/$/, '') + '/health');
-        const data = await resp.json();
-        if (statusEl) statusEl.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
-      } catch (e) {
-        if (statusEl) statusEl.textContent = 'Недоступен';
-      }
-    });
-    // Auto-check TTS server status
-    if (ttsServerUrl) {
-      try {
-        const resp = await fetch(ttsServerUrl.replace(/\/$/, '') + '/health');
-        const data = await resp.json();
-        const s = document.getElementById('tts-server-status');
-        if (s) s.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
-      } catch { const s = document.getElementById('tts-server-status'); if (s) s.textContent = 'Недоступен'; }
-    }
-
-    // Pill group click handlers
-    document.querySelectorAll('.pill-group').forEach(group => {
-      group.addEventListener('click', (e) => {
-        const pill = e.target.closest('.pill');
-        if (!pill) return;
-        group.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        saveProactive();
-      });
-    });
 
     // Training data export
     document.getElementById('export-training-btn')?.addEventListener('click', async (e) => {
