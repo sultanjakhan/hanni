@@ -15,7 +15,7 @@ use std::io::Write;
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
 
-const SYSTEM_PROMPT: &str = r#"You are Hanni, a helpful AI assistant running locally on Mac. Answer concisely. Use the user's language.
+const SYSTEM_PROMPT: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses — don't repeat patterns. Use the user's language.
 
 You can execute actions using ```action JSON blocks:
 Life tracking: add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), add_note(title,content), get_stats.
@@ -23,6 +23,12 @@ macOS: get_activity (app usage today), get_calendar (upcoming events), get_music
 Memory: remember(category,key,value), recall(category), forget(category,key), search_memory(query,limit?). Categories: user, preferences, world, tasks, people, habits.
 Focus: start_focus(duration,apps?,sites?), stop_focus. Block distracting apps and sites for focused work.
 System: run_shell(command), open_url(url), send_notification(title,body), set_volume(level), get_clipboard, set_clipboard(text).
+Media: add_media_item(media_type,title,status?,rating?,progress?,total_episodes?). Types: music,anime,manga,movie,series,cartoon,game,book,podcast. Status: planned,in_progress,completed,on_hold,dropped.
+Food: log_food(meal_type,name,calories?,protein?,carbs?,fat?). Meal types: breakfast,lunch,dinner,snack.
+Products: add_product(name,category?,expiry_date?,location?). Location: fridge,freezer,pantry. get_expiring_products(days?) — check what's about to expire.
+Money: add_transaction(transaction_type,amount,category,description?,currency?). Types: expense,income.
+Mindset: log_mood(mood,note?,trigger?). Mood: 1-5. save_journal_entry(mood,energy,stress,gratitude?,reflection?,wins?,struggles?).
+Goals: create_goal(tab_name,title,target_value,unit?,deadline?), update_goal(id,current_value?).
 Voice: (automatic — user speaks, text appears).
 
 IMPORTANT:
@@ -32,7 +38,8 @@ IMPORTANT:
 - Do NOT repeat raw results. Analyze and summarize naturally.
 - If a file is attached, analyze it.
 - Proactively remember important facts the user shares (name, preferences, habits, language, people they mention). You always have your memories in context — no need to recall before answering.
-- Use search_memory(query) to find specific memories when the user asks about something that might be stored."#;
+- Use search_memory(query) to find specific memories when the user asks about something that might be stored.
+- Be warm but not boring. Add personality — a light joke, genuine curiosity, playful sarcasm (in a loving way). Never be robotic."#;
 
 fn data_file_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join("Documents/life-tracker/data.json")
@@ -321,6 +328,207 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             created_at TEXT NOT NULL,
             UNIQUE(habit_id, date),
             FOREIGN KEY (habit_id) REFERENCES habits(id)
+        );
+
+        -- v0.8.0: Media Items (Hobbies collections)
+        CREATE TABLE IF NOT EXISTS media_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            media_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            original_title TEXT NOT NULL DEFAULT '',
+            year INTEGER,
+            description TEXT NOT NULL DEFAULT '',
+            cover_url TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'planned',
+            rating INTEGER DEFAULT 0,
+            progress INTEGER DEFAULT 0,
+            total_episodes INTEGER,
+            started_at TEXT,
+            completed_at TEXT,
+            notes TEXT NOT NULL DEFAULT '',
+            hidden INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS user_lists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            color TEXT NOT NULL DEFAULT '#818cf8',
+            icon TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS list_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            list_id INTEGER NOT NULL,
+            media_item_id INTEGER NOT NULL,
+            position INTEGER DEFAULT 0,
+            added_at TEXT NOT NULL,
+            FOREIGN KEY (list_id) REFERENCES user_lists(id),
+            FOREIGN KEY (media_item_id) REFERENCES media_items(id)
+        );
+
+        -- v0.8.0: Food
+        CREATE TABLE IF NOT EXISTS food_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            meal_type TEXT NOT NULL DEFAULT 'snack',
+            name TEXT NOT NULL,
+            calories INTEGER DEFAULT 0,
+            protein REAL DEFAULT 0,
+            carbs REAL DEFAULT 0,
+            fat REAL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS recipes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            ingredients TEXT NOT NULL DEFAULT '',
+            instructions TEXT NOT NULL DEFAULT '',
+            prep_time INTEGER DEFAULT 0,
+            cook_time INTEGER DEFAULT 0,
+            servings INTEGER DEFAULT 1,
+            calories INTEGER DEFAULT 0,
+            tags TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            quantity REAL DEFAULT 1,
+            unit TEXT NOT NULL DEFAULT 'шт',
+            expiry_date TEXT,
+            location TEXT NOT NULL DEFAULT 'fridge',
+            barcode TEXT NOT NULL DEFAULT '',
+            purchased_at TEXT,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        -- v0.8.0: Money
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'expense',
+            amount REAL NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'KZT',
+            category TEXT NOT NULL DEFAULT 'other',
+            description TEXT NOT NULL DEFAULT '',
+            recurring INTEGER DEFAULT 0,
+            recurring_period TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS budgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            amount REAL NOT NULL,
+            period TEXT NOT NULL DEFAULT 'monthly',
+            created_at TEXT NOT NULL,
+            UNIQUE(category, period)
+        );
+
+        CREATE TABLE IF NOT EXISTS savings_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            target_amount REAL NOT NULL,
+            current_amount REAL DEFAULT 0,
+            deadline TEXT,
+            color TEXT NOT NULL DEFAULT '#818cf8',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            amount REAL NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'KZT',
+            period TEXT NOT NULL DEFAULT 'monthly',
+            next_payment TEXT,
+            category TEXT NOT NULL DEFAULT 'other',
+            active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS debts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'owe',
+            amount REAL NOT NULL,
+            remaining REAL NOT NULL,
+            interest_rate REAL DEFAULT 0,
+            due_date TEXT,
+            description TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        -- v0.8.0: Mindset
+        CREATE TABLE IF NOT EXISTS journal_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL UNIQUE,
+            mood INTEGER DEFAULT 3,
+            energy INTEGER DEFAULT 3,
+            stress INTEGER DEFAULT 3,
+            gratitude TEXT NOT NULL DEFAULT '',
+            reflection TEXT NOT NULL DEFAULT '',
+            wins TEXT NOT NULL DEFAULT '',
+            struggles TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS mood_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            mood INTEGER NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            trigger_text TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS principles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT 'discipline',
+            active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+
+        -- v0.8.0: Blocklist
+        CREATE TABLE IF NOT EXISTS blocklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            value TEXT NOT NULL,
+            schedule TEXT,
+            active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+
+        -- v0.8.0: Goals & Settings
+        CREATE TABLE IF NOT EXISTS tab_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tab_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            target_value REAL NOT NULL DEFAULT 0,
+            current_value REAL DEFAULT 0,
+            unit TEXT NOT NULL DEFAULT '',
+            deadline TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -2927,6 +3135,942 @@ fn update_memory(id: i64, value: String, db: tauri::State<'_, HanniDb>) -> Resul
     Ok(())
 }
 
+// ── v0.8.0: Media Items (Hobbies collections) ──
+
+#[tauri::command]
+fn add_media_item(
+    media_type: String, title: String, original_title: Option<String>, year: Option<i32>,
+    description: Option<String>, cover_url: Option<String>, status: Option<String>,
+    rating: Option<i32>, progress: Option<i32>, total_episodes: Option<i32>,
+    notes: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO media_items (media_type, title, original_title, year, description, cover_url, status, rating, progress, total_episodes, notes, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        rusqlite::params![
+            media_type, title, original_title.unwrap_or_default(), year,
+            description.unwrap_or_default(), cover_url.unwrap_or_default(),
+            status.unwrap_or_else(|| "planned".into()), rating.unwrap_or(0),
+            progress.unwrap_or(0), total_episodes,
+            notes.unwrap_or_default(), now
+        ],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn update_media_item(
+    id: i64, status: Option<String>, rating: Option<i32>, progress: Option<i32>,
+    notes: Option<String>, title: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    // Build dynamic update
+    let (cur_status, cur_rating, cur_progress, cur_notes, cur_title): (String, i32, i32, String, String) = conn.query_row(
+        "SELECT status, rating, progress, notes, title FROM media_items WHERE id=?1",
+        rusqlite::params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    ).map_err(|e| format!("Not found: {}", e))?;
+    let new_status = status.unwrap_or(cur_status);
+    let completed_at = if new_status == "completed" { Some(now.clone()) } else { None };
+    conn.execute(
+        "UPDATE media_items SET status=?1, rating=?2, progress=?3, notes=?4, title=?5, completed_at=?6, updated_at=?7 WHERE id=?8",
+        rusqlite::params![new_status, rating.unwrap_or(cur_rating), progress.unwrap_or(cur_progress),
+            notes.unwrap_or(cur_notes), title.unwrap_or(cur_title), completed_at, now, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM list_items WHERE media_item_id=?1", rusqlite::params![id]).ok();
+    conn.execute("DELETE FROM media_items WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_media_items(media_type: String, status: Option<String>, show_hidden: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let hidden = if show_hidden.unwrap_or(false) { 1 } else { 0 };
+    if let Some(s) = status {
+        let mut stmt = conn.prepare(
+            "SELECT id, media_type, title, original_title, year, status, rating, progress, total_episodes, cover_url, notes, hidden, created_at
+             FROM media_items WHERE media_type=?1 AND status=?2 AND hidden<=?3 ORDER BY updated_at DESC"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![media_type, s, hidden], |row| media_from_row(row))
+            .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, media_type, title, original_title, year, status, rating, progress, total_episodes, cover_url, notes, hidden, created_at
+             FROM media_items WHERE media_type=?1 AND hidden<=?2 ORDER BY updated_at DESC"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![media_type, hidden], |row| media_from_row(row))
+            .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    }
+}
+
+fn media_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Error> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?,
+        "media_type": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?,
+        "original_title": row.get::<_, String>(3)?,
+        "year": row.get::<_, Option<i32>>(4)?,
+        "status": row.get::<_, String>(5)?,
+        "rating": row.get::<_, i32>(6)?,
+        "progress": row.get::<_, i32>(7)?,
+        "total_episodes": row.get::<_, Option<i32>>(8)?,
+        "cover_url": row.get::<_, String>(9)?,
+        "notes": row.get::<_, String>(10)?,
+        "hidden": row.get::<_, i32>(11)? != 0,
+    }))
+}
+
+#[tauri::command]
+fn hide_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE media_items SET hidden=1 WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn unhide_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE media_items SET hidden=0 WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_user_list(name: String, description: Option<String>, color: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO user_lists (name, description, color, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![name, description.unwrap_or_default(), color.unwrap_or_else(|| "#818cf8".into()), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_user_lists(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT ul.id, ul.name, ul.description, ul.color,
+                (SELECT COUNT(*) FROM list_items WHERE list_id=ul.id) as item_count
+         FROM user_lists ul ORDER BY ul.created_at DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "description": row.get::<_, String>(2)?,
+            "color": row.get::<_, String>(3)?,
+            "item_count": row.get::<_, i64>(4)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn add_to_list(list_id: i64, media_item_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR IGNORE INTO list_items (list_id, media_item_id, added_at) VALUES (?1, ?2, ?3)",
+        rusqlite::params![list_id, media_item_id, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_from_list(list_id: i64, media_item_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "DELETE FROM list_items WHERE list_id=?1 AND media_item_id=?2",
+        rusqlite::params![list_id, media_item_id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_list_items(list_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.media_type, m.title, m.status, m.rating, m.cover_url
+         FROM list_items li JOIN media_items m ON m.id = li.media_item_id
+         WHERE li.list_id=?1 ORDER BY li.position, li.added_at"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![list_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "media_type": row.get::<_, String>(1)?,
+            "title": row.get::<_, String>(2)?,
+            "status": row.get::<_, String>(3)?,
+            "rating": row.get::<_, i32>(4)?,
+            "cover_url": row.get::<_, String>(5)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn get_media_stats(media_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(mt) = media_type {
+        let (total, completed, in_progress, avg_rating): (i64, i64, i64, f64) = conn.query_row(
+            "SELECT COUNT(*), SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN status='in_progress' THEN 1 ELSE 0 END),
+                    COALESCE(AVG(CASE WHEN rating>0 THEN rating END), 0)
+             FROM media_items WHERE media_type=?1 AND hidden=0",
+            rusqlite::params![mt], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap_or((0, 0, 0, 0.0));
+        Ok(serde_json::json!({ "total": total, "completed": completed, "in_progress": in_progress, "avg_rating": format!("{:.1}", avg_rating) }))
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT media_type, COUNT(*), SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END)
+             FROM media_items WHERE hidden=0 GROUP BY media_type"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "media_type": row.get::<_, String>(0)?,
+                "total": row.get::<_, i64>(1)?,
+                "completed": row.get::<_, i64>(2)?,
+            }))
+        }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(serde_json::json!({ "by_type": rows }))
+    }
+}
+
+// ── v0.8.0: Food commands ──
+
+#[tauri::command]
+fn log_food(
+    date: Option<String>, meal_type: String, name: String,
+    calories: Option<i64>, protein: Option<f64>, carbs: Option<f64>, fat: Option<f64>,
+    notes: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now();
+    let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
+    conn.execute(
+        "INSERT INTO food_log (date, meal_type, name, calories, protein, carbs, fat, notes, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![d, meal_type, name, calories.unwrap_or(0), protein.unwrap_or(0.0),
+            carbs.unwrap_or(0.0), fat.unwrap_or(0.0), notes.unwrap_or_default(), now.to_rfc3339()],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_food_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let mut stmt = conn.prepare(
+        "SELECT id, meal_type, name, calories, protein, carbs, fat, notes FROM food_log WHERE date=?1 ORDER BY created_at"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![d], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "meal_type": row.get::<_, String>(1)?,
+            "name": row.get::<_, String>(2)?, "calories": row.get::<_, i64>(3)?,
+            "protein": row.get::<_, f64>(4)?, "carbs": row.get::<_, f64>(5)?,
+            "fat": row.get::<_, f64>(6)?, "notes": row.get::<_, String>(7)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn delete_food_entry(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM food_log WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_food_stats(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let d = days.unwrap_or(7);
+    let since = (chrono::Local::now() - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+    let (total_cal, avg_cal, total_protein): (i64, f64, f64) = conn.query_row(
+        "SELECT COALESCE(SUM(calories),0), COALESCE(AVG(daily_cal),0), COALESCE(SUM(protein),0)
+         FROM (SELECT date, SUM(calories) as daily_cal, SUM(protein) as protein FROM food_log WHERE date>=?1 GROUP BY date)",
+        rusqlite::params![since], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).unwrap_or((0, 0.0, 0.0));
+    Ok(serde_json::json!({ "total_calories": total_cal, "avg_daily_calories": format!("{:.0}", avg_cal), "total_protein": format!("{:.1}", total_protein), "days": d }))
+}
+
+#[tauri::command]
+fn create_recipe(
+    name: String, description: Option<String>, ingredients: String, instructions: String,
+    prep_time: Option<i64>, cook_time: Option<i64>, servings: Option<i64>,
+    calories: Option<i64>, tags: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO recipes (name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+        rusqlite::params![name, description.unwrap_or_default(), ingredients, instructions,
+            prep_time.unwrap_or(0), cook_time.unwrap_or(0), servings.unwrap_or(1),
+            calories.unwrap_or(0), tags.unwrap_or_default(), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_recipes(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(q) = search {
+        let like = format!("%{}%", q);
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![like], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags FROM recipes ORDER BY updated_at DESC LIMIT 50"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map([], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    }
+}
+
+fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Error> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+        "description": row.get::<_, String>(2)?, "prep_time": row.get::<_, i64>(3)?,
+        "cook_time": row.get::<_, i64>(4)?, "servings": row.get::<_, i64>(5)?,
+        "calories": row.get::<_, i64>(6)?, "tags": row.get::<_, String>(7)?,
+    }))
+}
+
+#[tauri::command]
+fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_product(
+    name: String, category: Option<String>, quantity: Option<f64>, unit: Option<String>,
+    expiry_date: Option<String>, location: Option<String>, notes: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO products (name, category, quantity, unit, expiry_date, location, notes, purchased_at, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        rusqlite::params![name, category.unwrap_or_else(|| "other".into()), quantity.unwrap_or(1.0),
+            unit.unwrap_or_else(|| "шт".into()), expiry_date,
+            location.unwrap_or_else(|| "fridge".into()), notes.unwrap_or_default(), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_products(location: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(loc) = location {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, category, quantity, unit, expiry_date, location, notes FROM products WHERE location=?1 ORDER BY expiry_date NULLS LAST"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![loc], |row| product_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, name, category, quantity, unit, expiry_date, location, notes FROM products ORDER BY expiry_date NULLS LAST"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map([], |row| product_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    }
+}
+
+fn product_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Error> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+        "category": row.get::<_, String>(2)?, "quantity": row.get::<_, f64>(3)?,
+        "unit": row.get::<_, String>(4)?, "expiry_date": row.get::<_, Option<String>>(5)?,
+        "location": row.get::<_, String>(6)?, "notes": row.get::<_, String>(7)?,
+    }))
+}
+
+#[tauri::command]
+fn update_product(id: i64, quantity: Option<f64>, expiry_date: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let (cur_qty, cur_exp, cur_notes): (f64, Option<String>, String) = conn.query_row(
+        "SELECT quantity, expiry_date, notes FROM products WHERE id=?1", rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|e| format!("Not found: {}", e))?;
+    conn.execute(
+        "UPDATE products SET quantity=?1, expiry_date=?2, notes=?3 WHERE id=?4",
+        rusqlite::params![quantity.unwrap_or(cur_qty), expiry_date.or(cur_exp), notes.unwrap_or(cur_notes), id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_product(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM products WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_expiring_products(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let d = days.unwrap_or(3);
+    let deadline = (chrono::Local::now() + chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT id, name, category, quantity, unit, expiry_date, location, notes FROM products
+         WHERE expiry_date IS NOT NULL AND expiry_date <= ?1 ORDER BY expiry_date"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![deadline], |row| product_from_row(row))
+        .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+// ── v0.8.0: Money commands ──
+
+#[tauri::command]
+fn add_transaction(
+    date: Option<String>, transaction_type: String, amount: f64, currency: Option<String>,
+    category: String, description: Option<String>, recurring: Option<bool>,
+    recurring_period: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now();
+    let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
+    conn.execute(
+        "INSERT INTO transactions (date, type, amount, currency, category, description, recurring, recurring_period, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![d, transaction_type, amount, currency.unwrap_or_else(|| "KZT".into()),
+            category, description.unwrap_or_default(), recurring.unwrap_or(false) as i32,
+            recurring_period, now.to_rfc3339()],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_transactions(month: Option<String>, transaction_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let prefix = month.unwrap_or_else(|| chrono::Local::now().format("%Y-%m").to_string());
+    let pattern = format!("{}%", prefix);
+    if let Some(t) = transaction_type {
+        let mut stmt = conn.prepare(
+            "SELECT id, date, type, amount, currency, category, description FROM transactions WHERE date LIKE ?1 AND type=?2 ORDER BY date DESC, created_at DESC"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![pattern, t], |row| tx_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, date, type, amount, currency, category, description FROM transactions WHERE date LIKE ?1 ORDER BY date DESC, created_at DESC"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![pattern], |row| tx_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    }
+}
+
+fn tx_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Error> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
+        "type": row.get::<_, String>(2)?, "amount": row.get::<_, f64>(3)?,
+        "currency": row.get::<_, String>(4)?, "category": row.get::<_, String>(5)?,
+        "description": row.get::<_, String>(6)?,
+    }))
+}
+
+#[tauri::command]
+fn delete_transaction(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM transactions WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_transaction_stats(month: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let prefix = month.unwrap_or_else(|| chrono::Local::now().format("%Y-%m").to_string());
+    let pattern = format!("{}%", prefix);
+    let (total_expense, total_income): (f64, f64) = conn.query_row(
+        "SELECT COALESCE(SUM(CASE WHEN type='expense' THEN amount END), 0),
+                COALESCE(SUM(CASE WHEN type='income' THEN amount END), 0)
+         FROM transactions WHERE date LIKE ?1",
+        rusqlite::params![pattern], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap_or((0.0, 0.0));
+    // By category
+    let mut stmt = conn.prepare(
+        "SELECT category, SUM(amount) FROM transactions WHERE date LIKE ?1 AND type='expense' GROUP BY category ORDER BY SUM(amount) DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let by_cat: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![pattern], |row| {
+        Ok(serde_json::json!({ "category": row.get::<_, String>(0)?, "amount": row.get::<_, f64>(1)? }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(serde_json::json!({ "total_expense": total_expense, "total_income": total_income, "balance": total_income - total_expense, "by_category": by_cat }))
+}
+
+#[tauri::command]
+fn create_budget(category: String, amount: f64, period: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    let p = period.unwrap_or_else(|| "monthly".into());
+    conn.execute(
+        "INSERT INTO budgets (category, amount, period, created_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(category, period) DO UPDATE SET amount=?2",
+        rusqlite::params![category, amount, p, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_budgets(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let month = chrono::Local::now().format("%Y-%m").to_string();
+    let pattern = format!("{}%", month);
+    let mut stmt = conn.prepare(
+        "SELECT b.id, b.category, b.amount, b.period,
+                COALESCE((SELECT SUM(amount) FROM transactions WHERE category=b.category AND type='expense' AND date LIKE ?1), 0) as spent
+         FROM budgets b ORDER BY b.category"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![pattern], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "category": row.get::<_, String>(1)?,
+            "amount": row.get::<_, f64>(2)?, "period": row.get::<_, String>(3)?,
+            "spent": row.get::<_, f64>(4)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn delete_budget(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM budgets WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_savings_goal(name: String, target_amount: f64, deadline: Option<String>, color: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO savings_goals (name, target_amount, deadline, color, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![name, target_amount, deadline, color.unwrap_or_else(|| "#818cf8".into()), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_savings_goals(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, target_amount, current_amount, deadline, color FROM savings_goals ORDER BY created_at DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        let target: f64 = row.get(2)?;
+        let current: f64 = row.get(3)?;
+        let pct = if target > 0.0 { (current / target * 100.0).min(100.0) } else { 0.0 };
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+            "target_amount": target, "current_amount": current,
+            "deadline": row.get::<_, Option<String>>(4)?, "color": row.get::<_, String>(5)?,
+            "percent": format!("{:.0}", pct),
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn update_savings_goal(id: i64, add_amount: Option<f64>, target_amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(add) = add_amount {
+        conn.execute("UPDATE savings_goals SET current_amount = current_amount + ?1 WHERE id=?2", rusqlite::params![add, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    if let Some(target) = target_amount {
+        conn.execute("UPDATE savings_goals SET target_amount=?1 WHERE id=?2", rusqlite::params![target, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_savings_goal(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM savings_goals WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_subscription(name: String, amount: f64, currency: Option<String>, period: Option<String>, next_payment: Option<String>, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO subscriptions (name, amount, currency, period, next_payment, category, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![name, amount, currency.unwrap_or_else(|| "KZT".into()), period.unwrap_or_else(|| "monthly".into()),
+            next_payment, category.unwrap_or_else(|| "other".into()), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_subscriptions(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, amount, currency, period, next_payment, category, active FROM subscriptions ORDER BY active DESC, name"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+            "amount": row.get::<_, f64>(2)?, "currency": row.get::<_, String>(3)?,
+            "period": row.get::<_, String>(4)?, "next_payment": row.get::<_, Option<String>>(5)?,
+            "category": row.get::<_, String>(6)?, "active": row.get::<_, i32>(7)? != 0,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn update_subscription(id: i64, active: Option<bool>, amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(a) = active { conn.execute("UPDATE subscriptions SET active=?1 WHERE id=?2", rusqlite::params![a as i32, id]).map_err(|e| format!("DB error: {}", e))?; }
+    if let Some(amt) = amount { conn.execute("UPDATE subscriptions SET amount=?1 WHERE id=?2", rusqlite::params![amt, id]).map_err(|e| format!("DB error: {}", e))?; }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_subscription(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM subscriptions WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_debt(name: String, debt_type: String, amount: f64, interest_rate: Option<f64>, due_date: Option<String>, description: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO debts (name, type, amount, remaining, interest_rate, due_date, description, created_at) VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![name, debt_type, amount, interest_rate.unwrap_or(0.0), due_date, description.unwrap_or_default(), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_debts(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, name, type, amount, remaining, interest_rate, due_date, description FROM debts WHERE remaining > 0 ORDER BY due_date NULLS LAST"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        let amt: f64 = row.get(3)?;
+        let rem: f64 = row.get(4)?;
+        let pct = if amt > 0.0 { ((amt - rem) / amt * 100.0).min(100.0) } else { 0.0 };
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+            "type": row.get::<_, String>(2)?, "amount": amt, "remaining": rem,
+            "interest_rate": row.get::<_, f64>(5)?, "due_date": row.get::<_, Option<String>>(6)?,
+            "description": row.get::<_, String>(7)?, "paid_percent": format!("{:.0}", pct),
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn update_debt(id: i64, pay_amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(pay) = pay_amount {
+        conn.execute("UPDATE debts SET remaining = MAX(0, remaining - ?1) WHERE id=?2", rusqlite::params![pay, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_debt(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM debts WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+// ── v0.8.0: Mindset commands ──
+
+#[tauri::command]
+fn save_journal_entry(
+    date: Option<String>, mood: i32, energy: i32, stress: i32,
+    gratitude: Option<String>, reflection: Option<String>,
+    wins: Option<String>, struggles: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now();
+    let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
+    conn.execute(
+        "INSERT INTO journal_entries (date, mood, energy, stress, gratitude, reflection, wins, struggles, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(date) DO UPDATE SET mood=?2, energy=?3, stress=?4, gratitude=?5, reflection=?6, wins=?7, struggles=?8",
+        rusqlite::params![d, mood, energy, stress, gratitude.unwrap_or_default(),
+            reflection.unwrap_or_default(), wins.unwrap_or_default(), struggles.unwrap_or_default(), now.to_rfc3339()],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_journal_entries(period: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let days = period.unwrap_or(30);
+    let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT id, date, mood, energy, stress, gratitude, reflection, wins, struggles FROM journal_entries WHERE date>=?1 ORDER BY date DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![since], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
+            "mood": row.get::<_, i32>(2)?, "energy": row.get::<_, i32>(3)?,
+            "stress": row.get::<_, i32>(4)?, "gratitude": row.get::<_, String>(5)?,
+            "reflection": row.get::<_, String>(6)?, "wins": row.get::<_, String>(7)?,
+            "struggles": row.get::<_, String>(8)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn get_journal_entry(date: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.query_row(
+        "SELECT id, date, mood, energy, stress, gratitude, reflection, wins, struggles FROM journal_entries WHERE date=?1",
+        rusqlite::params![date], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
+                "mood": row.get::<_, i32>(2)?, "energy": row.get::<_, i32>(3)?,
+                "stress": row.get::<_, i32>(4)?, "gratitude": row.get::<_, String>(5)?,
+                "reflection": row.get::<_, String>(6)?, "wins": row.get::<_, String>(7)?,
+                "struggles": row.get::<_, String>(8)?,
+            }))
+        },
+    ).map_err(|e| format!("Not found: {}", e))
+}
+
+#[tauri::command]
+fn log_mood(mood: i32, note: Option<String>, trigger: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now();
+    conn.execute(
+        "INSERT INTO mood_log (date, time, mood, note, trigger_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![now.format("%Y-%m-%d").to_string(), now.format("%H:%M").to_string(),
+            mood, note.unwrap_or_default(), trigger.unwrap_or_default(), now.to_rfc3339()],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_mood_history(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let d = days.unwrap_or(7);
+    let since = (chrono::Local::now() - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT id, date, time, mood, note, trigger_text FROM mood_log WHERE date>=?1 ORDER BY date DESC, time DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![since], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
+            "time": row.get::<_, String>(2)?, "mood": row.get::<_, i32>(3)?,
+            "note": row.get::<_, String>(4)?, "trigger": row.get::<_, String>(5)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn create_principle(title: String, description: Option<String>, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO principles (title, description, category, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![title, description.unwrap_or_default(), category.unwrap_or_else(|| "discipline".into()), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_principles(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, title, description, category, active FROM principles ORDER BY category, created_at"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "title": row.get::<_, String>(1)?,
+            "description": row.get::<_, String>(2)?, "category": row.get::<_, String>(3)?,
+            "active": row.get::<_, i32>(4)? != 0,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn update_principle(id: i64, active: Option<bool>, title: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(a) = active { conn.execute("UPDATE principles SET active=?1 WHERE id=?2", rusqlite::params![a as i32, id]).map_err(|e| format!("DB error: {}", e))?; }
+    if let Some(t) = title { conn.execute("UPDATE principles SET title=?1 WHERE id=?2", rusqlite::params![t, id]).map_err(|e| format!("DB error: {}", e))?; }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_principle(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM principles WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_mindset_check(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let week_ago = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+    let (avg_mood, avg_energy, avg_stress, journal_count): (f64, f64, f64, i64) = conn.query_row(
+        "SELECT COALESCE(AVG(mood),3), COALESCE(AVG(energy),3), COALESCE(AVG(stress),3), COUNT(*)
+         FROM journal_entries WHERE date>=?1",
+        rusqlite::params![week_ago], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).unwrap_or((3.0, 3.0, 3.0, 0));
+    let principles_count: i64 = conn.query_row("SELECT COUNT(*) FROM principles WHERE active=1", [], |row| row.get(0)).unwrap_or(0);
+    Ok(serde_json::json!({
+        "avg_mood": format!("{:.1}", avg_mood), "avg_energy": format!("{:.1}", avg_energy),
+        "avg_stress": format!("{:.1}", avg_stress), "journal_streak": journal_count,
+        "active_principles": principles_count,
+    }))
+}
+
+// ── v0.8.0: Blocklist commands ──
+
+#[tauri::command]
+fn add_to_blocklist(block_type: String, value: String, schedule: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO blocklist (type, value, schedule, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![block_type, value, schedule, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn remove_from_blocklist(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM blocklist WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_blocklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, type, value, schedule, active FROM blocklist ORDER BY type, value"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "type": row.get::<_, String>(1)?,
+            "value": row.get::<_, String>(2)?, "schedule": row.get::<_, Option<String>>(3)?,
+            "active": row.get::<_, i32>(4)? != 0,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn toggle_blocklist_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE blocklist SET active = 1 - active WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+// ── v0.8.0: Goals & Settings commands ──
+
+#[tauri::command]
+fn create_goal(tab_name: String, title: String, target_value: f64, unit: Option<String>, deadline: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO tab_goals (tab_name, title, target_value, unit, deadline, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![tab_name, title, target_value, unit.unwrap_or_default(), deadline, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_goals(tab_name: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(t) = tab_name {
+        let mut stmt = conn.prepare(
+            "SELECT id, tab_name, title, target_value, current_value, unit, deadline, status FROM tab_goals WHERE tab_name=?1 AND status='active' ORDER BY created_at"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![t], |row| goal_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, tab_name, title, target_value, current_value, unit, deadline, status FROM tab_goals WHERE status='active' ORDER BY tab_name, created_at"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = stmt.query_map([], |row| goal_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        Ok(rows)
+    }
+}
+
+fn goal_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Error> {
+    let target: f64 = row.get(3)?;
+    let current: f64 = row.get(4)?;
+    let pct = if target > 0.0 { (current / target * 100.0).min(100.0) } else { 0.0 };
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "tab_name": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?, "target_value": target,
+        "current_value": current, "unit": row.get::<_, String>(5)?,
+        "deadline": row.get::<_, Option<String>>(6)?, "status": row.get::<_, String>(7)?,
+        "percent": format!("{:.0}", pct),
+    }))
+}
+
+#[tauri::command]
+fn update_goal(id: i64, current_value: Option<f64>, status: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(v) = current_value { conn.execute("UPDATE tab_goals SET current_value=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {}", e))?; }
+    if let Some(s) = status { conn.execute("UPDATE tab_goals SET status=?1 WHERE id=?2", rusqlite::params![s, id]).map_err(|e| format!("DB error: {}", e))?; }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_goal(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM tab_goals WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",
+        rusqlite::params![key, value],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_app_setting(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<String>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let result: Option<String> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key=?1", rusqlite::params![key], |row| row.get(0),
+    ).ok();
+    Ok(result)
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -3127,24 +4271,27 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 
 // ── Proactive messaging logic ──
 
-const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion living on the user's Mac. You're like a close friend who shares the same space. You see what's on the screen, what music is playing, what's in the calendar.
+const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion living on the user's Mac. You're like a close friend who shares the same space.
 
-Your job: write a short message to the user. Be natural, like texting a friend.
+Your job: write a short, natural message. Like texting a friend you live with.
 
-WHAT YOU CAN DO:
-- Comment on what they're doing, listening to, browsing
-- Mention an upcoming calendar event
-- React to their screen time (too much distraction? productive streak?)
-- Share a thought, observation, or gentle nudge
-- Just say hi if it's been a while — you live here, it's natural
-- Be playful, curious, warm
+VARIETY IS KEY — pick a DIFFERENT style each time:
+- Observation: comment on their screen/music/browsing
+- Calendar: mention upcoming events
+- Nudge: gentle productivity/health reminder
+- Curiosity: ask about their day/project/mood
+- Humor: light joke or playful tease about their habits
+- Care: check in on mood trends, suggest breaks
+- Memory: reference something you remember about them
+- Food: warn about expiring products if any
+- Goals: celebrate progress or remind about deadlines
+- Journal: remind them to write evening reflection
 
 RULES:
-- 1-2 sentences max
-- Default to Russian
-- NEVER repeat your last message (it's shown below if exists)
-- Be yourself — a companion, not a notification bot
-- Only reply [SKIP] if you literally just sent a message and nothing changed
+- 1-2 sentences max, Russian by default
+- NEVER repeat your last message style or content
+- Be genuine — a companion, not a notification bot
+- Only reply [SKIP] if nothing meaningful to say
 
 Reply with your message text, or [SKIP]."#;
 
@@ -3488,6 +4635,75 @@ pub fn run() {
             get_all_memories,
             delete_memory,
             update_memory,
+            // v0.8.0: Media Items (Hobbies collections)
+            add_media_item,
+            update_media_item,
+            delete_media_item,
+            get_media_items,
+            hide_media_item,
+            unhide_media_item,
+            create_user_list,
+            get_user_lists,
+            add_to_list,
+            remove_from_list,
+            get_list_items,
+            get_media_stats,
+            // v0.8.0: Food
+            log_food,
+            get_food_log,
+            delete_food_entry,
+            get_food_stats,
+            create_recipe,
+            get_recipes,
+            delete_recipe,
+            add_product,
+            get_products,
+            update_product,
+            delete_product,
+            get_expiring_products,
+            // v0.8.0: Money
+            add_transaction,
+            get_transactions,
+            delete_transaction,
+            get_transaction_stats,
+            create_budget,
+            get_budgets,
+            delete_budget,
+            create_savings_goal,
+            get_savings_goals,
+            update_savings_goal,
+            delete_savings_goal,
+            add_subscription,
+            get_subscriptions,
+            update_subscription,
+            delete_subscription,
+            add_debt,
+            get_debts,
+            update_debt,
+            delete_debt,
+            // v0.8.0: Mindset
+            save_journal_entry,
+            get_journal_entries,
+            get_journal_entry,
+            log_mood,
+            get_mood_history,
+            create_principle,
+            get_principles,
+            update_principle,
+            delete_principle,
+            get_mindset_check,
+            // v0.8.0: Blocklist
+            add_to_blocklist,
+            remove_from_blocklist,
+            get_blocklist,
+            toggle_blocklist_item,
+            // v0.8.0: Goals & Settings
+            create_goal,
+            get_goals,
+            update_goal,
+            delete_goal,
+            set_app_setting,
+            get_app_setting,
         ])
         .setup(move |app| {
             // Auto-updater

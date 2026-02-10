@@ -7,23 +7,66 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const integrationsContent = document.getElementById('integrations-content');
-const settingsContent = document.getElementById('settings-content');
-
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 
 let busy = false;
 let history = [];
-let attachedFile = null; // {name, content}
-let currentTab = 'chat';
+let attachedFile = null;
 let isRecording = false;
-let integrationsLoaded = false;
-let currentConversationId = null; // Active conversation ID in SQLite
+let currentConversationId = null;
 let isSpeaking = false;
 let convSearchTimeout = null;
+let focusTimerInterval = null;
+let currentNoteId = null;
+let noteAutoSaveTimeout = null;
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth();
+let selectedCalendarDate = null;
+let currentProjectId = null;
+let devFilter = 'all';
+let mediaStatusFilter = 'all';
 
-// Track which tabs have been loaded
-const tabLoaded = {};
+// ── Tab Registry ──
+const TAB_REGISTRY = {
+  chat:        { label: 'Chat',        closable: false, subTabs: null },
+  dashboard:   { label: 'Dashboard',   closable: true,  subTabs: ['Overview'] },
+  calendar:    { label: 'Calendar',    closable: true,  subTabs: ['Month'] },
+  focus:       { label: 'Focus',       closable: true,  subTabs: ['Current', 'History'] },
+  notes:       { label: 'Notes',       closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
+  work:        { label: 'Work',        closable: true,  subTabs: ['Projects'] },
+  development: { label: 'Development', closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
+  hobbies:     { label: 'Hobbies',     closable: true,  subTabs: ['Overview','Music','Anime','Manga','Movies','Series','Cartoons','Games','Books','Podcasts'] },
+  sports:      { label: 'Sports',      closable: true,  subTabs: ['Workouts', 'Stats'] },
+  health:      { label: 'Health',      closable: true,  subTabs: ['Today', 'Habits'] },
+  mindset:     { label: 'Mindset',     closable: true,  subTabs: ['Journal', 'Mood', 'Principles'] },
+  food:        { label: 'Food',        closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
+  money:       { label: 'Money',       closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
+  memory:      { label: 'Memory',      closable: true,  subTabs: ['All Facts', 'Search'] },
+  settings:    { label: 'Settings',    closable: true,  subTabs: ['General', 'Blocklist', 'Integrations', 'About'] },
+};
+
+let openTabs = ['chat', 'dashboard'];
+let activeTab = 'chat';
+let activeSubTab = {};
+
+// Init default sub-tabs
+for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
+  if (reg.subTabs?.length) activeSubTab[id] = reg.subTabs[0];
+}
+
+// Restore from localStorage
+try {
+  const saved = JSON.parse(localStorage.getItem('hanni_tabs'));
+  if (saved) {
+    openTabs = saved.open || ['chat', 'dashboard'];
+    activeTab = saved.active || 'chat';
+    if (saved.sub) Object.assign(activeSubTab, saved.sub);
+  }
+} catch (_) {}
+
+function saveTabs() {
+  localStorage.setItem('hanni_tabs', JSON.stringify({ open: openTabs, active: activeTab, sub: activeSubTab }));
+}
 
 // ── Auto-update notification ──
 listen('update-available', (event) => {
@@ -31,7 +74,7 @@ listen('update-available', (event) => {
   const banner = document.createElement('div');
   banner.style.cssText = 'padding:8px 16px;background:#161616;color:#888;font-size:12px;text-align:center;border-bottom:1px solid #222;';
   banner.textContent = `Обновление до v${version}...`;
-  document.querySelector('main').prepend(banner);
+  document.getElementById('content-area')?.prepend(banner);
 });
 
 // ── Proactive message listener ──
@@ -236,78 +279,164 @@ document.getElementById('conv-search')?.addEventListener('input', (e) => {
 
 // ── Tab navigation ──
 
-function switchTab(tab) {
-  currentTab = tab;
-
-  // Update sidebar buttons
-  document.querySelectorAll('.sidebar-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === tab);
-  });
-
-  // Update views
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  const view = document.getElementById(`view-${tab}`);
-  if (view) view.classList.add('active');
-
-  // Show/hide chat-specific UI
-  const newChatBtn = document.getElementById('new-chat');
-  if (newChatBtn) newChatBtn.style.display = tab === 'chat' ? '' : 'none';
-
-  // Lazy-load tab content
-  switch (tab) {
-    case 'chat':
-      loadConversationsList();
-      input.focus();
-      break;
-    case 'dashboard':
-      loadDashboard();
-      break;
-    case 'calendar':
-      loadCalendar();
-      break;
-    case 'focus':
-      loadFocus();
-      break;
-    case 'notes':
-      loadNotes();
-      break;
-    case 'work':
-      loadWork();
-      break;
-    case 'development':
-      loadDevelopment();
-      break;
-    case 'hobbies':
-      loadHobbies();
-      break;
-    case 'sports':
-      loadSports();
-      break;
-    case 'health':
-      loadHealth();
-      break;
-    case 'integrations':
-      if (!integrationsLoaded) loadIntegrations();
-      break;
-    case 'settings':
-      loadSettings();
-      break;
+function renderTabBar() {
+  const tabList = document.getElementById('tab-list');
+  tabList.innerHTML = '';
+  for (const tabId of openTabs) {
+    const reg = TAB_REGISTRY[tabId];
+    if (!reg) continue;
+    const item = document.createElement('div');
+    item.className = 'tab-item' + (tabId === activeTab ? ' active' : '');
+    item.innerHTML = `<span class="tab-item-label">${reg.label}</span>` +
+      (reg.closable ? `<button class="tab-item-close" data-tab="${tabId}">&times;</button>` : '');
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab-item-close')) return;
+      switchTab(tabId);
+    });
+    if (reg.closable) {
+      item.querySelector('.tab-item-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(tabId);
+      });
+    }
+    tabList.appendChild(item);
   }
 }
 
-// Keyboard shortcuts: Cmd+1..0 for tabs
-document.addEventListener('keydown', (e) => {
-  if (!e.metaKey && !e.ctrlKey) return;
-  const tabMap = { '1': 'chat', '2': 'dashboard', '3': 'calendar', '4': 'focus', '5': 'notes',
-                   '6': 'work', '7': 'development', '8': 'hobbies', '9': 'sports', '0': 'health' };
-  if (tabMap[e.key]) {
-    e.preventDefault();
-    switchTab(tabMap[e.key]);
+function renderSubSidebar() {
+  const sidebar = document.getElementById('sub-sidebar');
+  const items = document.getElementById('sub-sidebar-items');
+  const reg = TAB_REGISTRY[activeTab];
+
+  if (!reg || !reg.subTabs || activeTab === 'chat') {
+    sidebar.classList.add('hidden');
+    return;
   }
+
+  sidebar.classList.remove('hidden');
+  items.innerHTML = '';
+  const currentSub = activeSubTab[activeTab] || reg.subTabs[0];
+  for (const sub of reg.subTabs) {
+    const item = document.createElement('div');
+    item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
+    item.textContent = sub;
+    item.addEventListener('click', () => {
+      activeSubTab[activeTab] = sub;
+      saveTabs();
+      renderSubSidebar();
+      loadSubTabContent(activeTab, sub);
+    });
+    items.appendChild(item);
+  }
+  loadGoalsWidget();
+}
+
+async function loadGoalsWidget() {
+  const section = document.getElementById('sub-sidebar-goals');
+  const list = document.getElementById('goals-list');
+  const toggle = document.getElementById('goals-toggle');
+  if (!section || !list) return;
+  try {
+    const goals = await invoke('get_goals', { tabName: activeTab });
+    if (goals.length === 0) { section.classList.add('hidden'); return; }
+    section.classList.remove('hidden');
+    list.innerHTML = '';
+    for (const g of goals) {
+      const pct = g.target_value > 0 ? Math.min(100, Math.round(g.current_value / g.target_value * 100)) : 0;
+      const item = document.createElement('div');
+      item.className = 'goal-item';
+      item.innerHTML = `<div>${escapeHtml(g.title)} (${pct}%)</div>
+        <div class="goal-progress"><div class="goal-progress-bar" style="width:${pct}%"></div></div>`;
+      list.appendChild(item);
+    }
+  } catch (_) { section.classList.add('hidden'); }
+  toggle?.addEventListener('click', () => list.classList.toggle('hidden'));
+}
+
+function openTab(tabId) {
+  if (!TAB_REGISTRY[tabId]) return;
+  if (!openTabs.includes(tabId)) openTabs.push(tabId);
+  switchTab(tabId);
+}
+
+function closeTab(tabId) {
+  if (!TAB_REGISTRY[tabId]?.closable) return;
+  const idx = openTabs.indexOf(tabId);
+  if (idx === -1) return;
+  openTabs.splice(idx, 1);
+  if (activeTab === tabId) activeTab = openTabs[Math.min(idx, openTabs.length - 1)] || 'chat';
+  saveTabs();
+  renderTabBar();
+  activateView();
+}
+
+function switchTab(tabId) {
+  if (!TAB_REGISTRY[tabId]) return;
+  if (!openTabs.includes(tabId)) openTabs.push(tabId);
+  activeTab = tabId;
+  saveTabs();
+  renderTabBar();
+  activateView();
+}
+
+function activateView() {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const view = document.getElementById(`view-${activeTab}`);
+  if (view) view.classList.add('active');
+  renderSubSidebar();
+  const reg = TAB_REGISTRY[activeTab];
+  const sub = reg?.subTabs ? (activeSubTab[activeTab] || reg.subTabs[0]) : null;
+  loadSubTabContent(activeTab, sub);
+}
+
+function loadSubTabContent(tabId, subTab) {
+  switch (tabId) {
+    case 'chat': loadConversationsList(); input.focus(); break;
+    case 'dashboard': loadDashboard(); break;
+    case 'calendar': loadCalendar(); break;
+    case 'focus': loadFocus(); break;
+    case 'notes': loadNotes(subTab); break;
+    case 'work': loadWork(); break;
+    case 'development': loadDevelopment(); break;
+    case 'hobbies': loadHobbies(subTab); break;
+    case 'sports': loadSports(); break;
+    case 'health': loadHealth(); break;
+    case 'mindset': loadMindset(subTab); break;
+    case 'food': loadFood(subTab); break;
+    case 'money': loadMoney(subTab); break;
+    case 'memory': loadMemoryTab(subTab); break;
+    case 'settings': loadSettings(subTab); break;
+  }
+}
+
+// Tab add dropdown
+document.getElementById('tab-add')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const dropdown = document.getElementById('tab-dropdown');
+  const list = document.getElementById('tab-dropdown-list');
+  list.innerHTML = '';
+  for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
+    if (openTabs.includes(id)) continue;
+    const item = document.createElement('div');
+    item.className = 'tab-dropdown-item';
+    item.textContent = reg.label;
+    item.addEventListener('click', () => { dropdown.classList.add('hidden'); openTab(id); });
+    list.appendChild(item);
+  }
+  dropdown.classList.toggle('hidden');
 });
 
-document.querySelectorAll('.sidebar-btn').forEach(btn => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+document.addEventListener('click', () => {
+  document.getElementById('tab-dropdown')?.classList.add('hidden');
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (!e.metaKey && !e.ctrlKey) return;
+  if (e.key === 'w') { e.preventDefault(); if (TAB_REGISTRY[activeTab]?.closable) closeTab(activeTab); return; }
+  if (e.key === 't') { e.preventDefault(); document.getElementById('tab-add')?.click(); return; }
+  const num = parseInt(e.key);
+  if (num >= 1 && num <= 9 && num <= openTabs.length) { e.preventDefault(); switchTab(openTabs[num - 1]); }
 });
 
 // ── Chat helpers ──
@@ -504,6 +633,71 @@ async function executeAction(actionJson) {
         break;
       case 'set_clipboard':
         result = await invoke('set_clipboard', { text: action.text || '' });
+        break;
+      // Media
+      case 'add_media':
+        result = await invoke('add_media_item', {
+          mediaType: action.media_type || 'movie', title: action.title || '',
+          originalTitle: action.original_title || null, year: action.year || null,
+          description: action.description || null, coverUrl: action.cover_url || null,
+          status: action.status || 'planned', rating: action.rating || null,
+          progress: action.progress || null, totalEpisodes: action.total_episodes || null,
+          notes: action.notes || null,
+        });
+        break;
+      // Food
+      case 'log_food':
+        result = await invoke('log_food', {
+          date: action.date || null, mealType: action.meal_type || 'snack',
+          name: action.name || '', calories: action.calories || null,
+          protein: action.protein || null, carbs: action.carbs || null,
+          fat: action.fat || null, notes: action.notes || null,
+        });
+        break;
+      case 'add_product':
+        result = await invoke('add_product', {
+          name: action.name || '', category: action.category || null,
+          quantity: action.quantity || null, unit: action.unit || null,
+          expiryDate: action.expiry_date || null, location: action.location || 'fridge',
+          barcode: action.barcode || null, notes: action.notes || null,
+        });
+        break;
+      // Money
+      case 'add_transaction':
+        result = await invoke('add_transaction', {
+          date: action.date || null, txType: action.tx_type || 'expense',
+          amount: action.amount || 0, currency: action.currency || 'KZT',
+          category: action.category || 'other', description: action.description || '',
+          recurring: action.recurring || false, recurringPeriod: action.recurring_period || null,
+        });
+        break;
+      // Mindset
+      case 'log_mood':
+        result = await invoke('log_mood', {
+          mood: action.mood || 3, note: action.note || null,
+          trigger: action.trigger || null,
+        });
+        break;
+      case 'save_journal':
+        result = await invoke('save_journal_entry', {
+          mood: action.mood || 3, energy: action.energy || 3, stress: action.stress || 3,
+          gratitude: action.gratitude || null, reflection: action.reflection || null,
+          wins: action.wins || null, struggles: action.struggles || null,
+        });
+        break;
+      // Goals
+      case 'create_goal':
+        result = await invoke('create_goal', {
+          tabName: action.tab || 'general', title: action.title || '',
+          targetValue: action.target || 1, currentValue: action.current || 0,
+          unit: action.unit || '', deadline: action.deadline || null,
+        });
+        break;
+      case 'update_goal':
+        result = await invoke('update_goal', {
+          id: action.id, currentValue: action.current || null,
+          status: action.status || null,
+        });
         break;
       default:
         result = 'Unknown action: ' + action.type;
@@ -756,6 +950,585 @@ input.addEventListener('keydown', e => {
   }
 });
 
+// ── Mindset ──
+async function loadMindset(subTab) {
+  const el = document.getElementById('mindset-content');
+  if (!el) return;
+  if (subTab === 'Journal') loadJournal(el);
+  else if (subTab === 'Mood') loadMoodLog(el);
+  else if (subTab === 'Principles') loadPrinciples(el);
+  else loadJournal(el);
+}
+
+async function loadJournal(el) {
+  try {
+    const today = await invoke('get_journal_entry', { date: null }).catch(() => null);
+    const entries = await invoke('get_journal_entries', { days: 7 }).catch(() => []);
+    const mood = today?.mood || 3, energy = today?.energy || 3, stress = today?.stress || 3;
+    el.innerHTML = `
+      <div class="module-header"><h2>Journal</h2></div>
+      <div class="settings-section">
+        <div class="settings-section-title">Today</div>
+        <div class="settings-row"><span class="settings-label">Mood (1-5)</span><input class="form-input" id="j-mood" type="number" min="1" max="5" value="${mood}" style="width:60px;"></div>
+        <div class="settings-row"><span class="settings-label">Energy (1-5)</span><input class="form-input" id="j-energy" type="number" min="1" max="5" value="${energy}" style="width:60px;"></div>
+        <div class="settings-row"><span class="settings-label">Stress (1-5)</span><input class="form-input" id="j-stress" type="number" min="1" max="5" value="${stress}" style="width:60px;"></div>
+        <div class="form-group"><label class="form-label">Gratitude</label><textarea class="form-textarea" id="j-gratitude" rows="2">${escapeHtml(today?.gratitude||'')}</textarea></div>
+        <div class="form-group"><label class="form-label">Wins</label><textarea class="form-textarea" id="j-wins" rows="2">${escapeHtml(today?.wins||'')}</textarea></div>
+        <div class="form-group"><label class="form-label">Struggles</label><textarea class="form-textarea" id="j-struggles" rows="2">${escapeHtml(today?.struggles||'')}</textarea></div>
+        <div class="form-group"><label class="form-label">Reflection</label><textarea class="form-textarea" id="j-reflection" rows="3">${escapeHtml(today?.reflection||'')}</textarea></div>
+        <button class="btn-primary" id="j-save" style="margin-top:8px;">Save</button>
+      </div>
+      ${entries.length > 0 ? `<div class="module-card-title" style="margin-top:16px;">Recent Entries</div>
+        ${entries.map(e => `<div class="focus-log-item">
+          <span class="focus-log-time">${e.date}</span>
+          <span class="focus-log-title">Mood:${e.mood} Energy:${e.energy} Stress:${e.stress}</span>
+        </div>`).join('')}` : ''}`;
+    document.getElementById('j-save')?.addEventListener('click', async () => {
+      try {
+        await invoke('save_journal_entry', {
+          mood: parseInt(document.getElementById('j-mood')?.value)||3,
+          energy: parseInt(document.getElementById('j-energy')?.value)||3,
+          stress: parseInt(document.getElementById('j-stress')?.value)||3,
+          gratitude: document.getElementById('j-gratitude')?.value||null,
+          reflection: document.getElementById('j-reflection')?.value||null,
+          wins: document.getElementById('j-wins')?.value||null,
+          struggles: document.getElementById('j-struggles')?.value||null,
+        });
+        loadJournal(el);
+      } catch (err) { alert('Error: ' + err); }
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadMoodLog(el) {
+  try {
+    const history = await invoke('get_mood_history', { days: 14 }).catch(() => []);
+    const moods = ['😤','😕','😐','🙂','😊'];
+    el.innerHTML = `
+      <div class="module-header"><h2>Mood Log</h2></div>
+      <div style="display:flex;gap:12px;justify-content:center;margin:20px 0;">
+        ${moods.map((m,i) => `<button class="mood-btn" data-mood="${i+1}" style="font-size:32px;background:none;border:none;cursor:pointer;opacity:0.5;transition:opacity 0.1s;" title="Mood ${i+1}">${m}</button>`).join('')}
+      </div>
+      <input class="form-input" id="mood-note" placeholder="Note (optional)..." style="max-width:400px;margin:0 auto 16px;display:block;">
+      <div class="module-card-title">Recent</div>
+      <div id="mood-history">
+        ${history.map(m => `<div class="focus-log-item">
+          <span class="focus-log-time">${m.date} ${m.time||''}</span>
+          <span style="font-size:18px;">${moods[(m.mood||3)-1]}</span>
+          <span class="focus-log-title">${escapeHtml(m.note||'')}</span>
+        </div>`).join('')}
+      </div>`;
+    el.querySelectorAll('.mood-btn').forEach(btn => {
+      btn.addEventListener('mouseenter', () => btn.style.opacity = '1');
+      btn.addEventListener('mouseleave', () => btn.style.opacity = '0.5');
+      btn.addEventListener('click', async () => {
+        try {
+          await invoke('log_mood', { mood: parseInt(btn.dataset.mood), note: document.getElementById('mood-note')?.value||null, trigger: null });
+          loadMoodLog(el);
+        } catch (err) { alert('Error: ' + err); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadPrinciples(el) {
+  try {
+    const principles = await invoke('get_principles').catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Principles</h2><button class="btn-primary" id="add-principle-btn">+ Add</button></div>
+      <div id="principles-list">
+        ${principles.map(p => `<div class="habit-item">
+          <div class="habit-check${p.active ? ' checked' : ''}" data-id="${p.id}">${p.active ? '&#10003;' : ''}</div>
+          <span class="habit-name">${escapeHtml(p.title)}</span>
+          <span style="color:#555;font-size:11px;">${p.category||''}</span>
+          <button class="memory-item-btn" data-del="${p.id}" style="margin-left:auto;">&times;</button>
+        </div>`).join('')}
+      </div>`;
+    el.querySelectorAll('[data-del]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Delete?')) { await invoke('delete_principle', { id: parseInt(btn.dataset.del) }).catch(()=>{}); loadPrinciples(el); }
+      });
+    });
+    document.getElementById('add-principle-btn')?.addEventListener('click', () => {
+      const title = prompt('Principle:');
+      if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+// ── Food ──
+async function loadFood(subTab) {
+  const el = document.getElementById('food-content');
+  if (!el) return;
+  if (subTab === 'Food Log') loadFoodLog(el);
+  else if (subTab === 'Recipes') loadRecipes(el);
+  else if (subTab === 'Products') loadProducts(el);
+  else loadFoodLog(el);
+}
+
+async function loadFoodLog(el) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const log = await invoke('get_food_log', { date: today }).catch(() => []);
+    const stats = await invoke('get_food_stats', { days: 1 }).catch(() => ({}));
+    const mealLabels = { breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snack:'Snack' };
+    el.innerHTML = `
+      <div class="module-header"><h2>Food Log</h2><button class="btn-primary" id="food-add-btn">+ Log Food</button></div>
+      <div class="dashboard-stats">
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_calories||0}</div><div class="dashboard-stat-label">Calories</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_protein||0}g</div><div class="dashboard-stat-label">Protein</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_carbs||0}g</div><div class="dashboard-stat-label">Carbs</div></div>
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_fat||0}g</div><div class="dashboard-stat-label">Fat</div></div>
+      </div>
+      <div id="food-log-list">
+        ${['breakfast','lunch','dinner','snack'].map(meal => {
+          const items = log.filter(l => l.meal_type === meal);
+          return items.length > 0 ? `<div class="module-card-title">${mealLabels[meal]}</div>
+            ${items.map(i => `<div class="focus-log-item">
+              <span class="focus-log-title">${escapeHtml(i.name)}</span>
+              <span class="focus-log-duration">${i.calories||0} kcal</span>
+              <button class="memory-item-btn" data-fdel="${i.id}">&times;</button>
+            </div>`).join('')}` : '';
+        }).join('')}
+      </div>`;
+    el.querySelectorAll('[data-fdel]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('delete_food_entry', { id: parseInt(btn.dataset.fdel) }).catch(()=>{});
+        loadFoodLog(el);
+      });
+    });
+    document.getElementById('food-add-btn')?.addEventListener('click', () => showAddFoodModal(el));
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+function showAddFoodModal(el) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Log Food</div>
+    <div class="form-group"><label class="form-label">Meal</label>
+      <select class="form-select" id="food-meal" style="width:100%;">
+        <option value="breakfast">Breakfast</option><option value="lunch">Lunch</option>
+        <option value="dinner">Dinner</option><option value="snack">Snack</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="food-name"></div>
+    <div class="form-group"><label class="form-label">Calories</label><input class="form-input" id="food-cal" type="number"></div>
+    <div class="form-group"><label class="form-label">Protein (g)</label><input class="form-input" id="food-protein" type="number"></div>
+    <div class="form-group"><label class="form-label">Carbs (g)</label><input class="form-input" id="food-carbs" type="number"></div>
+    <div class="form-group"><label class="form-label">Fat (g)</label><input class="form-input" id="food-fat" type="number"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="food-save">Save</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('food-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('food-name')?.value?.trim();
+    if (!name) return;
+    try {
+      await invoke('log_food', {
+        date: null, mealType: document.getElementById('food-meal')?.value || 'snack', name,
+        calories: parseInt(document.getElementById('food-cal')?.value)||null,
+        protein: parseFloat(document.getElementById('food-protein')?.value)||null,
+        carbs: parseFloat(document.getElementById('food-carbs')?.value)||null,
+        fat: parseFloat(document.getElementById('food-fat')?.value)||null,
+        notes: null,
+      });
+      overlay.remove();
+      loadFoodLog(el);
+    } catch (err) { alert('Error: ' + err); }
+  });
+}
+
+async function loadRecipes(el) {
+  try {
+    const recipes = await invoke('get_recipes', { search: null, tags: null }).catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Recipes</h2><button class="btn-primary" id="recipe-add-btn">+ Add Recipe</button></div>
+      <div class="dev-grid" id="recipes-grid">
+        ${recipes.map(r => `<div class="dev-card">
+          <div class="dev-card-title">${escapeHtml(r.name)}</div>
+          <div style="font-size:12px;color:#666;">${r.prep_time||0}+${r.cook_time||0} min · ${r.calories||'?'} kcal</div>
+          ${r.tags ? `<div class="dev-card-meta">${r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join('')}</div>` : ''}
+        </div>`).join('')}
+      </div>`;
+    document.getElementById('recipe-add-btn')?.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal">
+        <div class="modal-title">Add Recipe</div>
+        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="rcp-name"></div>
+        <div class="form-group"><label class="form-label">Ingredients</label><textarea class="form-textarea" id="rcp-ing" rows="3"></textarea></div>
+        <div class="form-group"><label class="form-label">Instructions</label><textarea class="form-textarea" id="rcp-inst" rows="3"></textarea></div>
+        <div class="form-group"><label class="form-label">Prep time (min)</label><input class="form-input" id="rcp-prep" type="number"></div>
+        <div class="form-group"><label class="form-label">Calories</label><input class="form-input" id="rcp-cal" type="number"></div>
+        <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" id="rcp-tags"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn-primary" id="rcp-save">Save</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById('rcp-save')?.addEventListener('click', async () => {
+        const name = document.getElementById('rcp-name')?.value?.trim();
+        if (!name) return;
+        try {
+          await invoke('create_recipe', {
+            name, description: null,
+            ingredients: document.getElementById('rcp-ing')?.value||'',
+            instructions: document.getElementById('rcp-inst')?.value||'',
+            prepTime: parseInt(document.getElementById('rcp-prep')?.value)||null,
+            cookTime: null, servings: null,
+            calories: parseInt(document.getElementById('rcp-cal')?.value)||null,
+            tags: document.getElementById('rcp-tags')?.value||null,
+          });
+          overlay.remove();
+          loadRecipes(el);
+        } catch (err) { alert('Error: ' + err); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadProducts(el) {
+  try {
+    const products = await invoke('get_products', { location: null, expiringSoon: false }).catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Products</h2><button class="btn-primary" id="product-add-btn">+ Add Product</button></div>
+      <div id="products-list">
+        ${products.map(p => {
+          const exp = p.expiry_date ? new Date(p.expiry_date) : null;
+          const isExpiring = exp && (exp - Date.now()) < 3 * 86400000;
+          return `<div class="focus-log-item" style="${isExpiring ? 'border-left:2px solid #f87171;' : ''}">
+            <span class="focus-log-title">${escapeHtml(p.name)}</span>
+            <span class="badge badge-gray">${p.location||''}</span>
+            ${p.quantity ? `<span style="color:#888;font-size:12px;">${p.quantity} ${p.unit||''}</span>` : ''}
+            ${exp ? `<span style="color:${isExpiring?'#f87171':'#888'};font-size:11px;">${p.expiry_date}</span>` : ''}
+            <button class="memory-item-btn" data-pdel="${p.id}">&times;</button>
+          </div>`;
+        }).join('')}
+      </div>`;
+    el.querySelectorAll('[data-pdel]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('delete_product', { id: parseInt(btn.dataset.pdel) }).catch(()=>{});
+        loadProducts(el);
+      });
+    });
+    document.getElementById('product-add-btn')?.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal">
+        <div class="modal-title">Add Product</div>
+        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="prod-name"></div>
+        <div class="form-group"><label class="form-label">Location</label>
+          <select class="form-select" id="prod-loc" style="width:100%;">
+            <option value="fridge">Fridge</option><option value="freezer">Freezer</option>
+            <option value="pantry">Pantry</option><option value="other">Other</option>
+          </select></div>
+        <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" id="prod-qty" type="number"></div>
+        <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="prod-unit" placeholder="pcs, kg, L..."></div>
+        <div class="form-group"><label class="form-label">Expiry Date</label><input class="form-input" id="prod-exp" type="date"></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn-primary" id="prod-save">Save</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById('prod-save')?.addEventListener('click', async () => {
+        const name = document.getElementById('prod-name')?.value?.trim();
+        if (!name) return;
+        try {
+          await invoke('add_product', {
+            name, category: null,
+            quantity: parseFloat(document.getElementById('prod-qty')?.value)||null,
+            unit: document.getElementById('prod-unit')?.value||null,
+            expiryDate: document.getElementById('prod-exp')?.value||null,
+            location: document.getElementById('prod-loc')?.value||'fridge',
+            barcode: null, notes: null,
+          });
+          overlay.remove();
+          loadProducts(el);
+        } catch (err) { alert('Error: ' + err); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+// ── Money ──
+async function loadMoney(subTab) {
+  const el = document.getElementById('money-content');
+  if (!el) return;
+  if (subTab === 'Expenses' || subTab === 'Income') loadTransactions(el, subTab === 'Income' ? 'income' : 'expense');
+  else if (subTab === 'Budget') loadBudgets(el);
+  else if (subTab === 'Savings') loadSavings(el);
+  else if (subTab === 'Subscriptions') loadSubscriptions(el);
+  else if (subTab === 'Debts') loadDebts(el);
+  else loadTransactions(el, 'expense');
+}
+
+async function loadTransactions(el, txType) {
+  try {
+    const items = await invoke('get_transactions', { txType, category: null, days: 30 }).catch(() => []);
+    const stats = await invoke('get_transaction_stats', { days: 30 }).catch(() => ({}));
+    const isExpense = txType === 'expense';
+    el.innerHTML = `
+      <div class="module-header"><h2>${isExpense ? 'Expenses' : 'Income'}</h2><button class="btn-primary" id="tx-add-btn">+ Add</button></div>
+      <div class="dashboard-stats">
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${isExpense ? (stats.total_expenses||0) : (stats.total_income||0)}</div><div class="dashboard-stat-label">Total (30d)</div></div>
+      </div>
+      <div id="tx-list">
+        ${items.map(t => `<div class="focus-log-item">
+          <span class="focus-log-time">${t.date}</span>
+          <span class="focus-log-title">${escapeHtml(t.description||t.category)}</span>
+          <span class="badge badge-gray">${t.category}</span>
+          <span class="focus-log-duration" style="color:${isExpense?'#f87171':'#34d399'}">${isExpense?'-':'+'} ${t.amount} ${t.currency||'KZT'}</span>
+          <button class="memory-item-btn" data-txdel="${t.id}">&times;</button>
+        </div>`).join('')}
+      </div>`;
+    el.querySelectorAll('[data-txdel]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('delete_transaction', { id: parseInt(btn.dataset.txdel) }).catch(()=>{});
+        loadTransactions(el, txType);
+      });
+    });
+    document.getElementById('tx-add-btn')?.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal">
+        <div class="modal-title">Add ${isExpense ? 'Expense' : 'Income'}</div>
+        <div class="form-group"><label class="form-label">Amount</label><input class="form-input" id="tx-amount" type="number" step="0.01"></div>
+        <div class="form-group"><label class="form-label">Category</label><input class="form-input" id="tx-category" placeholder="food, transport, salary..."></div>
+        <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="tx-desc"></div>
+        <div class="form-group"><label class="form-label">Currency</label>
+          <select class="form-select" id="tx-currency" style="width:100%;">
+            <option value="KZT">KZT</option><option value="USD">USD</option><option value="RUB">RUB</option>
+          </select></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn-primary" id="tx-save">Save</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById('tx-save')?.addEventListener('click', async () => {
+        const amount = parseFloat(document.getElementById('tx-amount')?.value);
+        if (!amount) return;
+        try {
+          await invoke('add_transaction', {
+            date: null, txType, amount,
+            currency: document.getElementById('tx-currency')?.value||'KZT',
+            category: document.getElementById('tx-category')?.value||'other',
+            description: document.getElementById('tx-desc')?.value||'',
+            recurring: false, recurringPeriod: null,
+          });
+          overlay.remove();
+          loadTransactions(el, txType);
+        } catch (err) { alert('Error: ' + err); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadBudgets(el) {
+  try {
+    const budgets = await invoke('get_budgets').catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Budgets</h2><button class="btn-primary" id="budget-add-btn">+ Add Budget</button></div>
+      <div id="budgets-list">
+        ${budgets.map(b => {
+          const pct = b.amount > 0 ? Math.min(100, Math.round((b.spent||0) / b.amount * 100)) : 0;
+          const warn = pct > 80;
+          return `<div class="settings-section" style="margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#fff;font-size:14px;">${escapeHtml(b.category)}</span>
+              <span style="color:${warn?'#f87171':'#888'};font-size:12px;">${b.spent||0} / ${b.amount} (${b.period})</span>
+            </div>
+            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'#f87171':'#818cf8'}"></div></div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    document.getElementById('budget-add-btn')?.addEventListener('click', () => {
+      const cat = prompt('Category:');
+      const amt = prompt('Amount:');
+      if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadSavings(el) {
+  try {
+    const goals = await invoke('get_savings_goals').catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Savings Goals</h2><button class="btn-primary" id="savings-add-btn">+ Add Goal</button></div>
+      <div id="savings-list">
+        ${goals.map(g => {
+          const pct = g.target_amount > 0 ? Math.min(100, Math.round(g.current_amount / g.target_amount * 100)) : 0;
+          return `<div class="settings-section" style="margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#fff;font-size:14px;">${escapeHtml(g.name)}</span>
+              <span style="color:#888;font-size:12px;">${g.current_amount} / ${g.target_amount}</span>
+            </div>
+            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%"></div></div>
+            ${g.deadline ? `<div style="font-size:11px;color:#555;margin-top:4px;">Deadline: ${g.deadline}</div>` : ''}
+            <button class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px;" data-sadd="${g.id}">+ Add funds</button>
+          </div>`;
+        }).join('')}
+      </div>`;
+    el.querySelectorAll('[data-sadd]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const amount = prompt('Amount to add:');
+        if (amount) {
+          const goal = goals.find(g => g.id === parseInt(btn.dataset.sadd));
+          if (goal) {
+            await invoke('update_savings_goal', { id: goal.id, currentAmount: (goal.current_amount||0) + parseFloat(amount), name: null, targetAmount: null, deadline: null }).catch(e => alert(e));
+            loadSavings(el);
+          }
+        }
+      });
+    });
+    document.getElementById('savings-add-btn')?.addEventListener('click', () => {
+      const name = prompt('Goal name:');
+      const target = prompt('Target amount:');
+      if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#818cf8' }).then(() => loadSavings(el)).catch(e => alert(e));
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadSubscriptions(el) {
+  try {
+    const subs = await invoke('get_subscriptions').catch(() => []);
+    const monthly = subs.filter(s => s.active).reduce((sum, s) => sum + (s.period === 'yearly' ? s.amount/12 : s.amount), 0);
+    el.innerHTML = `
+      <div class="module-header"><h2>Subscriptions</h2><button class="btn-primary" id="sub-add-btn">+ Add</button></div>
+      <div class="dashboard-stats">
+        <div class="dashboard-stat"><div class="dashboard-stat-value">${Math.round(monthly)}</div><div class="dashboard-stat-label">/month</div></div>
+      </div>
+      <div id="subs-list">
+        ${subs.map(s => `<div class="focus-log-item">
+          <span class="focus-log-title">${escapeHtml(s.name)}</span>
+          <span class="badge ${s.active?'badge-green':'badge-gray'}">${s.active?'Active':'Paused'}</span>
+          <span class="focus-log-duration">${s.amount} ${s.currency||'KZT'}/${s.period}</span>
+          ${s.next_payment ? `<span style="color:#555;font-size:11px;">Next: ${s.next_payment}</span>` : ''}
+        </div>`).join('')}
+      </div>`;
+    document.getElementById('sub-add-btn')?.addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal">
+        <div class="modal-title">Add Subscription</div>
+        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="sub-name"></div>
+        <div class="form-group"><label class="form-label">Amount</label><input class="form-input" id="sub-amount" type="number"></div>
+        <div class="form-group"><label class="form-label">Period</label>
+          <select class="form-select" id="sub-period" style="width:100%;"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
+        <div class="form-group"><label class="form-label">Category</label><input class="form-input" id="sub-cat" placeholder="entertainment, tools..."></div>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn-primary" id="sub-save">Save</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById('sub-save')?.addEventListener('click', async () => {
+        const name = document.getElementById('sub-name')?.value?.trim();
+        if (!name) return;
+        try {
+          await invoke('add_subscription', {
+            name, amount: parseFloat(document.getElementById('sub-amount')?.value)||0,
+            currency: 'KZT', period: document.getElementById('sub-period')?.value||'monthly',
+            nextPayment: null, category: document.getElementById('sub-cat')?.value||'other', active: true,
+          });
+          overlay.remove();
+          loadSubscriptions(el);
+        } catch (err) { alert('Error: ' + err); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadDebts(el) {
+  try {
+    const debts = await invoke('get_debts').catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Debts</h2><button class="btn-primary" id="debt-add-btn">+ Add</button></div>
+      <div id="debts-list">
+        ${debts.map(d => {
+          const pct = d.amount > 0 ? Math.min(100, Math.round((d.amount - d.remaining) / d.amount * 100)) : 0;
+          return `<div class="settings-section" style="margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#fff;font-size:14px;">${escapeHtml(d.name)}</span>
+              <span class="badge ${d.type==='owe'?'badge-purple':'badge-green'}">${d.type==='owe'?'I owe':'Owed to me'}</span>
+            </div>
+            <div style="color:#888;font-size:12px;margin-top:4px;">Remaining: ${d.remaining} / ${d.amount}</div>
+            <div class="dev-progress" style="margin-top:4px;"><div class="dev-progress-bar" style="width:${pct}%"></div></div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    document.getElementById('debt-add-btn')?.addEventListener('click', () => {
+      const name = prompt('Name:');
+      const type = prompt('Type (owe/owed):') || 'owe';
+      const amount = prompt('Amount:');
+      if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+// ── Memory Tab ──
+async function loadMemoryTab(subTab) {
+  const el = document.getElementById('memory-content');
+  if (!el) return;
+  if (subTab === 'Search') loadMemorySearch(el);
+  else loadAllFacts(el);
+}
+
+async function loadAllFacts(el) {
+  try {
+    const memories = await invoke('get_all_memories', { search: null }).catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Memory</h2></div>
+      <div class="memory-browser" id="memory-all-list">
+        ${memories.map(m => `<div class="memory-item">
+          <span class="memory-item-category">${escapeHtml(m.category)}</span>
+          <span class="memory-item-key">${escapeHtml(m.key)}</span>
+          <span class="memory-item-value">${escapeHtml(m.value)}</span>
+          <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
+        </div>`).join('')}
+      </div>`;
+    el.querySelectorAll('[data-mid]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Delete?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadAllFacts(el); }
+      });
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+async function loadMemorySearch(el) {
+  el.innerHTML = `
+    <div class="module-header"><h2>Memory Search</h2></div>
+    <div class="memory-search-box" style="margin-bottom:16px;">
+      <input class="form-input" id="mem-search-input" placeholder="Search memories..." autocomplete="off">
+    </div>
+    <div class="memory-browser" id="mem-search-results"></div>`;
+  document.getElementById('mem-search-input')?.addEventListener('input', async (e) => {
+    clearTimeout(convSearchTimeout);
+    convSearchTimeout = setTimeout(async () => {
+      const q = e.target.value;
+      if (!q || q.length < 2) return;
+      try {
+        const results = await invoke('get_all_memories', { search: q });
+        const list = document.getElementById('mem-search-results');
+        if (list) list.innerHTML = results.map(m => `<div class="memory-item">
+          <span class="memory-item-category">${escapeHtml(m.category)}</span>
+          <span class="memory-item-key">${escapeHtml(m.key)}</span>
+          <span class="memory-item-value">${escapeHtml(m.value)}</span>
+        </div>`).join('') || '<div style="color:#555;font-size:12px;padding:8px;">No results</div>';
+      } catch (_) {}
+    }, 300);
+  });
+}
+
 // ── Integrations page ──
 
 function panelItem(item) {
@@ -768,7 +1541,10 @@ function panelItem(item) {
   </div>`;
 }
 
+let integrationsLoaded = false;
 async function loadIntegrations(force) {
+  const integrationsContent = document.getElementById('settings-content');
+  if (!integrationsContent) return;
   if (!force) integrationsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
     const info = await invoke('get_integrations');
@@ -881,7 +1657,12 @@ async function loadMemoryBrowser(search) {
 
 // ── Settings page ──
 
-async function loadSettings() {
+async function loadSettings(subTab) {
+  const settingsContent = document.getElementById('settings-content');
+  if (!settingsContent) return;
+  if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
+  if (subTab === 'Integrations') { loadIntegrations(); return; }
+  if (subTab === 'About') { loadAbout(settingsContent); return; }
   settingsContent.innerHTML = '<div style="color:#555;font-size:13px;">Загрузка...</div>';
   try {
     const [info, proactive, trainingStats] = await Promise.all([
@@ -1020,8 +1801,86 @@ async function loadSettings() {
   }
 }
 
-// ── Tab loaders (stubs until implemented) ──
+// ── Blocklist (Settings sub-tab) ──
+async function loadBlocklist(el) {
+  try {
+    const items = await invoke('get_blocklist').catch(() => []);
+    const sites = items.filter(i => i.type === 'site');
+    const apps = items.filter(i => i.type === 'app');
+    el.innerHTML = `
+      <div class="module-header"><h2>Blocklist</h2><button class="btn-primary" id="bl-add-btn">+ Add</button></div>
+      <div class="module-card-title">Sites</div>
+      <div id="bl-sites">${sites.map(s => `<div class="focus-log-item">
+        <span class="focus-log-title">${escapeHtml(s.value)}</span>
+        <label class="toggle"><input type="checkbox" data-toggle="${s.id}" ${s.active?'checked':''}><span class="toggle-slider"></span></label>
+        ${s.schedule ? `<span style="color:#555;font-size:11px;">${s.schedule}</span>` : ''}
+        <button class="memory-item-btn" data-bldel="${s.id}">&times;</button>
+      </div>`).join('') || '<div style="color:#555;font-size:12px;padding:4px 0;">None</div>'}</div>
+      <div class="module-card-title" style="margin-top:16px;">Apps</div>
+      <div id="bl-apps">${apps.map(a => `<div class="focus-log-item">
+        <span class="focus-log-title">${escapeHtml(a.value)}</span>
+        <label class="toggle"><input type="checkbox" data-toggle="${a.id}" ${a.active?'checked':''}><span class="toggle-slider"></span></label>
+        <button class="memory-item-btn" data-bldel="${a.id}">&times;</button>
+      </div>`).join('') || '<div style="color:#555;font-size:12px;padding:4px 0;">None</div>'}</div>`;
+    el.querySelectorAll('[data-toggle]').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        await invoke('toggle_blocklist_item', { id: parseInt(cb.dataset.toggle) }).catch(()=>{});
+      });
+    });
+    el.querySelectorAll('[data-bldel]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await invoke('remove_from_blocklist', { id: parseInt(btn.dataset.bldel) }).catch(()=>{});
+        loadBlocklist(el);
+      });
+    });
+    document.getElementById('bl-add-btn')?.addEventListener('click', () => {
+      const type = prompt('Type (site/app):') || 'site';
+      const value = prompt(type === 'site' ? 'Domain (e.g. youtube.com):' : 'App name (e.g. Discord):');
+      if (value) invoke('add_to_blocklist', { blockType: type, value, schedule: null }).then(() => loadBlocklist(el)).catch(e => alert(e));
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
 
+// ── About (Settings sub-tab) ──
+async function loadAbout(el) {
+  try {
+    const info = await invoke('get_model_info').catch(() => ({}));
+    const trainingStats = await invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 }));
+    el.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">Hanni v${APP_VERSION}</div>
+        <div class="settings-row"><span class="settings-label">Model</span><span class="settings-value">${info.model_name||'?'}</span></div>
+        <div class="settings-row"><span class="settings-label">Server</span><span class="settings-value ${info.server_online?'online':'offline'}">${info.server_online?'Online':'Offline'}</span></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Training Data</div>
+        <div class="settings-row"><span class="settings-label">Conversations</span><span class="settings-value">${trainingStats.conversations}</span></div>
+        <div class="settings-row"><span class="settings-label">Messages</span><span class="settings-value">${trainingStats.total_messages}</span></div>
+        <div class="settings-row"><span class="settings-label">Export</span><button class="settings-btn" id="about-export-btn">Export JSONL</button></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">HTTP API</div>
+        <div class="settings-row"><span class="settings-label">Address</span><span class="settings-value">127.0.0.1:8235</span></div>
+        <div class="settings-row"><span class="settings-label">Status</span><span class="settings-value" id="about-api-status">Checking...</span></div>
+      </div>`;
+    document.getElementById('about-export-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Exporting...'; btn.disabled = true;
+      try { const r = await invoke('export_training_data'); btn.textContent = `${r.train_count} train + ${r.valid_count} valid`; }
+      catch (err) { btn.textContent = String(err).substring(0, 30); }
+      setTimeout(() => { btn.textContent = 'Export JSONL'; btn.disabled = false; }, 4000);
+    });
+    try {
+      const resp = await fetch('http://127.0.0.1:8235/api/status');
+      const apiEl = document.getElementById('about-api-status');
+      if (apiEl) { apiEl.textContent = resp.ok ? 'Active' : 'Unavailable'; apiEl.className = 'settings-value ' + (resp.ok ? 'online' : 'offline'); }
+    } catch (_) {
+      const apiEl = document.getElementById('about-api-status');
+      if (apiEl) { apiEl.textContent = 'Unavailable'; apiEl.className = 'settings-value offline'; }
+    }
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+}
+
+// ── Tab loaders (stubs) ──
 function showStub(containerId, icon, label) {
   const el = document.getElementById(containerId);
   if (el) el.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">${icon}</div>${label}</div>`;
@@ -1098,8 +1957,6 @@ async function loadDashboard() {
 }
 
 // ── Focus ──
-let focusTimerInterval = null;
-
 async function loadFocus() {
   const el = document.getElementById('focus-content');
   if (!el) return;
@@ -1192,7 +2049,7 @@ async function loadFocus() {
       const startedAt = new Date(current.started_at).getTime();
       focusTimerInterval = setInterval(() => {
         const timerEl = document.getElementById('focus-timer');
-        if (!timerEl || currentTab !== 'focus') { clearInterval(focusTimerInterval); return; }
+        if (!timerEl || activeTab !== 'focus') { clearInterval(focusTimerInterval); return; }
         const elapsed = Math.floor((Date.now() - startedAt) / 1000);
         const h = Math.floor(elapsed / 3600);
         const m = Math.floor((elapsed % 3600) / 60);
@@ -1206,14 +2063,12 @@ async function loadFocus() {
 }
 
 // ── Notes ──
-let currentNoteId = null;
-let noteAutoSaveTimeout = null;
-
-async function loadNotes() {
+async function loadNotes(subTab) {
   const el = document.getElementById('notes-content');
   if (!el) return;
   try {
-    const notes = await invoke('get_notes', { filter: null, search: null });
+    const filter = subTab === 'Pinned' ? 'pinned' : subTab === 'Archived' ? 'archived' : null;
+    const notes = await invoke('get_notes', { filter, search: null });
     const notesList = notes || [];
 
     el.innerHTML = `<div class="notes-layout">
@@ -1333,10 +2188,6 @@ async function openNote(id) {
 }
 
 // ── Calendar ──
-let calendarYear = new Date().getFullYear();
-let calendarMonth = new Date().getMonth();
-let selectedCalendarDate = null;
-
 async function loadCalendar() {
   const el = document.getElementById('calendar-content');
   if (!el) return;
@@ -1472,8 +2323,6 @@ function showAddEventModal() {
 }
 
 // ── Work ──
-let currentProjectId = null;
-
 async function loadWork() {
   const el = document.getElementById('work-content');
   if (!el) return;
@@ -1547,8 +2396,6 @@ async function renderWork(el, projects) {
 }
 
 // ── Development ──
-let devFilter = 'all';
-
 async function loadDevelopment() {
   const el = document.getElementById('development-content');
   if (!el) return;
@@ -1632,75 +2479,168 @@ function showAddLearningModal() {
   });
 }
 
-// ── Hobbies ──
-async function loadHobbies() {
+// ── Hobbies (Media Collections) ──
+const MEDIA_TYPES = ['music','anime','manga','movie','series','cartoon','game','book','podcast'];
+const MEDIA_LABELS = { music:'Music',anime:'Anime',manga:'Manga',movie:'Movies',series:'Series',cartoon:'Cartoons',game:'Games',book:'Books',podcast:'Podcasts' };
+const STATUS_LABELS = { planned:'Planned',in_progress:'In Progress',completed:'Completed',on_hold:'On Hold',dropped:'Dropped' };
+
+async function loadHobbies(subTab) {
   const el = document.getElementById('hobbies-content');
   if (!el) return;
+  if (!subTab || subTab === 'Overview') {
+    loadHobbiesOverview(el);
+  } else {
+    const mediaType = Object.entries(MEDIA_LABELS).find(([k,v]) => v === subTab)?.[0];
+    if (mediaType) loadMediaList(el, mediaType);
+  }
+}
+
+async function loadHobbiesOverview(el) {
   try {
-    const hobbies = await invoke('get_hobbies').catch(() => []);
-    renderHobbies(el, hobbies || []);
-  } catch (e) {
-    showStub('hobbies-content', '&#9670;', 'Хобби — скоро');
-  }
+    const stats = await invoke('get_media_stats', { mediaType: null }).catch(() => ({}));
+    const lists = await invoke('get_user_lists').catch(() => []);
+    el.innerHTML = `
+      <div class="module-header"><h2>Collections</h2></div>
+      <div class="dashboard-stats">
+        ${MEDIA_TYPES.map(t => `<div class="dashboard-stat"><div class="dashboard-stat-value">${stats[t] || 0}</div><div class="dashboard-stat-label">${MEDIA_LABELS[t]}</div></div>`).join('')}
+      </div>
+      ${lists.length > 0 ? `<div class="module-card-title" style="margin-top:16px;">Lists</div>
+        <div class="hobby-grid">${lists.map(l => `<div class="hobby-card" data-list="${l.id}">
+          <div class="hobby-card-name">${escapeHtml(l.name)}</div>
+          <div class="hobby-card-label">${l.item_count || 0} items</div>
+        </div>`).join('')}</div>` : ''}
+      <div style="margin-top:16px;">
+        <button class="btn-primary" id="create-list-btn">+ New List</button>
+      </div>`;
+    document.getElementById('create-list-btn')?.addEventListener('click', () => {
+      const name = prompt('List name:');
+      if (name) invoke('create_user_list', { name, description: '', color: '#818cf8' }).then(() => loadHobbies('Overview')).catch(e => alert(e));
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
 }
 
-function renderHobbies(el, hobbies) {
-  el.innerHTML = `
-    <div class="module-header"><h2>Хобби</h2><button class="btn-primary" id="hobby-add-btn">+ Добавить</button></div>
-    <div class="hobby-grid" id="hobby-grid"></div>`;
-
-  const grid = document.getElementById('hobby-grid');
-  for (const h of hobbies) {
-    const card = document.createElement('div');
-    card.className = 'hobby-card';
-    card.innerHTML = `
-      <div class="hobby-card-icon">${h.icon || '&#9670;'}</div>
-      <div class="hobby-card-name">${escapeHtml(h.name)}</div>
-      <div class="hobby-card-hours">${h.total_hours || 0}</div>
-      <div class="hobby-card-label">часов</div>`;
-    card.addEventListener('click', () => showHobbyDetail(h));
-    grid.appendChild(card);
-  }
-
-  document.getElementById('hobby-add-btn')?.addEventListener('click', () => {
-    const name = prompt('Название хобби:');
-    if (name) invoke('create_hobby', { name, category: 'general', icon: '&#9670;', color: '#818cf8' }).then(() => loadHobbies()).catch(e => alert(e));
-  });
+async function loadMediaList(el, mediaType) {
+  try {
+    const items = await invoke('get_media_items', { mediaType, status: mediaStatusFilter === 'all' ? null : mediaStatusFilter, hidden: false });
+    const label = MEDIA_LABELS[mediaType];
+    el.innerHTML = `
+      <div class="module-header"><h2>${label}</h2><button class="btn-primary" id="media-add-btn">+ Add</button></div>
+      <div class="dev-filters">
+        ${['all','planned','in_progress','completed','on_hold','dropped'].map(s =>
+          `<button class="pill${mediaStatusFilter === s ? ' active' : ''}" data-filter="${s}">${s === 'all' ? 'All' : STATUS_LABELS[s]}</button>`
+        ).join('')}
+      </div>
+      <div class="dev-grid" id="media-grid"></div>`;
+    const grid = document.getElementById('media-grid');
+    for (const item of items) {
+      const card = document.createElement('div');
+      card.className = 'dev-card';
+      card.style.cursor = 'pointer';
+      const stars = item.rating ? ' ★'.repeat(Math.round(item.rating / 2)) : '';
+      card.innerHTML = `
+        <div class="dev-card-title">${escapeHtml(item.title)}</div>
+        <div class="dev-card-meta">
+          <span class="badge ${item.status === 'completed' ? 'badge-green' : item.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[item.status] || item.status}</span>
+          ${item.year ? `<span class="badge badge-purple">${item.year}</span>` : ''}
+        </div>
+        ${stars ? `<div style="color:#f59e0b;font-size:12px;">${stars}</div>` : ''}
+        ${item.progress != null && item.total_episodes ? `<div class="dev-progress"><div class="dev-progress-bar" style="width:${Math.min(100, Math.round(item.progress/item.total_episodes*100))}%"></div></div>
+        <div style="font-size:11px;color:#555;">${item.progress}/${item.total_episodes}</div>` : ''}`;
+      card.addEventListener('click', () => showMediaDetail(item, mediaType));
+      grid.appendChild(card);
+    }
+    el.querySelectorAll('.dev-filters .pill').forEach(btn => {
+      btn.addEventListener('click', () => { mediaStatusFilter = btn.dataset.filter; loadMediaList(el, mediaType); });
+    });
+    document.getElementById('media-add-btn')?.addEventListener('click', () => showAddMediaModal(mediaType));
+  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
 }
 
-async function showHobbyDetail(hobby) {
-  const entries = await invoke('get_hobby_entries', { hobbyId: hobby.id }).catch(() => []);
+function showAddMediaModal(mediaType) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  const hasEpisodes = ['anime','series','cartoon','manga','podcast'].includes(mediaType);
   overlay.innerHTML = `<div class="modal">
-    <div class="modal-title">${escapeHtml(hobby.name)}</div>
-    <div class="form-group">
-      <label class="form-label">Длительность (мин)</label>
-      <input class="form-input" id="hobby-duration" type="number" value="30">
+    <div class="modal-title">Add ${MEDIA_LABELS[mediaType]}</div>
+    <div class="form-group"><label class="form-label">Title</label><input class="form-input" id="media-title"></div>
+    <div class="form-group"><label class="form-label">Year</label><input class="form-input" id="media-year" type="number"></div>
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-select" id="media-status" style="width:100%;">
+        <option value="planned">Planned</option><option value="in_progress">In Progress</option>
+        <option value="completed">Completed</option><option value="on_hold">On Hold</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Rating (0-10)</label><input class="form-input" id="media-rating" type="number" min="0" max="10"></div>
+    ${hasEpisodes ? `<div class="form-group"><label class="form-label">Progress</label><input class="form-input" id="media-progress" type="number" min="0"></div>
+    <div class="form-group"><label class="form-label">Total Episodes</label><input class="form-input" id="media-total" type="number" min="0"></div>` : ''}
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="media-notes"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="media-save">Save</button>
     </div>
-    <div class="form-group">
-      <label class="form-label">Заметки</label>
-      <input class="form-input" id="hobby-notes">
-    </div>
-    <button class="btn-primary" id="hobby-log-btn" style="width:100%;margin-bottom:16px;">Залогировать</button>
-    <div class="module-card-title">История</div>
-    ${(entries || []).map(e => `<div class="focus-log-item">
-      <span class="focus-log-time">${e.date || ''}</span>
-      <span class="focus-log-title">${e.notes || ''}</span>
-      <span class="focus-log-duration">${e.duration_minutes || 0} мин</span>
-    </div>`).join('')}
-    <div class="modal-actions"><button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById('hobby-log-btn')?.addEventListener('click', async () => {
-    const dur = parseInt(document.getElementById('hobby-duration')?.value || '30');
-    const notes = document.getElementById('hobby-notes')?.value || '';
+  document.getElementById('media-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('media-title')?.value?.trim();
+    if (!title) return;
     try {
-      await invoke('log_hobby_entry', { hobbyId: hobby.id, durationMinutes: dur, notes });
+      await invoke('add_media_item', {
+        mediaType, title,
+        originalTitle: null, year: parseInt(document.getElementById('media-year')?.value) || null,
+        description: null, coverUrl: null,
+        status: document.getElementById('media-status')?.value || 'planned',
+        rating: parseInt(document.getElementById('media-rating')?.value) || null,
+        progress: hasEpisodes ? (parseInt(document.getElementById('media-progress')?.value) || null) : null,
+        totalEpisodes: hasEpisodes ? (parseInt(document.getElementById('media-total')?.value) || null) : null,
+        notes: document.getElementById('media-notes')?.value || null,
+      });
       overlay.remove();
-      loadHobbies();
-    } catch (err) { alert('Ошибка: ' + err); }
+      loadMediaList(document.getElementById('hobbies-content'), mediaType);
+    } catch (err) { alert('Error: ' + err); }
+  });
+}
+
+function showMediaDetail(item, mediaType) {
+  const hasEpisodes = ['anime','series','cartoon','manga','podcast'].includes(mediaType);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">${escapeHtml(item.title)}</div>
+    ${item.year ? `<div style="color:#888;font-size:12px;margin-bottom:8px;">${item.year}</div>` : ''}
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-select" id="md-status" style="width:100%;">
+        ${Object.entries(STATUS_LABELS).map(([k,v]) => `<option value="${k}"${item.status===k?' selected':''}>${v}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label class="form-label">Rating (0-10)</label><input class="form-input" id="md-rating" type="number" min="0" max="10" value="${item.rating||''}"></div>
+    ${hasEpisodes ? `<div class="form-group"><label class="form-label">Progress</label><input class="form-input" id="md-progress" type="number" value="${item.progress||0}"></div>` : ''}
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="md-notes">${escapeHtml(item.notes||'')}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn-danger" id="md-delete">Delete</button>
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="md-save">Save</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('md-save')?.addEventListener('click', async () => {
+    try {
+      await invoke('update_media_item', {
+        id: item.id,
+        status: document.getElementById('md-status')?.value || null,
+        rating: parseInt(document.getElementById('md-rating')?.value) || null,
+        progress: hasEpisodes ? (parseInt(document.getElementById('md-progress')?.value) || null) : null,
+        notes: document.getElementById('md-notes')?.value || null,
+        title: null, description: null, coverUrl: null, totalEpisodes: null,
+      });
+      overlay.remove();
+      loadMediaList(document.getElementById('hobbies-content'), mediaType);
+    } catch (err) { alert('Error: ' + err); }
+  });
+  document.getElementById('md-delete')?.addEventListener('click', async () => {
+    if (!confirm('Delete this item?')) return;
+    await invoke('delete_media_item', { id: item.id }).catch(e => alert(e));
+    overlay.remove();
+    loadMediaList(document.getElementById('hobbies-content'), mediaType);
   });
 }
 
@@ -1900,8 +2840,13 @@ headerVersion.addEventListener('click', async () => {
   setTimeout(() => { headerVersion.textContent = `v${APP_VERSION}`; }, 4000);
 });
 
-// ── Auto-restore last conversation on startup ──
+// ── Initialization ──
 (async () => {
+  // Render tab bar
+  renderTabBar();
+  activateView();
+
+  // Auto-restore last conversation
   try {
     const convs = await invoke('get_conversations', { limit: 1 });
     if (convs.length > 0) {
