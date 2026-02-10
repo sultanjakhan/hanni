@@ -688,6 +688,15 @@ fn migrate_memory_json(conn: &rusqlite::Connection) {
     let _ = std::fs::rename(&json_path, &bak_path);
 }
 
+fn migrate_events_source(conn: &rusqlite::Connection) {
+    // Add source column to events table (manual, apple, google)
+    let has_source = conn.prepare("SELECT source FROM events LIMIT 1").is_ok();
+    if !has_source {
+        let _ = conn.execute("ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'", []);
+        let _ = conn.execute("ALTER TABLE events ADD COLUMN external_id TEXT", []);
+    }
+}
+
 fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, limit: usize) -> String {
     let mut lines = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
@@ -2758,7 +2767,7 @@ fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<Ve
     let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
     let prefix = format!("{}-{:02}", year, month);
     let mut stmt = conn.prepare(
-        "SELECT id, title, description, date, time, duration_minutes, category, color, completed FROM events WHERE date LIKE ?1 ORDER BY date, time"
+        "SELECT id, title, description, date, time, duration_minutes, category, color, completed, COALESCE(source,'manual') FROM events WHERE date LIKE ?1 ORDER BY date, time"
     ).map_err(|e| format!("DB error: {}", e))?;
     let pattern = format!("{}%", prefix);
     let rows = stmt.query_map(rusqlite::params![pattern], |row| {
@@ -2772,6 +2781,7 @@ fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<Ve
             "category": row.get::<_, String>(6)?,
             "color": row.get::<_, String>(7)?,
             "completed": row.get::<_, i32>(8)? != 0,
+            "source": row.get::<_, String>(9)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -2782,6 +2792,181 @@ fn delete_event(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
     conn.execute("DELETE FROM events WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
+}
+
+// ── v0.8.3: Calendar Sync ──
+
+#[tauri::command]
+async fn sync_apple_calendar(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    // AppleScript to get events from Calendar.app for the given month
+    let prefix = format!("{}-{:02}", year, month);
+    let last_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 },
+        _ => 31,
+    };
+
+    let script = format!(
+        r#"
+        set output to ""
+        set startD to date "1 January 2000"
+        set year of startD to {year}
+        set month of startD to {month}
+        set day of startD to 1
+        set time of startD to 0
+        set endD to date "1 January 2000"
+        set year of endD to {year}
+        set month of endD to {month}
+        set day of endD to {last_day}
+        set time of endD to 86399
+        tell application "Calendar"
+            repeat with cal in calendars
+                set calName to name of cal
+                set evts to (every event of cal whose start date >= startD and start date <= endD)
+                repeat with evt in evts
+                    set evtStart to start date of evt
+                    set evtName to summary of evt
+                    set evtDur to 60
+                    try
+                        set evtEnd to end date of evt
+                        set evtDur to ((evtEnd - evtStart) / 60) as integer
+                    end try
+                    set evtDesc to ""
+                    try
+                        set evtDesc to description of evt
+                    end try
+                    set evtUID to uid of evt
+                    set m to (month of evtStart as integer)
+                    set d to day of evtStart
+                    set h to hours of evtStart
+                    set mn to minutes of evtStart
+                    set dateStr to "{year}-" & text -2 thru -1 of ("0" & m) & "-" & text -2 thru -1 of ("0" & d)
+                    set timeStr to text -2 thru -1 of ("0" & h) & ":" & text -2 thru -1 of ("0" & mn)
+                    set output to output & evtUID & "||" & evtName & "||" & dateStr & "||" & timeStr & "||" & evtDur & "||" & calName & "||" & evtDesc & linefeed
+                end repeat
+            end repeat
+        end tell
+        return output
+        "#,
+        year = year, month = month, last_day = last_day
+    );
+
+    let output = run_osascript(&script).unwrap_or_default();
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+
+    // Clear old apple events for this month
+    conn.execute(
+        "DELETE FROM events WHERE source='apple' AND date LIKE ?1",
+        rusqlite::params![format!("{}%", prefix)],
+    ).map_err(|e| format!("DB error: {}", e))?;
+
+    let mut count = 0i32;
+    for line in output.lines() {
+        let parts: Vec<&str> = line.split("||").collect();
+        if parts.len() < 6 { continue; }
+        let uid = parts[0].trim();
+        let title = parts[1].trim();
+        let date = parts[2].trim();
+        let time = parts[3].trim();
+        let dur: i64 = parts[4].trim().parse().unwrap_or(60);
+        let cal_name = parts[5].trim();
+        let desc = parts.get(6).unwrap_or(&"").trim();
+
+        conn.execute(
+            "INSERT INTO events (title, description, date, time, duration_minutes, category, color, source, external_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'apple', ?8, ?9)",
+            rusqlite::params![title, desc, date, time, dur, cal_name, "#a1a1a6", uid, now],
+        ).map_err(|e| format!("Insert error: {}", e))?;
+        count += 1;
+    }
+
+    Ok(serde_json::json!({ "synced": count, "source": "apple" }))
+}
+
+#[tauri::command]
+async fn sync_google_ics(url: String, month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    if url.is_empty() { return Err("No ICS URL provided".into()); }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let body = client.get(&url).send().await
+        .map_err(|e| format!("Fetch error: {}", e))?
+        .text().await
+        .map_err(|e| format!("Read error: {}", e))?;
+
+    let prefix = format!("{}-{:02}", year, month);
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+
+    // Clear old google events for this month
+    conn.execute(
+        "DELETE FROM events WHERE source='google' AND date LIKE ?1",
+        rusqlite::params![format!("{}%", prefix)],
+    ).map_err(|e| format!("DB error: {}", e))?;
+
+    // Simple ICS parser: extract VEVENT blocks
+    let mut count = 0i32;
+    let re_dt = regex::Regex::new(r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})").unwrap();
+
+    for block in body.split("BEGIN:VEVENT") {
+        if !block.contains("END:VEVENT") { continue; }
+        let get_field = |field: &str| -> String {
+            block.lines()
+                .find(|l| l.starts_with(field))
+                .map(|l| l[field.len()..].trim().to_string())
+                .unwrap_or_default()
+        };
+
+        let summary = get_field("SUMMARY:");
+        if summary.is_empty() { continue; }
+
+        let dtstart_line = block.lines()
+            .find(|l| l.starts_with("DTSTART"))
+            .unwrap_or("");
+        let dtend_line = block.lines()
+            .find(|l| l.starts_with("DTEND"))
+            .unwrap_or("");
+        let uid = get_field("UID:");
+        let desc = get_field("DESCRIPTION:").replace("\\n", "\n").replace("\\,", ",");
+
+        let (date, time) = if let Some(caps) = re_dt.captures(dtstart_line) {
+            let d = format!("{}-{}-{}", &caps[1], &caps[2], &caps[3]);
+            let t = format!("{}:{}", &caps[4], &caps[5]);
+            (d, t)
+        } else {
+            // All-day event: DTSTART;VALUE=DATE:20250215
+            let re_d = regex::Regex::new(r"(\d{4})(\d{2})(\d{2})").unwrap();
+            if let Some(caps) = re_d.captures(dtstart_line) {
+                (format!("{}-{}-{}", &caps[1], &caps[2], &caps[3]), String::new())
+            } else {
+                continue;
+            }
+        };
+
+        if !date.starts_with(&prefix) { continue; }
+
+        let dur: i64 = if let Some(caps) = re_dt.captures(dtend_line) {
+            let start_h: i64 = re_dt.captures(dtstart_line).map(|c| c[4].parse().unwrap_or(0)).unwrap_or(0);
+            let start_m: i64 = re_dt.captures(dtstart_line).map(|c| c[5].parse().unwrap_or(0)).unwrap_or(0);
+            let end_h: i64 = caps[4].parse().unwrap_or(0);
+            let end_m: i64 = caps[5].parse().unwrap_or(0);
+            ((end_h * 60 + end_m) - (start_h * 60 + start_m)).max(1)
+        } else { 60 };
+
+        conn.execute(
+            "INSERT INTO events (title, description, date, time, duration_minutes, category, color, source, external_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'google', ?6, 'google', ?7, ?8)",
+            rusqlite::params![summary, desc, date, time, dur, "#a1a1a6", uid, now],
+        ).map_err(|e| format!("Insert error: {}", e))?;
+        count += 1;
+    }
+
+    Ok(serde_json::json!({ "synced": count, "source": "google" }))
 }
 
 // ── v0.7.0: Projects & Tasks (Work) commands ──
@@ -4966,6 +5151,7 @@ pub fn run() {
         .expect("Cannot open hanni.db");
     init_db(&conn).expect("Cannot initialize database");
     migrate_memory_json(&conn);
+    migrate_events_source(&conn);
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
     // Start MLX server if not already running
@@ -5072,6 +5258,9 @@ pub fn run() {
             create_event,
             get_events,
             delete_event,
+            // v0.8.3: Calendar Sync
+            sync_apple_calendar,
+            sync_google_ics,
             // v0.7.0: Projects & Tasks (Work)
             create_project,
             get_projects,
