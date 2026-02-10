@@ -977,7 +977,7 @@ async function loadSupplies(el) {
     el.innerHTML = `
       <div class="module-header"><h2>Supplies</h2><button class="btn-primary" id="home-add-btn">+ Add Item</button></div>
       <div id="home-items-list">
-        ${items.map(i => `<div class="focus-log-item" style="${i.needed ? 'border-left:2px solid #f59e0b;' : ''}">
+        ${items.map(i => `<div class="focus-log-item" style="${i.needed ? 'border-left:2px solid #ccc;' : ''}">
           <span class="focus-log-title">${escapeHtml(i.name)}</span>
           <span class="badge badge-gray">${categories[i.category] || i.category}</span>
           ${i.quantity != null ? `<span style="color:#888;font-size:12px;">${i.quantity} ${i.unit||''}</span>` : ''}
@@ -1039,7 +1039,7 @@ async function loadSupplies(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadShoppingList(el) {
@@ -1060,7 +1060,7 @@ async function loadShoppingList(el) {
         loadShoppingList(el);
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 // ── Mindset ──
@@ -1110,7 +1110,7 @@ async function loadJournal(el) {
         loadJournal(el);
       } catch (err) { alert('Error: ' + err); }
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadMoodLog(el) {
@@ -1141,7 +1141,7 @@ async function loadMoodLog(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadPrinciples(el) {
@@ -1166,7 +1166,7 @@ async function loadPrinciples(el) {
       const title = prompt('Principle:');
       if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 // ── Food ──
@@ -1211,7 +1211,7 @@ async function loadFoodLog(el) {
       });
     });
     document.getElementById('food-add-btn')?.addEventListener('click', () => showAddFoodModal(el));
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 function showAddFoodModal(el) {
@@ -1302,7 +1302,7 @@ async function loadRecipes(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadProducts(el) {
@@ -1314,11 +1314,11 @@ async function loadProducts(el) {
         ${products.map(p => {
           const exp = p.expiry_date ? new Date(p.expiry_date) : null;
           const isExpiring = exp && (exp - Date.now()) < 3 * 86400000;
-          return `<div class="focus-log-item" style="${isExpiring ? 'border-left:2px solid #f87171;' : ''}">
+          return `<div class="focus-log-item" style="${isExpiring ? 'border-left:2px solid #999;' : ''}">
             <span class="focus-log-title">${escapeHtml(p.name)}</span>
             <span class="badge badge-gray">${p.location||''}</span>
             ${p.quantity ? `<span style="color:#888;font-size:12px;">${p.quantity} ${p.unit||''}</span>` : ''}
-            ${exp ? `<span style="color:${isExpiring?'#f87171':'#888'};font-size:11px;">${p.expiry_date}</span>` : ''}
+            ${exp ? `<span style="color:${isExpiring?'#999':'#888'};font-size:11px;">${p.expiry_date}</span>` : ''}
             <button class="memory-item-btn" data-pdel="${p.id}">&times;</button>
           </div>`;
         }).join('')}
@@ -1367,7 +1367,7 @@ async function loadProducts(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 // ── Money ──
@@ -1397,7 +1397,7 @@ async function loadTransactions(el, txType) {
           <span class="focus-log-time">${t.date}</span>
           <span class="focus-log-title">${escapeHtml(t.description||t.category)}</span>
           <span class="badge badge-gray">${t.category}</span>
-          <span class="focus-log-duration" style="color:${isExpense?'#f87171':'#34d399'}">${isExpense?'-':'+'} ${t.amount} ${t.currency||'KZT'}</span>
+          <span class="focus-log-duration" style="color:${isExpense?'#999':'#e0e0e0'}">${isExpense?'-':'+'} ${t.amount} ${t.currency||'KZT'}</span>
           <button class="memory-item-btn" data-txdel="${t.id}">&times;</button>
         </div>`).join('')}
       </div>`;
@@ -1442,7 +1442,7 @@ async function loadTransactions(el, txType) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadBudgets(el) {
@@ -1457,9 +1457,9 @@ async function loadBudgets(el) {
           return `<div class="settings-section" style="margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span style="color:#fff;font-size:14px;">${escapeHtml(b.category)}</span>
-              <span style="color:${warn?'#f87171':'#888'};font-size:12px;">${b.spent||0} / ${b.amount} (${b.period})</span>
+              <span style="color:${warn?'#999':'#888'};font-size:12px;">${b.spent||0} / ${b.amount} (${b.period})</span>
             </div>
-            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'#f87171':'#818cf8'}"></div></div>
+            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'#999':'#e0e0e0'}"></div></div>
           </div>`;
         }).join('')}
       </div>`;
@@ -1468,7 +1468,7 @@ async function loadBudgets(el) {
       const amt = prompt('Amount:');
       if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadSavings(el) {
@@ -1505,9 +1505,9 @@ async function loadSavings(el) {
     document.getElementById('savings-add-btn')?.addEventListener('click', () => {
       const name = prompt('Goal name:');
       const target = prompt('Target amount:');
-      if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#818cf8' }).then(() => loadSavings(el)).catch(e => alert(e));
+      if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#e0e0e0' }).then(() => loadSavings(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadSubscriptions(el) {
@@ -1558,7 +1558,7 @@ async function loadSubscriptions(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadDebts(el) {
@@ -1585,7 +1585,7 @@ async function loadDebts(el) {
       const amount = prompt('Amount:');
       if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 // ── People Tab ──
@@ -1597,6 +1597,10 @@ async function loadPeople(subTab) {
     const items = await invoke('get_contacts', filter);
     let contacts = Array.isArray(items) ? items : [];
     if (subTab === 'Favorites') contacts = contacts.filter(c => c.favorite);
+    // Load blocks for each contact
+    for (const c of contacts) {
+      try { c._blocks = await invoke('get_contact_blocks', { contactId: c.id }); } catch { c._blocks = []; }
+    }
     el.innerHTML = `
       <div class="module-header">
         <h2>${subTab === 'Blocked' ? 'Blocked' : subTab === 'Favorites' ? 'Favorites' : 'All Contacts'}</h2>
@@ -1611,10 +1615,22 @@ async function loadPeople(subTab) {
                 <div class="contact-name">${c.name}${c.favorite ? ' ★' : ''}</div>
                 <div class="contact-detail">${c.relationship || c.category || ''}${c.phone ? ' · ' + c.phone : ''}${c.email ? ' · ' + c.email : ''}</div>
                 ${c.blocked ? '<span class="badge badge-red">Blocked</span>' : ''}
-                ${c.block_reason ? '<div class="contact-detail" style="color:#f87171">' + c.block_reason + '</div>' : ''}
+                ${c.block_reason ? '<div class="contact-detail" style="color:#999">' + c.block_reason + '</div>' : ''}
                 ${c.notes ? '<div class="contact-detail">' + c.notes + '</div>' : ''}
+                ${c._blocks && c._blocks.length > 0 ? `
+                  <div class="contact-blocks-list">
+                    ${c._blocks.map(b => `
+                      <div class="contact-block-item">
+                        <span class="contact-block-type">${b.block_type === 'app' ? 'App' : 'Site'}</span>
+                        <span class="contact-block-value">${b.value}</span>
+                        ${b.reason ? '<span class="contact-block-reason">' + b.reason + '</span>' : ''}
+                        <button class="contact-block-del" onclick="deleteContactBlock(${b.id})">✕</button>
+                      </div>
+                    `).join('')}
+                  </div>` : ''}
               </div>
               <div class="contact-actions">
+                <button class="btn-secondary" onclick="showContactBlockModal(${c.id}, '${c.name.replace(/'/g, "\\'")}')" title="Block sites/apps">🔗</button>
                 <button class="btn-secondary" onclick="toggleContactFav(${c.id})" title="${c.favorite ? 'Unfavorite' : 'Favorite'}">${c.favorite ? '★' : '☆'}</button>
                 <button class="btn-secondary" onclick="toggleContactBlock(${c.id})" title="${c.blocked ? 'Unblock' : 'Block'}">${c.blocked ? '🔓' : '🚫'}</button>
                 <button class="btn-danger" onclick="deleteContact(${c.id})" style="padding:8px 12px">✕</button>
@@ -1641,6 +1657,44 @@ window.deleteContact = async (id) => {
     await invoke('delete_contact', { id });
     loadPeople(activeSubTab.people || 'All');
   }
+};
+window.deleteContactBlock = async (id) => {
+  await invoke('delete_contact_block', { id });
+  loadPeople(activeSubTab.people || 'All');
+};
+window.showContactBlockModal = (contactId, contactName) => {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Block site/app for ${contactName}</div>
+      <div class="form-group"><label class="form-label">Type</label>
+        <select class="form-select" id="cb-type" style="width:100%">
+          <option value="site">Site</option><option value="app">App</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Value *</label><input class="form-input" id="cb-value" placeholder="e.g. instagram.com or Instagram"></div>
+      <div class="form-group"><label class="form-label">Reason</label><input class="form-input" id="cb-reason" placeholder="Why block?"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="cb-cancel">Cancel</button>
+        <button class="btn-primary" id="cb-save">Add</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#cb-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#cb-save').onclick = async () => {
+    const value = document.getElementById('cb-value').value.trim();
+    if (!value) return;
+    await invoke('add_contact_block', {
+      contactId,
+      blockType: document.getElementById('cb-type').value,
+      value,
+      reason: document.getElementById('cb-reason').value.trim() || null,
+    });
+    overlay.remove();
+    loadPeople(activeSubTab.people || 'All');
+  };
 };
 
 function showAddContactModal() {
@@ -1716,7 +1770,7 @@ async function loadAllFacts(el) {
         if (confirm('Delete?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadAllFacts(el); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadMemorySearch(el) {
@@ -1828,7 +1882,7 @@ async function loadIntegrations(force) {
 
     integrationsLoaded = true;
   } catch (e) {
-    integrationsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
+    integrationsContent.innerHTML = `<div style="color:#999;font-size:13px;">Ошибка: ${e}</div>`;
   }
 }
 
@@ -2012,7 +2066,7 @@ async function loadSettings(subTab) {
     }
 
   } catch (e) {
-    settingsContent.innerHTML = `<div style="color:#f87171;font-size:13px;">Ошибка: ${e}</div>`;
+    settingsContent.innerHTML = `<div style="color:#999;font-size:13px;">Ошибка: ${e}</div>`;
   }
 }
 
@@ -2053,7 +2107,7 @@ async function loadBlocklist(el) {
       const value = prompt(type === 'site' ? 'Domain (e.g. youtube.com):' : 'App name (e.g. Discord):');
       if (value) invoke('add_to_blocklist', { blockType: type, value, schedule: null }).then(() => loadBlocklist(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 // ── About (Settings sub-tab) ──
@@ -2092,7 +2146,7 @@ async function loadAbout(el) {
       const apiEl = document.getElementById('about-api-status');
       if (apiEl) { apiEl.textContent = 'Unavailable'; apiEl.className = 'settings-value offline'; }
     }
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 // ── Tab loaders (stubs) ──
@@ -2446,7 +2500,7 @@ function renderCalendar(el, events) {
     const isToday = dateStr === todayStr;
     const isSelected = dateStr === selectedCalendarDate;
     const dayEvents = eventsByDate[dateStr] || [];
-    const dots = dayEvents.slice(0, 3).map(e => `<span class="calendar-event-dot" style="background:${e.color || '#818cf8'}"></span>`).join('');
+    const dots = dayEvents.slice(0, 3).map(e => `<span class="calendar-event-dot" style="background:${e.color || '#e0e0e0'}"></span>`).join('');
     daysHtml += `<div class="calendar-day${isToday ? ' today' : ''}${isSelected ? ' selected' : ''}" data-date="${dateStr}">
       <span class="calendar-day-number">${d}</span>
       <div class="calendar-day-dots">${dots}</div>
@@ -2529,7 +2583,7 @@ function showAddEventModal() {
         time: document.getElementById('event-time')?.value || '',
         durationMinutes: 60,
         category: 'general',
-        color: '#818cf8',
+        color: '#e0e0e0',
       });
       overlay.remove();
       loadCalendar();
@@ -2574,7 +2628,7 @@ async function renderWork(el, projects) {
     const item = document.createElement('div');
     item.className = 'work-project-item' + (p.id === currentProjectId ? ' active' : '');
     const taskCount = (p.task_count || 0);
-    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || '#818cf8'}"></span>
+    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || '#e0e0e0'}"></span>
       <span class="work-project-name">${escapeHtml(p.name)}</span>
       <span class="work-project-count">${taskCount}</span>`;
     item.addEventListener('click', () => { currentProjectId = p.id; loadWork(); });
@@ -2601,7 +2655,7 @@ async function renderWork(el, projects) {
 
   document.getElementById('new-project-btn')?.addEventListener('click', () => {
     const name = prompt('Название проекта:');
-    if (name) invoke('create_project', { name, description: '', color: '#818cf8' }).then(() => loadWork()).catch(e => alert(e));
+    if (name) invoke('create_project', { name, description: '', color: '#e0e0e0' }).then(() => loadWork()).catch(e => alert(e));
   });
 
   document.getElementById('new-task-btn')?.addEventListener('click', () => {
@@ -2729,9 +2783,9 @@ async function loadHobbiesOverview(el) {
       </div>`;
     document.getElementById('create-list-btn')?.addEventListener('click', () => {
       const name = prompt('List name:');
-      if (name) invoke('create_user_list', { name, description: '', color: '#818cf8' }).then(() => loadHobbies('Overview')).catch(e => alert(e));
+      if (name) invoke('create_user_list', { name, description: '', color: '#e0e0e0' }).then(() => loadHobbies('Overview')).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 async function loadMediaList(el, mediaType) {
@@ -2758,7 +2812,7 @@ async function loadMediaList(el, mediaType) {
           <span class="badge ${item.status === 'completed' ? 'badge-green' : item.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[item.status] || item.status}</span>
           ${item.year ? `<span class="badge badge-purple">${item.year}</span>` : ''}
         </div>
-        ${stars ? `<div style="color:#f59e0b;font-size:12px;">${stars}</div>` : ''}
+        ${stars ? `<div style="color:#ccc;font-size:12px;">${stars}</div>` : ''}
         ${item.progress != null && item.total_episodes ? `<div class="dev-progress"><div class="dev-progress-bar" style="width:${Math.min(100, Math.round(item.progress/item.total_episodes*100))}%"></div></div>
         <div style="font-size:11px;color:#555;">${item.progress}/${item.total_episodes}</div>` : ''}`;
       card.addEventListener('click', () => showMediaDetail(item, mediaType));
@@ -2768,7 +2822,7 @@ async function loadMediaList(el, mediaType) {
       btn.addEventListener('click', () => { mediaStatusFilter = btn.dataset.filter; loadMediaList(el, mediaType); });
     });
     document.getElementById('media-add-btn')?.addEventListener('click', () => showAddMediaModal(mediaType));
-  } catch (e) { el.innerHTML = `<div style="color:#f87171;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#999;font-size:13px;">Error: ${e}</div>`; }
 }
 
 function showAddMediaModal(mediaType) {
