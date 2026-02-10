@@ -587,6 +587,17 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             favorite INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS contact_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contact_id INTEGER NOT NULL,
+            block_type TEXT NOT NULL DEFAULT 'site',
+            value TEXT NOT NULL,
+            reason TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -4301,6 +4312,58 @@ fn toggle_contact_favorite(id: i64, db: tauri::State<'_, HanniDb>) -> Result<Str
     Ok("toggled".into())
 }
 
+// ── Contact blocks (per-person site/app blocking) ──
+
+#[tauri::command]
+fn add_contact_block(
+    contact_id: i64,
+    block_type: Option<String>,
+    value: String,
+    reason: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "INSERT INTO contact_blocks (contact_id, block_type, value, reason) VALUES (?1,?2,?3,?4)",
+        rusqlite::params![contact_id, block_type.unwrap_or("site".into()), value, reason],
+    ).map_err(|e| e.to_string())?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_contact_blocks(contact_id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare("SELECT id, contact_id, block_type, value, reason, active, created_at FROM contact_blocks WHERE contact_id=?1 ORDER BY created_at DESC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(rusqlite::params![contact_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "contact_id": row.get::<_, i64>(1)?,
+            "block_type": row.get::<_, String>(2)?,
+            "value": row.get::<_, String>(3)?,
+            "reason": row.get::<_, Option<String>>(4)?,
+            "active": row.get::<_, i32>(5)? != 0,
+            "created_at": row.get::<_, String>(6)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    let items: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
+    Ok(serde_json::json!(items))
+}
+
+#[tauri::command]
+fn delete_contact_block(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM contact_blocks WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("deleted".into())
+}
+
+#[tauri::command]
+fn toggle_contact_block_active(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("UPDATE contact_blocks SET active = CASE WHEN active=1 THEN 0 ELSE 1 END WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
+    Ok("toggled".into())
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -4947,6 +5010,11 @@ pub fn run() {
             delete_contact,
             toggle_contact_blocked,
             toggle_contact_favorite,
+            // v0.8.1: Contact blocks
+            add_contact_block,
+            get_contact_blocks,
+            delete_contact_block,
+            toggle_contact_block_active,
         ])
         .setup(move |app| {
             // Auto-updater
