@@ -194,8 +194,13 @@ body {
   background: #111;
 }
 
-.sub-sidebar-section {
+.sub-sidebar-bottom {
   margin-top: auto;
+  padding: 8px 0;
+  border-top: 1px solid #1a1a1a;
+}
+
+.sub-sidebar-section {
   padding: 8px 0;
   border-top: 1px solid #1a1a1a;
 }
