@@ -28,7 +28,17 @@
 
   <!-- Chat view -->
   <div id="view-chat" class="view active">
-    <div id="chat"></div>
+    <div id="chat-container">
+      <div id="conversations-panel">
+        <div id="conv-search-box">
+          <input id="conv-search" type="text" placeholder="Поиск..." autocomplete="off">
+        </div>
+        <div id="conv-list"></div>
+      </div>
+      <div id="chat-main">
+        <div id="chat"></div>
+      </div>
+    </div>
     <div id="attach-preview"></div>
     <div id="input-area">
       <button id="attach" title="Прикрепить файл">+</button>
