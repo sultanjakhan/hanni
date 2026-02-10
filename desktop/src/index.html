@@ -9,9 +9,12 @@
 <body>
 <!-- Top tab bar (browser-like) -->
 <div id="tab-bar">
-  <div id="tab-list"></div>
-  <button id="tab-add" title="Открыть вкладку">+</button>
+  <div class="tab-bar-left">
+    <div id="tab-list"></div>
+    <button id="tab-add" title="Открыть вкладку">+</button>
+  </div>
   <div id="tab-bar-right">
+    <button id="tab-settings-btn" title="Settings">&#9881;</button>
     <span id="header-version" class="header-version"></span>
   </div>
 </div>
@@ -40,6 +43,9 @@
     <div id="view-chat" class="view active">
       <div id="chat-container">
         <div id="conversations-panel">
+          <div id="conv-header">
+            <button id="new-chat-btn" title="Новый чат">+ Новый чат</button>
+          </div>
           <div id="conv-search-box">
             <input id="conv-search" type="text" placeholder="Поиск..." autocomplete="off">
           </div>
