@@ -13,7 +13,7 @@ use std::process::{Child, Command};
 use std::io::Write;
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
-const MODEL: &str = "mlx-community/Qwen3-30B-A3B-4bit";
+const MODEL: &str = "mlx-community/Qwen3-32B-4bit";
 
 const SYSTEM_PROMPT: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language.
 
@@ -4724,27 +4724,73 @@ async fn proactive_llm_call(
     }
 }
 
-fn speak_tts(text: &str, voice: &str) {
-    let clean = text.replace('"', "'");
-    // Check if voice is an edge-tts voice (contains "Neural")
-    if voice.contains("Neural") {
-        let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
-        let tmp2 = tmp.clone();
-        let voice_owned = voice.to_string();
-        let clean_owned = clean.to_string();
-        std::thread::spawn(move || {
-            let status = std::process::Command::new("edge-tts")
-                .args(["--voice", &voice_owned, "--text", &clean_owned, "--write-media", &tmp2])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if let Ok(s) = status {
-                if s.success() {
-                    let _ = std::process::Command::new("afplay").arg(&tmp2).status();
-                    let _ = std::fs::remove_file(&tmp2);
+fn speak_edge_tts(text: &str, voice: &str) {
+    let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
+    let tmp2 = tmp.clone();
+    let voice_owned = voice.to_string();
+    let text_owned = text.to_string();
+    std::thread::spawn(move || {
+        let status = std::process::Command::new("edge-tts")
+            .args(["--voice", &voice_owned, "--text", &text_owned, "--write-media", &tmp2])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if let Ok(s) = status {
+            if s.success() {
+                let _ = std::process::Command::new("afplay").arg(&tmp2).status();
+                let _ = std::fs::remove_file(&tmp2);
+            }
+        }
+    });
+}
+
+fn speak_remote_tts(text: &str, voice: &str, server_url: &str) {
+    let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
+    let tmp2 = tmp.clone();
+    let url = format!("{}/tts", server_url.trim_end_matches('/'));
+    let text_owned = text.to_string();
+    let voice_owned = voice.to_string();
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build();
+        if let Ok(client) = client {
+            let resp = client.post(&url)
+                .json(&serde_json::json!({"text": text_owned, "voice": voice_owned}))
+                .send();
+            if let Ok(resp) = resp {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes() {
+                        if std::fs::write(&tmp2, &bytes).is_ok() {
+                            let _ = std::process::Command::new("afplay").arg(&tmp2).status();
+                            let _ = std::fs::remove_file(&tmp2);
+                        }
+                    }
                 }
             }
-        });
+        }
+    });
+}
+
+fn speak_tts(text: &str, voice: &str) {
+    let clean = text.replace('"', "'");
+    // Check for remote TTS server setting
+    let data_dir = hanni_data_dir();
+    let db_path = data_dir.join("hanni.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        if let Ok(url) = conn.query_row(
+            "SELECT value FROM app_settings WHERE key='tts_server_url'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            if !url.is_empty() {
+                speak_remote_tts(&clean, voice, &url);
+                return;
+            }
+        }
+    }
+    if voice.contains("Neural") {
+        speak_edge_tts(&clean, voice);
     } else {
         let _ = std::process::Command::new("say")
             .args(["-v", voice, "-r", "210", &clean])
@@ -4753,25 +4799,25 @@ fn speak_tts(text: &str, voice: &str) {
 }
 
 #[tauri::command]
-async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
+async fn speak_text(text: String, voice: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "Milena".into());
     let clean = text.replace('"', "'");
+    // Check for remote TTS server
+    let remote_url = {
+        let conn = db.0.lock().map_err(|e| format!("DB lock: {}", e))?;
+        conn.query_row("SELECT value FROM app_settings WHERE key='tts_server_url'", [], |row| row.get::<_, String>(0)).ok()
+    };
+    if let Some(url) = remote_url {
+        if !url.is_empty() {
+            let url2 = url.clone();
+            tokio::task::spawn_blocking(move || speak_remote_tts(&clean, &v, &url2));
+            return Ok(());
+        }
+    }
     if v.contains("Neural") {
-        let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
-        let tmp2 = tmp.clone();
-        tokio::task::spawn_blocking(move || {
-            let status = std::process::Command::new("edge-tts")
-                .args(["--voice", &v, "--text", &clean, "--write-media", &tmp2])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if let Ok(s) = status {
-                if s.success() {
-                    let _ = std::process::Command::new("afplay").arg(&tmp2).status();
-                    let _ = std::fs::remove_file(&tmp2);
-                }
-            }
-        });
+        let v2 = v.clone();
+        let c2 = clean.clone();
+        tokio::task::spawn_blocking(move || speak_edge_tts(&c2, &v2));
     } else {
         std::process::Command::new("say")
             .args(["-v", &v, "-r", "210", &clean])
