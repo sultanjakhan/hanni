@@ -10,7 +10,7 @@ const attachPreview = document.getElementById('attach-preview');
 const integrationsContent = document.getElementById('integrations-content');
 const settingsContent = document.getElementById('settings-content');
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.6.0';
 
 let busy = false;
 let history = [];
@@ -18,6 +18,9 @@ let attachedFile = null; // {name, content}
 let currentTab = 'chat';
 let isRecording = false;
 let integrationsLoaded = false;
+let currentConversationId = null; // Active conversation ID in SQLite
+let isSpeaking = false;
+let convSearchTimeout = null;
 
 // ── Auto-update notification ──
 listen('update-available', (event) => {
@@ -44,6 +47,7 @@ listen('proactive-message', (event) => {
   // Add to history so user can reply naturally
   history.push(['assistant', text]);
   scrollDown();
+  autoSaveConversation();
 
   // Desktop notification if window not focused
   if (!document.hasFocus()) {
@@ -130,6 +134,103 @@ listen('focus-ended', () => {
   }
 });
 
+// ── Conversation sidebar ──
+
+async function loadConversationsList(searchQuery) {
+  const convList = document.getElementById('conv-list');
+  if (!convList) return;
+  try {
+    let convs;
+    if (searchQuery && searchQuery.trim().length > 1) {
+      convs = await invoke('search_conversations', { query: searchQuery, limit: 20 });
+    } else {
+      convs = await invoke('get_conversations', { limit: 30 });
+    }
+    convList.innerHTML = '';
+    for (const c of convs) {
+      const item = document.createElement('div');
+      item.className = 'conv-item' + (c.id === currentConversationId ? ' active' : '');
+      const date = new Date(c.started_at);
+      const dateStr = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      const timeStr = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const summary = c.summary || `Диалог (${c.message_count} сообщ.)`;
+      item.innerHTML = `
+        <div class="conv-item-summary">${escapeHtml(summary)}</div>
+        <div class="conv-item-meta">${dateStr} ${timeStr} · ${c.message_count} сообщ.</div>
+        <button class="conv-delete" data-id="${c.id}" title="Удалить">&times;</button>
+      `;
+      item.addEventListener('click', (e) => {
+        if (e.target.classList.contains('conv-delete')) return;
+        loadConversation(c.id);
+      });
+      item.querySelector('.conv-delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(e.target.dataset.id);
+        await invoke('delete_conversation', { id });
+        if (currentConversationId === id) {
+          currentConversationId = null;
+          history = [];
+          chat.innerHTML = '';
+        }
+        loadConversationsList();
+      });
+      convList.appendChild(item);
+    }
+  } catch (_) {}
+}
+
+async function loadConversation(id) {
+  if (busy) return;
+  try {
+    // Save current conversation before switching
+    await autoSaveConversation();
+    const conv = await invoke('get_conversation', { id });
+    currentConversationId = id;
+    history = conv.messages || [];
+    chat.innerHTML = '';
+    // Render all messages
+    for (const [role, content] of history) {
+      if (role === 'user' && content.startsWith('[Action result:')) {
+        const div = document.createElement('div');
+        div.className = 'action-result success';
+        div.textContent = content;
+        chat.appendChild(div);
+      } else {
+        addMsg(role === 'assistant' ? 'bot' : role, content);
+      }
+    }
+    scrollDown();
+    loadConversationsList();
+  } catch (e) {
+    addMsg('bot', 'Ошибка загрузки: ' + e);
+  }
+}
+
+async function autoSaveConversation() {
+  if (history.length < 2) return;
+  try {
+    if (currentConversationId) {
+      await invoke('update_conversation', { id: currentConversationId, messages: history });
+    } else {
+      currentConversationId = await invoke('save_conversation', { messages: history });
+    }
+  } catch (_) {}
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Conversation search
+document.getElementById('conv-search')?.addEventListener('input', (e) => {
+  clearTimeout(convSearchTimeout);
+  convSearchTimeout = setTimeout(() => {
+    loadConversationsList(e.target.value);
+  }, 300);
+});
+
 // ── Tab navigation ──
 
 function switchTab(tab) {
@@ -149,6 +250,7 @@ function switchTab(tab) {
   } else if (tab === 'settings') {
     loadSettings();
   } else if (tab === 'chat') {
+    loadConversationsList();
     input.focus();
   }
 }
@@ -164,6 +266,24 @@ function scrollDown() {
 }
 
 function addMsg(role, text) {
+  if (role === 'bot') {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg-wrapper';
+    const div = document.createElement('div');
+    div.className = 'msg bot';
+    div.textContent = text;
+    wrapper.appendChild(div);
+    // TTS button
+    const ttsBtn = document.createElement('button');
+    ttsBtn.className = 'tts-btn';
+    ttsBtn.innerHTML = '&#9834;';
+    ttsBtn.title = 'Озвучить';
+    ttsBtn.addEventListener('click', () => toggleTTS(ttsBtn, text));
+    wrapper.appendChild(ttsBtn);
+    chat.appendChild(wrapper);
+    scrollDown();
+    return div;
+  }
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   div.textContent = text;
@@ -379,7 +499,7 @@ async function streamChat(botDiv, t0) {
   const unlistenDone = await listen('chat-done', () => {});
 
   try {
-    const msgs = history.slice(-16);
+    const msgs = history.slice(-30);
     await invoke('chat', { messages: msgs });
   } catch (e) {
     if (!fullReply) {
@@ -403,6 +523,38 @@ function showAgentIndicator(step) {
   chat.appendChild(div);
   scrollDown();
   return div;
+}
+
+// ── TTS ──
+
+async function toggleTTS(btn, text) {
+  if (isSpeaking) {
+    await invoke('stop_speaking').catch(() => {});
+    document.querySelectorAll('.tts-btn.speaking').forEach(b => b.classList.remove('speaking'));
+    isSpeaking = false;
+    return;
+  }
+  isSpeaking = true;
+  btn.classList.add('speaking');
+  try {
+    // Get voice from proactive settings
+    let voice = 'Milena';
+    try {
+      const ps = await invoke('get_proactive_settings');
+      voice = ps.voice_name || 'Milena';
+    } catch (_) {}
+    await invoke('speak_text', { text, voice });
+    // Auto-clear speaking state after estimated duration
+    const wordCount = text.split(/\s+/).length;
+    const durationMs = Math.max(2000, wordCount * 300);
+    setTimeout(() => {
+      btn.classList.remove('speaking');
+      isSpeaking = false;
+    }, durationMs);
+  } catch (_) {
+    btn.classList.remove('speaking');
+    isSpeaking = false;
+  }
 }
 
 // ── Send message ──
@@ -442,10 +594,13 @@ async function send() {
       showAgentIndicator(iteration);
     }
 
-    // Create bot message div
+    // Create bot message div with TTS wrapper
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg-wrapper';
     const botDiv = document.createElement('div');
     botDiv.className = 'msg bot';
-    chat.appendChild(botDiv);
+    wrapper.appendChild(botDiv);
+    chat.appendChild(wrapper);
     scrollDown();
 
     // Stream model response
@@ -482,6 +637,21 @@ async function send() {
     history.push(['user', `[Action result: ${results.join('; ')}]`]);
   }
 
+  // Add TTS button to last bot wrapper
+  const lastWrapper = chat.querySelector('.msg-wrapper:last-of-type');
+  if (lastWrapper && !lastWrapper.querySelector('.tts-btn')) {
+    const lastBotDiv = lastWrapper.querySelector('.msg.bot');
+    if (lastBotDiv) {
+      const ttsBtn = document.createElement('button');
+      ttsBtn.className = 'tts-btn';
+      ttsBtn.innerHTML = '&#9834;';
+      ttsBtn.title = 'Озвучить';
+      const ttsText = lastBotDiv.textContent;
+      ttsBtn.addEventListener('click', () => toggleTTS(ttsBtn, ttsText));
+      lastWrapper.appendChild(ttsBtn);
+    }
+  }
+
   // Show timing
   const total = ((performance.now() - t0) / 1000).toFixed(1);
   const ttft = firstToken ? (firstToken / 1000).toFixed(1) : '?';
@@ -492,15 +662,20 @@ async function send() {
   chat.appendChild(timing);
   scrollDown();
 
-  // Post-chat: save conversation and extract facts in background
-  if (history.length >= 4) {
-    (async () => {
-      try {
-        const convId = await invoke('save_conversation', { messages: history });
-        await invoke('process_conversation_end', { messages: history, conversationId: convId });
-      } catch (_) {}
-    })();
-  }
+  // Post-chat: incremental save + extract facts in background
+  (async () => {
+    try {
+      if (currentConversationId) {
+        await invoke('update_conversation', { id: currentConversationId, messages: history });
+      } else {
+        currentConversationId = await invoke('save_conversation', { messages: history });
+      }
+      if (history.length >= 4) {
+        await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });
+      }
+      loadConversationsList();
+    } catch (_) {}
+  })();
 
   busy = false;
   sendBtn.disabled = false;
@@ -512,14 +687,11 @@ async function send() {
 async function newChat() {
   if (busy) return;
   // Save current conversation before clearing
-  if (history.length >= 4) {
-    try {
-      const convId = await invoke('save_conversation', { messages: history });
-      await invoke('process_conversation_end', { messages: history, conversationId: convId });
-    } catch (_) {}
-  }
+  await autoSaveConversation();
+  currentConversationId = null;
   history = [];
   chat.innerHTML = '';
+  loadConversationsList();
   input.focus();
 }
 
@@ -808,5 +980,32 @@ headerVersion.addEventListener('click', async () => {
   }
   setTimeout(() => { headerVersion.textContent = `v${APP_VERSION}`; }, 4000);
 });
+
+// ── Auto-restore last conversation on startup ──
+(async () => {
+  try {
+    const convs = await invoke('get_conversations', { limit: 1 });
+    if (convs.length > 0) {
+      const latest = convs[0];
+      const conv = await invoke('get_conversation', { id: latest.id });
+      if (conv.messages && conv.messages.length > 0) {
+        currentConversationId = latest.id;
+        history = conv.messages;
+        for (const [role, content] of history) {
+          if (role === 'user' && content.startsWith('[Action result:')) {
+            const div = document.createElement('div');
+            div.className = 'action-result success';
+            div.textContent = content;
+            chat.appendChild(div);
+          } else {
+            addMsg(role === 'assistant' ? 'bot' : role, content);
+          }
+        }
+        scrollDown();
+      }
+    }
+  } catch (_) {}
+  loadConversationsList();
+})();
 
 input.focus();

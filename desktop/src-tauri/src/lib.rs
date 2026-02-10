@@ -143,7 +143,23 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             summary TEXT,
             message_count INTEGER DEFAULT 0,
             messages TEXT NOT NULL
-        );"
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(
+            summary, messages,
+            content='conversations', content_rowid='id'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS conv_ai AFTER INSERT ON conversations BEGIN
+            INSERT INTO conversations_fts(rowid, summary, messages) VALUES (new.id, COALESCE(new.summary, ''), new.messages);
+        END;
+        CREATE TRIGGER IF NOT EXISTS conv_ad AFTER DELETE ON conversations BEGIN
+            INSERT INTO conversations_fts(conversations_fts, rowid, summary, messages) VALUES('delete', old.id, COALESCE(old.summary, ''), old.messages);
+        END;
+        CREATE TRIGGER IF NOT EXISTS conv_au AFTER UPDATE ON conversations BEGIN
+            INSERT INTO conversations_fts(conversations_fts, rowid, summary, messages) VALUES('delete', old.id, COALESCE(old.summary, ''), old.messages);
+            INSERT INTO conversations_fts(rowid, summary, messages) VALUES (new.id, COALESCE(new.summary, ''), new.messages);
+        END;"
     ).map_err(|e| format!("DB init error: {}", e))
 }
 
@@ -1819,6 +1835,113 @@ fn save_conversation(
 }
 
 #[tauri::command]
+fn update_conversation(
+    id: i64,
+    messages: Vec<(String, String)>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    let messages_json = serde_json::to_string(&messages)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+    let msg_count = messages.len() as i64;
+    conn.execute(
+        "UPDATE conversations SET messages=?1, message_count=?2, ended_at=?3 WHERE id=?4",
+        rusqlite::params![messages_json, msg_count, now, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_conversations(
+    limit: Option<i64>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let max = limit.unwrap_or(30);
+    let mut stmt = conn.prepare(
+        "SELECT id, started_at, summary, message_count FROM conversations
+         ORDER BY started_at DESC LIMIT ?1"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![max], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "started_at": row.get::<_, String>(1)?,
+            "summary": row.get::<_, Option<String>>(2)?,
+            "message_count": row.get::<_, i64>(3)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?
+    .filter_map(|r| r.ok())
+    .collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn get_conversation(
+    id: i64,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let (messages_json, summary, started_at): (String, Option<String>, String) = conn.query_row(
+        "SELECT messages, summary, started_at FROM conversations WHERE id=?1",
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).map_err(|e| format!("Not found: {}", e))?;
+    let messages: Vec<(String, String)> = serde_json::from_str(&messages_json)
+        .map_err(|e| format!("Parse error: {}", e))?;
+    Ok(serde_json::json!({
+        "id": id,
+        "started_at": started_at,
+        "summary": summary,
+        "messages": messages,
+    }))
+}
+
+#[tauri::command]
+fn delete_conversation(
+    id: i64,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM conversations WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn search_conversations(
+    query: String,
+    limit: Option<i64>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let max = limit.unwrap_or(20);
+    let words: Vec<&str> = query.split_whitespace().filter(|w| w.len() > 1).take(10).collect();
+    if words.is_empty() {
+        return Ok(vec![]);
+    }
+    let fts_query = words.join(" OR ");
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.started_at, c.summary, c.message_count
+         FROM conversations_fts fts
+         JOIN conversations c ON c.id = fts.rowid
+         WHERE conversations_fts MATCH ?1
+         ORDER BY rank LIMIT ?2"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![fts_query, max], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "started_at": row.get::<_, String>(1)?,
+            "summary": row.get::<_, Option<String>>(2)?,
+            "message_count": row.get::<_, i64>(3)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?
+    .filter_map(|r| r.ok())
+    .collect();
+    Ok(rows)
+}
+
+#[tauri::command]
 async fn process_conversation_end(
     messages: Vec<(String, String)>,
     conversation_id: i64,
@@ -2256,6 +2379,23 @@ fn speak_tts(text: &str, voice: &str) {
         .spawn();
 }
 
+#[tauri::command]
+async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
+    let v = voice.unwrap_or_else(|| "Milena".into());
+    let clean = text.replace('"', "'");
+    std::process::Command::new("say")
+        .args(["-v", &v, "-r", "210", &clean])
+        .spawn()
+        .map_err(|e| format!("TTS error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_speaking() -> Result<(), String> {
+    let _ = std::process::Command::new("killall").arg("say").output();
+    Ok(())
+}
+
 // ── Proactive messaging commands ──
 
 #[tauri::command]
@@ -2394,7 +2534,15 @@ pub fn run() {
             memory_forget,
             memory_search,
             save_conversation,
+            update_conversation,
+            get_conversations,
+            get_conversation,
+            delete_conversation,
+            search_conversations,
             process_conversation_end,
+            // Phase 2: TTS
+            speak_text,
+            stop_speaking,
             // Phase 1: Voice
             download_whisper_model,
             start_recording,
