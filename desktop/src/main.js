@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.13';
+const APP_VERSION = '0.8.14';
 
 let busy = false;
 let history = [];
@@ -2320,9 +2320,10 @@ async function loadSettings(subTab) {
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   settingsContent.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
   try {
-    const [info, trainingStats] = await Promise.all([
+    const [info, trainingStats, proactive] = await Promise.all([
       invoke('get_model_info'),
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_proactive_settings'),
     ]);
 
     settingsContent.innerHTML = `
@@ -2366,6 +2367,28 @@ async function loadSettings(subTab) {
           <span class="settings-label">Статус</span>
           <span class="settings-value" id="api-status">Проверяю...</span>
         </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Автономный режим</div>
+        <div class="settings-row">
+          <span class="settings-label">Включён</span>
+          <label class="toggle">
+            <input type="checkbox" id="settings-proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Интервал</span>
+          <div class="pill-group" id="settings-proactive-interval">
+            ${[5, 10, 15, 30].map(v =>
+              `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Тихие часы</span>
+          <span class="settings-value">${proactive.quiet_hours_start || 23}:00 — ${proactive.quiet_hours_end || 8}:00</span>
+        </div>
       </div>`;
 
     // Training data export
@@ -2392,6 +2415,27 @@ async function loadSettings(subTab) {
       const apiEl = document.getElementById('api-status');
       if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
     }
+
+    // Proactive settings handlers in main Settings
+    const saveSettingsProactive = () => {
+      const settings = {
+        enabled: document.getElementById('settings-proactive-enabled')?.checked ?? proactive.enabled,
+        voice_enabled: proactive.voice_enabled,
+        voice_name: proactive.voice_name,
+        interval_minutes: parseInt(document.querySelector('#settings-proactive-interval .pill.active')?.dataset.value || proactive.interval_minutes),
+        quiet_hours_start: proactive.quiet_hours_start || 23,
+        quiet_hours_end: proactive.quiet_hours_end || 8,
+      };
+      invoke('set_proactive_settings', { settings }).catch(() => {});
+    };
+    document.getElementById('settings-proactive-enabled')?.addEventListener('change', saveSettingsProactive);
+    document.querySelectorAll('#settings-proactive-interval .pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('#settings-proactive-interval .pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        saveSettingsProactive();
+      });
+    });
 
   } catch (e) {
     settingsContent.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`;
