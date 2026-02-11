@@ -2857,12 +2857,12 @@ async fn sync_apple_calendar(month: u32, year: i32, db: tauri::State<'_, HanniDb
     let script = format!(
         r#"
         set output to ""
-        set startD to date "1 January 2000"
+        set startD to current date
         set year of startD to {year}
         set month of startD to {month}
         set day of startD to 1
         set time of startD to 0
-        set endD to date "1 January 2000"
+        set endD to current date
         set year of endD to {year}
         set month of endD to {month}
         set day of endD to {last_day}
