@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.20';
+const APP_VERSION = '0.9.0';
 
 let busy = false;
 let history = [];
@@ -46,6 +46,39 @@ const TAB_REGISTRY = {
   people:      { label: 'People',      icon: '\u{1F465}', closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
   settings:    { label: 'Settings',    icon: '\u{2699}\u{FE0F}',  closable: true,  subTabs: ['Memory', 'Blocklist', 'Integrations', 'About'] },
 };
+
+const TAB_DESCRIPTIONS = {
+  dashboard: 'Overview of your day, activities, and quick actions',
+  calendar: 'Events, schedules, and calendar integrations',
+  focus: 'Deep work sessions and activity tracking',
+  notes: 'Quick notes, ideas, and thoughts',
+  work: 'Projects and tasks management',
+  development: 'Courses, skills, and learning resources',
+  home: 'Household supplies and shopping lists',
+  hobbies: 'Media collections — track what you watch, read, play',
+  sports: 'Workouts, martial arts, and fitness stats',
+  health: 'Daily health metrics and habit tracking',
+  mindset: 'Journal, mood tracking, and personal principles',
+  food: 'Food log, recipes, and product inventory',
+  money: 'Expenses, income, budgets, and savings',
+  people: 'Contacts and relationship management',
+  settings: 'App configuration and preferences',
+};
+
+function renderPageHeader(tabId, extra) {
+  const reg = TAB_REGISTRY[tabId];
+  if (!reg) return '';
+  const desc = extra?.description || TAB_DESCRIPTIONS[tabId] || '';
+  const props = extra?.properties || [];
+  return `<div class="page-header">
+    <div class="page-header-emoji">${reg.icon || ''}</div>
+    <div class="page-header-title">${extra?.title || reg.label}</div>
+    ${desc ? `<div class="page-header-description">${desc}</div>` : ''}
+    ${props.length ? `<div class="page-header-properties">${props.map(p =>
+      `<span class="page-property"><span class="page-property-label">${p.label}</span><span class="page-property-value ${p.class || ''}">${p.value}</span></span>`
+    ).join('')}</div>` : ''}
+  </div>`;
+}
 
 let openTabs = ['chat', 'dashboard'];
 let activeTab = 'chat';
@@ -404,7 +437,10 @@ function renderSubSidebar() {
       gear.className = 'sub-sidebar-item';
       gear.innerHTML = '\u{2699}\u{FE0F} Настройки';
       gear.addEventListener('click', () => {
-        if (!openTabs.includes('settings')) openTabs.push('settings');
+        if (!openTabs.includes('settings')) {
+          const idx = openTabs.indexOf(activeTab);
+          openTabs.splice(idx + 1, 0, 'settings');
+        }
         switchTab('settings');
       });
       settingsBottom.appendChild(gear);
@@ -489,7 +525,10 @@ function showAddGoalModal() {
 
 function openTab(tabId) {
   if (!TAB_REGISTRY[tabId]) return;
-  if (!openTabs.includes(tabId)) openTabs.push(tabId);
+  if (!openTabs.includes(tabId)) {
+    const idx = openTabs.indexOf(activeTab);
+    openTabs.splice(idx + 1, 0, tabId);
+  }
   switchTab(tabId);
 }
 
@@ -506,7 +545,10 @@ function closeTab(tabId) {
 
 function switchTab(tabId) {
   if (!TAB_REGISTRY[tabId]) return;
-  if (!openTabs.includes(tabId)) openTabs.push(tabId);
+  if (!openTabs.includes(tabId)) {
+    const idx = openTabs.indexOf(activeTab);
+    openTabs.splice(idx + 1, 0, tabId);
+  }
   activeTab = tabId;
   saveTabs();
   renderTabBar();
@@ -1364,8 +1406,10 @@ input.addEventListener('keydown', e => {
 async function loadHome(subTab) {
   const el = document.getElementById('home-content');
   if (!el) return;
-  if (subTab === 'Shopping List') loadShoppingList(el);
-  else loadSupplies(el);
+  el.innerHTML = renderPageHeader('home') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
+  if (subTab === 'Shopping List') loadShoppingList(pc);
+  else loadSupplies(pc);
 }
 
 async function loadSupplies(el) {
@@ -1465,10 +1509,12 @@ async function loadShoppingList(el) {
 async function loadMindset(subTab) {
   const el = document.getElementById('mindset-content');
   if (!el) return;
-  if (subTab === 'Journal') loadJournal(el);
-  else if (subTab === 'Mood') loadMoodLog(el);
-  else if (subTab === 'Principles') loadPrinciples(el);
-  else loadJournal(el);
+  el.innerHTML = renderPageHeader('mindset') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
+  if (subTab === 'Journal') loadJournal(pc);
+  else if (subTab === 'Mood') loadMoodLog(pc);
+  else if (subTab === 'Principles') loadPrinciples(pc);
+  else loadJournal(pc);
 }
 
 async function loadJournal(el) {
@@ -1571,10 +1617,12 @@ async function loadPrinciples(el) {
 async function loadFood(subTab) {
   const el = document.getElementById('food-content');
   if (!el) return;
-  if (subTab === 'Food Log') loadFoodLog(el);
-  else if (subTab === 'Recipes') loadRecipes(el);
-  else if (subTab === 'Products') loadProducts(el);
-  else loadFoodLog(el);
+  el.innerHTML = renderPageHeader('food') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
+  if (subTab === 'Food Log') loadFoodLog(pc);
+  else if (subTab === 'Recipes') loadRecipes(pc);
+  else if (subTab === 'Products') loadProducts(pc);
+  else loadFoodLog(pc);
 }
 
 async function loadFoodLog(el) {
@@ -1655,129 +1703,138 @@ function showAddFoodModal(el) {
 async function loadRecipes(el) {
   try {
     const recipes = await invoke('get_recipes', { search: null, tags: null }).catch(() => []);
-    el.innerHTML = `
-      <div class="module-header"><h2>Recipes</h2><button class="btn-primary" id="recipe-add-btn">+ Add Recipe</button></div>
-      <div class="dev-grid" id="recipes-grid">
-        ${recipes.map(r => `<div class="dev-card">
-          <div class="dev-card-title">${escapeHtml(r.name)}</div>
-          <div style="font-size:12px;color:var(--text-muted);">${r.prep_time||0}+${r.cook_time||0} min · ${r.calories||'?'} kcal</div>
-          ${r.tags ? `<div class="dev-card-meta">${r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join('')}</div>` : ''}
-        </div>`).join('')}
-      </div>`;
-    document.getElementById('recipe-add-btn')?.addEventListener('click', () => {
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.innerHTML = `<div class="modal">
-        <div class="modal-title">Add Recipe</div>
-        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="rcp-name"></div>
-        <div class="form-group"><label class="form-label">Ingredients</label><textarea class="form-textarea" id="rcp-ing" rows="3"></textarea></div>
-        <div class="form-group"><label class="form-label">Instructions</label><textarea class="form-textarea" id="rcp-inst" rows="3"></textarea></div>
-        <div class="form-group"><label class="form-label">Prep time (min)</label><input class="form-input" id="rcp-prep" type="number"></div>
-        <div class="form-group"><label class="form-label">Calories</label><input class="form-input" id="rcp-cal" type="number"></div>
-        <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" id="rcp-tags"></div>
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-          <button class="btn-primary" id="rcp-save">Save</button>
-        </div>
-      </div>`;
-      document.body.appendChild(overlay);
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-      document.getElementById('rcp-save')?.addEventListener('click', async () => {
-        const name = document.getElementById('rcp-name')?.value?.trim();
-        if (!name) return;
-        try {
-          await invoke('create_recipe', {
-            name, description: null,
-            ingredients: document.getElementById('rcp-ing')?.value||'',
-            instructions: document.getElementById('rcp-inst')?.value||'',
-            prepTime: parseInt(document.getElementById('rcp-prep')?.value)||null,
-            cookTime: null, servings: null,
-            calories: parseInt(document.getElementById('rcp-cal')?.value)||null,
-            tags: document.getElementById('rcp-tags')?.value||null,
-          });
-          overlay.remove();
-          loadRecipes(el);
-        } catch (err) { alert('Error: ' + err); }
-      });
+    const fixedColumns = [
+      { key: 'name', label: 'Name', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+      { key: 'prep_time', label: 'Prep', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.prep_time||0}+${r.cook_time||0} min</span>` },
+      { key: 'calories', label: 'Calories', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories||'—'}</span>` },
+      { key: 'tags', label: 'Tags', render: r => r.tags ? r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join(' ') : '' },
+    ];
+    el.innerHTML = '<div id="recipes-dbv"></div>';
+    const dbvEl = document.getElementById('recipes-dbv');
+    await renderDatabaseView(dbvEl, 'food', 'recipes', recipes, {
+      fixedColumns, idField: 'id',
+      addButton: '+ Add Recipe',
+      onAdd: () => showAddRecipeModal(el),
+      reloadFn: () => loadRecipes(el),
+      _tabId: 'food', _recordTable: 'recipes',
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
+}
+
+function showAddRecipeModal(el) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Add Recipe</div>
+    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="rcp-name"></div>
+    <div class="form-group"><label class="form-label">Ingredients</label><textarea class="form-textarea" id="rcp-ing" rows="3"></textarea></div>
+    <div class="form-group"><label class="form-label">Instructions</label><textarea class="form-textarea" id="rcp-inst" rows="3"></textarea></div>
+    <div class="form-group"><label class="form-label">Prep time (min)</label><input class="form-input" id="rcp-prep" type="number"></div>
+    <div class="form-group"><label class="form-label">Calories</label><input class="form-input" id="rcp-cal" type="number"></div>
+    <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" id="rcp-tags"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="rcp-save">Save</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('rcp-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('rcp-name')?.value?.trim();
+    if (!name) return;
+    try {
+      await invoke('create_recipe', {
+        name, description: null,
+        ingredients: document.getElementById('rcp-ing')?.value||'',
+        instructions: document.getElementById('rcp-inst')?.value||'',
+        prepTime: parseInt(document.getElementById('rcp-prep')?.value)||null,
+        cookTime: null, servings: null,
+        calories: parseInt(document.getElementById('rcp-cal')?.value)||null,
+        tags: document.getElementById('rcp-tags')?.value||null,
+      });
+      overlay.remove();
+      loadRecipes(el);
+    } catch (err) { alert('Error: ' + err); }
+  });
 }
 
 async function loadProducts(el) {
   try {
     const products = await invoke('get_products', { location: null, expiringSoon: false }).catch(() => []);
-    el.innerHTML = `
-      <div class="module-header"><h2>Products</h2><button class="btn-primary" id="product-add-btn">+ Add Product</button></div>
-      <div id="products-list">
-        ${products.map(p => {
-          const exp = p.expiry_date ? new Date(p.expiry_date) : null;
-          const isExpiring = exp && (exp - Date.now()) < 3 * 86400000;
-          return `<div class="focus-log-item" style="${isExpiring ? 'border-left:2px solid var(--text-muted);' : ''}">
-            <span class="focus-log-title">${escapeHtml(p.name)}</span>
-            <span class="badge badge-gray">${p.location||''}</span>
-            ${p.quantity ? `<span style="color:var(--text-secondary);font-size:12px;">${p.quantity} ${p.unit||''}</span>` : ''}
-            ${exp ? `<span style="color:${isExpiring?'var(--color-red)':'var(--text-secondary)'};font-size:11px;">${p.expiry_date}</span>` : ''}
-            <button class="memory-item-btn" data-pdel="${p.id}">&times;</button>
-          </div>`;
-        }).join('')}
-      </div>`;
-    el.querySelectorAll('[data-pdel]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        await invoke('delete_product', { id: parseInt(btn.dataset.pdel) }).catch(()=>{});
-        loadProducts(el);
-      });
-    });
-    document.getElementById('product-add-btn')?.addEventListener('click', () => {
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.innerHTML = `<div class="modal">
-        <div class="modal-title">Add Product</div>
-        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="prod-name"></div>
-        <div class="form-group"><label class="form-label">Location</label>
-          <select class="form-select" id="prod-loc" style="width:100%;">
-            <option value="fridge">Fridge</option><option value="freezer">Freezer</option>
-            <option value="pantry">Pantry</option><option value="other">Other</option>
-          </select></div>
-        <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" id="prod-qty" type="number"></div>
-        <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="prod-unit" placeholder="pcs, kg, L..."></div>
-        <div class="form-group"><label class="form-label">Expiry Date</label><input class="form-input" id="prod-exp" type="date"></div>
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-          <button class="btn-primary" id="prod-save">Save</button>
-        </div>
-      </div>`;
-      document.body.appendChild(overlay);
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-      document.getElementById('prod-save')?.addEventListener('click', async () => {
-        const name = document.getElementById('prod-name')?.value?.trim();
-        if (!name) return;
-        try {
-          await invoke('add_product', {
-            name, category: null,
-            quantity: parseFloat(document.getElementById('prod-qty')?.value)||null,
-            unit: document.getElementById('prod-unit')?.value||null,
-            expiryDate: document.getElementById('prod-exp')?.value||null,
-            location: document.getElementById('prod-loc')?.value||'fridge',
-            barcode: null, notes: null,
-          });
-          overlay.remove();
-          loadProducts(el);
-        } catch (err) { alert('Error: ' + err); }
-      });
+    const fixedColumns = [
+      { key: 'name', label: 'Name', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+      { key: 'location', label: 'Location', render: r => `<span class="badge badge-gray">${r.location||''}</span>` },
+      { key: 'quantity', label: 'Qty', render: r => r.quantity ? `<span style="font-size:12px;color:var(--text-secondary);">${r.quantity} ${r.unit||''}</span>` : '' },
+      { key: 'expiry_date', label: 'Expiry', render: r => {
+        if (!r.expiry_date) return '';
+        const exp = new Date(r.expiry_date);
+        const isExpiring = (exp - Date.now()) < 3 * 86400000;
+        return `<span style="color:${isExpiring?'var(--color-red)':'var(--text-secondary)'};font-size:12px;">${r.expiry_date}</span>`;
+      }},
+    ];
+    el.innerHTML = '<div id="products-dbv"></div>';
+    const dbvEl = document.getElementById('products-dbv');
+    await renderDatabaseView(dbvEl, 'food', 'products', products, {
+      fixedColumns, idField: 'id',
+      addButton: '+ Add Product',
+      onAdd: () => showAddProductModal(el),
+      reloadFn: () => loadProducts(el),
+      _tabId: 'food', _recordTable: 'products',
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
+}
+
+function showAddProductModal(el) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Add Product</div>
+    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="prod-name"></div>
+    <div class="form-group"><label class="form-label">Location</label>
+      <select class="form-select" id="prod-loc" style="width:100%;">
+        <option value="fridge">Fridge</option><option value="freezer">Freezer</option>
+        <option value="pantry">Pantry</option><option value="other">Other</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" id="prod-qty" type="number"></div>
+    <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="prod-unit" placeholder="pcs, kg, L..."></div>
+    <div class="form-group"><label class="form-label">Expiry Date</label><input class="form-input" id="prod-exp" type="date"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="prod-save">Save</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('prod-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('prod-name')?.value?.trim();
+    if (!name) return;
+    try {
+      await invoke('add_product', {
+        name, category: null,
+        quantity: parseFloat(document.getElementById('prod-qty')?.value)||null,
+        unit: document.getElementById('prod-unit')?.value||null,
+        expiryDate: document.getElementById('prod-exp')?.value||null,
+        location: document.getElementById('prod-loc')?.value||'fridge',
+        barcode: null, notes: null,
+      });
+      overlay.remove();
+      loadProducts(el);
+    } catch (err) { alert('Error: ' + err); }
+  });
 }
 
 // ── Money ──
 async function loadMoney(subTab) {
   const el = document.getElementById('money-content');
   if (!el) return;
-  if (subTab === 'Expenses' || subTab === 'Income') loadTransactions(el, subTab === 'Income' ? 'income' : 'expense');
-  else if (subTab === 'Budget') loadBudgets(el);
-  else if (subTab === 'Savings') loadSavings(el);
-  else if (subTab === 'Subscriptions') loadSubscriptions(el);
-  else if (subTab === 'Debts') loadDebts(el);
-  else loadTransactions(el, 'expense');
+  el.innerHTML = renderPageHeader('money') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
+  if (subTab === 'Expenses' || subTab === 'Income') loadTransactions(pc, subTab === 'Income' ? 'income' : 'expense');
+  else if (subTab === 'Budget') loadBudgets(pc);
+  else if (subTab === 'Savings') loadSavings(pc);
+  else if (subTab === 'Subscriptions') loadSubscriptions(pc);
+  else if (subTab === 'Debts') loadDebts(pc);
+  else loadTransactions(pc, 'expense');
 }
 
 async function loadTransactions(el, txType) {
@@ -1990,6 +2047,8 @@ async function loadDebts(el) {
 async function loadPeople(subTab) {
   const el = document.getElementById('people-content');
   if (!el) return;
+  el.innerHTML = renderPageHeader('people') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
   const filter = subTab === 'Blocked' ? { blocked: true } : subTab === 'Favorites' ? {} : {};
   try {
     const items = await invoke('get_contacts', filter);
@@ -1999,7 +2058,7 @@ async function loadPeople(subTab) {
     for (const c of contacts) {
       try { c._blocks = await invoke('get_contact_blocks', { contactId: c.id }); } catch { c._blocks = []; }
     }
-    el.innerHTML = `
+    pc.innerHTML = `
       <div class="module-header">
         <h2>${subTab === 'Blocked' ? 'Blocked' : subTab === 'Favorites' ? 'Favorites' : 'All Contacts'}</h2>
         <button class="btn-primary" id="add-contact-btn">+ Add</button>
@@ -2038,7 +2097,7 @@ async function loadPeople(subTab) {
       </div>`;
     document.getElementById('add-contact-btn')?.addEventListener('click', showAddContactModal);
   } catch (e) {
-    el.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">⚠️</div>${e}</div>`;
+    pc.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">⚠️</div>${e}</div>`;
   }
 }
 
@@ -2525,7 +2584,7 @@ async function loadDashboard() {
       </div>`;
     }
 
-    el.innerHTML = `
+    el.innerHTML = renderPageHeader('dashboard') + `<div class="page-content">
       <div class="dashboard-greeting">${greeting}!</div>
       <div class="dashboard-date">${dateStr}</div>
       ${focusBanner}
@@ -2551,13 +2610,13 @@ async function loadDashboard() {
         <button class="btn-primary" onclick="switchTab('notes')">Новая заметка</button>
         <button class="btn-primary" onclick="switchTab('focus')">Начать активность</button>
         <button class="btn-primary" onclick="switchTab('health')">Залогировать</button>
-      </div>`;
+      </div></div>`;
   } catch (e) {
     // Fallback for when backend command doesn't exist yet
     const now = new Date();
     const dateStr = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const greeting = now.getHours() < 12 ? 'Доброе утро' : now.getHours() < 18 ? 'Добрый день' : 'Добрый вечер';
-    el.innerHTML = `
+    el.innerHTML = renderPageHeader('dashboard') + `<div class="page-content">
       <div class="dashboard-greeting">${greeting}!</div>
       <div class="dashboard-date">${dateStr}</div>
       <div class="dashboard-stats">
@@ -2571,7 +2630,7 @@ async function loadDashboard() {
         <button class="btn-primary" onclick="switchTab('notes')">Новая заметка</button>
         <button class="btn-primary" onclick="switchTab('focus')">Начать активность</button>
         <button class="btn-primary" onclick="switchTab('health')">Залогировать</button>
-      </div>`;
+      </div></div>`;
   }
 }
 
@@ -2628,7 +2687,7 @@ async function loadFocus() {
         </div>`).join('')}
       </div>` : '';
 
-    el.innerHTML = currentHtml + logHtml;
+    el.innerHTML = renderPageHeader('focus') + '<div class="page-content">' + currentHtml + logHtml + '</div>';
 
     // Bind events
     let selectedCategory = 'other';
@@ -2690,7 +2749,7 @@ async function loadNotes(subTab) {
     const notes = await invoke('get_notes', { filter, search: null });
     const notesList = notes || [];
 
-    el.innerHTML = `<div class="notes-layout">
+    el.innerHTML = renderPageHeader('notes') + `<div class="page-content"><div class="notes-layout">
       <div class="notes-list">
         <div class="notes-list-header">
           <input class="form-input" id="notes-search" placeholder="Поиск заметок..." autocomplete="off">
@@ -2701,7 +2760,7 @@ async function loadNotes(subTab) {
       <div class="notes-editor" id="notes-editor-panel">
         <div class="notes-empty">Выберите заметку или создайте новую</div>
       </div>
-    </div>`;
+    </div></div>`;
 
     renderNotesList(notesList);
 
@@ -3338,11 +3397,13 @@ async function renderCalendarIntegrations(el) {
 async function loadWork() {
   const el = document.getElementById('work-content');
   if (!el) return;
+  el.innerHTML = renderPageHeader('work') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
   try {
     const projects = await invoke('get_projects').catch(() => []);
-    renderWork(el, projects || []);
+    renderWork(pc, projects || []);
   } catch (e) {
-    showStub('work-content', '&#9642;', 'Работа — скоро');
+    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">&#9642;</div>Работа — скоро</div>';
   }
 }
 
@@ -3411,11 +3472,13 @@ async function renderWork(el, projects) {
 async function loadDevelopment() {
   const el = document.getElementById('development-content');
   if (!el) return;
+  el.innerHTML = renderPageHeader('development') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
   try {
     const items = await invoke('get_learning_items', { typeFilter: devFilter === 'all' ? null : devFilter }).catch(() => []);
-    renderDevelopment(el, items || []);
+    renderDevelopment(pc, items || []);
   } catch (e) {
-    showStub('development-content', '&#9636;', 'Развитие — скоро');
+    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">&#9636;</div>Развитие — скоро</div>';
   }
 }
 
@@ -3425,34 +3488,33 @@ function renderDevelopment(el, items) {
   const statusLabels = { planned: 'Запланировано', in_progress: 'В процессе', completed: 'Завершено' };
   const statusColors = { planned: 'badge-gray', in_progress: 'badge-blue', completed: 'badge-green' };
 
-  el.innerHTML = `
-    <div class="module-header"><h2>Развитие</h2><button class="btn-primary" id="dev-add-btn">+ Добавить</button></div>
-    <div class="dev-filters">
-      ${filters.map(f => `<button class="pill${devFilter === f ? ' active' : ''}" data-filter="${f}">${filterLabels[f]}</button>`).join('')}
-    </div>
-    <div class="dev-grid" id="dev-grid"></div>`;
+  const filterBar = `<div class="dev-filters">
+    ${filters.map(f => `<button class="pill${devFilter === f ? ' active' : ''}" data-filter="${f}">${filterLabels[f]}</button>`).join('')}
+  </div>`;
 
-  const grid = document.getElementById('dev-grid');
-  for (const item of items) {
-    const card = document.createElement('div');
-    card.className = 'dev-card';
-    card.innerHTML = `
-      <div class="dev-card-title">${escapeHtml(item.title)}</div>
-      <div class="dev-card-meta">
-        <span class="badge ${statusColors[item.status] || 'badge-gray'}">${statusLabels[item.status] || item.status}</span>
-        <span class="badge badge-purple">${filterLabels[item.type] || item.type}</span>
-      </div>
-      ${item.description ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(item.description.substring(0, 100))}</div>` : ''}
-      <div class="dev-progress"><div class="dev-progress-bar" style="width:${item.progress || 0}%"></div></div>
-      <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">${item.progress || 0}%</div>`;
-    grid.appendChild(card);
-  }
+  const fixedColumns = [
+    { key: 'title', label: 'Title', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+    { key: 'type', label: 'Type', render: r => `<span class="badge badge-purple">${filterLabels[r.type] || r.type}</span>` },
+    { key: 'status', label: 'Status', render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
+    { key: 'progress', label: 'Progress', render: r => `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${r.progress || 0}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${r.progress || 0}%</span>` },
+  ];
+
+  el.innerHTML = filterBar + '<div id="dev-dbv"></div>';
+  const dbvEl = document.getElementById('dev-dbv');
+
+  renderDatabaseView(dbvEl, 'development', 'learning_items', items, {
+    fixedColumns,
+    idField: 'id',
+    addButton: '+ Добавить',
+    onAdd: () => showAddLearningModal(),
+    reloadFn: () => loadDevelopment(),
+    _tabId: 'development',
+    _recordTable: 'learning_items',
+  });
 
   el.querySelectorAll('.dev-filters .pill').forEach(btn => {
     btn.addEventListener('click', () => { devFilter = btn.dataset.filter; loadDevelopment(); });
   });
-
-  document.getElementById('dev-add-btn')?.addEventListener('click', () => showAddLearningModal());
 }
 
 function showAddLearningModal() {
@@ -3491,6 +3553,423 @@ function showAddLearningModal() {
   });
 }
 
+// ── Database View System (Notion-style) ──
+
+async function renderDatabaseView(el, tabId, recordTable, records, options = {}) {
+  const { fixedColumns = [], idField = 'id', onRowClick, addButton, reloadFn } = options;
+
+  // Load custom property definitions
+  let customProps = [];
+  try { customProps = await invoke('get_property_definitions', { tabId }); } catch {}
+
+  // Load property values for all records
+  const recordIds = records.map(r => r[idField]);
+  let allValues = [];
+  if (recordIds.length > 0 && customProps.length > 0) {
+    try { allValues = await invoke('get_property_values', { recordTable, recordIds }); } catch {}
+  }
+
+  // Build values map: { recordId: { propertyId: value } }
+  const valuesMap = {};
+  for (const v of allValues) {
+    if (!valuesMap[v.record_id]) valuesMap[v.record_id] = {};
+    valuesMap[v.record_id][v.property_id] = v.value;
+  }
+
+  // Load and apply filters
+  if (!dbvFilters[tabId]) await loadFiltersFromViewConfig(tabId);
+  const filteredRecords = applyFilters(records, valuesMap, dbvFilters[tabId], idField);
+
+  const visibleProps = customProps.filter(p => p.visible !== false);
+
+  // Render header
+  const headerHtml = `<div class="database-view-header">
+    ${addButton ? `<button class="btn-primary" id="dbv-add-btn">${addButton}</button>` : ''}
+    <button class="btn-secondary dbv-add-prop-btn" id="dbv-add-prop" style="font-size:11px;padding:4px 10px;">+ Property</button>
+  </div>`;
+
+  // Render table
+  const thFixed = fixedColumns.map(c => `<th class="sortable-header" data-sort="${c.key}">${c.label}</th>`).join('');
+  const thCustom = visibleProps.map(p => `<th class="sortable-header" data-sort="prop_${p.id}">${escapeHtml(p.name)}</th>`).join('');
+
+  let tbodyHtml = '';
+  for (const record of filteredRecords) {
+    const rid = record[idField];
+    const tdFixed = fixedColumns.map(c => {
+      const val = c.render ? c.render(record) : escapeHtml(String(record[c.key] ?? ''));
+      return `<td>${val}</td>`;
+    }).join('');
+
+    const tdCustom = visibleProps.map(p => {
+      const rawVal = valuesMap[rid]?.[p.id] ?? '';
+      const displayVal = formatPropValue(rawVal, p);
+      return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}'>${displayVal}</td>`;
+    }).join('');
+
+    tbodyHtml += `<tr class="data-table-row" data-id="${rid}">${tdFixed}${tdCustom}</tr>`;
+  }
+
+  if (filteredRecords.length === 0) {
+    const colspan = fixedColumns.length + visibleProps.length;
+    tbodyHtml = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-faint);padding:24px;">No items yet</td></tr>`;
+  }
+
+  el.innerHTML = headerHtml + `
+    <table class="data-table database-view">
+      <thead><tr>${thFixed}${thCustom}</tr></thead>
+      <tbody>${tbodyHtml}</tbody>
+    </table>`;
+
+  // Render filter bar if custom props exist
+  if (customProps.length > 0) {
+    renderFilterBar(el, tabId, customProps, reloadFn || (() => {}));
+  }
+
+  // Bind row click
+  if (onRowClick) {
+    el.querySelectorAll('.data-table-row').forEach(row => {
+      row.style.cursor = 'pointer';
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.cell-editable') && e.target.closest('.inline-editor')) return;
+        const id = parseInt(row.dataset.id);
+        const record = filteredRecords.find(r => r[idField] === id);
+        if (record) onRowClick(record);
+      });
+    });
+  }
+
+  // Bind inline editing
+  el.querySelectorAll('.cell-editable').forEach(cell => {
+    cell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      startInlineEdit(cell, recordTable, reloadFn);
+    });
+  });
+
+  // Bind add property button
+  document.getElementById('dbv-add-prop')?.addEventListener('click', () => {
+    showAddPropertyModal(tabId, reloadFn);
+  });
+
+  // Bind add button
+  if (addButton && options.onAdd) {
+    document.getElementById('dbv-add-btn')?.addEventListener('click', options.onAdd);
+  }
+
+  // Bind sortable headers
+  el.querySelectorAll('.sortable-header').forEach(th => {
+    th.addEventListener('click', () => {
+      const sortKey = th.dataset.sort;
+      const currentDir = th.dataset.dir || 'none';
+      const newDir = currentDir === 'asc' ? 'desc' : 'asc';
+      el.querySelectorAll('.sortable-header').forEach(h => { h.dataset.dir = 'none'; h.classList.remove('sort-asc', 'sort-desc'); });
+      th.dataset.dir = newDir;
+      th.classList.add(`sort-${newDir}`);
+      sortDatabaseView(el, records, allValues, sortKey, newDir, fixedColumns, visibleProps, valuesMap, idField, options);
+    });
+  });
+}
+
+function formatPropValue(val, prop) {
+  if (!val && val !== 0) return '<span class="text-faint">—</span>';
+  switch (prop.type) {
+    case 'checkbox': return val === 'true' ? '✓' : '—';
+    case 'select': return `<span class="badge badge-blue">${escapeHtml(val)}</span>`;
+    case 'multi_select': {
+      try {
+        const items = JSON.parse(val);
+        return items.map(i => `<span class="badge badge-purple">${escapeHtml(i)}</span>`).join(' ');
+      } catch { return escapeHtml(val); }
+    }
+    case 'url': return `<a href="${escapeHtml(val)}" target="_blank" style="color:var(--accent-blue);text-decoration:none;">${escapeHtml(val.substring(0, 30))}</a>`;
+    case 'number': return escapeHtml(val);
+    case 'date': return escapeHtml(val);
+    default: return escapeHtml(val);
+  }
+}
+
+function startInlineEdit(cell, recordTable, reloadFn) {
+  if (cell.querySelector('.inline-editor')) return;
+  const recordId = parseInt(cell.dataset.recordId);
+  const propId = parseInt(cell.dataset.propId);
+  const propType = cell.dataset.propType;
+  let options = [];
+  try { options = JSON.parse(cell.dataset.propOptions || '[]'); } catch {}
+
+  const currentVal = cell.textContent.trim();
+  const originalHtml = cell.innerHTML;
+
+  let editorHtml = '';
+  switch (propType) {
+    case 'select':
+      editorHtml = `<select class="inline-editor inline-select">
+        <option value="">—</option>
+        ${options.map(o => `<option value="${escapeHtml(o)}"${o === currentVal ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+      </select>`;
+      break;
+    case 'multi_select': {
+      let selected = [];
+      try { selected = JSON.parse(cell.dataset.currentValue || '[]'); } catch {}
+      editorHtml = `<div class="inline-editor inline-multi-select">
+        ${options.map(o => `<label class="inline-ms-option"><input type="checkbox" value="${escapeHtml(o)}"${selected.includes(o) ? ' checked' : ''}> ${escapeHtml(o)}</label>`).join('')}
+        <button class="btn-primary inline-ms-done" style="font-size:11px;padding:2px 8px;margin-top:4px;">OK</button>
+      </div>`;
+      break;
+    }
+    case 'checkbox':
+      // Toggle immediately
+      const newVal = currentVal === '✓' ? 'false' : 'true';
+      invoke('set_property_value', { recordId, recordTable, propertyId: propId, value: newVal })
+        .then(() => { if (reloadFn) reloadFn(); }).catch(() => {});
+      return;
+    case 'date':
+      editorHtml = `<input type="date" class="inline-editor inline-date" value="${currentVal === '—' ? '' : currentVal}">`;
+      break;
+    case 'number':
+      editorHtml = `<input type="number" class="inline-editor inline-number" value="${currentVal === '—' ? '' : currentVal}">`;
+      break;
+    default:
+      editorHtml = `<input type="text" class="inline-editor inline-text" value="${currentVal === '—' ? '' : escapeHtml(currentVal)}">`;
+  }
+
+  cell.innerHTML = editorHtml;
+  const editor = cell.querySelector('.inline-editor');
+  if (editor.tagName === 'INPUT' || editor.tagName === 'SELECT') {
+    editor.focus();
+    const saveAndClose = () => {
+      const val = editor.value || null;
+      cell.innerHTML = originalHtml;
+      invoke('set_property_value', { recordId, recordTable, propertyId: propId, value: val })
+        .then(() => { if (reloadFn) reloadFn(); }).catch(() => {});
+    };
+    editor.addEventListener('blur', saveAndClose);
+    editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); editor.blur(); }
+      if (e.key === 'Escape') { cell.innerHTML = originalHtml; }
+    });
+  } else if (propType === 'multi_select') {
+    cell.querySelector('.inline-ms-done')?.addEventListener('click', () => {
+      const checked = [...cell.querySelectorAll('input:checked')].map(cb => cb.value);
+      const val = checked.length > 0 ? JSON.stringify(checked) : null;
+      cell.innerHTML = originalHtml;
+      invoke('set_property_value', { recordId, recordTable, propertyId: propId, value: val })
+        .then(() => { if (reloadFn) reloadFn(); }).catch(() => {});
+    });
+  }
+}
+
+function showAddPropertyModal(tabId, reloadFn) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-compact">
+    <div class="modal-title">Add Property</div>
+    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="prop-name" placeholder="Property name"></div>
+    <div class="form-group"><label class="form-label">Type</label>
+      <select class="form-select" id="prop-type" style="width:100%;">
+        <option value="text">Text</option><option value="number">Number</option>
+        <option value="select">Select</option><option value="multi_select">Multi Select</option>
+        <option value="date">Date</option><option value="checkbox">Checkbox</option>
+        <option value="url">URL</option>
+      </select>
+    </div>
+    <div class="form-group" id="prop-options-group" style="display:none;">
+      <label class="form-label">Options (comma-separated)</label>
+      <input class="form-input" id="prop-options" placeholder="Option 1, Option 2, Option 3">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="prop-save">Add</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  document.getElementById('prop-type')?.addEventListener('change', (e) => {
+    const show = ['select', 'multi_select'].includes(e.target.value);
+    document.getElementById('prop-options-group').style.display = show ? 'block' : 'none';
+  });
+
+  document.getElementById('prop-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('prop-name')?.value?.trim();
+    if (!name) return;
+    const propType = document.getElementById('prop-type')?.value || 'text';
+    let options = null;
+    if (['select', 'multi_select'].includes(propType)) {
+      const raw = document.getElementById('prop-options')?.value?.trim();
+      if (raw) options = JSON.stringify(raw.split(',').map(s => s.trim()).filter(Boolean));
+    }
+    try {
+      await invoke('create_property_definition', { tabId, name, propType, position: null, color: null, options, defaultValue: null });
+      overlay.remove();
+      if (reloadFn) reloadFn();
+    } catch (err) { alert('Error: ' + err); }
+  });
+}
+
+function sortDatabaseView(el, records, allValues, sortKey, dir, fixedColumns, visibleProps, valuesMap, idField, options) {
+  const sorted = [...records].sort((a, b) => {
+    let va, vb;
+    if (sortKey.startsWith('prop_')) {
+      const pid = parseInt(sortKey.substring(5));
+      va = valuesMap[a[idField]]?.[pid] ?? '';
+      vb = valuesMap[b[idField]]?.[pid] ?? '';
+    } else {
+      va = a[sortKey] ?? '';
+      vb = b[sortKey] ?? '';
+    }
+    if (typeof va === 'number' && typeof vb === 'number') return dir === 'asc' ? va - vb : vb - va;
+    return dir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+  });
+  renderDatabaseView(el, options._tabId || '', options._recordTable || '', sorted, options);
+}
+
+// ── Filter System ──
+
+// Active filters per tab: { tabId: [{ propId, condition, value }] }
+const dbvFilters = {};
+
+function renderFilterBar(el, tabId, customProps, onApply) {
+  const filters = dbvFilters[tabId] || [];
+  const chips = filters.map((f, idx) => {
+    const prop = customProps.find(p => p.id === f.propId);
+    const label = prop ? prop.name : '?';
+    const condLabels = { eq: '=', neq: '\u2260', contains: '\u2248', empty: 'empty', not_empty: 'not empty' };
+    return `<span class="filter-chip" data-idx="${idx}">
+      ${escapeHtml(label)} ${condLabels[f.condition] || f.condition} ${f.value ? escapeHtml(f.value) : ''}
+      <span class="filter-chip-remove" data-remove="${idx}">\u00d7</span>
+    </span>`;
+  }).join('');
+
+  const bar = document.createElement('div');
+  bar.className = 'filter-bar';
+  bar.innerHTML = `<button class="btn-secondary" id="dbv-add-filter" style="font-size:11px;padding:4px 10px;">+ Filter</button>${chips}`;
+  el.prepend(bar);
+
+  bar.querySelector('#dbv-add-filter')?.addEventListener('click', () => {
+    showFilterBuilderModal(tabId, customProps, onApply);
+  });
+
+  bar.querySelectorAll('.filter-chip-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.remove);
+      if (dbvFilters[tabId]) dbvFilters[tabId].splice(idx, 1);
+      saveFiltersToViewConfig(tabId);
+      onApply();
+    });
+  });
+}
+
+function showFilterBuilderModal(tabId, customProps, onApply) {
+  if (customProps.length === 0) { alert('Add custom properties first to filter by them.'); return; }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-compact">
+    <div class="modal-title">Add Filter</div>
+    <div class="form-group"><label class="form-label">Property</label>
+      <select class="form-select" id="filter-prop" style="width:100%;">
+        ${customProps.map(p => `<option value="${p.id}" data-type="${p.type}" data-options='${escapeHtml(p.options||"[]")}'>${escapeHtml(p.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">Condition</label>
+      <select class="form-select" id="filter-cond" style="width:100%;">
+        <option value="eq">Equals</option><option value="neq">Not equals</option>
+        <option value="contains">Contains</option>
+        <option value="empty">Is empty</option><option value="not_empty">Is not empty</option>
+      </select>
+    </div>
+    <div class="form-group" id="filter-val-group"><label class="form-label">Value</label>
+      <input class="form-input" id="filter-val" placeholder="Value">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="filter-apply">Apply</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  // Update value input based on property type
+  const updateValueInput = () => {
+    const sel = document.getElementById('filter-prop');
+    const opt = sel?.selectedOptions[0];
+    const type = opt?.dataset.type;
+    const cond = document.getElementById('filter-cond')?.value;
+    const valGroup = document.getElementById('filter-val-group');
+
+    if (cond === 'empty' || cond === 'not_empty') {
+      valGroup.style.display = 'none';
+      return;
+    }
+    valGroup.style.display = 'block';
+
+    if (type === 'select' || type === 'multi_select') {
+      let options = [];
+      try { options = JSON.parse(opt?.dataset.options || '[]'); } catch {}
+      valGroup.innerHTML = `<label class="form-label">Value</label>
+        <select class="form-select" id="filter-val" style="width:100%;">
+          ${options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}
+        </select>`;
+    } else {
+      valGroup.innerHTML = `<label class="form-label">Value</label><input class="form-input" id="filter-val" placeholder="Value">`;
+    }
+  };
+
+  document.getElementById('filter-prop')?.addEventListener('change', updateValueInput);
+  document.getElementById('filter-cond')?.addEventListener('change', updateValueInput);
+
+  document.getElementById('filter-apply')?.addEventListener('click', () => {
+    const propId = parseInt(document.getElementById('filter-prop')?.value);
+    const condition = document.getElementById('filter-cond')?.value || 'eq';
+    const value = document.getElementById('filter-val')?.value || '';
+    if (!dbvFilters[tabId]) dbvFilters[tabId] = [];
+    dbvFilters[tabId].push({ propId, condition, value });
+    overlay.remove();
+    saveFiltersToViewConfig(tabId);
+    onApply();
+  });
+}
+
+function applyFilters(records, valuesMap, filters, idField) {
+  if (!filters || filters.length === 0) return records;
+  return records.filter(r => {
+    const rid = r[idField];
+    return filters.every(f => {
+      const val = valuesMap[rid]?.[f.propId] ?? '';
+      switch (f.condition) {
+        case 'eq': return val === f.value;
+        case 'neq': return val !== f.value;
+        case 'contains': return String(val).toLowerCase().includes(f.value.toLowerCase());
+        case 'empty': return !val;
+        case 'not_empty': return !!val;
+        default: return true;
+      }
+    });
+  });
+}
+
+async function saveFiltersToViewConfig(tabId) {
+  const filters = dbvFilters[tabId] || [];
+  try {
+    const configs = await invoke('get_view_configs', { tabId });
+    if (configs.length > 0) {
+      await invoke('update_view_config', { id: configs[0].id, filterJson: JSON.stringify(filters), sortJson: null, visibleColumns: null });
+    } else {
+      const id = await invoke('create_view_config', { tabId, name: 'Default', viewType: 'table' });
+      await invoke('update_view_config', { id, filterJson: JSON.stringify(filters), sortJson: null, visibleColumns: null });
+    }
+  } catch {}
+}
+
+async function loadFiltersFromViewConfig(tabId) {
+  try {
+    const configs = await invoke('get_view_configs', { tabId });
+    if (configs.length > 0 && configs[0].filter_json) {
+      dbvFilters[tabId] = JSON.parse(configs[0].filter_json);
+    }
+  } catch {}
+}
+
 // ── Hobbies (Media Collections) ──
 const MEDIA_TYPES = ['music','anime','manga','movie','series','cartoon','game','book','podcast'];
 const MEDIA_LABELS = { music:'Music',anime:'Anime',manga:'Manga',movie:'Movies',series:'Series',cartoon:'Cartoons',game:'Games',book:'Books',podcast:'Podcasts' };
@@ -3499,11 +3978,13 @@ const STATUS_LABELS = { planned:'Planned',in_progress:'In Progress',completed:'C
 async function loadHobbies(subTab) {
   const el = document.getElementById('hobbies-content');
   if (!el) return;
+  el.innerHTML = renderPageHeader('hobbies') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
   if (!subTab || subTab === 'Overview') {
-    loadHobbiesOverview(el);
+    loadHobbiesOverview(pc);
   } else {
     const mediaType = Object.entries(MEDIA_LABELS).find(([k,v]) => v === subTab)?.[0];
-    if (mediaType) loadMediaList(el, mediaType);
+    if (mediaType) loadMediaList(pc, mediaType);
   }
 }
 
@@ -3536,42 +4017,44 @@ async function loadMediaList(el, mediaType) {
     const items = await invoke('get_media_items', { mediaType, status: mediaStatusFilter === 'all' ? null : mediaStatusFilter, hidden: false });
     const label = MEDIA_LABELS[mediaType];
     const hasEp = ['anime','series','cartoon','manga','podcast'].includes(mediaType);
-    el.innerHTML = `
-      <div class="module-header"><h2>${label}</h2><button class="btn-primary" id="media-add-btn">+ Add</button></div>
-      <div class="dev-filters">
-        ${['all','planned','in_progress','completed','on_hold','dropped'].map(s =>
-          `<button class="pill${mediaStatusFilter === s ? ' active' : ''}" data-filter="${s}">${s === 'all' ? 'All' : STATUS_LABELS[s]}</button>`
-        ).join('')}
-      </div>
-      <table class="data-table" id="media-table">
-        <thead><tr>
-          <th>Title</th><th>Status</th><th>Rating</th>${hasEp ? '<th>Progress</th>' : ''}<th>Year</th>
-        </tr></thead>
-        <tbody id="media-tbody"></tbody>
-      </table>`;
-    const tbody = document.getElementById('media-tbody');
-    for (const item of items) {
-      const row = document.createElement('tr');
-      row.className = 'data-table-row';
-      row.style.cursor = 'pointer';
-      const stars = item.rating ? '\u2605'.repeat(Math.round(item.rating / 2)) + '\u2606'.repeat(5 - Math.round(item.rating / 2)) : '\u2014';
-      const progress = hasEp && item.total_episodes ? `${item.progress || 0}/${item.total_episodes}` : '';
-      row.innerHTML = `
-        <td class="data-table-title">${escapeHtml(item.title)}</td>
-        <td><span class="badge ${item.status === 'completed' ? 'badge-green' : item.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[item.status] || item.status}</span></td>
-        <td style="color:var(--text-secondary);font-size:12px;">${stars}</td>
-        ${hasEp ? `<td style="font-size:12px;color:var(--text-muted);">${progress}</td>` : ''}
-        <td style="color:var(--text-muted);font-size:12px;">${item.year || '\u2014'}</td>`;
-      row.addEventListener('click', () => showMediaDetail(item, mediaType));
-      tbody.appendChild(row);
-    }
-    if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px;">No items yet</td></tr>';
-    }
+
+    // Status filter bar
+    const filterBar = `<div class="dev-filters">
+      ${['all','planned','in_progress','completed','on_hold','dropped'].map(s =>
+        `<button class="pill${mediaStatusFilter === s ? ' active' : ''}" data-filter="${s}">${s === 'all' ? 'All' : STATUS_LABELS[s]}</button>`
+      ).join('')}
+    </div>`;
+
+    // Fixed columns from existing schema
+    const fixedColumns = [
+      { key: 'title', label: 'Title', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+      { key: 'status', label: 'Status', render: r => `<span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>` },
+      { key: 'rating', label: 'Rating', render: r => {
+        const stars = r.rating ? '\u2605'.repeat(Math.round(r.rating / 2)) + '\u2606'.repeat(5 - Math.round(r.rating / 2)) : '\u2014';
+        return `<span style="color:var(--text-secondary);font-size:12px;">${stars}</span>`;
+      }},
+      ...(hasEp ? [{ key: 'progress', label: 'Progress', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.total_episodes ? `${r.progress || 0}/${r.total_episodes}` : ''}</span>` }] : []),
+      { key: 'year', label: 'Year', render: r => `<span style="color:var(--text-muted);font-size:12px;">${r.year || '\u2014'}</span>` },
+    ];
+
+    // Render filter bar + database view container
+    el.innerHTML = filterBar + '<div id="media-dbv"></div>';
+    const dbvEl = document.getElementById('media-dbv');
+
+    await renderDatabaseView(dbvEl, 'hobbies', 'media_items', items, {
+      fixedColumns,
+      idField: 'id',
+      addButton: '+ Add',
+      onAdd: () => showAddMediaModal(mediaType),
+      onRowClick: (record) => showMediaDetail(record, mediaType),
+      reloadFn: () => loadMediaList(el, mediaType),
+      _tabId: 'hobbies',
+      _recordTable: 'media_items',
+    });
+
     el.querySelectorAll('.dev-filters .pill').forEach(btn => {
       btn.addEventListener('click', () => { mediaStatusFilter = btn.dataset.filter; loadMediaList(el, mediaType); });
     });
-    document.getElementById('media-add-btn')?.addEventListener('click', () => showAddMediaModal(mediaType));
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -3618,7 +4101,7 @@ function showAddMediaModal(mediaType) {
         notes: document.getElementById('media-notes')?.value || null,
       });
       overlay.remove();
-      loadMediaList(document.getElementById('hobbies-content'), mediaType);
+      loadHobbies(MEDIA_LABELS[mediaType]);
     } catch (err) { alert('Error: ' + err); }
   });
 }
@@ -3656,14 +4139,14 @@ function showMediaDetail(item, mediaType) {
         title: null, description: null, coverUrl: null, totalEpisodes: null,
       });
       overlay.remove();
-      loadMediaList(document.getElementById('hobbies-content'), mediaType);
+      loadHobbies(MEDIA_LABELS[mediaType]);
     } catch (err) { alert('Error: ' + err); }
   });
   document.getElementById('md-delete')?.addEventListener('click', async () => {
     if (!confirm('Delete this item?')) return;
     await invoke('delete_media_item', { id: item.id }).catch(e => alert(e));
     overlay.remove();
-    loadMediaList(document.getElementById('hobbies-content'), mediaType);
+    loadHobbies(MEDIA_LABELS[mediaType]);
   });
 }
 
@@ -3671,18 +4154,20 @@ function showMediaDetail(item, mediaType) {
 async function loadSports(subTab) {
   const el = document.getElementById('sports-content');
   if (!el) return;
+  el.innerHTML = renderPageHeader('sports') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
   if (subTab === 'Martial Arts') {
-    loadMartialArts(el);
+    loadMartialArts(pc);
     return;
   }
   if (subTab === 'Stats') {
-    loadSportsStats(el);
+    loadSportsStats(pc);
     return;
   }
   try {
     const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
     const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
-    renderSports(el, workouts || [], stats);
+    renderSports(pc, workouts || [], stats);
   } catch (e) {
     showStub('sports-content', '&#9829;', 'Спорт — скоро');
   }
@@ -3820,12 +4305,14 @@ function showAddWorkoutModal() {
 async function loadHealth() {
   const el = document.getElementById('health-content');
   if (!el) return;
+  el.innerHTML = renderPageHeader('health') + '<div class="page-content"></div>';
+  const pc = el.querySelector('.page-content');
   try {
     const today = await invoke('get_health_today').catch(() => ({}));
     const habits = await invoke('get_habits_today').catch(() => []);
-    renderHealth(el, today, habits);
+    renderHealth(pc, today, habits);
   } catch (e) {
-    showStub('health-content', '&#10010;', 'Здоровье — скоро');
+    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">&#10010;</div>Здоровье — скоро</div>';
   }
 }
 

@@ -1110,7 +1110,7 @@ body.dragover::after {
 .tab-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 0 80px 40px;
 }
 
 /* ── Tab stub placeholder ── */
@@ -1153,6 +1153,57 @@ body.dragover::after {
   border-bottom: 1px solid var(--border-default);
 }
 
+/* ── Page Header (Notion-style) ── */
+.page-header {
+  padding: 48px 0 20px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.page-header-emoji {
+  font-size: 48px;
+  line-height: 1.2;
+  margin-bottom: 8px;
+}
+.page-header-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.page-header-description {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.page-header-properties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+.page-property {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.page-property-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 11px;
+}
+.page-property-value {
+  color: var(--text-secondary);
+}
+
+/* ── Page Content (centered layout) ── */
+.page-content {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
 .module-header {
   display: flex;
   justify-content: space-between;
@@ -1171,16 +1222,17 @@ body.dragover::after {
   width: 100%; border-collapse: collapse; font-size: 14px;
 }
 .data-table thead th {
-  text-align: left; padding: 8px 12px; color: var(--text-muted); font-weight: 500;
+  text-align: left; padding: 12px 16px; color: var(--text-muted); font-weight: 500;
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border-default);
+  background: var(--bg-elevated);
 }
 .data-table tbody tr {
   border-bottom: 1px solid var(--bg-hover);
   transition: background var(--transition-fast);
 }
 .data-table tbody tr:hover { background: var(--bg-hover); }
-.data-table td { padding: 10px 12px; color: var(--text-secondary); }
+.data-table td { padding: 14px 16px; color: var(--text-secondary); }
 .data-table-title { font-weight: 500; color: var(--text-primary); }
 
 .module-grid {
@@ -2396,3 +2448,99 @@ body.dragover::after {
   from { opacity: 0; transform: scale(0.95); }
   to { opacity: 1; transform: scale(1); }
 }
+
+/* ── Database View (Notion-style) ── */
+.database-view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.database-view-header .btn-primary { margin-right: auto; }
+.dbv-add-prop-btn {
+  font-size: 11px !important;
+  padding: 4px 10px !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border-default) !important;
+}
+.dbv-add-prop-btn:hover { color: var(--text-secondary) !important; }
+
+/* Sortable headers */
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+.sortable-header:hover { color: var(--text-secondary); }
+.sortable-header.sort-asc::after { content: ' \u2191'; font-size: 10px; }
+.sortable-header.sort-desc::after { content: ' \u2193'; font-size: 10px; }
+
+/* Editable cells */
+.cell-editable {
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: background var(--transition-fast);
+}
+.cell-editable:hover { background: var(--bg-hover); }
+
+/* Inline editors */
+.inline-editor {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 4px 8px;
+  outline: none;
+}
+.inline-select { padding: 4px 6px; }
+.inline-multi-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+}
+.inline-ms-option {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.inline-ms-option input { accent-color: var(--accent-blue); }
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.filter-chip:hover { background: var(--bg-hover); }
+.filter-chip-remove {
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+.filter-chip-remove:hover { color: var(--color-red); }
+
+.text-faint { color: var(--text-faint); }
