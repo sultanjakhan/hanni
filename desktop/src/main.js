@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.19';
+const APP_VERSION = '0.8.20';
 
 let busy = false;
 let history = [];
@@ -74,7 +74,7 @@ function saveTabs() {
 listen('update-available', (event) => {
   const version = event.payload;
   const banner = document.createElement('div');
-  banner.style.cssText = 'padding:8px 16px;background:#111113;color:#a1a1a6;font-size:12px;text-align:center;border-bottom:1px solid #222224;';
+  banner.style.cssText = 'padding:8px 16px;background:var(--bg-card);color:var(--text-secondary);font-size:12px;text-align:center;border-bottom:1px solid var(--border-default);';
   banner.textContent = `Обновление до v${version}...`;
   document.getElementById('content-area')?.prepend(banner);
 });
@@ -445,7 +445,7 @@ async function loadGoalsWidget() {
           <div class="goal-inline-info"><span>${escapeHtml(g.title)}</span><span class="goal-inline-pct">${pct}%</span></div>
           <div class="goal-progress"><div class="goal-progress-bar" style="width:${pct}%"></div></div>
         </div>`;
-      }).join('') : '<div style="color:#3f3f44;font-size:12px;">No goals yet</div>'}`;
+      }).join('') : '<div style="color:var(--text-faint);font-size:12px;">No goals yet</div>'}`;
     contentEl.insertBefore(wrapper, contentEl.firstChild);
     wrapper.querySelector('#add-goal-btn')?.addEventListener('click', () => showAddGoalModal());
   } catch (_) {}
@@ -732,7 +732,7 @@ async function loadChatSettings() {
       } catch { const s = document.getElementById('chat-tts-server-status'); if (s) s.textContent = 'Недоступен'; }
     }
   } catch (e) {
-    el.innerHTML = `<div style="color:#ef4444;font-size:13px;">Ошибка: ${e}</div>`;
+    el.innerHTML = `<div style="color:var(--color-red);font-size:14px;">Ошибка: ${e}</div>`;
   }
 }
 
@@ -999,7 +999,7 @@ async function executeAction(actionJson) {
           title: action.title || '', description: action.description || '',
           date: action.date || new Date().toISOString().slice(0, 10),
           time: action.time || '', durationMinutes: action.duration || action.duration_minutes || 60,
-          category: action.category || 'general', color: action.color || '#a1a1a6',
+          category: action.category || 'general', color: action.color || '#9B9B9B',
         });
         break;
       case 'delete_event':
@@ -1375,11 +1375,11 @@ async function loadSupplies(el) {
     el.innerHTML = `
       <div class="module-header"><h2>Supplies</h2><button class="btn-primary" id="home-add-btn">+ Add Item</button></div>
       <div id="home-items-list">
-        ${items.map(i => `<div class="focus-log-item" style="${i.needed ? 'border-left:2px solid #a1a1a6;' : ''}">
+        ${items.map(i => `<div class="focus-log-item" style="${i.needed ? 'border-left:2px solid var(--text-secondary);' : ''}">
           <span class="focus-log-title">${escapeHtml(i.name)}</span>
           <span class="badge badge-gray">${categories[i.category] || i.category}</span>
-          ${i.quantity != null ? `<span style="color:#a1a1a6;font-size:12px;">${i.quantity} ${i.unit||''}</span>` : ''}
-          <span style="color:#3f3f44;font-size:11px;">${i.location||''}</span>
+          ${i.quantity != null ? `<span style="color:var(--text-secondary);font-size:12px;">${i.quantity} ${i.unit||''}</span>` : ''}
+          <span style="color:var(--text-faint);font-size:11px;">${i.location||''}</span>
           <button class="btn-secondary" style="padding:2px 8px;font-size:10px;margin-left:4px;" data-need="${i.id}">${i.needed ? 'In stock' : 'Need'}</button>
           <button class="memory-item-btn" data-hdel="${i.id}">&times;</button>
         </div>`).join('')}
@@ -1437,7 +1437,7 @@ async function loadSupplies(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadShoppingList(el) {
@@ -1449,16 +1449,16 @@ async function loadShoppingList(el) {
         ${items.map(i => `<div class="habit-item">
           <div class="habit-check" data-bought="${i.id}"></div>
           <span class="habit-name">${escapeHtml(i.name)}</span>
-          ${i.quantity != null ? `<span style="color:#a1a1a6;font-size:12px;margin-left:auto;">${i.quantity} ${i.unit||''}</span>` : ''}
+          ${i.quantity != null ? `<span style="color:var(--text-secondary);font-size:12px;margin-left:auto;">${i.quantity} ${i.unit||''}</span>` : ''}
         </div>`).join('')}
-      </div>` : '<div style="color:#3f3f44;font-size:13px;padding:20px;text-align:center;">All stocked up!</div>'}`;
+      </div>` : '<div style="color:var(--text-faint);font-size:14px;padding:20px;text-align:center;">All stocked up!</div>'}`;
     el.querySelectorAll('[data-bought]').forEach(btn => {
       btn.addEventListener('click', async () => {
         await invoke('toggle_home_item_needed', { id: parseInt(btn.dataset.bought) }).catch(()=>{});
         loadShoppingList(el);
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 // ── Mindset ──
@@ -1508,7 +1508,7 @@ async function loadJournal(el) {
         loadJournal(el);
       } catch (err) { alert('Error: ' + err); }
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadMoodLog(el) {
@@ -1539,7 +1539,7 @@ async function loadMoodLog(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadPrinciples(el) {
@@ -1551,7 +1551,7 @@ async function loadPrinciples(el) {
         ${principles.map(p => `<div class="habit-item">
           <div class="habit-check${p.active ? ' checked' : ''}" data-id="${p.id}">${p.active ? '&#10003;' : ''}</div>
           <span class="habit-name">${escapeHtml(p.title)}</span>
-          <span style="color:#3f3f44;font-size:11px;">${p.category||''}</span>
+          <span style="color:var(--text-faint);font-size:11px;">${p.category||''}</span>
           <button class="memory-item-btn" data-del="${p.id}" style="margin-left:auto;">&times;</button>
         </div>`).join('')}
       </div>`;
@@ -1564,7 +1564,7 @@ async function loadPrinciples(el) {
       const title = prompt('Principle:');
       if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 // ── Food ──
@@ -1609,7 +1609,7 @@ async function loadFoodLog(el) {
       });
     });
     document.getElementById('food-add-btn')?.addEventListener('click', () => showAddFoodModal(el));
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 function showAddFoodModal(el) {
@@ -1660,7 +1660,7 @@ async function loadRecipes(el) {
       <div class="dev-grid" id="recipes-grid">
         ${recipes.map(r => `<div class="dev-card">
           <div class="dev-card-title">${escapeHtml(r.name)}</div>
-          <div style="font-size:12px;color:#63636a;">${r.prep_time||0}+${r.cook_time||0} min · ${r.calories||'?'} kcal</div>
+          <div style="font-size:12px;color:var(--text-muted);">${r.prep_time||0}+${r.cook_time||0} min · ${r.calories||'?'} kcal</div>
           ${r.tags ? `<div class="dev-card-meta">${r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join('')}</div>` : ''}
         </div>`).join('')}
       </div>`;
@@ -1700,7 +1700,7 @@ async function loadRecipes(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadProducts(el) {
@@ -1712,11 +1712,11 @@ async function loadProducts(el) {
         ${products.map(p => {
           const exp = p.expiry_date ? new Date(p.expiry_date) : null;
           const isExpiring = exp && (exp - Date.now()) < 3 * 86400000;
-          return `<div class="focus-log-item" style="${isExpiring ? 'border-left:2px solid #63636a;' : ''}">
+          return `<div class="focus-log-item" style="${isExpiring ? 'border-left:2px solid var(--text-muted);' : ''}">
             <span class="focus-log-title">${escapeHtml(p.name)}</span>
             <span class="badge badge-gray">${p.location||''}</span>
-            ${p.quantity ? `<span style="color:#a1a1a6;font-size:12px;">${p.quantity} ${p.unit||''}</span>` : ''}
-            ${exp ? `<span style="color:${isExpiring?'#63636a':'#a1a1a6'};font-size:11px;">${p.expiry_date}</span>` : ''}
+            ${p.quantity ? `<span style="color:var(--text-secondary);font-size:12px;">${p.quantity} ${p.unit||''}</span>` : ''}
+            ${exp ? `<span style="color:${isExpiring?'var(--color-red)':'var(--text-secondary)'};font-size:11px;">${p.expiry_date}</span>` : ''}
             <button class="memory-item-btn" data-pdel="${p.id}">&times;</button>
           </div>`;
         }).join('')}
@@ -1765,7 +1765,7 @@ async function loadProducts(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 // ── Money ──
@@ -1795,7 +1795,7 @@ async function loadTransactions(el, txType) {
           <span class="focus-log-time">${t.date}</span>
           <span class="focus-log-title">${escapeHtml(t.description||t.category)}</span>
           <span class="badge badge-gray">${t.category}</span>
-          <span class="focus-log-duration" style="color:${isExpense?'#63636a':'#fafafa'}">${isExpense?'-':'+'} ${t.amount} ${t.currency||'KZT'}</span>
+          <span class="focus-log-duration" style="color:${isExpense?'var(--text-muted)':'var(--text-primary)'}">${isExpense?'-':'+'} ${t.amount} ${t.currency||'KZT'}</span>
           <button class="memory-item-btn" data-txdel="${t.id}">&times;</button>
         </div>`).join('')}
       </div>`;
@@ -1840,7 +1840,7 @@ async function loadTransactions(el, txType) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadBudgets(el) {
@@ -1854,10 +1854,10 @@ async function loadBudgets(el) {
           const warn = pct > 80;
           return `<div class="settings-section" style="margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="color:#fafafa;font-size:14px;">${escapeHtml(b.category)}</span>
-              <span style="color:${warn?'#63636a':'#a1a1a6'};font-size:12px;">${b.spent||0} / ${b.amount} (${b.period})</span>
+              <span style="color:var(--text-primary);font-size:14px;">${escapeHtml(b.category)}</span>
+              <span style="color:${warn?'var(--color-yellow)':'var(--text-secondary)'};font-size:12px;">${b.spent||0} / ${b.amount} (${b.period})</span>
             </div>
-            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'#63636a':'#fafafa'}"></div></div>
+            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'var(--color-yellow)':'var(--accent-blue)'}"></div></div>
           </div>`;
         }).join('')}
       </div>`;
@@ -1866,7 +1866,7 @@ async function loadBudgets(el) {
       const amt = prompt('Amount:');
       if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadSavings(el) {
@@ -1879,11 +1879,11 @@ async function loadSavings(el) {
           const pct = g.target_amount > 0 ? Math.min(100, Math.round(g.current_amount / g.target_amount * 100)) : 0;
           return `<div class="settings-section" style="margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="color:#fafafa;font-size:14px;">${escapeHtml(g.name)}</span>
-              <span style="color:#a1a1a6;font-size:12px;">${g.current_amount} / ${g.target_amount}</span>
+              <span style="color:var(--text-primary);font-size:14px;">${escapeHtml(g.name)}</span>
+              <span style="color:var(--text-secondary);font-size:12px;">${g.current_amount} / ${g.target_amount}</span>
             </div>
             <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%"></div></div>
-            ${g.deadline ? `<div style="font-size:11px;color:#3f3f44;margin-top:4px;">Deadline: ${g.deadline}</div>` : ''}
+            ${g.deadline ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Deadline: ${g.deadline}</div>` : ''}
             <button class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px;" data-sadd="${g.id}">+ Add funds</button>
           </div>`;
         }).join('')}
@@ -1903,9 +1903,9 @@ async function loadSavings(el) {
     document.getElementById('savings-add-btn')?.addEventListener('click', () => {
       const name = prompt('Goal name:');
       const target = prompt('Target amount:');
-      if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#e0e0e0' }).then(() => loadSavings(el)).catch(e => alert(e));
+      if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#9B9B9B' }).then(() => loadSavings(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadSubscriptions(el) {
@@ -1922,7 +1922,7 @@ async function loadSubscriptions(el) {
           <span class="focus-log-title">${escapeHtml(s.name)}</span>
           <span class="badge ${s.active?'badge-green':'badge-gray'}">${s.active?'Active':'Paused'}</span>
           <span class="focus-log-duration">${s.amount} ${s.currency||'KZT'}/${s.period}</span>
-          ${s.next_payment ? `<span style="color:#3f3f44;font-size:11px;">Next: ${s.next_payment}</span>` : ''}
+          ${s.next_payment ? `<span style="color:var(--text-faint);font-size:11px;">Next: ${s.next_payment}</span>` : ''}
         </div>`).join('')}
       </div>`;
     document.getElementById('sub-add-btn')?.addEventListener('click', () => {
@@ -1956,7 +1956,7 @@ async function loadSubscriptions(el) {
         } catch (err) { alert('Error: ' + err); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadDebts(el) {
@@ -1969,10 +1969,10 @@ async function loadDebts(el) {
           const pct = d.amount > 0 ? Math.min(100, Math.round((d.amount - d.remaining) / d.amount * 100)) : 0;
           return `<div class="settings-section" style="margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="color:#fafafa;font-size:14px;">${escapeHtml(d.name)}</span>
+              <span style="color:var(--text-primary);font-size:14px;">${escapeHtml(d.name)}</span>
               <span class="badge ${d.type==='owe'?'badge-purple':'badge-green'}">${d.type==='owe'?'I owe':'Owed to me'}</span>
             </div>
-            <div style="color:#a1a1a6;font-size:12px;margin-top:4px;">Remaining: ${d.remaining} / ${d.amount}</div>
+            <div style="color:var(--text-secondary);font-size:12px;margin-top:4px;">Remaining: ${d.remaining} / ${d.amount}</div>
             <div class="dev-progress" style="margin-top:4px;"><div class="dev-progress-bar" style="width:${pct}%"></div></div>
           </div>`;
         }).join('')}
@@ -1983,7 +1983,7 @@ async function loadDebts(el) {
       const amount = prompt('Amount:');
       if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 // ── People Tab ──
@@ -2013,7 +2013,7 @@ async function loadPeople(subTab) {
                 <div class="contact-name">${c.name}${c.favorite ? ' ★' : ''}</div>
                 <div class="contact-detail">${c.relationship || c.category || ''}${c.phone ? ' · ' + c.phone : ''}${c.email ? ' · ' + c.email : ''}</div>
                 ${c.blocked ? '<span class="badge badge-red">Blocked</span>' : ''}
-                ${c.block_reason ? '<div class="contact-detail" style="color:#63636a">' + c.block_reason + '</div>' : ''}
+                ${c.block_reason ? '<div class="contact-detail" style="color:var(--text-muted)">' + c.block_reason + '</div>' : ''}
                 ${c.notes ? '<div class="contact-detail">' + c.notes + '</div>' : ''}
                 ${c._blocks && c._blocks.length > 0 ? `
                   <div class="contact-blocks-list">
@@ -2113,7 +2113,7 @@ function showAddContactModal() {
       <div class="form-group"><label class="form-label">Relationship</label><input class="form-input" id="mc-rel" placeholder="e.g. College friend"></div>
       <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="mc-notes" placeholder="Notes"></textarea></div>
       <div class="form-group" style="display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="mc-blocked"><label for="mc-blocked" style="color:#a1a1a6;font-size:13px">Block this contact</label>
+        <input type="checkbox" id="mc-blocked"><label for="mc-blocked" style="color:var(--text-secondary);font-size:14px">Block this contact</label>
       </div>
       <div class="form-group"><label class="form-label">Block reason</label><input class="form-input" id="mc-reason" placeholder="Why blocked?"></div>
       <div class="modal-actions">
@@ -2168,7 +2168,7 @@ async function loadAllFacts(el) {
         if (confirm('Delete?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadAllFacts(el); }
       });
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadMemoryInSettings(el) {
@@ -2179,7 +2179,7 @@ async function loadMemoryInSettings(el) {
       <div class="memory-search-box" style="margin-bottom:12px;">
         <input class="form-input" id="settings-mem-search" placeholder="Поиск по памяти..." autocomplete="off">
       </div>
-      <div style="color:#63636a;font-size:12px;margin-bottom:12px;">${memories.length} фактов</div>
+      <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">${memories.length} фактов</div>
       <div class="memory-browser" id="settings-mem-list">
         ${memories.map(m => `<div class="memory-item">
           <span class="memory-item-category">${escapeHtml(m.category)}</span>
@@ -2205,7 +2205,7 @@ async function loadMemoryInSettings(el) {
           <span class="memory-item-key">${escapeHtml(m.key)}</span>
           <span class="memory-item-value">${escapeHtml(m.value)}</span>
           <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
-        </div>`).join('') || '<div style="color:#3f3f44;font-size:12px;padding:8px;">Ничего не найдено</div>';
+        </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Ничего не найдено</div>';
         list?.querySelectorAll('[data-mid]').forEach(btn => {
           btn.addEventListener('click', async () => {
             if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadMemoryInSettings(el); }
@@ -2213,7 +2213,7 @@ async function loadMemoryInSettings(el) {
         });
       }, 300);
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`; }
 }
 
 async function loadMemorySearch(el) {
@@ -2235,7 +2235,7 @@ async function loadMemorySearch(el) {
           <span class="memory-item-category">${escapeHtml(m.category)}</span>
           <span class="memory-item-key">${escapeHtml(m.key)}</span>
           <span class="memory-item-value">${escapeHtml(m.value)}</span>
-        </div>`).join('') || '<div style="color:#3f3f44;font-size:12px;padding:8px;">No results</div>';
+        </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">No results</div>';
       } catch (_) {}
     }, 300);
   });
@@ -2355,7 +2355,7 @@ async function loadIntegrations(force) {
 
     integrationsLoaded = true;
   } catch (e) {
-    integrationsContent.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`;
+    integrationsContent.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`;
   }
 }
 
@@ -2386,7 +2386,7 @@ async function loadMemoryBrowser(search) {
       list.appendChild(item);
     }
     if (memories.length === 0) {
-      list.innerHTML = '<div style="color:#3f3f44;font-size:12px;padding:8px;">Нет фактов</div>';
+      list.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Нет фактов</div>';
     }
   } catch (_) {}
 
@@ -2422,15 +2422,15 @@ async function loadBlocklist(el) {
       <div id="bl-sites">${sites.map(s => `<div class="focus-log-item">
         <span class="focus-log-title">${escapeHtml(s.value)}</span>
         <label class="toggle"><input type="checkbox" data-toggle="${s.id}" ${s.active?'checked':''}><span class="toggle-slider"></span></label>
-        ${s.schedule ? `<span style="color:#3f3f44;font-size:11px;">${s.schedule}</span>` : ''}
+        ${s.schedule ? `<span style="color:var(--text-faint);font-size:11px;">${s.schedule}</span>` : ''}
         <button class="memory-item-btn" data-bldel="${s.id}">&times;</button>
-      </div>`).join('') || '<div style="color:#3f3f44;font-size:12px;padding:4px 0;">None</div>'}</div>
+      </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:4px 0;">None</div>'}</div>
       <div class="module-card-title" style="margin-top:16px;">Apps</div>
       <div id="bl-apps">${apps.map(a => `<div class="focus-log-item">
         <span class="focus-log-title">${escapeHtml(a.value)}</span>
         <label class="toggle"><input type="checkbox" data-toggle="${a.id}" ${a.active?'checked':''}><span class="toggle-slider"></span></label>
         <button class="memory-item-btn" data-bldel="${a.id}">&times;</button>
-      </div>`).join('') || '<div style="color:#3f3f44;font-size:12px;padding:4px 0;">None</div>'}</div>`;
+      </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:4px 0;">None</div>'}</div>`;
     el.querySelectorAll('[data-toggle]').forEach(cb => {
       cb.addEventListener('change', async () => {
         await invoke('toggle_blocklist_item', { id: parseInt(cb.dataset.toggle) }).catch(()=>{});
@@ -2447,7 +2447,7 @@ async function loadBlocklist(el) {
       const value = prompt(type === 'site' ? 'Domain (e.g. youtube.com):' : 'App name (e.g. Discord):');
       if (value) invoke('add_to_blocklist', { blockType: type, value, schedule: null }).then(() => loadBlocklist(el)).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 // ── About (Settings sub-tab) ──
@@ -2496,7 +2496,7 @@ async function loadAbout(el) {
       const apiEl = document.getElementById('about-api-status');
       if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
     }
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`; }
 }
 
 // ── Tab loaders (stubs) ──
@@ -2608,7 +2608,7 @@ async function loadFocus() {
             <button class="focus-preset" data-category="other">Другое</button>
           </div>
           <div style="display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;">
-            <label style="font-size:12px;color:#a1a1a6;display:flex;align-items:center;gap:6px;">
+            <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;">
               <input type="checkbox" id="focus-block-check"> Блокировать отвлечения
             </label>
           </div>
@@ -2890,7 +2890,7 @@ function renderCalendar(el, events) {
     const isToday = dateStr === todayStr;
     const isSelected = dateStr === selectedCalendarDate;
     const dayEvents = eventsByDate[dateStr] || [];
-    const dots = dayEvents.slice(0, 3).map(e => `<span class="calendar-event-dot" style="background:${e.color || '#fafafa'}"></span>`).join('');
+    const dots = dayEvents.slice(0, 3).map(e => `<span class="calendar-event-dot" style="background:${e.color || 'var(--accent-blue)'}"></span>`).join('');
     daysHtml += `<div class="calendar-day${isToday ? ' today' : ''}${isSelected ? ' selected' : ''}" data-date="${dateStr}">
       <span class="calendar-day-number">${d}</span>
       <div class="calendar-day-dots">${dots}</div>
@@ -3088,7 +3088,7 @@ function showAddEventModal() {
         time: document.getElementById('event-time')?.value || '',
         durationMinutes: 60,
         category: 'general',
-        color: '#a1a1a6',
+        color: '#9B9B9B',
       });
       overlay.remove();
       loadCalendar();
@@ -3117,7 +3117,7 @@ function renderDayCalendar(el, events) {
     const evtHtml = hourEvents.map(e => {
       const srcBadge = e.source && e.source !== 'manual' ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
       const endMin = (() => { const [hh,mm] = (e.time||'00:00').split(':').map(Number); const t = hh*60+mm+(e.duration_minutes||60); return `${String(Math.floor(t/60)%24).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; })();
-      return `<div class="day-event" style="border-left:3px solid ${e.color || '#a1a1a6'};">
+      return `<div class="day-event" style="border-left:3px solid ${e.color || 'var(--text-secondary)'};">
         <span class="day-event-time">${e.time} – ${endMin}</span>
         <span class="day-event-title">${escapeHtml(e.title)}</span>${srcBadge}
         <span class="day-event-dur">${e.duration_minutes || 60} мин</span>
@@ -3133,7 +3133,7 @@ function renderDayCalendar(el, events) {
   const allDay = dayEvents.filter(e => !e.time);
   const allDayHtml = allDay.length ? `<div class="day-allday">
     <div class="day-hour-label">Весь день</div>
-    <div class="day-hour-content">${allDay.map(e => `<div class="day-event" style="border-left:3px solid ${e.color || '#a1a1a6'};"><span class="day-event-title">${escapeHtml(e.title)}</span></div>`).join('')}</div>
+    <div class="day-hour-content">${allDay.map(e => `<div class="day-event" style="border-left:3px solid ${e.color || 'var(--text-secondary)'};"><span class="day-event-title">${escapeHtml(e.title)}</span></div>`).join('')}</div>
   </div>` : '';
 
   el.innerHTML = `
@@ -3186,11 +3186,11 @@ async function renderCalendarList(el) {
   const events = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []) || [];
 
   const sourceLabel = (s) => s === 'apple' ? '🍎 Apple' : s === 'google' ? '📅 Google' : '✏️ Вручную';
-  const sourceColor = (s) => s === 'apple' ? '#34d399' : s === 'google' ? '#60a5fa' : '#fafafa';
+  const sourceColor = (s) => s === 'apple' ? '#4F9768' : s === 'google' ? '#447ACB' : 'var(--text-secondary)';
 
   let rowsHtml = '';
   if (events.length === 0) {
-    rowsHtml = '<tr><td colspan="6" style="text-align:center;color:#63636a;padding:24px;">Нет событий</td></tr>';
+    rowsHtml = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">Нет событий</td></tr>';
   } else {
     for (const ev of events) {
       const endTime = ev.time && ev.duration_minutes ? (() => {
@@ -3200,12 +3200,12 @@ async function renderCalendarList(el) {
       })() : '';
       const timeRange = ev.time ? (endTime ? `${ev.time} – ${endTime}` : ev.time) : 'Весь день';
       rowsHtml += `<tr class="cal-list-row" data-id="${ev.id}">
-        <td style="color:#fafafa;font-weight:500;">${escapeHtml(ev.title)}</td>
+        <td style="color:var(--text-primary);font-weight:500;">${escapeHtml(ev.title)}</td>
         <td>${ev.date}</td>
         <td>${timeRange}</td>
         <td>${ev.duration_minutes ? ev.duration_minutes + ' мин' : '—'}</td>
         <td><span style="color:${sourceColor(ev.source)};font-size:12px;">${sourceLabel(ev.source)}</span></td>
-        <td style="color:#63636a;font-size:12px;">${escapeHtml(ev.category || '')}</td>
+        <td style="color:var(--text-muted);font-size:12px;">${escapeHtml(ev.category || '')}</td>
       </tr>`;
     }
   }
@@ -3216,7 +3216,7 @@ async function renderCalendarList(el) {
       <div class="calendar-month-label">${monthNames[calendarMonth]} ${calendarYear}</div>
       <button class="calendar-nav-btn" id="list-next">&gt;</button>
       <button class="btn-primary" id="list-add-event" style="margin-left:16px;">+ Событие</button>
-      <span style="color:#63636a;font-size:12px;margin-left:auto;">${events.length} событий</span>
+      <span style="color:var(--text-muted);font-size:12px;margin-left:auto;">${events.length} событий</span>
     </div>
     <div style="overflow-x:auto;">
       <table class="cal-list-table">
@@ -3268,7 +3268,7 @@ async function renderCalendarIntegrations(el) {
           <label class="toggle"><input type="checkbox" id="calint-apple" ${appleEnabled !== 'false' ? 'checked' : ''}><span class="toggle-track"></span></label>
         </div>
         <div class="settings-row">
-          <span class="settings-label" style="color:#3f3f44;font-size:12px;">Включает все календари добавленные в macOS (iCloud, Google, Exchange и др.)</span>
+          <span class="settings-label" style="color:var(--text-faint);font-size:12px;">Включает все календари добавленные в macOS (iCloud, Google, Exchange и др.)</span>
         </div>
         <div class="settings-row">
           <button class="btn-primary" id="calint-sync-apple">Синхронизировать сейчас</button>
@@ -3278,7 +3278,7 @@ async function renderCalendarIntegrations(el) {
       <div class="settings-section">
         <div class="settings-section-title">Google Calendar (ICS)</div>
         <div class="settings-row">
-          <span class="settings-label" style="color:#3f3f44;font-size:12px;">Приватный ICS URL: Google Calendar → Настройки → Настройки календаря → Секретный адрес в формате iCal</span>
+          <span class="settings-label" style="color:var(--text-faint);font-size:12px;">Приватный ICS URL: Google Calendar → Настройки → Настройки календаря → Секретный адрес в формате iCal</span>
         </div>
         <div style="display:flex;gap:8px;padding:8px 0;">
           <input class="form-input" id="calint-google-url" placeholder="https://calendar.google.com/...basic.ics" value="${escapeHtml(googleUrl)}" style="flex:1">
@@ -3309,11 +3309,11 @@ async function renderCalendarIntegrations(el) {
       try {
         const r = await invoke('sync_apple_calendar', { month: new Date().getMonth() + 1, year: new Date().getFullYear() });
         if (r.error) {
-          if (status) { status.textContent = '✗ ' + r.error; status.style.color = '#ef4444'; }
+          if (status) { status.textContent = '✗ ' + r.error; status.style.color = 'var(--color-red)'; }
         } else {
           if (status) { status.textContent = `✓ ${r.synced} событий`; status.style.color = ''; }
         }
-      } catch (e) { if (status) { status.textContent = '✗ ' + e; status.style.color = '#ef4444'; } }
+      } catch (e) { if (status) { status.textContent = '✗ ' + e; status.style.color = 'var(--color-red)'; } }
       setTimeout(() => { if (btn) { btn.textContent = 'Синхронизировать сейчас'; btn.disabled = false; } }, 2000);
     });
     document.getElementById('calint-save-google')?.addEventListener('click', async () => {
@@ -3330,7 +3330,7 @@ async function renderCalendarIntegrations(el) {
       setTimeout(() => { if (btn) { btn.textContent = 'Сохранить и синхронизировать'; btn.disabled = false; } }, 2000);
     });
   } catch (e) {
-    el.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`;
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`;
   }
 }
 
@@ -3359,7 +3359,7 @@ async function renderWork(el, projects) {
     </div>
     <div class="work-tasks">
       <div class="work-tasks-header">
-        <h2 style="font-size:16px;color:#fafafa;">${currentProjectId ? escapeHtml(projects.find(p => p.id === currentProjectId)?.name || '') : 'Выберите проект'}</h2>
+        <h2 style="font-size:16px;color:var(--text-primary);">${currentProjectId ? escapeHtml(projects.find(p => p.id === currentProjectId)?.name || '') : 'Выберите проект'}</h2>
         ${currentProjectId ? '<button class="btn-primary" id="new-task-btn">+ Задача</button>' : ''}
       </div>
       <div id="work-tasks-list"></div>
@@ -3371,7 +3371,7 @@ async function renderWork(el, projects) {
     const item = document.createElement('div');
     item.className = 'work-project-item' + (p.id === currentProjectId ? ' active' : '');
     const taskCount = (p.task_count || 0);
-    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || '#fafafa'}"></span>
+    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || 'var(--accent-blue)'}"></span>
       <span class="work-project-name">${escapeHtml(p.name)}</span>
       <span class="work-project-count">${taskCount}</span>`;
     item.addEventListener('click', () => { currentProjectId = p.id; loadWork(); });
@@ -3398,7 +3398,7 @@ async function renderWork(el, projects) {
 
   document.getElementById('new-project-btn')?.addEventListener('click', () => {
     const name = prompt('Название проекта:');
-    if (name) invoke('create_project', { name, description: '', color: '#e0e0e0' }).then(() => loadWork()).catch(e => alert(e));
+    if (name) invoke('create_project', { name, description: '', color: '#9B9B9B' }).then(() => loadWork()).catch(e => alert(e));
   });
 
   document.getElementById('new-task-btn')?.addEventListener('click', () => {
@@ -3442,9 +3442,9 @@ function renderDevelopment(el, items) {
         <span class="badge ${statusColors[item.status] || 'badge-gray'}">${statusLabels[item.status] || item.status}</span>
         <span class="badge badge-purple">${filterLabels[item.type] || item.type}</span>
       </div>
-      ${item.description ? `<div style="font-size:12px;color:#63636a;margin-bottom:6px;">${escapeHtml(item.description.substring(0, 100))}</div>` : ''}
+      ${item.description ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(item.description.substring(0, 100))}</div>` : ''}
       <div class="dev-progress"><div class="dev-progress-bar" style="width:${item.progress || 0}%"></div></div>
-      <div style="font-size:11px;color:#3f3f44;margin-top:4px;">${item.progress || 0}%</div>`;
+      <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">${item.progress || 0}%</div>`;
     grid.appendChild(card);
   }
 
@@ -3526,9 +3526,9 @@ async function loadHobbiesOverview(el) {
       </div>`;
     document.getElementById('create-list-btn')?.addEventListener('click', () => {
       const name = prompt('List name:');
-      if (name) invoke('create_user_list', { name, description: '', color: '#e0e0e0' }).then(() => loadHobbies('Overview')).catch(e => alert(e));
+      if (name) invoke('create_user_list', { name, description: '', color: '#9B9B9B' }).then(() => loadHobbies('Overview')).catch(e => alert(e));
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadMediaList(el, mediaType) {
@@ -3559,20 +3559,20 @@ async function loadMediaList(el, mediaType) {
       row.innerHTML = `
         <td class="data-table-title">${escapeHtml(item.title)}</td>
         <td><span class="badge ${item.status === 'completed' ? 'badge-green' : item.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[item.status] || item.status}</span></td>
-        <td style="color:#a1a1a6;font-size:12px;">${stars}</td>
-        ${hasEp ? `<td style="font-size:12px;color:#63636a;">${progress}</td>` : ''}
-        <td style="color:#63636a;font-size:12px;">${item.year || '\u2014'}</td>`;
+        <td style="color:var(--text-secondary);font-size:12px;">${stars}</td>
+        ${hasEp ? `<td style="font-size:12px;color:var(--text-muted);">${progress}</td>` : ''}
+        <td style="color:var(--text-muted);font-size:12px;">${item.year || '\u2014'}</td>`;
       row.addEventListener('click', () => showMediaDetail(item, mediaType));
       tbody.appendChild(row);
     }
     if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#3f3f44;padding:24px;">No items yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-faint);padding:24px;">No items yet</td></tr>';
     }
     el.querySelectorAll('.dev-filters .pill').forEach(btn => {
       btn.addEventListener('click', () => { mediaStatusFilter = btn.dataset.filter; loadMediaList(el, mediaType); });
     });
     document.getElementById('media-add-btn')?.addEventListener('click', () => showAddMediaModal(mediaType));
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 function showAddMediaModal(mediaType) {
@@ -3629,7 +3629,7 @@ function showMediaDetail(item, mediaType) {
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-title">${escapeHtml(item.title)}</div>
-    ${item.year ? `<div style="color:#a1a1a6;font-size:12px;margin-bottom:8px;">${item.year}</div>` : ''}
+    ${item.year ? `<div style="color:var(--text-secondary);font-size:12px;margin-bottom:8px;">${item.year}</div>` : ''}
     <div class="form-group"><label class="form-label">Status</label>
       <select class="form-select" id="md-status" style="width:100%;">
         ${Object.entries(STATUS_LABELS).map(([k,v]) => `<option value="${k}"${item.status===k?' selected':''}>${v}</option>`).join('')}
@@ -3700,7 +3700,7 @@ async function loadMartialArts(el) {
       </table>`;
     const tbody = document.getElementById('ma-tbody');
     if (ma.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#3f3f44;padding:24px;">Нет тренировок</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px;">Нет тренировок</td></tr>';
     } else {
       for (const w of ma) {
         const row = document.createElement('tr');
@@ -3713,7 +3713,7 @@ async function loadMartialArts(el) {
       showAddWorkoutModal();
       setTimeout(() => { const sel = document.getElementById('workout-type'); if (sel) sel.value = 'martial_arts'; }, 50);
     });
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);">Error: ${e}</div>`; }
 }
 
 async function loadSportsStats(el) {
@@ -3733,12 +3733,12 @@ async function loadSportsStats(el) {
         <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_calories || 0}</div><div class="dashboard-stat-label">Калории</div></div>
       </div>
       <div style="margin-top:16px;">
-        <h3 style="font-size:14px;color:#63636a;margin-bottom:8px;">По типам</h3>
-        ${Object.entries(byType).map(([t, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;color:#a1a1a6;border-bottom:1px solid #19191b;">
-          <span>${typeLabels[t] || t}</span><span style="color:#63636a;">${c}</span>
-        </div>`).join('') || '<div style="color:#3f3f44;font-size:13px;">No data yet</div>'}
+        <h3 style="font-size:14px;color:var(--text-muted);margin-bottom:8px;">По типам</h3>
+        ${Object.entries(byType).map(([t, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px;color:var(--text-secondary);border-bottom:1px solid var(--bg-hover);">
+          <span>${typeLabels[t] || t}</span><span style="color:var(--text-muted);">${c}</span>
+        </div>`).join('') || '<div style="color:var(--text-faint);font-size:14px;">No data yet</div>'}
       </div>`;
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);">Error: ${e}</div>`; }
 }
 
 function renderSports(el, workouts, stats) {
