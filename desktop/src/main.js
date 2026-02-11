@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.7';
 
 let busy = false;
 let history = [];
@@ -31,7 +31,7 @@ let mediaStatusFilter = 'all';
 const TAB_REGISTRY = {
   chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': '\u{1F4AC}', 'Настройки': '\u{2699}' } },
   dashboard:   { label: 'Dashboard',   icon: '\u{1F3E0}', closable: true,  subTabs: ['Overview'] },
-  calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Интеграции'] },
+  calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: '\u{1F3AF}', closable: true,  subTabs: ['Current', 'History'] },
   notes:       { label: 'Notes',       icon: '\u{1F4DD}', closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
   work:        { label: 'Work',        icon: '\u{1F4BC}', closable: true,  subTabs: ['Projects'] },
@@ -2739,6 +2739,7 @@ async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
   if (subTab === 'Интеграции') { renderCalendarIntegrations(el); return; }
+  if (subTab === 'Список') { renderCalendarList(el); return; }
 
   // Auto-sync when navigating to a month not yet synced
   const monthKey = `${calendarYear}-${calendarMonth + 1}`;
@@ -2758,7 +2759,8 @@ async function loadCalendar(subTab) {
           // Refresh view after background sync completes
           const freshEvents = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
           const calEl = document.getElementById('calendar-content');
-          if (calEl && !subTab || subTab === 'Месяц') renderCalendar(calEl, freshEvents || []);
+          if (calEl && subTab === 'Список') renderCalendarList(calEl);
+          else if (calEl && !subTab || subTab === 'Месяц') renderCalendar(calEl, freshEvents || []);
           else if (calEl && subTab === 'Неделя') renderWeekCalendar(calEl, freshEvents || []);
           else if (calEl && subTab === 'День') renderDayCalendar(calEl, freshEvents || []);
         } catch (e) { console.error('Auto-sync error:', e); }
@@ -3095,6 +3097,79 @@ function renderDayCalendar(el, events) {
         const ti = document.getElementById('event-time');
         if (ti) ti.value = `${String(cell.dataset.hour).padStart(2,'0')}:00`;
       }, 50);
+    });
+  });
+}
+
+// ── Calendar List view (Notion-style table) ──
+async function renderCalendarList(el) {
+  const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const events = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []) || [];
+
+  const sourceLabel = (s) => s === 'apple' ? '🍎 Apple' : s === 'google' ? '📅 Google' : '✏️ Вручную';
+  const sourceColor = (s) => s === 'apple' ? '#34d399' : s === 'google' ? '#60a5fa' : '#fafafa';
+
+  let rowsHtml = '';
+  if (events.length === 0) {
+    rowsHtml = '<tr><td colspan="6" style="text-align:center;color:#63636a;padding:24px;">Нет событий</td></tr>';
+  } else {
+    for (const ev of events) {
+      const endTime = ev.time && ev.duration_minutes ? (() => {
+        const [h, m] = ev.time.split(':').map(Number);
+        const total = h * 60 + m + ev.duration_minutes;
+        return `${String(Math.floor(total / 60) % 24).padStart(2,'0')}:${String(total % 60).padStart(2,'0')}`;
+      })() : '';
+      const timeRange = ev.time ? (endTime ? `${ev.time} – ${endTime}` : ev.time) : 'Весь день';
+      rowsHtml += `<tr class="cal-list-row" data-id="${ev.id}">
+        <td style="color:#fafafa;font-weight:500;">${escapeHtml(ev.title)}</td>
+        <td>${ev.date}</td>
+        <td>${timeRange}</td>
+        <td>${ev.duration_minutes ? ev.duration_minutes + ' мин' : '—'}</td>
+        <td><span style="color:${sourceColor(ev.source)};font-size:12px;">${sourceLabel(ev.source)}</span></td>
+        <td style="color:#63636a;font-size:12px;">${escapeHtml(ev.category || '')}</td>
+      </tr>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div class="calendar-nav">
+      <button class="calendar-nav-btn" id="list-prev">&lt;</button>
+      <div class="calendar-month-label">${monthNames[calendarMonth]} ${calendarYear}</div>
+      <button class="calendar-nav-btn" id="list-next">&gt;</button>
+      <button class="btn-primary" id="list-add-event" style="margin-left:16px;">+ Событие</button>
+      <span style="color:#63636a;font-size:12px;margin-left:auto;">${events.length} событий</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="cal-list-table">
+        <thead>
+          <tr>
+            <th>Название</th>
+            <th>Дата</th>
+            <th>Время</th>
+            <th>Длит.</th>
+            <th>Источник</th>
+            <th>Категория</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>`;
+
+  document.getElementById('list-prev')?.addEventListener('click', () => {
+    calendarMonth--;
+    if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+    loadCalendar('Список');
+  });
+  document.getElementById('list-next')?.addEventListener('click', () => {
+    calendarMonth++;
+    if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+    loadCalendar('Список');
+  });
+  document.getElementById('list-add-event')?.addEventListener('click', () => showAddEventModal());
+  el.querySelectorAll('.cal-list-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const ev = events.find(e => e.id === Number(row.dataset.id));
+      if (ev) { selectedCalendarDate = ev.date; calDayDate = ev.date; const dd = new Date(ev.date); calendarMonth = dd.getMonth(); calendarYear = dd.getFullYear(); loadCalendar('День'); }
     });
   });
 }

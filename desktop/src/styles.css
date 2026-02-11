@@ -1656,6 +1656,21 @@ body.dragover::after {
   flex: 1;
 }
 
+/* ── Calendar List (table view) ── */
+.cal-list-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.cal-list-table th {
+  text-align: left; padding: 8px 12px; color: #63636a; font-weight: 500;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid #222224; background: #111113;
+}
+.cal-list-table td {
+  padding: 10px 12px; color: #a1a1a6; border-bottom: 1px solid #19191b;
+}
+.cal-list-row { cursor: pointer; }
+.cal-list-row:hover td { background: #111113; }
+
 /* ── Week Calendar ── */
 .week-grid {
   display: grid; grid-template-columns: 50px repeat(7, 1fr); gap: 0;
