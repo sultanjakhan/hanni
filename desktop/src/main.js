@@ -2734,21 +2734,36 @@ async function openNote(id) {
 }
 
 // ── Calendar ──
-let calendarSynced = false;
+let syncedMonths = new Set();
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
   if (subTab === 'Интеграции') { renderCalendarIntegrations(el); return; }
 
-  // Auto-sync on first calendar open
-  if (!calendarSynced) {
-    calendarSynced = true;
+  // Auto-sync when navigating to a month not yet synced
+  const monthKey = `${calendarYear}-${calendarMonth + 1}`;
+  if (!syncedMonths.has(monthKey)) {
+    syncedMonths.add(monthKey);
     const autoSync = await invoke('get_app_setting', { key: 'calendar_autosync' }).catch(() => 'false');
     if (autoSync === 'true') {
       const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
       const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
-      if (appleEnabled !== 'false') invoke('sync_apple_calendar', { month: calendarMonth + 1, year: calendarYear }).catch(() => {});
-      if (googleUrl) invoke('sync_google_ics', { url: googleUrl, month: calendarMonth + 1, year: calendarYear }).catch(() => {});
+      const syncAndRefresh = async () => {
+        try {
+          if (appleEnabled !== 'false') {
+            const r = await invoke('sync_apple_calendar', { month: calendarMonth + 1, year: calendarYear });
+            if (r.error) console.warn('Apple Calendar:', r.error);
+          }
+          if (googleUrl) await invoke('sync_google_ics', { url: googleUrl, month: calendarMonth + 1, year: calendarYear });
+          // Refresh view after background sync completes
+          const freshEvents = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
+          const calEl = document.getElementById('calendar-content');
+          if (calEl && !subTab || subTab === 'Месяц') renderCalendar(calEl, freshEvents || []);
+          else if (calEl && subTab === 'Неделя') renderWeekCalendar(calEl, freshEvents || []);
+          else if (calEl && subTab === 'День') renderDayCalendar(calEl, freshEvents || []);
+        } catch (e) { console.error('Auto-sync error:', e); }
+      };
+      syncAndRefresh(); // fire and forget — non-blocking
     }
   }
 
@@ -2862,15 +2877,22 @@ function renderCalendar(el, events) {
       const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
       const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
       let total = 0;
+      let syncError = null;
       if (appleEnabled !== 'false') {
         const r = await invoke('sync_apple_calendar', { month: calendarMonth + 1, year: calendarYear });
-        total += r.synced || 0;
+        if (r.error) syncError = r.error;
+        else total += r.synced || 0;
       }
       if (googleUrl) {
         const r = await invoke('sync_google_ics', { url: googleUrl, month: calendarMonth + 1, year: calendarYear });
         total += r.synced || 0;
       }
-      if (btn) btn.textContent = `✓ ${total}`;
+      if (syncError) {
+        if (btn) { btn.textContent = '✗'; btn.title = syncError; }
+        console.error('Calendar sync:', syncError);
+      } else {
+        if (btn) btn.textContent = `✓ ${total}`;
+      }
       loadCalendar();
     } catch (e) {
       if (btn) btn.textContent = '✗';
@@ -3132,8 +3154,12 @@ async function renderCalendarIntegrations(el) {
       if (btn) { btn.textContent = 'Синхронизация...'; btn.disabled = true; }
       try {
         const r = await invoke('sync_apple_calendar', { month: new Date().getMonth() + 1, year: new Date().getFullYear() });
-        if (status) status.textContent = `✓ ${r.synced} событий`;
-      } catch (e) { if (status) status.textContent = '✗ ' + e; }
+        if (r.error) {
+          if (status) { status.textContent = '✗ ' + r.error; status.style.color = '#ef4444'; }
+        } else {
+          if (status) { status.textContent = `✓ ${r.synced} событий`; status.style.color = ''; }
+        }
+      } catch (e) { if (status) { status.textContent = '✗ ' + e; status.style.color = '#ef4444'; } }
       setTimeout(() => { if (btn) { btn.textContent = 'Синхронизировать сейчас'; btn.disabled = false; } }, 2000);
     });
     document.getElementById('calint-save-google')?.addEventListener('click', async () => {
