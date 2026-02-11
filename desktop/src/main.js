@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.16';
+const APP_VERSION = '0.8.17';
 
 let busy = false;
 let history = [];
@@ -29,7 +29,7 @@ let mediaStatusFilter = 'all';
 
 // ── Tab Registry ──
 const TAB_REGISTRY = {
-  chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': '\u{1F4AC}', 'Настройки': '\u{2699}' } },
+  chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': '\u{1F4AC}', 'Настройки': '\u{2699}\u{FE0F}' } },
   dashboard:   { label: 'Dashboard',   icon: '\u{1F3E0}', closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: '\u{1F3AF}', closable: true,  subTabs: ['Current', 'History'] },
@@ -38,13 +38,13 @@ const TAB_REGISTRY = {
   development: { label: 'Development', icon: '\u{1F4DA}', closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
   home:        { label: 'Home',        icon: '\u{1F3E1}', closable: true,  subTabs: ['Supplies', 'Shopping List'] },
   hobbies:     { label: 'Hobbies',     icon: '\u{1F3AE}', closable: true,  subTabs: ['Overview','Music','Anime','Manga','Movies','Series','Cartoons','Games','Books','Podcasts'] },
-  sports:      { label: 'Sports',      icon: '\u{1F3CB}', closable: true,  subTabs: ['Workouts', 'Martial Arts', 'Stats'] },
-  health:      { label: 'Health',      icon: '\u{2764}',  closable: true,  subTabs: ['Today', 'Habits'] },
+  sports:      { label: 'Sports',      icon: '\u{1F3CB}\u{FE0F}', closable: true,  subTabs: ['Workouts', 'Martial Arts', 'Stats'] },
+  health:      { label: 'Health',      icon: '\u{2764}\u{FE0F}',  closable: true,  subTabs: ['Today', 'Habits'] },
   mindset:     { label: 'Mindset',     icon: '\u{1F9E0}', closable: true,  subTabs: ['Journal', 'Mood', 'Principles'] },
   food:        { label: 'Food',        icon: '\u{1F355}', closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: '\u{1F4B0}', closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: '\u{1F465}', closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: '\u{2699}',  closable: true,  subTabs: ['General', 'Memory', 'Blocklist', 'Integrations', 'About'] },
+  settings:    { label: 'Settings',    icon: '\u{2699}\u{FE0F}',  closable: true,  subTabs: ['General', 'Memory', 'Blocklist', 'Integrations', 'About'] },
 };
 
 let openTabs = ['chat', 'dashboard'];
@@ -365,12 +365,6 @@ function renderSubSidebar() {
     });
     items.appendChild(item);
   }
-  // Settings shortcut at bottom
-  const settingsBtn = document.getElementById('settings-shortcut');
-  if (settingsBtn) {
-    settingsBtn.className = 'sub-sidebar-item' + (activeTab === 'settings' ? ' active' : '');
-    settingsBtn.onclick = () => switchTab('settings');
-  }
   loadGoalsWidget();
 }
 
@@ -524,9 +518,6 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
 document.addEventListener('click', () => {
   document.getElementById('tab-dropdown')?.classList.add('hidden');
 });
-
-// Settings button in tab bar (always visible)
-document.getElementById('tab-settings-btn')?.addEventListener('click', () => openTab('settings'));
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
@@ -2364,54 +2355,9 @@ async function loadSettings(subTab) {
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   settingsContent.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
   try {
-    const [info, trainingStats, proactive] = await Promise.all([
-      invoke('get_model_info'),
-      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
-      invoke('get_proactive_settings'),
-    ]);
+    const proactive = await invoke('get_proactive_settings');
 
     settingsContent.innerHTML = `
-      <div class="settings-section">
-        <div class="settings-section-title">Модель</div>
-        <div class="settings-row">
-          <span class="settings-label">Название</span>
-          <span class="settings-value">${info.model_name}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Сервер</span>
-          <span class="settings-value">${info.server_url}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Статус</span>
-          <span class="settings-value ${info.server_online ? 'online' : 'offline'}">${info.server_online ? 'Онлайн' : 'Офлайн'}</span>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Тренировочные данные</div>
-        <div class="settings-row">
-          <span class="settings-label">Диалогов</span>
-          <span class="settings-value">${trainingStats.conversations}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Сообщений</span>
-          <span class="settings-value">${trainingStats.total_messages}</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Экспорт</span>
-          <button class="settings-btn" id="export-training-btn">Экспорт JSONL</button>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">HTTP API</div>
-        <div class="settings-row">
-          <span class="settings-label">Адрес</span>
-          <span class="settings-value">127.0.0.1:8235</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Статус</span>
-          <span class="settings-value" id="api-status">Проверяю...</span>
-        </div>
-      </div>
       <div class="settings-section">
         <div class="settings-section-title">Автономный режим</div>
         <div class="settings-row">
@@ -2435,32 +2381,6 @@ async function loadSettings(subTab) {
         </div>
       </div>`;
 
-    // Training data export
-    document.getElementById('export-training-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target;
-      btn.textContent = 'Экспорт...';
-      btn.disabled = true;
-      try {
-        const result = await invoke('export_training_data');
-        btn.textContent = `${result.train_count} train + ${result.valid_count} valid`;
-      } catch (err) {
-        btn.textContent = String(err).substring(0, 30);
-      }
-      setTimeout(() => { btn.textContent = 'Экспорт JSONL'; btn.disabled = false; }, 4000);
-    });
-
-    // Check API status
-    try {
-      const resp = await fetch('http://127.0.0.1:8235/api/status');
-      const apiEl = document.getElementById('api-status');
-      if (apiEl) apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен';
-      if (apiEl) apiEl.className = 'settings-value ' + (resp.ok ? 'online' : 'offline');
-    } catch (_) {
-      const apiEl = document.getElementById('api-status');
-      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
-    }
-
-    // Proactive settings handlers in main Settings
     const saveSettingsProactive = () => {
       const settings = {
         enabled: document.getElementById('settings-proactive-enabled')?.checked ?? proactive.enabled,
@@ -2534,35 +2454,45 @@ async function loadAbout(el) {
     el.innerHTML = `
       <div class="settings-section">
         <div class="settings-section-title">Hanni v${APP_VERSION}</div>
-        <div class="settings-row"><span class="settings-label">Model</span><span class="settings-value">${info.model_name||'?'}</span></div>
-        <div class="settings-row"><span class="settings-label">Server</span><span class="settings-value ${info.server_online?'online':'offline'}">${info.server_online?'Online':'Offline'}</span></div>
+        <div class="settings-row"><span class="settings-label">Обновления</span><button class="settings-btn" id="about-check-update">Проверить обновления</button></div>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">Training Data</div>
-        <div class="settings-row"><span class="settings-label">Conversations</span><span class="settings-value">${trainingStats.conversations}</span></div>
-        <div class="settings-row"><span class="settings-label">Messages</span><span class="settings-value">${trainingStats.total_messages}</span></div>
-        <div class="settings-row"><span class="settings-label">Export</span><button class="settings-btn" id="about-export-btn">Export JSONL</button></div>
+        <div class="settings-section-title">Модель</div>
+        <div class="settings-row"><span class="settings-label">Название</span><span class="settings-value">${info.model_name||'?'}</span></div>
+        <div class="settings-row"><span class="settings-label">Сервер</span><span class="settings-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Данные</div>
+        <div class="settings-row"><span class="settings-label">Диалогов</span><span class="settings-value">${trainingStats.conversations}</span></div>
+        <div class="settings-row"><span class="settings-label">Сообщений</span><span class="settings-value">${trainingStats.total_messages}</span></div>
+        <div class="settings-row"><span class="settings-label">Экспорт</span><button class="settings-btn" id="about-export-btn">Экспорт JSONL</button></div>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">HTTP API</div>
-        <div class="settings-row"><span class="settings-label">Address</span><span class="settings-value">127.0.0.1:8235</span></div>
-        <div class="settings-row"><span class="settings-label">Status</span><span class="settings-value" id="about-api-status">Checking...</span></div>
+        <div class="settings-row"><span class="settings-label">Адрес</span><span class="settings-value">127.0.0.1:8235</span></div>
+        <div class="settings-row"><span class="settings-label">Статус</span><span class="settings-value" id="about-api-status">Проверяю...</span></div>
       </div>`;
+    document.getElementById('about-check-update')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Проверяю...'; btn.disabled = true;
+      try { const r = await invoke('check_update'); btn.textContent = r; }
+      catch (err) { btn.textContent = 'Ошибка'; }
+      setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
+    });
     document.getElementById('about-export-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.textContent = 'Exporting...'; btn.disabled = true;
+      const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
       try { const r = await invoke('export_training_data'); btn.textContent = `${r.train_count} train + ${r.valid_count} valid`; }
       catch (err) { btn.textContent = String(err).substring(0, 30); }
-      setTimeout(() => { btn.textContent = 'Export JSONL'; btn.disabled = false; }, 4000);
+      setTimeout(() => { btn.textContent = 'Экспорт JSONL'; btn.disabled = false; }, 4000);
     });
     try {
       const resp = await fetch('http://127.0.0.1:8235/api/status');
       const apiEl = document.getElementById('about-api-status');
-      if (apiEl) { apiEl.textContent = resp.ok ? 'Active' : 'Unavailable'; apiEl.className = 'settings-value ' + (resp.ok ? 'online' : 'offline'); }
+      if (apiEl) { apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен'; apiEl.className = 'settings-value ' + (resp.ok ? 'online' : 'offline'); }
     } catch (_) {
       const apiEl = document.getElementById('about-api-status');
-      if (apiEl) { apiEl.textContent = 'Unavailable'; apiEl.className = 'settings-value offline'; }
+      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
     }
-  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
+  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`; }
 }
 
 // ── Tab loaders (stubs) ──
@@ -3980,20 +3910,6 @@ function renderHealth(el, today, habits) {
     if (name) invoke('create_habit', { name, icon: '', frequency: 'daily' }).then(() => loadHealth()).catch(e => alert(e));
   });
 }
-
-// ── Header version + update ──
-const headerVersion = document.getElementById('header-version');
-headerVersion.textContent = `v${APP_VERSION}`;
-headerVersion.addEventListener('click', async () => {
-  headerVersion.textContent = 'Проверяю...';
-  try {
-    const result = await invoke('check_update');
-    headerVersion.textContent = result;
-  } catch (err) {
-    headerVersion.textContent = 'Ошибка';
-  }
-  setTimeout(() => { headerVersion.textContent = `v${APP_VERSION}`; }, 4000);
-});
 
 // ── Initialization ──
 (async () => {
