@@ -13,10 +13,7 @@
     <div id="tab-list"></div>
     <button id="tab-add" title="Открыть вкладку">+</button>
   </div>
-  <div id="tab-bar-right">
-    <button id="tab-settings-btn" title="Settings">&#9881;</button>
-    <span id="header-version" class="header-version"></span>
-  </div>
+  <div id="tab-bar-right"></div>
 </div>
 
 <!-- Tab add dropdown -->
@@ -32,9 +29,7 @@
       <div class="sub-sidebar-section-title" id="goals-toggle">Goals</div>
       <div id="goals-list" class="hidden"></div>
     </div>
-    <div id="sub-sidebar-settings" class="sub-sidebar-bottom">
-      <div class="sub-sidebar-item" id="settings-shortcut">Settings</div>
-    </div>
+    <div id="sub-sidebar-settings" class="sub-sidebar-bottom"></div>
   </div>
 
   <!-- Main content area -->
@@ -58,11 +53,19 @@
       <div id="chat-settings-content" class="tab-content"></div>
       <div id="attach-preview"></div>
       <div id="input-area">
-        <button id="attach" title="Прикрепить файл">+</button>
-        <input id="file-input" type="file" style="display:none">
-        <input id="input" type="text" placeholder="Напиши сообщение..." autocomplete="off">
-        <button id="record" title="Голосовой ввод">&#9679;</button>
-        <button id="send">&rarr;</button>
+        <div id="input-wrapper">
+          <button id="attach" title="Прикрепить файл">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 7.5l-5.793 5.793a3.5 3.5 0 01-4.95-4.95L9.05 2.05a2 2 0 012.828 2.828L5.586 11.17a.5.5 0 01-.707-.707L11.17 4.17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <input id="file-input" type="file" style="display:none">
+          <input id="input" type="text" placeholder="Напиши сообщение..." autocomplete="off">
+          <button id="record" title="Голосовой ввод">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 00-2.5 2.5v4a2.5 2.5 0 005 0v-4A2.5 2.5 0 008 1z" stroke="currentColor" stroke-width="1.5"/><path d="M4 7.5a4 4 0 008 0M8 13v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <button id="send">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 13V3l11 5-11 5z" fill="currentColor"/></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -81,7 +84,6 @@
     <div id="view-food" class="view"><div id="food-content" class="tab-content"></div></div>
     <div id="view-money" class="view"><div id="money-content" class="tab-content"></div></div>
     <div id="view-people" class="view"><div id="people-content" class="tab-content"></div></div>
-    <div id="view-memory" class="view"><div id="memory-content" class="tab-content"></div></div>
     <div id="view-settings" class="view"><div id="settings-content" class="tab-content"></div></div>
   </div>
 </div>
