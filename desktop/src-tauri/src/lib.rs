@@ -205,11 +205,19 @@ fn migrate_old_data_dir() {
     let old_dir = dirs::home_dir().unwrap_or_default().join("Documents/Hanni");
     let new_dir = hanni_data_dir();
     if !old_dir.exists() { return; }
-    if new_dir.exists() && new_dir.join("hanni.db").exists() { return; } // already migrated
+    let marker = new_dir.join(".migrated");
+    if marker.exists() { return; } // already migrated
     let _ = std::fs::create_dir_all(&new_dir);
-    // Move all files from old to new
+    let old_db = old_dir.join("hanni.db");
+    let new_db = new_dir.join("hanni.db");
+    // If old DB exists, copy it over (replaces empty DB created by init_db)
+    if old_db.exists() {
+        let _ = std::fs::copy(&old_db, &new_db);
+    }
+    // Copy other files (settings, audio, etc.)
     if let Ok(entries) = std::fs::read_dir(&old_dir) {
         for entry in entries.flatten() {
+            if entry.file_name() == "hanni.db" { continue; } // already handled
             let dest = new_dir.join(entry.file_name());
             if !dest.exists() {
                 if entry.path().is_dir() {
@@ -220,6 +228,7 @@ fn migrate_old_data_dir() {
             }
         }
     }
+    let _ = std::fs::write(&marker, "migrated");
     eprintln!("Migrated data from {:?} to {:?}", old_dir, new_dir);
 }
 
@@ -1709,14 +1718,44 @@ fn start_mlx_server() -> Option<Child> {
 }
 
 fn run_osascript(script: &str) -> Result<String, String> {
-    let output = std::process::Command::new("osascript")
+    let mut child = std::process::Command::new("osascript")
         .args(["-e", script])
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| format!("osascript error: {}", e))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+
+    // 10-second timeout — prevents hanging on permission dialogs
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    use std::io::Read;
+                    let _ = out.read_to_string(&mut stdout);
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = err.read_to_string(&mut stderr);
+                }
+                return if status.success() {
+                    Ok(stdout.trim().to_string())
+                } else {
+                    Err(stderr.trim().to_string())
+                };
+            }
+            Ok(None) => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("osascript timeout (10s)".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("osascript error: {}", e)),
+        }
     }
 }
 
@@ -5174,26 +5213,119 @@ RULES:
 Reply with your message text, or [SKIP]."#;
 
 async fn gather_context() -> String {
+    // All context functions are internally blocking (run_osascript, rusqlite).
+    // Run in spawn_blocking to avoid starving tokio worker threads.
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::task::spawn_blocking(gather_context_blocking),
+    ).await {
+        Ok(Ok(ctx)) => ctx,
+        _ => format!("Current time: {}\n", chrono::Local::now().format("%H:%M %A, %d %B %Y")),
+    }
+}
+
+fn gather_context_blocking() -> String {
     let now = chrono::Local::now();
     let mut ctx = format!("Current time: {}\n", now.format("%H:%M %A, %d %B %Y"));
 
-    if let Ok(activity) = get_activity_summary().await {
+    // Screen Time (SQLite query — fast, no osascript)
+    if let Ok(activity) = gather_screen_time() {
         ctx.push_str(&format!("\n--- Screen Time ---\n{}\n", activity));
     }
 
-    if let Ok(calendar) = get_calendar_events().await {
+    // Calendar events from Calendar.app
+    let cal_script = r#"
+        set output to ""
+        set today to current date
+        set endDate to today + (2 * days)
+        tell application "Calendar"
+            repeat with cal in calendars
+                set evts to (every event of cal whose start date >= today and start date <= endDate)
+                repeat with evt in evts
+                    set evtStart to start date of evt
+                    set evtName to summary of evt
+                    set output to output & (evtStart as string) & " | " & evtName & linefeed
+                end repeat
+            end repeat
+        end tell
+        if output is "" then
+            return "No upcoming events in the next 2 days."
+        end if
+        return output
+    "#;
+    if let Ok(calendar) = run_osascript(cal_script) {
         ctx.push_str(&format!("\n--- Calendar ---\n{}\n", calendar));
     }
 
-    if let Ok(music) = get_now_playing().await {
-        ctx.push_str(&format!("\n--- Music ---\n{}\n", music));
+    // Now playing
+    let music_check = run_osascript(
+        "tell application \"System Events\" to (name of processes) contains \"Music\""
+    );
+    if let Ok(ref val) = music_check {
+        if val == "true" {
+            if let Ok(info) = run_osascript(
+                "tell application \"Music\" to if player state is playing then \
+                 return (name of current track) & \" — \" & (artist of current track) \
+                 else return \"Music paused\" end if"
+            ) {
+                ctx.push_str(&format!("\n--- Music ---\nApple Music: {}\n", info));
+            }
+        }
     }
 
-    if let Ok(browser) = get_browser_tab().await {
-        ctx.push_str(&format!("\n--- Browser ---\n{}\n", browser));
+    // Browser tab
+    let browsers = [
+        ("Arc", "tell application \"Arc\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
+        ("Google Chrome", "tell application \"Google Chrome\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
+        ("Safari", "tell application \"Safari\" to return URL of front document & \" | \" & name of front document"),
+    ];
+    for (name, script) in &browsers {
+        let check = run_osascript(&format!(
+            "tell application \"System Events\" to (name of processes) contains \"{}\"", name
+        ));
+        if let Ok(ref val) = check {
+            if val == "true" {
+                if let Ok(info) = run_osascript(script) {
+                    ctx.push_str(&format!("\n--- Browser ---\n{}: {}\n", name, info));
+                    break;
+                }
+            }
+        }
     }
 
     ctx
+}
+
+fn gather_screen_time() -> Result<String, String> {
+    let db_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join("Library/Application Support/Knowledge/knowledgeC.db");
+    if !db_path.exists() { return Err("No Screen Time DB".into()); }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT ZSOURCE.ZNAME as app_name,
+                ROUND(SUM(CAST((ZOBJECT.ZENDDATE - ZOBJECT.ZSTARTDATE) AS REAL)) / 60, 1) as minutes
+         FROM ZOBJECT JOIN ZSOURCE ON ZOBJECT.ZSOURCE = ZSOURCE.Z_PK
+         WHERE DATE(datetime(ZOBJECT.ZSTARTDATE + 978307200, 'unixepoch', 'localtime')) = DATE('now')
+               AND ZOBJECT.ZSTREAMNAME = '/app/inFocus' AND ZOBJECT.ZENDDATE > ZOBJECT.ZSTARTDATE
+         GROUP BY ZSOURCE.ZBUNDLEID ORDER BY minutes DESC"
+    ).map_err(|e| e.to_string())?;
+    let rows: Vec<(String, f64, String)> = stmt.query_map([], |row| {
+        let app: String = row.get::<_, Option<String>>(0)?.unwrap_or_default();
+        let min: f64 = row.get(1)?;
+        Ok((app, min))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .map(|(app, min)| { let cat = classify_app(&app).to_string(); (app, min, cat) })
+    .collect();
+    if rows.is_empty() { return Ok("No Screen Time data for today yet.".into()); }
+    let (mut prod, mut dist, mut neut) = (0.0, 0.0, 0.0);
+    for r in &rows { match r.2.as_str() { "productive" => prod += r.1, "distraction" => dist += r.1, _ => neut += r.1 } }
+    let top: Vec<String> = rows.iter().take(5).map(|r| format!("  {} — {:.0} min ({})", r.0, r.1, r.2)).collect();
+    Ok(format!("Productive: {:.0} min | Distraction: {:.0} min | Neutral: {:.0} min\n{}", prod, dist, neut, top.join("\n")))
 }
 
 #[derive(Deserialize)]
@@ -5510,6 +5642,10 @@ pub fn run() {
     let proactive_settings = load_proactive_settings();
     let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
 
+    // Migrate data from ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
+    // Must run BEFORE init_db to avoid creating an empty DB over old data
+    migrate_old_data_dir();
+
     // Initialize SQLite database
     let db_path = hanni_db_path();
     if let Some(parent) = db_path.parent() {
@@ -5748,9 +5884,6 @@ pub fn run() {
             toggle_contact_block_active,
         ])
         .setup(move |app| {
-            // Migrate data from ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
-            migrate_old_data_dir();
-
             // Auto-updater
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -5831,7 +5964,10 @@ pub fn run() {
             let proactive_handle = app.handle().clone();
             let proactive_state_ref = proactive_state.clone();
             tauri::async_runtime::spawn(async move {
-                let client = reqwest::Client::new();
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new());
 
                 // Initial delay — let the app fully start
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
