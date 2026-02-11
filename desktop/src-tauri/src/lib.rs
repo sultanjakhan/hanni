@@ -82,7 +82,7 @@ Notes & Life Tracker:
 - add_note(title,content) — notes, lists, reminders
 - add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), get_stats
 Calendar & Events:
-- create_event(title,date,time?,duration?,description?,category?,color?) — add event to calendar
+- create_event(title,date,time?,duration?,description?,category?,color?) — add to calendar. USE THIS for meetings, deadlines, exams, all-day events (time="" duration=0). Look up date from [Current context] Next 14 days.
 - delete_event(id) — remove event
 - sync_calendar(month?,year?) — sync with Apple/Google Calendar
 Time Tracking:
@@ -1752,20 +1752,28 @@ async fn chat(app: AppHandle, messages: Vec<(String, String)>) -> Result<String,
 async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
     let client = &app.state::<HttpClient>().0;
 
-    // Build system prompt with current date/time context
+    // Build system prompt with current date/time context + full week lookup table
     let now_local = chrono::Local::now();
-    let weekday_ru = match now_local.format("%A").to_string().as_str() {
-        "Monday" => "понедельник", "Tuesday" => "вторник", "Wednesday" => "среда",
-        "Thursday" => "четверг", "Friday" => "пятница", "Saturday" => "суббота",
-        "Sunday" => "воскресенье", _ => "",
+    let weekday_ru = match now_local.format("%u").to_string().as_str() {
+        "1" => "понедельник", "2" => "вторник", "3" => "среда",
+        "4" => "четверг", "5" => "пятница", "6" => "суббота",
+        "7" => "воскресенье", _ => "",
     };
+    // Build next 14 days lookup: "Чт 2026-02-12, Пт 2026-02-13, ..."
+    let day_abbr = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+    let mut days_ahead = String::new();
+    for i in 1..=14 {
+        let d = now_local + chrono::Duration::days(i);
+        let wd = d.format("%u").to_string().parse::<usize>().unwrap_or(1) - 1;
+        if !days_ahead.is_empty() { days_ahead.push_str(", "); }
+        days_ahead.push_str(&format!("{} {}", day_abbr[wd], d.format("%Y-%m-%d")));
+    }
     let date_context = format!(
-        "\n\n[Current context]\nToday: {} ({})\nTime: {}\nUse YYYY-MM-DD for dates. \"Завтра\" = {}, \"Послезавтра\" = {}.",
+        "\n\n[Current context]\nToday: {} ({})\nTime: {}\nNext 14 days: {}\nUse YYYY-MM-DD. Deadlines/exams/all-day = create_event with time=\"\" and duration=0.",
         now_local.format("%Y-%m-%d"),
         weekday_ru,
         now_local.format("%H:%M"),
-        (now_local + chrono::Duration::days(1)).format("%Y-%m-%d"),
-        (now_local + chrono::Duration::days(2)).format("%Y-%m-%d"),
+        days_ahead,
     );
     let system_content = format!("{}{}", SYSTEM_PROMPT, date_context);
 
