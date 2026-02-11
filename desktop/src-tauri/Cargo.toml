@@ -1,6 +1,6 @@
 [package]
 name = "hanni"
-version = "0.8.11"
+version = "0.8.12"
 description = "Hanni — personal AI assistant"
 authors = ["sultanjakhan"]
 edition = "2021"

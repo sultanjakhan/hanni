@@ -106,8 +106,10 @@ Home:
 - add_home_item(name,category?,quantity?,unit?,location?) — track supplies
 Money:
 - add_transaction(transaction_type,amount,category,description?,currency?) — types: expense,income
+Fitness:
+- add_workout(type,title,duration?,calories?,notes?) — types: cardio,strength,yoga,stretching,swimming,running,cycling,martial_arts,other. Example: {"action":"add_workout","type":"strength","title":"Жим лёжа + присед","duration":60,"calories":400}
 Health:
-- log_health(sleep?,water?,steps?,weight?,notes?) — log daily health metrics
+- log_health(sleep?,water?,steps?,weight?,notes?) — log daily health metrics. Example: {"action":"log_health","sleep":7,"water":5}
 - log_mood(mood,note?,trigger?) — mood: 1-5
 - save_journal(mood,energy,stress,gratitude?,reflection?,wins?,struggles?)
 Goals:
