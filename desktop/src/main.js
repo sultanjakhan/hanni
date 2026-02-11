@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.17';
+const APP_VERSION = '0.8.18';
 
 let busy = false;
 let history = [];
@@ -44,7 +44,7 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: '\u{1F355}', closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: '\u{1F4B0}', closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: '\u{1F465}', closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: '\u{2699}\u{FE0F}',  closable: true,  subTabs: ['General', 'Memory', 'Blocklist', 'Integrations', 'About'] },
+  settings:    { label: 'Settings',    icon: '\u{2699}\u{FE0F}',  closable: true,  subTabs: ['Memory', 'Blocklist', 'Integrations', 'About'] },
 };
 
 let openTabs = ['chat', 'dashboard'];
@@ -349,8 +349,7 @@ function renderSubSidebar() {
 
   sidebar.classList.remove('hidden');
   items.innerHTML = '';
-  // Don't show sub-tabs when settings is the active tab (settings uses its own sub-tabs)
-  const subTabs = (activeTab === 'settings') ? reg.subTabs : reg.subTabs;
+  const subTabs = reg.subTabs;
   const currentSub = activeSubTab[activeTab] || subTabs[0];
   for (const sub of subTabs) {
     const item = document.createElement('div');
@@ -364,6 +363,20 @@ function renderSubSidebar() {
       loadSubTabContent(activeTab, sub);
     });
     items.appendChild(item);
+  }
+  const settingsBottom = document.getElementById('sub-sidebar-settings');
+  if (settingsBottom) {
+    settingsBottom.innerHTML = '';
+    if (activeTab !== 'settings') {
+      const gear = document.createElement('div');
+      gear.className = 'sub-sidebar-item';
+      gear.innerHTML = '\u{2699}\u{FE0F} Настройки';
+      gear.addEventListener('click', () => {
+        if (!openTabs.includes('settings')) openTabs.push('settings');
+        switchTab('settings');
+      });
+      settingsBottom.appendChild(gear);
+    }
   }
   loadGoalsWidget();
 }
@@ -576,6 +589,10 @@ async function loadChatSettings() {
               `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
             ).join('')}
           </div>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">Тихие часы</span>
+          <span class="settings-value">${proactive.quiet_hours_start || 23}:00 — ${proactive.quiet_hours_end || 8}:00</span>
         </div>
       </div>
       <div class="settings-section">
@@ -2353,57 +2370,8 @@ async function loadSettings(subTab) {
   if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
   if (subTab === 'Integrations') { loadIntegrations(); return; }
   if (subTab === 'About') { loadAbout(settingsContent); return; }
-  settingsContent.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
-  try {
-    const proactive = await invoke('get_proactive_settings');
-
-    settingsContent.innerHTML = `
-      <div class="settings-section">
-        <div class="settings-section-title">Автономный режим</div>
-        <div class="settings-row">
-          <span class="settings-label">Включён</span>
-          <label class="toggle">
-            <input type="checkbox" id="settings-proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Интервал</span>
-          <div class="pill-group" id="settings-proactive-interval">
-            ${[5, 10, 15, 30].map(v =>
-              `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
-            ).join('')}
-          </div>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Тихие часы</span>
-          <span class="settings-value">${proactive.quiet_hours_start || 23}:00 — ${proactive.quiet_hours_end || 8}:00</span>
-        </div>
-      </div>`;
-
-    const saveSettingsProactive = () => {
-      const settings = {
-        enabled: document.getElementById('settings-proactive-enabled')?.checked ?? proactive.enabled,
-        voice_enabled: proactive.voice_enabled,
-        voice_name: proactive.voice_name,
-        interval_minutes: parseInt(document.querySelector('#settings-proactive-interval .pill.active')?.dataset.value || proactive.interval_minutes),
-        quiet_hours_start: proactive.quiet_hours_start || 23,
-        quiet_hours_end: proactive.quiet_hours_end || 8,
-      };
-      invoke('set_proactive_settings', { settings }).catch(() => {});
-    };
-    document.getElementById('settings-proactive-enabled')?.addEventListener('change', saveSettingsProactive);
-    document.querySelectorAll('#settings-proactive-interval .pill').forEach(pill => {
-      pill.addEventListener('click', () => {
-        document.querySelectorAll('#settings-proactive-interval .pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-        saveSettingsProactive();
-      });
-    });
-
-  } catch (e) {
-    settingsContent.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`;
-  }
+  // Default to Memory
+  loadMemoryInSettings(settingsContent);
 }
 
 // ── Blocklist (Settings sub-tab) ──
