@@ -1717,6 +1717,31 @@ fn start_mlx_server() -> Option<Child> {
     Some(child)
 }
 
+// ── Calendar access guard ──
+// Prevents repeated Calendar.app permission prompts by caching denial.
+static CALENDAR_ACCESS_DENIED: AtomicBool = AtomicBool::new(false);
+
+fn check_calendar_access() -> bool {
+    if CALENDAR_ACCESS_DENIED.load(Ordering::Relaxed) {
+        return false;
+    }
+    let result = run_osascript(r#"tell application "Calendar" to count of calendars"#);
+    match result {
+        Ok(_) => true,
+        Err(e) => {
+            let lower = e.to_lowercase();
+            if lower.contains("not allowed") || lower.contains("denied")
+                || lower.contains("not permitted") || lower.contains("1002")
+                || lower.contains("-1743") || lower.contains("assistive")
+                || lower.contains("timeout")
+            {
+                CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed);
+            }
+            false
+        }
+    }
+}
+
 fn run_osascript(script: &str) -> Result<String, String> {
     let mut child = std::process::Command::new("osascript")
         .args(["-e", script])
@@ -2195,6 +2220,9 @@ async fn get_activity_summary() -> Result<String, String> {
 
 #[tauri::command]
 async fn get_calendar_events() -> Result<String, String> {
+    if !check_calendar_access() {
+        return Ok("Calendar access denied. Enable in System Settings → Privacy → Automation".into());
+    }
     let script = r#"
         set output to ""
         set today to current date
@@ -2966,22 +2994,12 @@ async fn sync_apple_calendar(month: u32, year: i32, db: tauri::State<'_, HanniDb
         year = year, month = month, last_day = last_day
     );
 
-    // Pre-check: verify Calendar.app access permission
-    let access_check = run_osascript(r#"tell application "Calendar" to count of calendars"#);
-    if let Err(ref e) = access_check {
-        let err_lower = e.to_lowercase();
-        if err_lower.contains("not allowed") || err_lower.contains("denied") || err_lower.contains("not permitted") || err_lower.contains("assistive") || err_lower.contains("-1743") {
-            return Ok(serde_json::json!({
-                "synced": 0,
-                "source": "apple",
-                "error": "Нет доступа к Calendar.app. Включите в Системные настройки → Конфиденциальность → Автоматизация"
-            }));
-        }
-        // Other AppleScript errors
+    // Pre-check: verify Calendar.app access permission (cached — won't re-prompt after denial)
+    if !check_calendar_access() {
         return Ok(serde_json::json!({
             "synced": 0,
             "source": "apple",
-            "error": format!("Ошибка Calendar.app: {}", e)
+            "error": "Нет доступа к Calendar.app. Включите в Системные настройки → Конфиденциальность → Автоматизация"
         }));
     }
 
@@ -5233,28 +5251,30 @@ fn gather_context_blocking() -> String {
         ctx.push_str(&format!("\n--- Screen Time ---\n{}\n", activity));
     }
 
-    // Calendar events from Calendar.app
-    let cal_script = r#"
-        set output to ""
-        set today to current date
-        set endDate to today + (2 * days)
-        tell application "Calendar"
-            repeat with cal in calendars
-                set evts to (every event of cal whose start date >= today and start date <= endDate)
-                repeat with evt in evts
-                    set evtStart to start date of evt
-                    set evtName to summary of evt
-                    set output to output & (evtStart as string) & " | " & evtName & linefeed
+    // Calendar events from Calendar.app (skip if access was denied)
+    if check_calendar_access() {
+        let cal_script = r#"
+            set output to ""
+            set today to current date
+            set endDate to today + (2 * days)
+            tell application "Calendar"
+                repeat with cal in calendars
+                    set evts to (every event of cal whose start date >= today and start date <= endDate)
+                    repeat with evt in evts
+                        set evtStart to start date of evt
+                        set evtName to summary of evt
+                        set output to output & (evtStart as string) & " | " & evtName & linefeed
+                    end repeat
                 end repeat
-            end repeat
-        end tell
-        if output is "" then
-            return "No upcoming events in the next 2 days."
-        end if
-        return output
-    "#;
-    if let Ok(calendar) = run_osascript(cal_script) {
-        ctx.push_str(&format!("\n--- Calendar ---\n{}\n", calendar));
+            end tell
+            if output is "" then
+                return "No upcoming events in the next 2 days."
+            end if
+            return output
+        "#;
+        if let Ok(calendar) = run_osascript(cal_script) {
+            ctx.push_str(&format!("\n--- Calendar ---\n{}\n", calendar));
+        }
     }
 
     // Now playing
@@ -5420,7 +5440,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         let mut success = false;
         for cmd in &candidates {
             let status = std::process::Command::new(cmd)
-                .args(["--voice", &voice_owned, "--rate", "+20%", "--text", &text_owned, "--write-media", &tmp2])
+                .args(["--voice", &voice_owned, "--rate", "+10%", "--text", &text_owned, "--write-media", &tmp2])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -5432,7 +5452,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         if !success {
             if let Some(python) = find_python() {
                 let status = std::process::Command::new(&python)
-                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", "+20%", "--text", &text_owned, "--write-media", &tmp2])
+                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", "+10%", "--text", &text_owned, "--write-media", &tmp2])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();

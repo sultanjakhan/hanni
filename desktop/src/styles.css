@@ -2270,3 +2270,77 @@ body.dragover::after {
 }
 .form-row .form-input, .form-row .form-select { flex: 1; }
 .form-hint { font-size: 11px; color: #3f3f44; flex-shrink: 0; }
+
+/* ── Skeleton loading ── */
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #111113 25%, #19191b 50%, #111113 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.5s infinite ease-in-out;
+  border-radius: 8px;
+}
+
+.skeleton-line {
+  height: 14px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+}
+
+.skeleton-line.w-full { width: 100%; }
+.skeleton-line.w-3-4 { width: 75%; }
+.skeleton-line.w-1-2 { width: 50%; }
+.skeleton-line.w-1-4 { width: 25%; }
+
+.skeleton-card {
+  background: #111113;
+  border: 1px solid #1e1e20;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 12px;
+}
+
+.skeleton-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.skeleton-row + .skeleton-row {
+  border-top: 1px solid #19191b;
+}
+
+.skeleton-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.skeleton-header {
+  height: 11px;
+  width: 80px;
+  margin-bottom: 16px;
+  border-radius: 4px;
+}
+
+.skeleton-stat {
+  background: #111113;
+  border: 1px solid #1e1e20;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+/* ── Version indicator ── */
+
+.version-label {
+  font-size: 10px;
+  color: #3f3f44;
+  padding: 4px 12px 8px;
+  letter-spacing: 0.3px;
+}
