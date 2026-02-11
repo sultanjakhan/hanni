@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.7';
+const APP_VERSION = '0.8.8';
 
 let busy = false;
 let history = [];
@@ -1023,15 +1023,39 @@ async function executeAction(actionJson) {
 }
 
 function parseAndExecuteActions(text) {
-  const actionRegex = /```action\s*\n([\s\S]*?)\n```/g;
+  // Lenient regex: optional newlines, handle ```action\n...\n``` and ```action{...}```
+  const actionRegex = /```action\s*\n?([\s\S]*?)```/g;
   let match;
   const actions = [];
 
   while ((match = actionRegex.exec(text)) !== null) {
-    actions.push(match[1].trim());
+    let json = match[1].trim();
+    if (json) actions.push(repairJson(json));
+  }
+
+  // Fallback: if no ```action found, try to find bare JSON with "action" key
+  if (actions.length === 0) {
+    const bareJson = text.match(/\{[^{}]*"action"\s*:\s*"[^"]+?"[^{}]*\}/g);
+    if (bareJson) {
+      for (const j of bareJson) actions.push(repairJson(j));
+    }
   }
 
   return actions;
+}
+
+function repairJson(str) {
+  // Fix common model JSON mistakes
+  let s = str.trim();
+  // Remove trailing commas before } or ]
+  s = s.replace(/,\s*([}\]])/g, '$1');
+  // Replace single quotes with double quotes (but not inside strings)
+  if (!s.includes('"') && s.includes("'")) {
+    s = s.replace(/'/g, '"');
+  }
+  // Fix unquoted keys: {action: "foo"} → {"action": "foo"}
+  s = s.replace(/([{,])\s*([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+  return s;
 }
 
 // ── Stream chat helper ──

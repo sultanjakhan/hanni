@@ -49,11 +49,12 @@ You: "Записала!"
 {"action": "log_mood", "mood": 4, "note": "День был хороший"}
 ```
 
-User: "Завтра встреча с Артёмом в 15:00"
-You: "Добавила в календарь!"
+User: "Завтра встреча с Артёмом в 15:00" (assume today is 2026-02-11)
+You: "Добавила в календарь на завтра!"
 ```action
 {"action": "create_event", "title": "Встреча с Артёмом", "date": "2026-02-12", "time": "15:00", "duration": 60}
 ```
+(IMPORTANT: For dates, calculate from [Current context] Today field. "завтра"=Today+1, "послезавтра"=Today+2, "в пятницу"=next Friday. Always output YYYY-MM-DD.)
 
 User: "Начни трекать время — работаю над проектом"
 You: "Запустила таймер!"
@@ -1751,9 +1752,26 @@ async fn chat(app: AppHandle, messages: Vec<(String, String)>) -> Result<String,
 async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
     let client = &app.state::<HttpClient>().0;
 
+    // Build system prompt with current date/time context
+    let now_local = chrono::Local::now();
+    let weekday_ru = match now_local.format("%A").to_string().as_str() {
+        "Monday" => "понедельник", "Tuesday" => "вторник", "Wednesday" => "среда",
+        "Thursday" => "четверг", "Friday" => "пятница", "Saturday" => "суббота",
+        "Sunday" => "воскресенье", _ => "",
+    };
+    let date_context = format!(
+        "\n\n[Current context]\nToday: {} ({})\nTime: {}\nUse YYYY-MM-DD for dates. \"Завтра\" = {}, \"Послезавтра\" = {}.",
+        now_local.format("%Y-%m-%d"),
+        weekday_ru,
+        now_local.format("%H:%M"),
+        (now_local + chrono::Duration::days(1)).format("%Y-%m-%d"),
+        (now_local + chrono::Duration::days(2)).format("%Y-%m-%d"),
+    );
+    let system_content = format!("{}{}", SYSTEM_PROMPT, date_context);
+
     let mut chat_messages = vec![ChatMessage {
         role: "system".into(),
-        content: SYSTEM_PROMPT.into(),
+        content: system_content,
     }];
 
     // Inject memory context from SQLite
@@ -5492,6 +5510,11 @@ pub fn run() {
     init_db(&conn).expect("Cannot initialize database");
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
+    // Set default Google Calendar ICS URL if not already set
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('google_calendar_ics_url', 'https://calendar.google.com/calendar/ical/2f2eac6fd95d168b5de7fad592978aec3d52365d08c6335fb568226de1d9da98%40group.calendar.google.com/public/basic.ics')",
+        [],
+    );
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
     // Start MLX server if not already running
