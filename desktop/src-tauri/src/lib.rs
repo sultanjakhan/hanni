@@ -5415,16 +5415,33 @@ fn speak_edge_tts(text: &str, voice: &str) {
     let voice_owned = voice.to_string();
     let text_owned = text.to_string();
     std::thread::spawn(move || {
-        let status = std::process::Command::new("edge-tts")
-            .args(["--voice", &voice_owned, "--text", &text_owned, "--write-media", &tmp2])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        if let Ok(s) = status {
-            if s.success() {
-                let _ = std::process::Command::new("afplay").arg(&tmp2).status();
-                let _ = std::fs::remove_file(&tmp2);
+        // Try direct edge-tts binary with PATH fallbacks
+        let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
+        let mut success = false;
+        for cmd in &candidates {
+            let status = std::process::Command::new(cmd)
+                .args(["--voice", &voice_owned, "--text", &text_owned, "--write-media", &tmp2])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Ok(s) = status {
+                if s.success() { success = true; break; }
             }
+        }
+        // Fallback: python3 -m edge_tts
+        if !success {
+            if let Some(python) = find_python() {
+                let status = std::process::Command::new(&python)
+                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--text", &text_owned, "--write-media", &tmp2])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                if let Ok(s) = status { success = s.success(); }
+            }
+        }
+        if success {
+            let _ = std::process::Command::new("afplay").arg(&tmp2).status();
+            let _ = std::fs::remove_file(&tmp2);
         }
     });
 }

@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.14';
+const APP_VERSION = '0.8.15';
 
 let busy = false;
 let history = [];
@@ -44,8 +44,7 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: '\u{1F355}', closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: '\u{1F4B0}', closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: '\u{1F465}', closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  memory:      { label: 'Memory',      icon: '\u{1F4BE}', closable: true,  subTabs: ['All Facts', 'Search'] },
-  settings:    { label: 'Settings',    icon: '\u{2699}',  closable: true,  subTabs: ['General', 'Blocklist', 'Integrations', 'About'] },
+  settings:    { label: 'Settings',    icon: '\u{2699}',  closable: true,  subTabs: ['General', 'Memory', 'Blocklist', 'Integrations', 'About'] },
 };
 
 let openTabs = ['chat', 'dashboard'];
@@ -501,7 +500,6 @@ function loadSubTabContent(tabId, subTab) {
     case 'food': loadFood(subTab); break;
     case 'money': loadMoney(subTab); break;
     case 'people': loadPeople(subTab); break;
-    case 'memory': loadMemoryTab(subTab); break;
     case 'settings': loadSettings(subTab); break;
   }
 }
@@ -2129,6 +2127,51 @@ async function loadAllFacts(el) {
   } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Error: ${e}</div>`; }
 }
 
+async function loadMemoryInSettings(el) {
+  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  try {
+    const memories = await invoke('get_all_memories', { search: null }).catch(() => []);
+    el.innerHTML = `
+      <div class="memory-search-box" style="margin-bottom:12px;">
+        <input class="form-input" id="settings-mem-search" placeholder="Поиск по памяти..." autocomplete="off">
+      </div>
+      <div style="color:#63636a;font-size:12px;margin-bottom:12px;">${memories.length} фактов</div>
+      <div class="memory-browser" id="settings-mem-list">
+        ${memories.map(m => `<div class="memory-item">
+          <span class="memory-item-category">${escapeHtml(m.category)}</span>
+          <span class="memory-item-key">${escapeHtml(m.key)}</span>
+          <span class="memory-item-value">${escapeHtml(m.value)}</span>
+          <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
+        </div>`).join('')}
+      </div>`;
+    el.querySelectorAll('[data-mid]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadMemoryInSettings(el); }
+      });
+    });
+    let searchTimeout;
+    document.getElementById('settings-mem-search')?.addEventListener('input', async (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        const q = e.target.value;
+        const results = await invoke('get_all_memories', { search: q || null }).catch(() => []);
+        const list = document.getElementById('settings-mem-list');
+        if (list) list.innerHTML = results.map(m => `<div class="memory-item">
+          <span class="memory-item-category">${escapeHtml(m.category)}</span>
+          <span class="memory-item-key">${escapeHtml(m.key)}</span>
+          <span class="memory-item-value">${escapeHtml(m.value)}</span>
+          <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
+        </div>`).join('') || '<div style="color:#3f3f44;font-size:12px;padding:8px;">Ничего не найдено</div>';
+        list?.querySelectorAll('[data-mid]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadMemoryInSettings(el); }
+          });
+        });
+      }, 300);
+    });
+  } catch (e) { el.innerHTML = `<div style="color:#63636a;font-size:13px;">Ошибка: ${e}</div>`; }
+}
+
 async function loadMemorySearch(el) {
   el.innerHTML = `
     <div class="module-header"><h2>Memory Search</h2></div>
@@ -2315,6 +2358,7 @@ async function loadMemoryBrowser(search) {
 async function loadSettings(subTab) {
   const settingsContent = document.getElementById('settings-content');
   if (!settingsContent) return;
+  if (subTab === 'Memory') { loadMemoryInSettings(settingsContent); return; }
   if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
   if (subTab === 'Integrations') { loadIntegrations(); return; }
   if (subTab === 'About') { loadAbout(settingsContent); return; }
