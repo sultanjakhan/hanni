@@ -699,6 +699,52 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        );
+
+        -- v0.9.0: Page Meta & Custom Properties (Notion-style)
+        CREATE TABLE IF NOT EXISTS page_meta (
+            tab_id TEXT PRIMARY KEY,
+            emoji TEXT,
+            title TEXT,
+            description TEXT,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS property_definitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tab_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            color TEXT,
+            options TEXT,
+            default_value TEXT,
+            visible INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            UNIQUE(tab_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS property_values (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_id INTEGER NOT NULL,
+            record_table TEXT NOT NULL,
+            property_id INTEGER NOT NULL,
+            value TEXT,
+            FOREIGN KEY (property_id) REFERENCES property_definitions(id) ON DELETE CASCADE,
+            UNIQUE(record_id, record_table, property_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS view_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tab_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            view_type TEXT NOT NULL DEFAULT 'table',
+            filter_json TEXT,
+            sort_json TEXT,
+            visible_columns TEXT,
+            is_default INTEGER DEFAULT 0,
+            position INTEGER,
+            created_at TEXT NOT NULL
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -5006,6 +5052,199 @@ fn toggle_contact_block_active(id: i64, db: tauri::State<'_, HanniDb>) -> Result
     Ok("toggled".into())
 }
 
+// ── v0.9.0: Page Meta & Custom Properties ──
+
+#[tauri::command]
+fn get_page_meta(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let result = conn.query_row(
+        "SELECT tab_id, emoji, title, description, updated_at FROM page_meta WHERE tab_id=?1",
+        rusqlite::params![tab_id],
+        |row| Ok(serde_json::json!({
+            "tab_id": row.get::<_, String>(0)?,
+            "emoji": row.get::<_, Option<String>>(1)?,
+            "title": row.get::<_, Option<String>>(2)?,
+            "description": row.get::<_, Option<String>>(3)?,
+            "updated_at": row.get::<_, String>(4)?,
+        }))
+    );
+    match result {
+        Ok(v) => Ok(v),
+        Err(_) => Ok(serde_json::json!(null)),
+    }
+}
+
+#[tauri::command]
+fn update_page_meta(tab_id: String, emoji: Option<String>, title: Option<String>, description: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO page_meta (tab_id, emoji, title, description, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(tab_id) DO UPDATE SET
+         emoji=COALESCE(?2, emoji), title=COALESCE(?3, title),
+         description=COALESCE(?4, description), updated_at=?5",
+        rusqlite::params![tab_id, emoji, title, description, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_property_definitions(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, tab_id, name, type, position, color, options, default_value, visible
+         FROM property_definitions WHERE tab_id=?1 ORDER BY position"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![tab_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "tab_id": row.get::<_, String>(1)?,
+            "name": row.get::<_, String>(2)?,
+            "type": row.get::<_, String>(3)?,
+            "position": row.get::<_, i64>(4)?,
+            "color": row.get::<_, Option<String>>(5)?,
+            "options": row.get::<_, Option<String>>(6)?,
+            "default_value": row.get::<_, Option<String>>(7)?,
+            "visible": row.get::<_, i64>(8)? != 0,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn create_property_definition(tab_id: String, name: String, prop_type: String, position: Option<i64>, color: Option<String>, options: Option<String>, default_value: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    let pos = position.unwrap_or_else(|| {
+        conn.query_row("SELECT COALESCE(MAX(position), 0) + 1 FROM property_definitions WHERE tab_id=?1",
+            rusqlite::params![tab_id], |row| row.get::<_, i64>(0)).unwrap_or(0)
+    });
+    conn.execute(
+        "INSERT INTO property_definitions (tab_id, name, type, position, color, options, default_value, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![tab_id, name, prop_type, pos, color, options, default_value, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn update_property_definition(id: i64, name: Option<String>, prop_type: Option<String>, position: Option<i64>, color: Option<String>, options: Option<String>, visible: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(n) = name { conn.execute("UPDATE property_definitions SET name=?1 WHERE id=?2", rusqlite::params![n, id]).map_err(|e| e.to_string())?; }
+    if let Some(t) = prop_type { conn.execute("UPDATE property_definitions SET type=?1 WHERE id=?2", rusqlite::params![t, id]).map_err(|e| e.to_string())?; }
+    if let Some(p) = position { conn.execute("UPDATE property_definitions SET position=?1 WHERE id=?2", rusqlite::params![p, id]).map_err(|e| e.to_string())?; }
+    if let Some(c) = color { conn.execute("UPDATE property_definitions SET color=?1 WHERE id=?2", rusqlite::params![c, id]).map_err(|e| e.to_string())?; }
+    if let Some(o) = options { conn.execute("UPDATE property_definitions SET options=?1 WHERE id=?2", rusqlite::params![o, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = visible { conn.execute("UPDATE property_definitions SET visible=?1 WHERE id=?2", rusqlite::params![v as i32, id]).map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_property_definition(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute("DELETE FROM property_values WHERE property_id=?1", rusqlite::params![id]).ok();
+    conn.execute("DELETE FROM property_definitions WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_property_values(record_table: String, record_ids: Vec<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if record_ids.is_empty() { return Ok(vec![]); }
+    let placeholders: Vec<String> = record_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 2)).collect();
+    let sql = format!(
+        "SELECT pv.id, pv.record_id, pv.record_table, pv.property_id, pv.value, pd.name, pd.type
+         FROM property_values pv JOIN property_definitions pd ON pd.id = pv.property_id
+         WHERE pv.record_table=?1 AND pv.record_id IN ({})",
+        placeholders.join(",")
+    );
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    params.push(Box::new(record_table));
+    for id in &record_ids { params.push(Box::new(*id)); }
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "record_id": row.get::<_, i64>(1)?,
+            "record_table": row.get::<_, String>(2)?,
+            "property_id": row.get::<_, i64>(3)?,
+            "value": row.get::<_, Option<String>>(4)?,
+            "prop_name": row.get::<_, String>(5)?,
+            "prop_type": row.get::<_, String>(6)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn set_property_value(record_id: i64, record_table: String, property_id: i64, value: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "INSERT INTO property_values (record_id, record_table, property_id, value)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(record_id, record_table, property_id) DO UPDATE SET value=?4",
+        rusqlite::params![record_id, record_table, property_id, value],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_property_value(record_id: i64, record_table: String, property_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "DELETE FROM property_values WHERE record_id=?1 AND record_table=?2 AND property_id=?3",
+        rusqlite::params![record_id, record_table, property_id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_view_configs(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT id, tab_id, name, view_type, filter_json, sort_json, visible_columns, is_default, position
+         FROM view_configs WHERE tab_id=?1 ORDER BY position"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![tab_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "tab_id": row.get::<_, String>(1)?,
+            "name": row.get::<_, String>(2)?,
+            "view_type": row.get::<_, String>(3)?,
+            "filter_json": row.get::<_, Option<String>>(4)?,
+            "sort_json": row.get::<_, Option<String>>(5)?,
+            "visible_columns": row.get::<_, Option<String>>(6)?,
+            "is_default": row.get::<_, i64>(7)? != 0,
+            "position": row.get::<_, Option<i64>>(8)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn create_view_config(tab_id: String, name: String, view_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let now = chrono::Local::now().to_rfc3339();
+    let vt = view_type.unwrap_or_else(|| "table".into());
+    conn.execute(
+        "INSERT INTO view_configs (tab_id, name, view_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![tab_id, name, vt, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn update_view_config(id: i64, filter_json: Option<String>, sort_json: Option<String>, visible_columns: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    if let Some(f) = filter_json { conn.execute("UPDATE view_configs SET filter_json=?1 WHERE id=?2", rusqlite::params![f, id]).map_err(|e| e.to_string())?; }
+    if let Some(s) = sort_json { conn.execute("UPDATE view_configs SET sort_json=?1 WHERE id=?2", rusqlite::params![s, id]).map_err(|e| e.to_string())?; }
+    if let Some(v) = visible_columns { conn.execute("UPDATE view_configs SET visible_columns=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
 // ── Integrations info ──
 
 #[derive(Serialize)]
@@ -5934,6 +6173,19 @@ pub fn run() {
             get_contact_blocks,
             delete_contact_block,
             toggle_contact_block_active,
+            // v0.9.0: Page Meta & Custom Properties
+            get_page_meta,
+            update_page_meta,
+            get_property_definitions,
+            create_property_definition,
+            update_property_definition,
+            delete_property_definition,
+            get_property_values,
+            set_property_value,
+            delete_property_value,
+            get_view_configs,
+            create_view_config,
+            update_view_config,
         ])
         .setup(move |app| {
             // Auto-updater
