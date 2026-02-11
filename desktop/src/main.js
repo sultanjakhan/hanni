@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.18';
+const APP_VERSION = '0.8.19';
 
 let busy = false;
 let history = [];
@@ -293,6 +293,38 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function skeletonSettings(rows = 3) {
+  let html = '<div class="skeleton-card">';
+  html += '<div class="skeleton skeleton-header"></div>';
+  for (let i = 0; i < rows; i++) {
+    html += `<div class="skeleton-row"><div class="skeleton skeleton-line w-1-4"></div><div class="skeleton skeleton-line w-1-4"></div></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function skeletonGrid(cols = 4) {
+  let html = '<div style="display:grid;grid-template-columns:repeat(' + cols + ',1fr);gap:10px;margin-bottom:20px;">';
+  for (let i = 0; i < cols; i++) {
+    html += '<div class="skeleton-stat"><div class="skeleton skeleton-line w-1-2" style="margin:0 auto 6px;height:20px;"></div><div class="skeleton skeleton-line w-3-4" style="margin:0 auto;height:10px;"></div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function skeletonList(items = 5) {
+  let html = '';
+  for (let i = 0; i < items; i++) {
+    const w = i % 3 === 0 ? 'w-3-4' : i % 3 === 1 ? 'w-full' : 'w-1-2';
+    html += `<div class="skeleton skeleton-line ${w}"></div>`;
+  }
+  return html;
+}
+
+function skeletonPage() {
+  return skeletonGrid(4) + skeletonSettings(3) + skeletonSettings(2);
+}
+
 // New chat button
 document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
   await autoSaveConversation();
@@ -377,6 +409,10 @@ function renderSubSidebar() {
       });
       settingsBottom.appendChild(gear);
     }
+    const ver = document.createElement('div');
+    ver.className = 'version-label';
+    ver.textContent = `v${APP_VERSION}`;
+    settingsBottom.appendChild(ver);
   }
   loadGoalsWidget();
 }
@@ -556,7 +592,7 @@ function hideChatSettingsMode() {
 async function loadChatSettings() {
   const el = document.getElementById('chat-settings-content');
   if (!el) return;
-  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  el.innerHTML = skeletonPage();
   try {
     const [proactive, ttsVoices, ttsServerUrl] = await Promise.all([
       invoke('get_proactive_settings'),
@@ -2136,7 +2172,7 @@ async function loadAllFacts(el) {
 }
 
 async function loadMemoryInSettings(el) {
-  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  el.innerHTML = skeletonPage();
   try {
     const memories = await invoke('get_all_memories', { search: null }).catch(() => []);
     el.innerHTML = `
@@ -2221,7 +2257,7 @@ let integrationsLoaded = false;
 async function loadIntegrations(force) {
   const integrationsContent = document.getElementById('settings-content');
   if (!integrationsContent) return;
-  if (!force) integrationsContent.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  if (!force) integrationsContent.innerHTML = skeletonPage();
   try {
     const info = await invoke('get_integrations');
 
@@ -2473,7 +2509,7 @@ function showStub(containerId, icon, label) {
 async function loadDashboard() {
   const el = document.getElementById('dashboard-content');
   if (!el) return;
-  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  el.innerHTML = skeletonPage();
   try {
     const data = await invoke('get_dashboard_data');
     const now = new Date();
@@ -2543,7 +2579,7 @@ async function loadDashboard() {
 async function loadFocus() {
   const el = document.getElementById('focus-content');
   if (!el) return;
-  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  el.innerHTML = skeletonPage();
   try {
     const current = await invoke('get_current_activity').catch(() => null);
     const log = await invoke('get_activity_log', { date: null }).catch(() => []);
@@ -3219,7 +3255,7 @@ async function renderCalendarList(el) {
 
 // ── Calendar Integrations sub-tab ──
 async function renderCalendarIntegrations(el) {
-  el.innerHTML = '<div style="color:#3f3f44;font-size:13px;">Загрузка...</div>';
+  el.innerHTML = skeletonPage();
   try {
     const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
     const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
