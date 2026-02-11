@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.11';
+const APP_VERSION = '0.8.12';
 
 let busy = false;
 let history = [];
@@ -1000,11 +1000,28 @@ async function executeAction(actionJson) {
         });
         break;
       // Health
-      case 'log_health':
-        result = await invoke('log_health', {
-          sleep: action.sleep || null, water: action.water || null,
-          steps: action.steps || null, weight: action.weight || null,
-          notes: action.notes || null,
+      case 'log_health': {
+        // Rust log_health takes one type at a time — call for each provided field
+        const fields = {sleep: action.sleep, water: action.water, steps: action.steps, weight: action.weight};
+        const logged = [];
+        for (const [type, val] of Object.entries(fields)) {
+          if (val != null && val !== undefined) {
+            await invoke('log_health', { healthType: type, value: Number(val), notes: action.notes || null });
+            logged.push(`${type}=${val}`);
+          }
+        }
+        result = logged.length ? `Записано: ${logged.join(', ')}` : 'Нет данных для записи';
+        break;
+      }
+      case 'add_workout':
+      case 'create_workout':
+      case 'log_workout':
+        result = await invoke('create_workout', {
+          workoutType: action.type || action.workout_type || 'general',
+          title: action.title || action.name || 'Тренировка',
+          durationMinutes: action.duration || action.duration_minutes || 60,
+          calories: action.calories || null,
+          notes: action.notes || '',
         });
         break;
       // Goals
