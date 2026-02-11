@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.8';
+const APP_VERSION = '0.8.9';
 
 let busy = false;
 let history = [];
@@ -785,8 +785,18 @@ document.body.addEventListener('drop', async (e) => {
 async function executeAction(actionJson) {
   try {
     const action = JSON.parse(actionJson);
-    const actionType = action.action || action.type; // model uses "action", fallback to "type"
+    // Normalize common model variations
+    if (action.meal_type) {
+      const mealMap = {'завтрак':'breakfast','обед':'lunch','ужин':'dinner','перекус':'snack',
+        'breakfast':'breakfast','lunch':'lunch','dinner':'dinner','snack':'snack'};
+      action.meal_type = mealMap[action.meal_type.toLowerCase()] || action.meal_type.toLowerCase();
+    }
+    let actionType = action.action || action.type;
     let result;
+    // If log_health has only mood, redirect to log_mood
+    if (actionType === 'log_health' && action.mood && !action.sleep && !action.water && !action.steps && !action.weight) {
+      actionType = 'log_mood';
+    }
 
     switch (actionType) {
       case 'add_purchase':

@@ -5510,11 +5510,6 @@ pub fn run() {
     init_db(&conn).expect("Cannot initialize database");
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
-    // Set default Google Calendar ICS URL if not already set
-    let _ = conn.execute(
-        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('google_calendar_ics_url', 'https://calendar.google.com/calendar/ical/2f2eac6fd95d168b5de7fad592978aec3d52365d08c6335fb568226de1d9da98%40group.calendar.google.com/public/basic.ics')",
-        [],
-    );
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
     // Start MLX server if not already running
