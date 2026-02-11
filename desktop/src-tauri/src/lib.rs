@@ -5420,7 +5420,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         let mut success = false;
         for cmd in &candidates {
             let status = std::process::Command::new(cmd)
-                .args(["--voice", &voice_owned, "--text", &text_owned, "--write-media", &tmp2])
+                .args(["--voice", &voice_owned, "--rate", "+20%", "--text", &text_owned, "--write-media", &tmp2])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -5432,7 +5432,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         if !success {
             if let Some(python) = find_python() {
                 let status = std::process::Command::new(&python)
-                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--text", &text_owned, "--write-media", &tmp2])
+                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", "+20%", "--text", &text_owned, "--write-media", &tmp2])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
@@ -5540,8 +5540,19 @@ async fn stop_speaking() -> Result<(), String> {
 async fn get_tts_voices() -> Result<serde_json::Value, String> {
     let mut voices: Vec<serde_json::Value> = Vec::new();
     // Add macOS voices first (always available)
-    voices.push(serde_json::json!({"name": "Milena", "gender": "Female", "lang": "ru-RU", "engine": "macos"}));
-    voices.push(serde_json::json!({"name": "Yuri", "gender": "Male", "lang": "ru-RU", "engine": "macos"}));
+    // Detect installed macOS voices
+    if let Ok(output) = std::process::Command::new("say").arg("-v").arg("?").output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
+            if parts.is_empty() { continue; }
+            let name = parts[0].trim();
+            if line.contains("ru_RU") || line.contains("kk_KZ") {
+                let lang = if line.contains("kk_KZ") { "kk-KZ" } else { "ru-RU" };
+                voices.push(serde_json::json!({"name": name, "gender": "—", "lang": lang, "engine": "macos"}));
+            }
+        }
+    }
     // Try edge-tts (may not be in PATH for .app bundles)
     let edge_tts_paths = [
         "edge-tts",
