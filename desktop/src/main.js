@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.8.9';
+const APP_VERSION = '0.8.10';
 
 let busy = false;
 let history = [];
@@ -3062,7 +3062,11 @@ let calDayDate = null;
 function renderDayCalendar(el, events) {
   const today = new Date();
   if (!calDayDate) calDayDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  const dayEvents = events.filter(e => e.date === calDayDate).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  const dayEvents = events.filter(e => e.date === calDayDate).map(e => {
+    // Normalize time to HH:MM (pad single-digit hour)
+    if (e.time && /^\d:\d{2}$/.test(e.time)) e.time = '0' + e.time;
+    return e;
+  }).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   const d = new Date(calDayDate + 'T00:00:00');
   const dayNames = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
   const monthNames = ['Января', 'Февраля', 'Марта', 'Апреля', 'Мая', 'Июня', 'Июля', 'Августа', 'Сентября', 'Октября', 'Ноября', 'Декабря'];
@@ -3073,7 +3077,9 @@ function renderDayCalendar(el, events) {
     const hourEvents = dayEvents.filter(e => e.time && e.time.startsWith(timeStr.slice(0,2)));
     const evtHtml = hourEvents.map(e => {
       const srcBadge = e.source && e.source !== 'manual' ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
+      const endMin = (() => { const [hh,mm] = (e.time||'00:00').split(':').map(Number); const t = hh*60+mm+(e.duration_minutes||60); return `${String(Math.floor(t/60)%24).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; })();
       return `<div class="day-event" style="border-left:3px solid ${e.color || '#a1a1a6'};">
+        <span class="day-event-time">${e.time} – ${endMin}</span>
         <span class="day-event-title">${escapeHtml(e.title)}</span>${srcBadge}
         <span class="day-event-dur">${e.duration_minutes || 60} мин</span>
       </div>`;

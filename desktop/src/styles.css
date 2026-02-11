@@ -1721,6 +1721,7 @@ body.dragover::after {
   padding: 6px 10px; background: #111113; border: 1px solid #222224;
   border-radius: 8px; display: flex; align-items: center; gap: 8px;
 }
+.day-event-time { font-size: 11px; color: #a1a1a6; min-width: 90px; }
 .day-event-title { font-size: 13px; color: #fafafa; flex: 1; }
 .day-event-dur { font-size: 11px; color: #63636a; }
 .day-allday {
