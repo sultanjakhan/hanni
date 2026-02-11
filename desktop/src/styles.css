@@ -90,7 +90,7 @@ body {
   background: #fafafa;
 }
 
-.tab-item-icon { font-size: 13px; flex-shrink: 0; }
+.tab-item-icon { font-size: 13px; flex-shrink: 0; width: 16px; text-align: center; display: inline-block; line-height: 16px; }
 .tab-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 
 .tab-item-close {
