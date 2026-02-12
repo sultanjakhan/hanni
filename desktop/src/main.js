@@ -453,19 +453,17 @@ function renderSubSidebar() {
   const settingsBottom = document.getElementById('sub-sidebar-settings');
   if (settingsBottom) {
     settingsBottom.innerHTML = '';
-    if (activeTab !== 'settings') {
-      const gear = document.createElement('div');
-      gear.className = 'sub-sidebar-item';
-      gear.innerHTML = '\u{2699}\u{FE0F} Настройки';
-      gear.addEventListener('click', () => {
-        if (!openTabs.includes('settings')) {
-          const idx = openTabs.indexOf(activeTab);
-          openTabs.splice(idx + 1, 0, 'settings');
-        }
-        switchTab('settings');
-      });
-      settingsBottom.appendChild(gear);
-    }
+    const gear = document.createElement('div');
+    gear.className = 'sub-sidebar-item' + (activeTab === 'settings' ? ' active' : '');
+    gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span> Настройки`;
+    gear.addEventListener('click', () => {
+      if (!openTabs.includes('settings')) {
+        const idx = openTabs.indexOf(activeTab);
+        openTabs.splice(idx + 1, 0, 'settings');
+      }
+      switchTab('settings');
+    });
+    settingsBottom.appendChild(gear);
     const ver = document.createElement('div');
     ver.className = 'version-label';
     ver.textContent = `v${APP_VERSION}`;
