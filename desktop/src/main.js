@@ -689,7 +689,12 @@ async function loadChatSettings() {
         </div>
         <div class="settings-row">
           <span class="settings-label">Тихие часы</span>
-          <span class="settings-value">${proactive.quiet_hours_start || 23}:00 — ${proactive.quiet_hours_end || 8}:00</span>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" id="chat-quiet-start" class="form-input" style="width:60px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_start ?? 23}">
+            <span class="settings-value">:00 —</span>
+            <input type="number" id="chat-quiet-end" class="form-input" style="width:60px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_end ?? 8}">
+            <span class="settings-value">:00</span>
+          </div>
         </div>
       </div>
       <div class="settings-section">
@@ -740,14 +745,16 @@ async function loadChatSettings() {
       voice_enabled: document.getElementById('chat-voice-enabled').checked,
       voice_name: document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural',
       interval_minutes: parseInt(document.querySelector('#chat-proactive-interval .pill.active')?.dataset.value || '10'),
-      quiet_hours_start: proactive.quiet_hours_start || 23,
-      quiet_hours_end: proactive.quiet_hours_end || 8,
+      quiet_hours_start: parseInt(document.getElementById('chat-quiet-start')?.value) || 23,
+      quiet_hours_end: parseInt(document.getElementById('chat-quiet-end')?.value) || 8,
     });
     const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
 
     document.getElementById('chat-proactive-enabled')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-voice-enabled')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-quiet-start')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-quiet-end')?.addEventListener('change', saveChatSettings);
 
     document.querySelectorAll('#chat-proactive-interval .pill').forEach(pill => {
       pill.addEventListener('click', () => {
@@ -4545,6 +4552,13 @@ async function startCallMode() {
   callOverlay.setAttribute('data-phase', 'listening');
   callPhaseText.textContent = PHASE_LABELS.listening;
   callTranscriptArea.innerHTML = '';
+
+  // Start a fresh chat for this call
+  await autoSaveConversation();
+  currentConversationId = null;
+  history = [];
+  chat.innerHTML = '';
+  addMsg('bot', 'Звонок начат...');
 
   // Disable normal input
   input.disabled = true;
