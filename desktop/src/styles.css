@@ -2613,3 +2613,173 @@ body.dragover::after {
 .filter-chip-remove:hover { color: var(--color-red); }
 
 .text-faint { color: var(--text-faint); }
+
+/* ── Call Mode Overlay ── */
+
+#call-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+#call-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
+
+#call-btn.active {
+  background: var(--color-green-bg);
+  color: var(--color-green);
+}
+
+#call-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(20px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease-out;
+}
+
+#call-overlay.hidden { display: none !important; }
+
+.call-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  max-width: 400px;
+  width: 100%;
+  padding: 40px;
+}
+
+.call-pulse-container {
+  position: relative;
+  width: 120px;
+  height: 120px;
+}
+
+.call-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent-blue);
+  opacity: 0.4;
+  animation: call-pulse 2s ease-out infinite;
+}
+
+.call-pulse-ring-2 {
+  animation-delay: 0.6s;
+}
+
+.call-pulse-core {
+  position: absolute;
+  inset: 30px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  opacity: 0.8;
+  animation: call-core-pulse 2s ease-in-out infinite;
+}
+
+/* Phase-specific colors */
+#call-overlay[data-phase="listening"] .call-pulse-ring { border-color: var(--accent-blue); }
+#call-overlay[data-phase="listening"] .call-pulse-core { background: var(--accent-blue); }
+
+#call-overlay[data-phase="recording"] .call-pulse-ring { border-color: var(--color-green); }
+#call-overlay[data-phase="recording"] .call-pulse-core { background: var(--color-green); animation-duration: 0.8s; }
+
+#call-overlay[data-phase="processing"] .call-pulse-ring { border-color: var(--color-yellow); animation: call-spin 1.5s linear infinite; }
+#call-overlay[data-phase="processing"] .call-pulse-core { background: var(--color-yellow); }
+
+#call-overlay[data-phase="speaking"] .call-pulse-ring { border-color: var(--color-purple); }
+#call-overlay[data-phase="speaking"] .call-pulse-core { background: var(--color-purple); animation: call-bounce 1s ease-in-out infinite; }
+
+@keyframes call-pulse {
+  0% { transform: scale(1); opacity: 0.4; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+@keyframes call-core-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+@keyframes call-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes call-bounce {
+  0%, 100% { transform: scale(1); }
+  25% { transform: scale(1.15); }
+  50% { transform: scale(0.95); }
+  75% { transform: scale(1.1); }
+}
+
+.call-phase-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.call-transcript-area {
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.call-transcript-user {
+  align-self: flex-end;
+  background: var(--accent-fill);
+  color: var(--bg-page);
+  padding: 8px 12px;
+  border-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-xs);
+  font-size: 14px;
+  max-width: 85%;
+}
+
+.call-transcript-bot {
+  align-self: flex-start;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: var(--radius-lg);
+  border-bottom-left-radius: var(--radius-xs);
+  font-size: 14px;
+  max-width: 85%;
+  border: 1px solid var(--border-subtle);
+}
+
+.call-end-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-red);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 16px;
+  transition: all var(--transition-normal);
+}
+
+.call-end-btn:hover {
+  background: #d44;
+  transform: scale(1.05);
+}

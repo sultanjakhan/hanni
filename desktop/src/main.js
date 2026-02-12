@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.9.5';
+const APP_VERSION = '0.10.0';
 
 let busy = false;
 let history = [];
@@ -4494,5 +4494,252 @@ function renderHealth(el, today, habits) {
   } catch (_) {}
   loadConversationsList();
 })();
+
+// ── Call Mode ──
+
+let callModeActive = false;
+
+const callBtn = document.getElementById('call-btn');
+const callOverlay = document.getElementById('call-overlay');
+const callPhaseText = document.getElementById('call-phase-text');
+const callTranscriptArea = document.getElementById('call-transcript-area');
+const callEndBtn = document.getElementById('call-end-btn');
+
+const PHASE_LABELS = {
+  idle: '',
+  listening: 'Слушаю...',
+  recording: 'Записываю...',
+  processing: 'Думаю...',
+  speaking: 'Говорю...',
+};
+
+async function toggleCallMode() {
+  if (callModeActive) {
+    await endCallMode();
+  } else {
+    await startCallMode();
+  }
+}
+
+async function startCallMode() {
+  // Check whisper model first
+  try {
+    const hasModel = await invoke('check_whisper_model');
+    if (!hasModel) {
+      if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
+        addMsg('bot', 'Скачиваю модель Whisper...');
+        await invoke('download_whisper_model');
+        addMsg('bot', 'Whisper загружен!');
+      } else {
+        return;
+      }
+    }
+  } catch (e) {
+    addMsg('bot', 'Ошибка: ' + e);
+    return;
+  }
+
+  callModeActive = true;
+  callBtn.classList.add('active');
+  callOverlay.classList.remove('hidden');
+  callOverlay.setAttribute('data-phase', 'listening');
+  callPhaseText.textContent = PHASE_LABELS.listening;
+  callTranscriptArea.innerHTML = '';
+
+  // Disable normal input
+  input.disabled = true;
+  sendBtn.disabled = true;
+  recordBtn.disabled = true;
+
+  try {
+    await invoke('start_call_mode');
+  } catch (e) {
+    addMsg('bot', 'Ошибка запуска звонка: ' + e);
+    await endCallMode();
+  }
+}
+
+async function endCallMode() {
+  callModeActive = false;
+  callBtn.classList.remove('active');
+  callOverlay.classList.add('hidden');
+
+  // Re-enable input
+  input.disabled = false;
+  sendBtn.disabled = false;
+  recordBtn.disabled = false;
+
+  try {
+    await invoke('stop_call_mode');
+  } catch (_) {}
+
+  input.focus();
+}
+
+// Listen for phase changes
+listen('call-phase-changed', (event) => {
+  const phase = event.payload;
+  if (!callModeActive && phase !== 'idle') return;
+  callOverlay.setAttribute('data-phase', phase);
+  callPhaseText.textContent = PHASE_LABELS[phase] || phase;
+});
+
+// Listen for transcripts
+listen('call-transcript', async (event) => {
+  const userText = event.payload;
+  if (!callModeActive || !userText) return;
+
+  // Show user bubble in overlay
+  const userBubble = document.createElement('div');
+  userBubble.className = 'call-transcript-user';
+  userBubble.textContent = userText;
+  callTranscriptArea.appendChild(userBubble);
+  callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
+
+  // Also add to actual chat history
+  addMsg('user', userText);
+  history.push(['user', userText]);
+
+  // Run LLM — same agentic loop as send()
+  const t0 = performance.now();
+  let iteration = 0;
+  const MAX_ITERATIONS = 5;
+  let lastReply = '';
+
+  while (iteration < MAX_ITERATIONS) {
+    iteration++;
+    if (iteration > 1) showAgentIndicator(iteration);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg-wrapper';
+    const botDiv = document.createElement('div');
+    botDiv.className = 'msg bot';
+    wrapper.appendChild(botDiv);
+    chat.appendChild(wrapper);
+    scrollDown();
+
+    const result = await streamChat(botDiv, t0);
+    if (!result.fullReply) break;
+
+    history.push(['assistant', result.fullReply]);
+    lastReply = result.fullReply;
+
+    const actions = parseAndExecuteActions(result.fullReply);
+    if (actions.length === 0) break;
+
+    botDiv.classList.add('intermediate');
+    const results = [];
+    for (const actionJson of actions) {
+      const { success, result: actionResult } = await executeAction(actionJson);
+      const actionDiv = document.createElement('div');
+      actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
+      actionDiv.textContent = actionResult;
+      chat.appendChild(actionDiv);
+      scrollDown();
+      results.push(actionResult);
+    }
+    history.push(['user', `[Action result: ${results.join('; ')}]`]);
+  }
+
+  if (!callModeActive) return;
+
+  // Show bot reply in overlay
+  if (lastReply) {
+    const displayText = lastReply.replace(/```action[\s\S]*?```/g, '').trim();
+    if (displayText) {
+      const botBubble = document.createElement('div');
+      botBubble.className = 'call-transcript-bot';
+      botBubble.textContent = displayText;
+      callTranscriptArea.appendChild(botBubble);
+      callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
+    }
+  }
+
+  // Save conversation
+  (async () => {
+    try {
+      if (currentConversationId) {
+        await invoke('update_conversation', { id: currentConversationId, messages: history });
+      } else {
+        currentConversationId = await invoke('save_conversation', { messages: history });
+      }
+      if (history.length >= 4) {
+        await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });
+      }
+      loadConversationsList();
+    } catch (_) {}
+  })();
+
+  // Speak the reply, then resume listening
+  if (lastReply && callModeActive) {
+    await speakAndListen(lastReply);
+  } else if (callModeActive) {
+    await invoke('call_mode_resume_listening').catch(() => {});
+  }
+});
+
+async function speakAndListen(text) {
+  if (!callModeActive) return;
+
+  // Set phase to speaking
+  callOverlay.setAttribute('data-phase', 'speaking');
+  callPhaseText.textContent = PHASE_LABELS.speaking;
+
+  // Get voice
+  let voice = 'ru-RU-SvetlanaNeural';
+  try {
+    const ps = await invoke('get_proactive_settings');
+    voice = ps.voice_name || voice;
+  } catch (_) {}
+
+  // Strip action blocks for TTS
+  const ttsText = text.replace(/```action[\s\S]*?```/g, '').trim();
+  if (!ttsText) {
+    if (callModeActive) {
+      await invoke('call_mode_resume_listening').catch(() => {});
+    }
+    return;
+  }
+
+  // Start barge-in polling
+  let bargedIn = false;
+  const bargeInterval = setInterval(async () => {
+    if (!callModeActive) { clearInterval(bargeInterval); return; }
+    try {
+      const b = await invoke('call_mode_check_bargein');
+      if (b) {
+        bargedIn = true;
+        clearInterval(bargeInterval);
+        await invoke('stop_speaking').catch(() => {});
+        if (callModeActive) {
+          await invoke('call_mode_resume_listening').catch(() => {});
+        }
+      }
+    } catch (_) {}
+  }, 200);
+
+  // Speak blocking
+  try {
+    await invoke('speak_text_blocking', { text: ttsText, voice });
+  } catch (_) {}
+
+  clearInterval(bargeInterval);
+
+  // If not barged in, resume listening
+  if (!bargedIn && callModeActive) {
+    await invoke('call_mode_resume_listening').catch(() => {});
+  }
+}
+
+callBtn.addEventListener('click', toggleCallMode);
+callEndBtn.addEventListener('click', endCallMode);
+
+// Keyboard shortcut: Escape ends call
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && callModeActive) {
+    e.preventDefault();
+    endCallMode();
+  }
+});
 
 input.focus();
