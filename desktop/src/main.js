@@ -27,24 +27,45 @@ let currentProjectId = null;
 let devFilter = 'all';
 let mediaStatusFilter = 'all';
 
+// ── SVG Icon set (Lucide-style, 16x16, stroke 1.5) ──
+const _s = (d) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const TAB_ICONS = {
+  chat:        _s('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
+  dashboard:   _s('<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>'),
+  calendar:    _s('<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'),
+  focus:       _s('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>'),
+  notes:       _s('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
+  work:        _s('<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>'),
+  development: _s('<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>'),
+  home:        _s('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'),
+  hobbies:     _s('<line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>'),
+  sports:      _s('<path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m2.515 18.657a2 2 0 1 1 2.828 2.829l1.768-1.768a2 2 0 1 1 2.828 2.829l-6.364-6.364a2 2 0 1 1-2.828-2.829l1.767-1.768a2 2 0 1 1-2.829-2.828z"/>'),
+  health:      _s('<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'),
+  mindset:     _s('<path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 4.5 17.5a2.5 2.5 0 0 1-.44-4.96A2.5 2.5 0 0 1 4.5 9.5a2.5 2.5 0 0 1 .44-4.96A2.5 2.5 0 0 1 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.54-2.94 2.5 2.5 0 0 0 .44-4.96A2.5 2.5 0 0 0 19.5 9.5a2.5 2.5 0 0 0-.44-4.96A2.5 2.5 0 0 0 14.5 2z"/>'),
+  food:        _s('<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'),
+  money:       _s('<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>'),
+  people:      _s('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+  settings:    _s('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+};
+
 // ── Tab Registry ──
 const TAB_REGISTRY = {
-  chat:        { label: 'Chat',        icon: '\u{1F4AC}', closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': '\u{1F4AC}', 'Настройки': '\u{2699}\u{FE0F}' } },
-  dashboard:   { label: 'Dashboard',   icon: '\u{1F3E0}', closable: true,  subTabs: ['Overview'] },
-  calendar:    { label: 'Calendar',    icon: '\u{1F4C5}', closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
-  focus:       { label: 'Focus',       icon: '\u{1F3AF}', closable: true,  subTabs: ['Current', 'History'] },
-  notes:       { label: 'Notes',       icon: '\u{1F4DD}', closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
-  work:        { label: 'Work',        icon: '\u{1F4BC}', closable: true,  subTabs: ['Projects'] },
-  development: { label: 'Development', icon: '\u{1F4DA}', closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
-  home:        { label: 'Home',        icon: '\u{1F3E1}', closable: true,  subTabs: ['Supplies', 'Shopping List'] },
-  hobbies:     { label: 'Hobbies',     icon: '\u{1F3AE}', closable: true,  subTabs: ['Overview','Music','Anime','Manga','Movies','Series','Cartoons','Games','Books','Podcasts'] },
-  sports:      { label: 'Sports',      icon: '\u{1F3CB}\u{FE0F}', closable: true,  subTabs: ['Workouts', 'Martial Arts', 'Stats'] },
-  health:      { label: 'Health',      icon: '\u{2764}\u{FE0F}',  closable: true,  subTabs: ['Today', 'Habits'] },
-  mindset:     { label: 'Mindset',     icon: '\u{1F9E0}', closable: true,  subTabs: ['Journal', 'Mood', 'Principles'] },
-  food:        { label: 'Food',        icon: '\u{1F355}', closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
-  money:       { label: 'Money',       icon: '\u{1F4B0}', closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
-  people:      { label: 'People',      icon: '\u{1F465}', closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: '\u{2699}\u{FE0F}',  closable: true,  subTabs: ['Memory', 'Blocklist', 'Integrations', 'About'] },
+  chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': TAB_ICONS.chat, 'Настройки': TAB_ICONS.settings } },
+  dashboard:   { label: 'Dashboard',   icon: TAB_ICONS.dashboard, closable: true,  subTabs: ['Overview'] },
+  calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
+  focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
+  notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
+  work:        { label: 'Work',        icon: TAB_ICONS.work, closable: true,  subTabs: ['Projects'] },
+  development: { label: 'Development', icon: TAB_ICONS.development, closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
+  home:        { label: 'Home',        icon: TAB_ICONS.home, closable: true,  subTabs: ['Supplies', 'Shopping List'] },
+  hobbies:     { label: 'Hobbies',     icon: TAB_ICONS.hobbies, closable: true,  subTabs: ['Overview','Music','Anime','Manga','Movies','Series','Cartoons','Games','Books','Podcasts'] },
+  sports:      { label: 'Sports',      icon: TAB_ICONS.sports, closable: true,  subTabs: ['Workouts', 'Martial Arts', 'Stats'] },
+  health:      { label: 'Health',      icon: TAB_ICONS.health,  closable: true,  subTabs: ['Today', 'Habits'] },
+  mindset:     { label: 'Mindset',     icon: TAB_ICONS.mindset, closable: true,  subTabs: ['Journal', 'Mood', 'Principles'] },
+  food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
+  money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
+  people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
+  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Memory', 'Blocklist', 'Integrations', 'About'] },
 };
 
 const TAB_DESCRIPTIONS = {
@@ -420,7 +441,7 @@ function renderSubSidebar() {
     const item = document.createElement('div');
     item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
     const subIcon = reg.subIcons?.[sub];
-    item.textContent = subIcon ? `${subIcon} ${sub}` : sub;
+    if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.textContent = sub; }
     item.addEventListener('click', () => {
       activeSubTab[activeTab] = sub;
       saveTabs();
@@ -599,7 +620,7 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
     if (openTabs.includes(id)) continue;
     const item = document.createElement('div');
     item.className = 'tab-dropdown-item';
-    item.textContent = `${reg.icon || ''} ${reg.label}`;
+    item.innerHTML = `<span class="tab-item-icon">${reg.icon || ''}</span> ${reg.label}`;
     item.addEventListener('click', () => { dropdown.classList.add('hidden'); openTab(id); });
     list.appendChild(item);
   }
@@ -2230,46 +2251,108 @@ async function loadAllFacts(el) {
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
+const MEMORY_CATEGORIES = ['user', 'preferences', 'people', 'habits', 'work', 'health', 'other'];
+
+function renderMemoryList(memories, el) {
+  const list = document.getElementById('settings-mem-list');
+  if (!list) return;
+  const countEl = document.getElementById('settings-mem-count');
+  if (countEl) countEl.textContent = `${memories.length} фактов`;
+  list.innerHTML = memories.map(m => `<div class="memory-item" data-mem-id="${m.id}">
+    <span class="memory-item-category">${escapeHtml(m.category)}</span>
+    <span class="memory-item-key">${escapeHtml(m.key)}</span>
+    <span class="memory-item-value">${escapeHtml(m.value)}</span>
+    <div class="memory-item-actions">
+      <button class="memory-item-btn memory-edit-btn" data-edit="${m.id}" title="Редактировать">&#9998;</button>
+      <button class="memory-item-btn" data-del="${m.id}" title="Удалить">&times;</button>
+    </div>
+  </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Ничего не найдено</div>';
+
+  list.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.del) }).catch(()=>{}); loadMemoryInSettings(el); }
+    });
+  });
+
+  list.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.edit);
+      const m = memories.find(x => x.id === id);
+      if (!m) return;
+      const row = btn.closest('.memory-item');
+      if (!row || row.querySelector('.memory-edit-form')) return;
+      row.innerHTML = `<form class="memory-edit-form">
+        <select class="form-input memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
+        <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
+        <input class="form-input memory-edit-val" value="${escapeHtml(m.value)}" placeholder="Значение" style="flex:1">
+        <button type="submit" class="btn-primary memory-edit-save">Сохранить</button>
+        <button type="button" class="btn-secondary memory-edit-cancel">Отмена</button>
+      </form>`;
+      row.querySelector('.memory-edit-cancel').addEventListener('click', () => renderMemoryList(memories, el));
+      row.querySelector('.memory-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const cat = row.querySelector('.memory-edit-cat').value;
+        const key = row.querySelector('.memory-edit-key').value.trim();
+        const val = row.querySelector('.memory-edit-val').value.trim();
+        if (!key || !val) return;
+        try {
+          await invoke('delete_memory', { id });
+          await invoke('memory_remember', { category: cat, key, value: val });
+        } catch (err) { console.error('Failed to update memory:', err); }
+        loadMemoryInSettings(el);
+      });
+    });
+  });
+}
+
 async function loadMemoryInSettings(el) {
   el.innerHTML = skeletonPage();
   try {
     const memories = await invoke('get_all_memories', { search: null }).catch(() => []);
     el.innerHTML = `
-      <div class="memory-search-box" style="margin-bottom:12px;">
-        <input class="form-input" id="settings-mem-search" placeholder="Поиск по памяти..." autocomplete="off">
+      <div class="memory-header">
+        <div class="memory-search-box" style="flex:1;">
+          <input class="form-input" id="settings-mem-search" placeholder="Поиск по памяти..." autocomplete="off">
+        </div>
+        <button class="btn-primary" id="mem-add-btn">+ Добавить</button>
       </div>
-      <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">${memories.length} фактов</div>
-      <div class="memory-browser" id="settings-mem-list">
-        ${memories.map(m => `<div class="memory-item">
-          <span class="memory-item-category">${escapeHtml(m.category)}</span>
-          <span class="memory-item-key">${escapeHtml(m.key)}</span>
-          <span class="memory-item-value">${escapeHtml(m.value)}</span>
-          <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
-        </div>`).join('')}
-      </div>`;
-    el.querySelectorAll('[data-mid]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadMemoryInSettings(el); }
+      <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;" id="settings-mem-count">${memories.length} фактов</div>
+      <div id="mem-add-form-container"></div>
+      <div class="memory-browser" id="settings-mem-list"></div>`;
+
+    renderMemoryList(memories, el);
+
+    document.getElementById('mem-add-btn')?.addEventListener('click', () => {
+      const container = document.getElementById('mem-add-form-container');
+      if (!container || container.querySelector('.memory-add-form')) return;
+      container.innerHTML = `<form class="memory-add-form">
+        <select class="form-input memory-add-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+        <input class="form-input memory-add-key" placeholder="Ключ (напр. имя, привычка)" autocomplete="off">
+        <input class="form-input memory-add-val" placeholder="Значение" autocomplete="off" style="flex:1">
+        <button type="submit" class="btn-primary">Добавить</button>
+        <button type="button" class="btn-secondary memory-add-cancel">Отмена</button>
+      </form>`;
+      container.querySelector('.memory-add-cancel').addEventListener('click', () => { container.innerHTML = ''; });
+      container.querySelector('.memory-add-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const cat = container.querySelector('.memory-add-cat').value;
+        const key = container.querySelector('.memory-add-key').value.trim();
+        const val = container.querySelector('.memory-add-val').value.trim();
+        if (!key || !val) return;
+        try {
+          await invoke('memory_remember', { category: cat, key, value: val });
+        } catch (err) { console.error('Failed to add memory:', err); }
+        loadMemoryInSettings(el);
       });
     });
+
     let searchTimeout;
     document.getElementById('settings-mem-search')?.addEventListener('input', async (e) => {
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(async () => {
         const q = e.target.value;
         const results = await invoke('get_all_memories', { search: q || null }).catch(() => []);
-        const list = document.getElementById('settings-mem-list');
-        if (list) list.innerHTML = results.map(m => `<div class="memory-item">
-          <span class="memory-item-category">${escapeHtml(m.category)}</span>
-          <span class="memory-item-key">${escapeHtml(m.key)}</span>
-          <span class="memory-item-value">${escapeHtml(m.value)}</span>
-          <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
-        </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Ничего не найдено</div>';
-        list?.querySelectorAll('[data-mid]').forEach(btn => {
-          btn.addEventListener('click', async () => {
-            if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mid) }).catch(()=>{}); loadMemoryInSettings(el); }
-          });
-        });
+        renderMemoryList(results, el);
       }, 300);
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`; }
@@ -2312,7 +2395,6 @@ function panelItem(item) {
   </div>`;
 }
 
-let integrationsLoaded = false;
 async function loadIntegrations(force) {
   const integrationsContent = document.getElementById('settings-content');
   if (!integrationsContent) return;
@@ -2389,71 +2471,31 @@ async function loadIntegrations(force) {
           ${blockerBadge}
           ${sitesItems}
         </div>
-        <div class="integration-card macos-card">
-          <div class="integration-card-title">Память Hanni</div>
-          <div class="memory-search-box">
-            <input class="form-input" id="memory-search" placeholder="Поиск по памяти..." autocomplete="off">
-          </div>
-          <div class="memory-browser" id="memory-browser-list"></div>
-        </div>
       </div>`;
 
     // Calendar integration handlers
     document.getElementById('int-apple-cal')?.addEventListener('change', async (e) => {
-      await invoke('set_app_setting', { key: 'apple_calendar_enabled', value: e.target.checked ? 'true' : 'false' });
+      try {
+        await invoke('set_app_setting', { key: 'apple_calendar_enabled', value: e.target.checked ? 'true' : 'false' });
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        console.error('Failed to save Apple Calendar setting:', err);
+      }
     });
     document.getElementById('int-cal-save')?.addEventListener('click', async () => {
-      const url = document.getElementById('int-google-ics')?.value.trim() || '';
-      await invoke('set_app_setting', { key: 'google_calendar_ics_url', value: url });
       const btn = document.getElementById('int-cal-save');
-      if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = 'Сохранить', 1500); }
+      const url = document.getElementById('int-google-ics')?.value.trim() || '';
+      try {
+        await invoke('set_app_setting', { key: 'google_calendar_ics_url', value: url });
+        if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = 'Сохранить', 1500); }
+      } catch (err) {
+        if (btn) { btn.textContent = '✗'; setTimeout(() => btn.textContent = 'Сохранить', 1500); }
+        console.error('Failed to save Google ICS URL:', err);
+      }
     });
-
-    // Load memory browser
-    loadMemoryBrowser();
-
-    integrationsLoaded = true;
   } catch (e) {
     integrationsContent.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`;
   }
-}
-
-// ── Memory browser ──
-
-async function loadMemoryBrowser(search) {
-  const list = document.getElementById('memory-browser-list');
-  if (!list) return;
-  try {
-    const memories = await invoke('get_all_memories', { search: search || null });
-    list.innerHTML = '';
-    for (const m of memories) {
-      const item = document.createElement('div');
-      item.className = 'memory-item';
-      item.innerHTML = `
-        <span class="memory-item-category">${escapeHtml(m.category)}</span>
-        <span class="memory-item-key">${escapeHtml(m.key)}</span>
-        <span class="memory-item-value">${escapeHtml(m.value)}</span>
-        <div class="memory-item-actions">
-          <button class="memory-item-btn" data-id="${m.id}" title="Удалить">&times;</button>
-        </div>`;
-      item.querySelector('.memory-item-btn').addEventListener('click', async (e) => {
-        if (confirm(`Удалить "${m.key}"?`)) {
-          await invoke('delete_memory', { id: m.id }).catch(() => {});
-          loadMemoryBrowser(search);
-        }
-      });
-      list.appendChild(item);
-    }
-    if (memories.length === 0) {
-      list.innerHTML = '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Нет фактов</div>';
-    }
-  } catch (_) {}
-
-  // Bind search
-  document.getElementById('memory-search')?.addEventListener('input', (e) => {
-    clearTimeout(convSearchTimeout);
-    convSearchTimeout = setTimeout(() => loadMemoryBrowser(e.target.value), 300);
-  });
 }
 
 // ── Settings page ──

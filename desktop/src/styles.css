@@ -144,7 +144,9 @@ body {
   color: var(--text-primary);
 }
 
-.tab-item-icon { font-size: 14px; flex-shrink: 0; width: 18px; height: 18px; text-align: center; display: inline-flex; align-items: center; justify-content: center; font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif; }
+.tab-item-icon { flex-shrink: 0; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.tab-item-icon svg { width: 16px; height: 16px; }
+.tab-item.active .tab-item-icon { color: var(--text-primary); }
 .tab-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 
 .tab-item-close {
@@ -1127,9 +1129,10 @@ body.dragover::after {
 }
 
 .tab-stub-icon {
-  font-size: 32px;
-  opacity: 0.5;
+  opacity: 0.4;
+  color: var(--text-muted);
 }
+.tab-stub-icon svg { width: 32px; height: 32px; }
 
 /* ── Common card styles ── */
 
@@ -1160,9 +1163,10 @@ body.dragover::after {
   margin: 0 auto;
 }
 .page-header-emoji {
-  font-size: 48px;
-  line-height: 1.2;
   margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+.page-header-emoji svg { width: 36px; height: 36px; }
 }
 .page-header-title {
   font-size: 32px;
@@ -2214,6 +2218,35 @@ body.dragover::after {
 }
 
 .memory-item-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
+
+.memory-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.memory-add-form,
+.memory-edit-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.memory-add-form { margin-bottom: 8px; }
+
+.memory-add-form select,
+.memory-edit-form select { width: 110px; flex-shrink: 0; }
+
+.memory-add-form .memory-add-key,
+.memory-edit-form .memory-edit-key { width: 140px; flex-shrink: 0; }
+
+.memory-edit-save,
+.memory-edit-cancel { flex-shrink: 0; padding: 4px 10px; font-size: 12px; }
+
+.memory-edit-btn { font-size: 12px; }
 
 /* ── People / Contacts ── */
 
