@@ -1270,14 +1270,13 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             std::thread::sleep(std::time::Duration::from_millis(16));
 
             // Check if call mode still active
-            let (active, phase) = {
+            {
                 let cs = match call_state.0.lock() {
                     Ok(cs) => cs,
                     Err(_) => break,
                 };
-                (cs.active, cs.phase.clone())
-            };
-            if !active { break; }
+                if !cs.active { break; }
+            }
 
             // Drain audio from ring buffer
             {
@@ -1295,6 +1294,14 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 let chunk: Vec<f32> = process_buf.drain(..512).collect();
 
                 let prob = vad.predict(chunk.clone());
+
+                // Read phase fresh for each chunk
+                let phase = {
+                    match call_state.0.lock() {
+                        Ok(cs) => cs.phase.clone(),
+                        Err(_) => continue,
+                    }
+                };
 
                 match phase.as_str() {
                     "listening" => {
