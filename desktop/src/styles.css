@@ -2166,27 +2166,50 @@ body.dragover::after {
 
 /* ── Memory browser ── */
 
-.memory-browser { margin-top: 12px; }
-.memory-search-box { margin-bottom: 12px; }
+.memory-browser { margin-top: 8px; }
+
+.memory-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
 
 .memory-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--bg-hover);
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
 }
+
+.memory-item:hover { background: var(--bg-hover); }
 
 .memory-item-category {
   font-size: 11px;
-  padding: 2px 6px;
+  font-weight: 500;
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
-  background: var(--color-purple-bg);
-  color: var(--color-purple);
   flex-shrink: 0;
 }
 
-.memory-item-key { font-size: 12px; color: var(--text-muted); min-width: 80px; }
+/* Category color coding */
+.memory-cat-user { background: var(--color-blue-bg); color: var(--color-blue); }
+.memory-cat-preferences { background: var(--color-purple-bg); color: var(--color-purple); }
+.memory-cat-people { background: var(--color-orange-bg); color: var(--color-orange); }
+.memory-cat-habits { background: var(--color-green-bg); color: var(--color-green); }
+.memory-cat-work { background: var(--color-yellow-bg); color: var(--color-yellow); }
+.memory-cat-health { background: var(--color-red-bg); color: var(--color-red); }
+.memory-cat-other { background: var(--bg-hover); color: var(--text-muted); }
+
+.memory-item-key {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 80px;
+  flex-shrink: 0;
+}
 
 .memory-item-value {
   font-size: 12px;
@@ -2199,49 +2222,48 @@ body.dragover::after {
 
 .memory-item-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   opacity: 0;
-  transition: opacity var(--transition-normal);
+  transition: opacity var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .memory-item:hover .memory-item-actions { opacity: 1; }
 
 .memory-item-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   border: none;
   background: transparent;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
-}
-
-.memory-item-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
-
-.memory-header {
   display: flex;
-  gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
+  justify-content: center;
+  transition: all var(--transition-fast);
 }
+
+.memory-item-btn:hover { color: var(--text-secondary); background: var(--bg-card); }
 
 .memory-add-form,
 .memory-edit-form {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 8px 0;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
   width: 100%;
 }
 
-.memory-add-form { margin-bottom: 8px; }
-
 .memory-add-form select,
-.memory-edit-form select { width: 110px; flex-shrink: 0; }
+.memory-edit-form select { width: 120px; flex-shrink: 0; }
 
 .memory-add-form .memory-add-key,
-.memory-edit-form .memory-edit-key { width: 140px; flex-shrink: 0; }
+.memory-edit-form .memory-edit-key { width: 150px; flex-shrink: 0; }
 
 .memory-edit-save,
 .memory-edit-cancel { flex-shrink: 0; padding: 4px 10px; font-size: 12px; }
