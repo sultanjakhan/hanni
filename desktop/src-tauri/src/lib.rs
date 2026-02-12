@@ -1765,9 +1765,14 @@ fn start_mlx_server() -> Option<Child> {
 
 // ── Calendar access guard ──
 // Prevents repeated Calendar.app permission prompts by caching denial.
+// Also respects the apple_calendar_enabled user setting from the DB.
 static CALENDAR_ACCESS_DENIED: AtomicBool = AtomicBool::new(false);
+static APPLE_CALENDAR_DISABLED: AtomicBool = AtomicBool::new(false);
 
 fn check_calendar_access() -> bool {
+    if APPLE_CALENDAR_DISABLED.load(Ordering::Relaxed) {
+        return false;
+    }
     if CALENDAR_ACCESS_DENIED.load(Ordering::Relaxed) {
         return false;
     }
@@ -4823,6 +4828,10 @@ fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>) ->
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",
         rusqlite::params![key, value],
     ).map_err(|e| format!("DB error: {}", e))?;
+    // Sync calendar toggle to static flag
+    if key == "apple_calendar_enabled" {
+        APPLE_CALENDAR_DISABLED.store(value == "false", Ordering::Relaxed);
+    }
     Ok(())
 }
 
@@ -5938,6 +5947,13 @@ pub fn run() {
     init_db(&conn).expect("Cannot initialize database");
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
+    // Load calendar toggle from DB into static flag
+    if let Ok(val) = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
+        [], |row| row.get::<_, String>(0),
+    ) {
+        APPLE_CALENDAR_DISABLED.store(val == "false", Ordering::Relaxed);
+    }
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
     // Start MLX server if not already running

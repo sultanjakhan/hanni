@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.9.4';
 
 let busy = false;
 let history = [];
@@ -2235,7 +2235,7 @@ async function loadAllFacts(el) {
       <div class="module-header"><h2>Memory</h2></div>
       <div class="memory-browser" id="memory-all-list">
         ${memories.map(m => `<div class="memory-item">
-          <span class="memory-item-category">${escapeHtml(m.category)}</span>
+          <span class="memory-item-category memory-cat-${m.category || 'other'}">${escapeHtml(m.category)}</span>
           <span class="memory-item-key">${escapeHtml(m.key)}</span>
           <span class="memory-item-value">${escapeHtml(m.value)}</span>
           <div class="memory-item-actions"><button class="memory-item-btn" data-mid="${m.id}">&times;</button></div>
@@ -2257,7 +2257,7 @@ function renderMemoryList(memories, el) {
   const countEl = document.getElementById('settings-mem-count');
   if (countEl) countEl.textContent = `${memories.length} фактов`;
   list.innerHTML = memories.map(m => `<div class="memory-item" data-mem-id="${m.id}">
-    <span class="memory-item-category">${escapeHtml(m.category)}</span>
+    <span class="memory-item-category memory-cat-${m.category || 'other'}">${escapeHtml(m.category)}</span>
     <span class="memory-item-key">${escapeHtml(m.key)}</span>
     <span class="memory-item-value">${escapeHtml(m.value)}</span>
     <div class="memory-item-actions">
@@ -2372,7 +2372,7 @@ async function loadMemorySearch(el) {
         const results = await invoke('get_all_memories', { search: q });
         const list = document.getElementById('mem-search-results');
         if (list) list.innerHTML = results.map(m => `<div class="memory-item">
-          <span class="memory-item-category">${escapeHtml(m.category)}</span>
+          <span class="memory-item-category memory-cat-${m.category || 'other'}">${escapeHtml(m.category)}</span>
           <span class="memory-item-key">${escapeHtml(m.key)}</span>
           <span class="memory-item-value">${escapeHtml(m.value)}</span>
         </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">No results</div>';
