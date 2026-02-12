@@ -7,7 +7,7 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.9.4';
+const APP_VERSION = '0.9.5';
 
 let busy = false;
 let history = [];
@@ -2277,28 +2277,39 @@ function renderMemoryList(memories, el) {
       const id = parseInt(btn.dataset.edit);
       const m = memories.find(x => x.id === id);
       if (!m) return;
-      const row = btn.closest('.memory-item');
-      if (!row || row.querySelector('.memory-edit-form')) return;
-      row.innerHTML = `<form class="memory-edit-form">
-        <select class="form-input memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
-        <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
-        <input class="form-input memory-edit-val" value="${escapeHtml(m.value)}" placeholder="Значение" style="flex:1">
-        <button type="submit" class="btn-primary memory-edit-save">Сохранить</button>
-        <button type="button" class="btn-secondary memory-edit-cancel">Отмена</button>
-      </form>`;
-      row.querySelector('.memory-edit-cancel').addEventListener('click', () => renderMemoryList(memories, el));
-      row.querySelector('.memory-edit-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const cat = row.querySelector('.memory-edit-cat').value;
-        const key = row.querySelector('.memory-edit-key').value.trim();
-        const val = row.querySelector('.memory-edit-val').value.trim();
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal modal-compact">
+        <div class="modal-title">Редактировать факт</div>
+        <div class="form-group"><label class="form-label">Категория</label>
+          <select class="form-input memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label class="form-label">Ключ</label>
+          <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
+        </div>
+        <div class="form-group"><label class="form-label">Значение</label>
+          <input class="form-input memory-edit-val" value="${escapeHtml(m.value)}" placeholder="Значение">
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="mem-edit-cancel">Отмена</button>
+          <button class="btn-primary" id="mem-edit-save">Сохранить</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#mem-edit-cancel').onclick = () => overlay.remove();
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('#mem-edit-save').onclick = async () => {
+        const cat = overlay.querySelector('.memory-edit-cat').value;
+        const key = overlay.querySelector('.memory-edit-key').value.trim();
+        const val = overlay.querySelector('.memory-edit-val').value.trim();
         if (!key || !val) return;
         try {
           await invoke('delete_memory', { id });
           await invoke('memory_remember', { category: cat, key, value: val });
         } catch (err) { console.error('Failed to update memory:', err); }
+        overlay.remove();
         loadMemoryInSettings(el);
-      });
+      };
     });
   });
 }
@@ -2315,33 +2326,43 @@ async function loadMemoryInSettings(el) {
         <button class="btn-primary" id="mem-add-btn">+ Добавить</button>
       </div>
       <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;" id="settings-mem-count">${memories.length} фактов</div>
-      <div id="mem-add-form-container"></div>
       <div class="memory-browser" id="settings-mem-list"></div>`;
 
     renderMemoryList(memories, el);
 
     document.getElementById('mem-add-btn')?.addEventListener('click', () => {
-      const container = document.getElementById('mem-add-form-container');
-      if (!container || container.querySelector('.memory-add-form')) return;
-      container.innerHTML = `<form class="memory-add-form">
-        <select class="form-input memory-add-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
-        <input class="form-input memory-add-key" placeholder="Ключ (напр. имя, привычка)" autocomplete="off">
-        <input class="form-input memory-add-val" placeholder="Значение" autocomplete="off" style="flex:1">
-        <button type="submit" class="btn-primary">Добавить</button>
-        <button type="button" class="btn-secondary memory-add-cancel">Отмена</button>
-      </form>`;
-      container.querySelector('.memory-add-cancel').addEventListener('click', () => { container.innerHTML = ''; });
-      container.querySelector('.memory-add-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const cat = container.querySelector('.memory-add-cat').value;
-        const key = container.querySelector('.memory-add-key').value.trim();
-        const val = container.querySelector('.memory-add-val').value.trim();
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal modal-compact">
+        <div class="modal-title">Новый факт</div>
+        <div class="form-group"><label class="form-label">Категория</label>
+          <select class="form-input memory-add-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label class="form-label">Ключ</label>
+          <input class="form-input memory-add-key" placeholder="напр. имя, привычка" autocomplete="off">
+        </div>
+        <div class="form-group"><label class="form-label">Значение</label>
+          <input class="form-input memory-add-val" placeholder="Значение факта" autocomplete="off">
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="mem-add-cancel">Отмена</button>
+          <button class="btn-primary" id="mem-add-save">Добавить</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#mem-add-cancel').onclick = () => overlay.remove();
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('#mem-add-save').onclick = async () => {
+        const cat = overlay.querySelector('.memory-add-cat').value;
+        const key = overlay.querySelector('.memory-add-key').value.trim();
+        const val = overlay.querySelector('.memory-add-val').value.trim();
         if (!key || !val) return;
         try {
           await invoke('memory_remember', { category: cat, key, value: val });
         } catch (err) { console.error('Failed to add memory:', err); }
+        overlay.remove();
         loadMemoryInSettings(el);
-      });
+      };
     });
 
     let searchTimeout;
