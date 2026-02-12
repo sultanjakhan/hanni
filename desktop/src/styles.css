@@ -119,9 +119,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 14px;
-  min-width: 100px;
-  max-width: 200px;
+  padding: 0 16px;
+  min-width: 120px;
+  max-width: 240px;
   height: 100%;
   border-right: 1px solid var(--bg-hover);
   cursor: pointer;
