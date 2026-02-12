@@ -1213,6 +1213,46 @@ fn call_mode_check_bargein(
     Ok(cs.barge_in)
 }
 
+#[tauri::command]
+fn save_voice_note(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+    title: String,
+) -> Result<String, String> {
+    let samples = {
+        let cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+        if cs.last_recording.is_empty() {
+            return Err("No recording available".into());
+        }
+        cs.last_recording.clone()
+    };
+
+    let app_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Hanni")
+        .join("voice_notes");
+    std::fs::create_dir_all(&app_dir).map_err(|e| format!("Dir error: {}", e))?;
+
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let filename = format!("{}_{}.wav", ts, title.chars().take(30).collect::<String>());
+    let filepath = app_dir.join(&filename);
+
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 16000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(&filepath, spec)
+        .map_err(|e| format!("WAV write error: {}", e))?;
+    for &s in &samples {
+        let val = (s * 32767.0).clamp(-32768.0, 32767.0) as i16;
+        writer.write_sample(val).map_err(|e| format!("Sample write error: {}", e))?;
+    }
+    writer.finalize().map_err(|e| format!("Finalize error: {}", e))?;
+
+    Ok(filepath.to_string_lossy().to_string())
+}
+
 fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
     std::thread::spawn(move || {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -1353,6 +1393,10 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                     Ok(text) => {
                                         let trimmed = text.trim().to_string();
                                         if !trimmed.is_empty() {
+                                            // Save last recording for voice notes
+                                            if let Ok(mut cs2) = call_state.0.lock() {
+                                                cs2.last_recording = samples.clone();
+                                            }
                                             let _ = app.emit("call-transcript", trimmed);
                                         } else {
                                             // Empty transcript — go back to listening
@@ -1419,6 +1463,7 @@ struct CallModeState {
     speech_frames: u32,
     silence_frames: u32,
     barge_in: bool,
+    last_recording: Vec<f32>, // last recorded audio for voice notes
 }
 
 struct CallMode(std::sync::Mutex<CallModeState>);
@@ -5736,7 +5781,7 @@ Your job: write a short, natural message. Like texting a friend you live with.
 
 VARIETY IS KEY — pick a DIFFERENT style each time:
 - Observation: comment on their screen/music/browsing
-- Calendar: mention upcoming events
+- Calendar: mention upcoming events, warn about events starting soon
 - Nudge: gentle productivity/health reminder
 - Curiosity: ask about their day/project/mood
 - Humor: light joke or playful tease about their habits
@@ -5745,11 +5790,17 @@ VARIETY IS KEY — pick a DIFFERENT style each time:
 - Food: warn about expiring products if any
 - Goals: celebrate progress or remind about deadlines
 - Journal: remind them to write evening reflection
+- Digest: MORNING ONLY (8-10am) — give a brief summary: today's events, deadlines, yesterday mood/sleep if known
+- Accountability: if they've been in the same app (YouTube, Reddit, Twitter, TikTok, etc.) for 30+ min, gently point it out
+- Schedule: if there's an upcoming event within 30 min, remind them to prepare
 
 RULES:
 - 1-2 sentences max, Russian by default
 - NEVER repeat your last message style or content
 - Be genuine — a companion, not a notification bot
+- If it's morning (8-10am) and first message, prefer Digest style
+- If a distracting app is open 30+ min, prefer Accountability style
+- If an event is within 30 min, prefer Schedule style
 - Only reply [SKIP] if nothing meaningful to say
 
 Reply with your message text, or [SKIP]."#;
@@ -5837,7 +5888,136 @@ fn gather_context_blocking() -> String {
         }
     }
 
+    // Active (frontmost) app and how long it's been in focus
+    if let Ok(front_app) = run_osascript(
+        "tell application \"System Events\" to return name of first application process whose frontmost is true"
+    ) {
+        ctx.push_str(&format!("\n--- Active App ---\nFrontmost: {}\n", front_app.trim()));
+        // Check how long this app has been the top app today from Screen Time
+        if let Ok(minutes) = get_app_focus_minutes(&front_app.trim()) {
+            ctx.push_str(&format!("Focus time today: {:.0} min\n", minutes));
+            let distracting = ["YouTube", "Reddit", "Twitter", "TikTok", "Instagram", "Telegram", "Discord", "VK"];
+            let is_distracting = distracting.iter().any(|d| front_app.contains(d));
+            if is_distracting && minutes > 30.0 {
+                ctx.push_str("⚠ Distraction alert: user has been on this app 30+ min!\n");
+            }
+        }
+    }
+
+    // Upcoming events within next 60 min (for schedule reminders)
+    if let Ok(upcoming) = get_upcoming_events_soon() {
+        if !upcoming.is_empty() {
+            ctx.push_str(&format!("\n--- Coming Up Soon ---\n{}\n", upcoming));
+        }
+    }
+
+    // Morning digest context: yesterday's mood, sleep, today's event count
+    let hour = now.hour();
+    if hour >= 8 && hour <= 10 {
+        if let Ok(digest) = gather_morning_digest() {
+            ctx.push_str(&format!("\n--- Morning Digest Data ---\n{}\n", digest));
+        }
+    }
+
     ctx
+}
+
+fn get_app_focus_minutes(app_name: &str) -> Result<f64, String> {
+    let db_path = dirs::home_dir()
+        .unwrap_or_default()
+        .join("Library/Application Support/Knowledge/knowledgeC.db");
+    if !db_path.exists() { return Err("No Screen Time DB".into()); }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ).map_err(|e| e.to_string())?;
+    let minutes: f64 = conn.query_row(
+        "SELECT COALESCE(ROUND(SUM(CAST((ZOBJECT.ZENDDATE - ZOBJECT.ZSTARTDATE) AS REAL)) / 60, 1), 0)
+         FROM ZOBJECT JOIN ZSOURCE ON ZOBJECT.ZSOURCE = ZSOURCE.Z_PK
+         WHERE DATE(datetime(ZOBJECT.ZSTARTDATE + 978307200, 'unixepoch', 'localtime')) = DATE('now')
+               AND ZOBJECT.ZSTREAMNAME = '/app/inFocus'
+               AND ZOBJECT.ZENDDATE > ZOBJECT.ZSTARTDATE
+               AND ZSOURCE.ZNAME LIKE ?1",
+        rusqlite::params![format!("%{}%", app_name)],
+        |row| row.get(0),
+    ).unwrap_or(0.0);
+    Ok(minutes)
+}
+
+fn get_upcoming_events_soon() -> Result<String, String> {
+    let db_path = hanni_db_path();
+    if !db_path.exists() { return Ok(String::new()); }
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let now = chrono::Local::now();
+    let today = now.format("%Y-%m-%d").to_string();
+    let current_time = now.format("%H:%M").to_string();
+    let soon_time = (now + chrono::Duration::minutes(60)).format("%H:%M").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT title, time, duration FROM events WHERE date = ?1 AND time >= ?2 AND time <= ?3 ORDER BY time"
+    ).map_err(|e| e.to_string())?;
+    let events: Vec<String> = stmt.query_map(
+        rusqlite::params![today, current_time, soon_time],
+        |row| {
+            let title: String = row.get(0)?;
+            let time: String = row.get(1)?;
+            let dur: i64 = row.get(2)?;
+            Ok(format!("{} — {} ({}мин)", time, title, dur))
+        },
+    ).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+    Ok(events.join("\n"))
+}
+
+fn gather_morning_digest() -> Result<String, String> {
+    let db_path = hanni_db_path();
+    if !db_path.exists() { return Ok(String::new()); }
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let mut digest = String::new();
+
+    // Today's events count
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let event_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM events WHERE date = ?1",
+        rusqlite::params![today],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    digest.push_str(&format!("Today's events: {}\n", event_count));
+
+    // Yesterday's mood
+    let yesterday = (chrono::Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+    if let Ok((mood, note)) = conn.query_row(
+        "SELECT mood, note FROM mood_log WHERE date(created_at) = ?1 ORDER BY created_at DESC LIMIT 1",
+        rusqlite::params![yesterday],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+    ) {
+        digest.push_str(&format!("Yesterday's mood: {}/5", mood));
+        if let Some(n) = note { digest.push_str(&format!(" ({})", n)); }
+        digest.push('\n');
+    }
+
+    // Yesterday's sleep
+    if let Ok(sleep) = conn.query_row(
+        "SELECT sleep_hours FROM health_log WHERE date(logged_at) = ?1 ORDER BY logged_at DESC LIMIT 1",
+        rusqlite::params![yesterday],
+        |row| row.get::<_, Option<f64>>(0),
+    ) {
+        if let Some(h) = sleep {
+            digest.push_str(&format!("Yesterday's sleep: {:.1}h\n", h));
+        }
+    }
+
+    // Active goals count
+    let goals_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM goals WHERE progress < target",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    if goals_count > 0 {
+        digest.push_str(&format!("Active goals: {}\n", goals_count));
+    }
+
+    Ok(digest)
 }
 
 fn gather_screen_time() -> Result<String, String> {
@@ -6407,6 +6587,7 @@ pub fn run() {
         speech_frames: 0,
         silence_frames: 0,
         barge_in: false,
+        last_recording: Vec::new(),
     })));
 
     tauri::Builder::default()
@@ -6631,6 +6812,7 @@ pub fn run() {
             call_mode_resume_listening,
             call_mode_check_bargein,
             speak_text_blocking,
+            save_voice_note,
         ])
         .setup(move |app| {
             // Auto-updater
