@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E1E2E"/>
+      <stop offset="100%" stop-color="#14142B"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- H letter — solid white-silver -->
+  <line x1="168" y1="140" x2="168" y2="372" stroke="#CBD5E1" stroke-width="38" stroke-linecap="round"/>
+  <line x1="344" y1="140" x2="344" y2="372" stroke="#CBD5E1" stroke-width="38" stroke-linecap="round"/>
+  <line x1="168" y1="256" x2="344" y2="256" stroke="#CBD5E1" stroke-width="38" stroke-linecap="round"/>
+  <!-- AI accent dot -->
+  <circle cx="344" cy="140" r="16" fill="#60A5FA"/>
+  <circle cx="344" cy="140" r="7" fill="#DBEAFE"/>
+</svg>
