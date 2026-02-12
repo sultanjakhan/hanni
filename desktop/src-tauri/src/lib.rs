@@ -1049,7 +1049,19 @@ fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String
     let samples = ws.audio_buffer.clone();
     ws.audio_buffer.clear();
 
-    // Run whisper transcription
+    transcribe_samples(&samples)
+}
+
+#[tauri::command]
+fn check_whisper_model() -> Result<bool, String> {
+    Ok(whisper_model_path().exists())
+}
+
+fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
+    let model_path = whisper_model_path();
+    if !model_path.exists() {
+        return Err("Whisper model not downloaded".into());
+    }
     let ctx = whisper_rs::WhisperContext::new_with_params(
         model_path.to_str().unwrap_or(""),
         whisper_rs::WhisperContextParameters::default(),
@@ -1058,13 +1070,13 @@ fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String
     let mut state = ctx.create_state().map_err(|e| format!("Whisper state error: {}", e))?;
 
     let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(None); // Auto-detect
+    params.set_language(None);
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
 
-    state.full(params, &samples).map_err(|e| format!("Transcription error: {}", e))?;
+    state.full(params, samples).map_err(|e| format!("Transcription error: {}", e))?;
 
     let num_segments = state.full_n_segments().map_err(|e| format!("Segment error: {}", e))?;
     let mut text = String::new();
@@ -1073,13 +1085,7 @@ fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String
             text.push_str(&segment);
         }
     }
-
     Ok(text.trim().to_string())
-}
-
-#[tauri::command]
-fn check_whisper_model() -> Result<bool, String> {
-    Ok(whisper_model_path().exists())
 }
 
 // ── Audio capture via cpal ──
@@ -1135,6 +1141,251 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
     });
 }
 
+// ── Call Mode ──
+
+#[tauri::command]
+fn start_call_mode(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+    app: AppHandle,
+) -> Result<String, String> {
+    {
+        let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+        if cs.active {
+            return Ok("Already in call mode".into());
+        }
+        cs.active = true;
+        cs.phase = "listening".into();
+        cs.audio_buffer.clear();
+        cs.speech_frames = 0;
+        cs.silence_frames = 0;
+        cs.barge_in = false;
+    }
+    let _ = app.emit("call-phase-changed", "listening");
+    let call_state_arc = call_state.inner().clone();
+    start_call_audio_loop(call_state_arc, app);
+    Ok("Call mode started".into())
+}
+
+#[tauri::command]
+fn stop_call_mode(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    cs.active = false;
+    cs.phase = "idle".into();
+    cs.audio_buffer.clear();
+    cs.speech_frames = 0;
+    cs.silence_frames = 0;
+    cs.barge_in = false;
+    let _ = app.emit("call-phase-changed", "idle");
+    // Kill any playing TTS
+    let _ = std::process::Command::new("killall").arg("afplay").output();
+    Ok("Call mode stopped".into())
+}
+
+#[tauri::command]
+fn call_mode_resume_listening(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    if !cs.active { return Ok(()); }
+    cs.phase = "listening".into();
+    cs.audio_buffer.clear();
+    cs.speech_frames = 0;
+    cs.silence_frames = 0;
+    cs.barge_in = false;
+    let _ = app.emit("call-phase-changed", "listening");
+    Ok(())
+}
+
+#[tauri::command]
+fn call_mode_check_bargein(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+) -> Result<bool, String> {
+    let cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    Ok(cs.barge_in)
+}
+
+fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
+    std::thread::spawn(move || {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+        let host = cpal::default_host();
+        let device = match host.default_input_device() {
+            Some(d) => d,
+            None => {
+                eprintln!("Call mode: no input device");
+                return;
+            }
+        };
+
+        let config = cpal::StreamConfig {
+            channels: 1,
+            sample_rate: cpal::SampleRate(16000),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        // Shared ring buffer for raw audio chunks
+        let chunk_buf: Arc<std::sync::Mutex<Vec<f32>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let chunk_buf_writer = chunk_buf.clone();
+
+        let stream = device.build_input_stream(
+            &config,
+            move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                if let Ok(mut buf) = chunk_buf_writer.lock() {
+                    buf.extend_from_slice(data);
+                }
+            },
+            |err| eprintln!("Call audio error: {}", err),
+            None,
+        );
+
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Call mode stream error: {}", e);
+                return;
+            }
+        };
+        let _ = stream.play();
+
+        // Initialize VAD
+        let mut vad = match voice_activity_detector::VoiceActivityDetector::builder()
+            .sample_rate(16000)
+            .chunk_size(512usize)
+            .build() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("VAD init error: {}", e);
+                return;
+            }
+        };
+
+        // Process loop
+        let mut process_buf: Vec<f32> = Vec::new();
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(16));
+
+            // Check if call mode still active
+            let (active, phase) = {
+                let cs = match call_state.0.lock() {
+                    Ok(cs) => cs,
+                    Err(_) => break,
+                };
+                (cs.active, cs.phase.clone())
+            };
+            if !active { break; }
+
+            // Drain audio from ring buffer
+            {
+                let mut buf = match chunk_buf.lock() {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                if !buf.is_empty() {
+                    process_buf.extend(buf.drain(..));
+                }
+            }
+
+            // Process in 512-sample chunks
+            while process_buf.len() >= 512 {
+                let chunk: Vec<f32> = process_buf.drain(..512).collect();
+
+                let prob = vad.predict(chunk.clone());
+
+                match phase.as_str() {
+                    "listening" => {
+                        let mut cs = match call_state.0.lock() {
+                            Ok(cs) => cs,
+                            Err(_) => continue,
+                        };
+                        if prob > 0.5 {
+                            cs.speech_frames += 1;
+                            // Buffer audio from the start of speech detection
+                            cs.audio_buffer.extend_from_slice(&chunk);
+                            if cs.speech_frames >= 6 {
+                                // Confirmed speech — transition to recording
+                                cs.phase = "recording".into();
+                                cs.silence_frames = 0;
+                                let _ = app.emit("call-phase-changed", "recording");
+                            }
+                        } else {
+                            cs.speech_frames = 0;
+                            cs.audio_buffer.clear();
+                        }
+                    }
+                    "recording" => {
+                        let mut cs = match call_state.0.lock() {
+                            Ok(cs) => cs,
+                            Err(_) => continue,
+                        };
+                        cs.audio_buffer.extend_from_slice(&chunk);
+
+                        if prob < 0.5 {
+                            cs.silence_frames += 1;
+                            if cs.silence_frames >= 25 {
+                                // ~800ms silence — done recording
+                                cs.phase = "processing".into();
+                                let samples = cs.audio_buffer.clone();
+                                cs.audio_buffer.clear();
+                                cs.speech_frames = 0;
+                                cs.silence_frames = 0;
+                                let _ = app.emit("call-phase-changed", "processing");
+                                drop(cs);
+
+                                // Transcribe
+                                match transcribe_samples(&samples) {
+                                    Ok(text) => {
+                                        let trimmed = text.trim().to_string();
+                                        if !trimmed.is_empty() {
+                                            let _ = app.emit("call-transcript", trimmed);
+                                        } else {
+                                            // Empty transcript — go back to listening
+                                            if let Ok(mut cs) = call_state.0.lock() {
+                                                cs.phase = "listening".into();
+                                                let _ = app.emit("call-phase-changed", "listening");
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        if let Ok(mut cs) = call_state.0.lock() {
+                                            cs.phase = "listening".into();
+                                            let _ = app.emit("call-phase-changed", "listening");
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            cs.silence_frames = 0;
+                        }
+                    }
+                    "speaking" => {
+                        // Check for barge-in with higher threshold
+                        let mut cs = match call_state.0.lock() {
+                            Ok(cs) => cs,
+                            Err(_) => continue,
+                        };
+                        if prob > 0.8 {
+                            cs.speech_frames += 1;
+                            if cs.speech_frames >= 6 {
+                                cs.barge_in = true;
+                            }
+                        } else {
+                            cs.speech_frames = 0;
+                        }
+                    }
+                    _ => {} // processing, idle — no-op
+                }
+            }
+        }
+
+        drop(stream);
+    });
+}
+
 // ── Focus Mode state ──
 
 struct FocusState {
@@ -1146,6 +1397,19 @@ struct FocusState {
 }
 
 struct FocusManager(std::sync::Mutex<FocusState>);
+
+// ── Call Mode state ──
+
+struct CallModeState {
+    active: bool,
+    phase: String,        // "idle", "listening", "recording", "processing", "speaking"
+    audio_buffer: Vec<f32>,
+    speech_frames: u32,
+    silence_frames: u32,
+    barge_in: bool,
+}
+
+struct CallMode(std::sync::Mutex<CallModeState>);
 
 #[derive(Serialize, Clone)]
 struct FocusStatus {
@@ -5742,8 +6006,64 @@ fn speak_remote_tts(text: &str, voice: &str, server_url: &str) {
     });
 }
 
+fn clean_text_for_tts(text: &str) -> String {
+    let mut s = text.replace('"', "'");
+    // Remove markdown formatting
+    s = s.replace("```", "").replace('`', "").replace("**", "").replace('*', "");
+    s = s.replace("###", "").replace("##", "").replace('#', "");
+    // Remove emojis and misc symbols (Unicode ranges)
+    s = s.chars().filter(|c| {
+        let cp = *c as u32;
+        // Keep basic Latin, Cyrillic, common punctuation, digits
+        // Filter out emoji/symbol ranges
+        !(
+            (0x1F600..=0x1F64F).contains(&cp) || // Emoticons
+            (0x1F300..=0x1F5FF).contains(&cp) || // Misc Symbols & Pictographs
+            (0x1F680..=0x1F6FF).contains(&cp) || // Transport & Map
+            (0x1F700..=0x1F77F).contains(&cp) || // Alchemical
+            (0x1F780..=0x1F7FF).contains(&cp) || // Geometric Shapes Extended
+            (0x1F800..=0x1F8FF).contains(&cp) || // Supplemental Arrows-C
+            (0x1F900..=0x1F9FF).contains(&cp) || // Supplemental Symbols & Pictographs
+            (0x1FA00..=0x1FA6F).contains(&cp) || // Chess Symbols
+            (0x1FA70..=0x1FAFF).contains(&cp) || // Symbols & Pictographs Extended-A
+            (0x2600..=0x26FF).contains(&cp) ||   // Misc symbols (☀☁☂ etc)
+            (0x2700..=0x27BF).contains(&cp) ||   // Dingbats (✂✈✉ etc)
+            (0x231A..=0x231B).contains(&cp) ||   // Watch, Hourglass
+            (0x23E9..=0x23F3).contains(&cp) ||   // Media control
+            (0x23F8..=0x23FA).contains(&cp) ||   // Media control
+            (0x25AA..=0x25AB).contains(&cp) ||   // Squares
+            (0x25B6..=0x25C0).contains(&cp) ||   // Triangles
+            (0x25FB..=0x25FE).contains(&cp) ||   // Squares
+            (0x2934..=0x2935).contains(&cp) ||   // Arrows
+            (0x2B05..=0x2B07).contains(&cp) ||   // Arrows
+            (0x2B1B..=0x2B1C).contains(&cp) ||   // Squares
+            (0x3030..=0x3030).contains(&cp) ||   // Wavy dash
+            (0x303D..=0x303D).contains(&cp) ||   // Part alternation mark
+            (0xFE0F..=0xFE0F).contains(&cp) ||   // Variation selector
+            (0x200D..=0x200D).contains(&cp) ||   // Zero-width joiner
+            (0x20E3..=0x20E3).contains(&cp) ||   // Combining enclosing keycap
+            (0xE0020..=0xE007F).contains(&cp)    // Tags
+        )
+    }).collect::<String>();
+    // Collapse multiple spaces/newlines
+    let mut result = String::with_capacity(s.len());
+    let mut prev_space = false;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            if !prev_space {
+                result.push(' ');
+                prev_space = true;
+            }
+        } else {
+            result.push(c);
+            prev_space = false;
+        }
+    }
+    result.trim().to_string()
+}
+
 fn speak_tts(text: &str, voice: &str) {
-    let clean = text.replace('"', "'");
+    let clean = clean_text_for_tts(text);
     // Check for remote TTS server setting
     let data_dir = hanni_data_dir();
     let db_path = data_dir.join("hanni.db");
@@ -5768,10 +6088,99 @@ fn speak_tts(text: &str, voice: &str) {
     }
 }
 
+/// Synchronous TTS — blocks until audio finishes playing
+fn speak_tts_sync(text: &str, voice: &str) {
+    let clean = clean_text_for_tts(text);
+    if clean.is_empty() { return; }
+    let data_dir = hanni_data_dir();
+    let db_path = data_dir.join("hanni.db");
+    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+        if let Ok(url) = conn.query_row(
+            "SELECT value FROM app_settings WHERE key='tts_server_url'",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            if !url.is_empty() {
+                speak_remote_tts_sync(&clean, voice, &url);
+                return;
+            }
+        }
+    }
+    if voice.contains("Neural") {
+        speak_edge_tts_sync(&clean, voice);
+    } else {
+        let _ = std::process::Command::new("say")
+            .args(["-v", voice, "-r", "210", &clean])
+            .status(); // .status() blocks
+    }
+}
+
+fn speak_edge_tts_sync(text: &str, voice: &str) {
+    let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
+    let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
+    let mut success = false;
+    for cmd in &candidates {
+        let status = std::process::Command::new(cmd)
+            .args(["--voice", voice, "--rate", "+10%", "--text", text, "--write-media", &tmp])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if let Ok(s) = status {
+            if s.success() { success = true; break; }
+        }
+    }
+    if !success {
+        if let Some(python) = find_python() {
+            let status = std::process::Command::new(&python)
+                .args(["-m", "edge_tts", "--voice", voice, "--rate", "+10%", "--text", text, "--write-media", &tmp])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if let Ok(s) = status { success = s.success(); }
+        }
+    }
+    if success {
+        let _ = std::process::Command::new("afplay").arg(&tmp).status();
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+fn speak_remote_tts_sync(text: &str, voice: &str, server_url: &str) {
+    let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
+    let url = format!("{}/tts", server_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build();
+    if let Ok(client) = client {
+        let resp = client.post(&url)
+            .json(&serde_json::json!({"text": text, "voice": voice}))
+            .send();
+        if let Ok(resp) = resp {
+            if resp.status().is_success() {
+                if let Ok(bytes) = resp.bytes() {
+                    if std::fs::write(&tmp, &bytes).is_ok() {
+                        let _ = std::process::Command::new("afplay").arg(&tmp).status();
+                        let _ = std::fs::remove_file(&tmp);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), String> {
+    let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
+    tokio::task::spawn_blocking(move || {
+        speak_tts_sync(&text, &v);
+    }).await.map_err(|e| format!("TTS join error: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn speak_text(text: String, voice: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
-    let clean = text.replace('"', "'");
+    let clean = clean_text_for_tts(&text);
     // Check for remote TTS server
     let remote_url = {
         let conn = db.0.lock().map_err(|e| format!("DB lock: {}", e))?;
@@ -5978,6 +6387,16 @@ pub fn run() {
         monitor_running: focus_monitor_flag.clone(),
     }));
 
+    // Call mode state
+    let call_mode = Arc::new(CallMode(std::sync::Mutex::new(CallModeState {
+        active: false,
+        phase: "idle".into(),
+        audio_buffer: Vec::new(),
+        speech_frames: 0,
+        silence_frames: 0,
+        barge_in: false,
+    })));
+
     tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
         .manage(LlmBusy(AtomicBool::new(false)))
@@ -5985,6 +6404,7 @@ pub fn run() {
         .manage(hanni_db)
         .manage(audio_state)
         .manage(focus_manager)
+        .manage(call_mode)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -6193,6 +6613,12 @@ pub fn run() {
             get_view_configs,
             create_view_config,
             update_view_config,
+            // v0.10.0: Call Mode
+            start_call_mode,
+            stop_call_mode,
+            call_mode_resume_listening,
+            call_mode_check_bargein,
+            speak_text_blocking,
         ])
         .setup(move |app| {
             // Auto-updater
