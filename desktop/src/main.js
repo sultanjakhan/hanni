@@ -935,6 +935,13 @@ async function executeAction(actionJson) {
           title: action.title || '',
           content: action.content || ''
         });
+        // If in call mode, also save audio recording
+        if (callModeActive && action.save_audio) {
+          try {
+            const wavPath = await invoke('save_voice_note', { title: action.title || 'note' });
+            result = (result || '') + ' (audio: ' + wavPath + ')';
+          } catch (_) {}
+        }
         break;
       case 'get_stats':
         result = await invoke('tracker_get_stats');
