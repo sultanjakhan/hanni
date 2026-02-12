@@ -5893,17 +5893,8 @@ async fn set_user_typing(
 // ── Updater ──
 
 fn updater_with_headers(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
-    let mut builder = app.updater_builder();
-    // Auth header only needed for private repos; public repos work without it
-    if let Some(pat) = option_env!("UPDATER_GITHUB_TOKEN") {
-        if !pat.is_empty() && pat != "dummy" {
-            builder = builder.header("Authorization", &format!("token {}", pat))
-                .map_err(|e| format!("Header error: {}", e))?;
-        }
-    }
-    builder
-        .header("Accept", "application/octet-stream")
-        .map_err(|e| format!("Header error: {}", e))?
+    // Public repo — no auth headers needed. Direct download URLs work without them.
+    app.updater_builder()
         .build()
         .map_err(|e| format!("Updater error: {}", e))
 }
