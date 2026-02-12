@@ -124,7 +124,7 @@ CRITICAL RULES:
 - Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly)."#;
 
 fn data_file_path() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join("Documents/life-tracker/data.json")
+    hanni_data_dir().join("life-tracker-data.json")
 }
 
 // ── Life Tracker data types ──
@@ -202,11 +202,16 @@ fn hanni_db_path() -> PathBuf {
 
 /// Migrate data from old ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
 fn migrate_old_data_dir() {
-    let old_dir = dirs::home_dir().unwrap_or_default().join("Documents/Hanni");
     let new_dir = hanni_data_dir();
-    if !old_dir.exists() { return; }
     let marker = new_dir.join(".migrated");
-    if marker.exists() { return; } // already migrated
+    if marker.exists() { return; } // already migrated — skip without touching ~/Documents
+    let old_dir = dirs::home_dir().unwrap_or_default().join("Documents/Hanni");
+    if !old_dir.exists() {
+        // No old data, create marker so we never check ~/Documents again
+        let _ = std::fs::create_dir_all(&new_dir);
+        let _ = std::fs::write(&marker, "migrated");
+        return;
+    }
     let _ = std::fs::create_dir_all(&new_dir);
     let old_db = old_dir.join("hanni.db");
     let new_db = new_dir.join("hanni.db");
@@ -5554,7 +5559,7 @@ async fn get_integrations() -> Result<IntegrationsInfo, String> {
             name: "Life Tracker".into(),
             status: if tracker_exists { "active" } else { "inactive" }.into(),
             detail: if tracker_exists {
-                "~/Documents/life-tracker/data.json".into()
+                "~/Library/Application Support/Hanni/life-tracker-data.json".into()
             } else {
                 "Файл не найден".into()
             },
