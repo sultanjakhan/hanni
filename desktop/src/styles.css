@@ -1167,7 +1167,7 @@ body.dragover::after {
   color: var(--text-secondary);
 }
 .page-header-emoji svg { width: 36px; height: 36px; }
-}
+
 .page-header-title {
   font-size: 32px;
   font-weight: 700;
@@ -2202,6 +2202,7 @@ body.dragover::after {
 .memory-cat-work { background: var(--color-yellow-bg); color: var(--color-yellow); }
 .memory-cat-health { background: var(--color-red-bg); color: var(--color-red); }
 .memory-cat-other { background: var(--bg-hover); color: var(--text-muted); }
+.memory-cat-observation { background: var(--color-green-bg); color: var(--color-green); }
 
 .memory-item-key {
   font-size: 12px;
