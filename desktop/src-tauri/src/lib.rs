@@ -1137,22 +1137,85 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
         let host = cpal::default_host();
         let device = match host.default_input_device() {
             Some(d) => d,
-            None => return,
+            None => {
+                eprintln!("Voice: no input device found");
+                if let Ok(mut ws) = recording_state.0.lock() {
+                    ws.capture_running = false;
+                    ws.recording = false;
+                }
+                return;
+            }
         };
 
-        let config = cpal::StreamConfig {
-            channels: 1,
-            sample_rate: cpal::SampleRate(16000),
-            buffer_size: cpal::BufferSize::Default,
+        // Try 16kHz mono first (Whisper native), fallback to device default
+        let (config, resample_ratio) = {
+            let target = cpal::StreamConfig {
+                channels: 1,
+                sample_rate: cpal::SampleRate(16000),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            match device.build_input_stream(
+                &target,
+                |_: &[f32], _: &cpal::InputCallbackInfo| {},
+                |_| {},
+                None,
+            ) {
+                Ok(_) => (target, 1.0_f64),
+                Err(_) => {
+                    // Fallback to device default config
+                    match device.default_input_config() {
+                        Ok(supported) => {
+                            let rate = supported.sample_rate().0;
+                            let ch = supported.channels();
+                            eprintln!("Voice: using device config {}Hz {}ch (will resample to 16kHz)", rate, ch);
+                            let cfg = cpal::StreamConfig {
+                                channels: ch,
+                                sample_rate: cpal::SampleRate(rate),
+                                buffer_size: cpal::BufferSize::Default,
+                            };
+                            (cfg, rate as f64 / 16000.0)
+                        }
+                        Err(e) => {
+                            eprintln!("Voice: no supported config: {}", e);
+                            if let Ok(mut ws) = recording_state.0.lock() {
+                                ws.capture_running = false;
+                                ws.recording = false;
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
         };
 
+        let channels = config.channels as usize;
+        let ratio = resample_ratio;
         let state_clone = recording_state.clone();
+
         let stream = device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 if let Ok(mut ws) = state_clone.0.lock() {
                     if ws.recording {
-                        ws.audio_buffer.extend_from_slice(data);
+                        if channels == 1 && ratio == 1.0 {
+                            ws.audio_buffer.extend_from_slice(data);
+                        } else {
+                            // Downmix to mono + resample to 16kHz
+                            let mono: Vec<f32> = if channels > 1 {
+                                data.chunks(channels).map(|ch| ch.iter().sum::<f32>() / channels as f32).collect()
+                            } else {
+                                data.to_vec()
+                            };
+                            if ratio > 1.0 {
+                                let mut pos = 0.0_f64;
+                                while (pos as usize) < mono.len() {
+                                    ws.audio_buffer.push(mono[pos as usize]);
+                                    pos += ratio;
+                                }
+                            } else {
+                                ws.audio_buffer.extend_from_slice(&mono);
+                            }
+                        }
                     }
                 }
             },
@@ -1162,20 +1225,34 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
             None,
         );
 
-        if let Ok(stream) = stream {
-            let _ = stream.play();
-            // Keep stream alive while recording, exit when done
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if let Ok(ws) = recording_state.0.lock() {
-                    if !ws.recording {
-                        break;
+        match stream {
+            Ok(stream) => {
+                if let Err(e) = stream.play() {
+                    eprintln!("Voice: stream play error: {}", e);
+                    if let Ok(mut ws) = recording_state.0.lock() {
+                        ws.capture_running = false;
+                        ws.recording = false;
+                    }
+                    return;
+                }
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if let Ok(ws) = recording_state.0.lock() {
+                        if !ws.recording {
+                            break;
+                        }
                     }
                 }
+                if let Ok(mut ws) = recording_state.0.lock() {
+                    ws.capture_running = false;
+                }
             }
-            // Mark capture as stopped so it can be restarted
-            if let Ok(mut ws) = recording_state.0.lock() {
-                ws.capture_running = false;
+            Err(e) => {
+                eprintln!("Voice: build stream error: {} — check microphone permissions", e);
+                if let Ok(mut ws) = recording_state.0.lock() {
+                    ws.capture_running = false;
+                    ws.recording = false;
+                }
             }
         }
     });
@@ -1309,25 +1386,77 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             Some(d) => d,
             None => {
                 eprintln!("Call mode: no input device");
+                let _ = app.emit("call-phase-changed", "idle");
                 return;
             }
         };
 
-        let config = cpal::StreamConfig {
-            channels: 1,
-            sample_rate: cpal::SampleRate(16000),
-            buffer_size: cpal::BufferSize::Default,
+        // Try 16kHz mono first, fallback to device default with resampling
+        let (config, resample_ratio, num_channels) = {
+            let target = cpal::StreamConfig {
+                channels: 1,
+                sample_rate: cpal::SampleRate(16000),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            match device.build_input_stream(
+                &target,
+                |_: &[f32], _: &cpal::InputCallbackInfo| {},
+                |_| {},
+                None,
+            ) {
+                Ok(_) => (target, 1.0_f64, 1usize),
+                Err(_) => {
+                    match device.default_input_config() {
+                        Ok(supported) => {
+                            let rate = supported.sample_rate().0;
+                            let ch = supported.channels();
+                            eprintln!("Call: using device config {}Hz {}ch (resampling to 16kHz)", rate, ch);
+                            let cfg = cpal::StreamConfig {
+                                channels: ch,
+                                sample_rate: cpal::SampleRate(rate),
+                                buffer_size: cpal::BufferSize::Default,
+                            };
+                            (cfg, rate as f64 / 16000.0, ch as usize)
+                        }
+                        Err(e) => {
+                            eprintln!("Call: no supported config: {}", e);
+                            let _ = app.emit("call-phase-changed", "idle");
+                            return;
+                        }
+                    }
+                }
+            }
         };
 
-        // Shared ring buffer for raw audio chunks
+        // Shared ring buffer for raw audio chunks (already 16kHz mono after resampling)
         let chunk_buf: Arc<std::sync::Mutex<Vec<f32>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
         let chunk_buf_writer = chunk_buf.clone();
+        let ratio = resample_ratio;
+        let channels = num_channels;
 
         let stream = device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 if let Ok(mut buf) = chunk_buf_writer.lock() {
-                    buf.extend_from_slice(data);
+                    if channels == 1 && ratio == 1.0 {
+                        buf.extend_from_slice(data);
+                    } else {
+                        // Downmix to mono + resample
+                        let mono: Vec<f32> = if channels > 1 {
+                            data.chunks(channels).map(|ch| ch.iter().sum::<f32>() / channels as f32).collect()
+                        } else {
+                            data.to_vec()
+                        };
+                        if ratio > 1.0 {
+                            let mut pos = 0.0_f64;
+                            while (pos as usize) < mono.len() {
+                                buf.push(mono[pos as usize]);
+                                pos += ratio;
+                            }
+                        } else {
+                            buf.extend_from_slice(&mono);
+                        }
+                    }
                 }
             },
             |err| eprintln!("Call audio error: {}", err),
@@ -1337,11 +1466,16 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
         let stream = match stream {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Call mode stream error: {}", e);
+                eprintln!("Call mode stream error: {} — check microphone permissions", e);
+                let _ = app.emit("call-phase-changed", "idle");
                 return;
             }
         };
-        let _ = stream.play();
+        if let Err(e) = stream.play() {
+            eprintln!("Call: stream play error: {}", e);
+            let _ = app.emit("call-phase-changed", "idle");
+            return;
+        }
 
         // Initialize VAD (try Silero, fallback to energy-based)
         let mut vad_opt: Option<voice_activity_detector::VoiceActivityDetector> = None;
@@ -1393,7 +1527,6 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                     // Energy-based voice detection fallback
                     let energy: f32 = chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32;
                     let rms = energy.sqrt();
-                    // Map RMS to 0-1 probability (threshold ~0.01 for speech)
                     (rms * 50.0).min(1.0)
                 };
 
@@ -1413,9 +1546,8 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                         };
                         if prob > 0.5 {
                             cs.speech_frames += 1;
-                            // Buffer audio from the start of speech detection
                             cs.audio_buffer.extend_from_slice(&chunk);
-                            if cs.speech_frames >= 6 {
+                            if cs.speech_frames >= 5 {
                                 // Confirmed speech — transition to recording
                                 cs.phase = "recording".into();
                                 cs.silence_frames = 0;
@@ -1435,8 +1567,8 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
 
                         if prob < 0.5 {
                             cs.silence_frames += 1;
-                            if cs.silence_frames >= 25 {
-                                // ~800ms silence — done recording
+                            if cs.silence_frames >= 20 {
+                                // ~640ms silence — done recording (faster turn-taking)
                                 cs.phase = "processing".into();
                                 let samples = cs.audio_buffer.clone();
                                 cs.audio_buffer.clear();
@@ -1445,31 +1577,34 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                 let _ = app.emit("call-phase-changed", "processing");
                                 drop(cs);
 
-                                // Transcribe
-                                match transcribe_samples(&samples) {
-                                    Ok(text) => {
-                                        let trimmed = text.trim().to_string();
-                                        if !trimmed.is_empty() {
-                                            // Save last recording for voice notes
-                                            if let Ok(mut cs2) = call_state.0.lock() {
-                                                cs2.last_recording = samples.clone();
-                                            }
-                                            let _ = app.emit("call-transcript", trimmed);
-                                        } else {
-                                            // Empty transcript — go back to listening
-                                            if let Ok(mut cs) = call_state.0.lock() {
-                                                cs.phase = "listening".into();
-                                                let _ = app.emit("call-phase-changed", "listening");
+                                // Transcribe on a separate thread to avoid blocking audio loop
+                                let call_state2 = call_state.clone();
+                                let app2 = app.clone();
+                                std::thread::spawn(move || {
+                                    match transcribe_samples(&samples) {
+                                        Ok(text) => {
+                                            let trimmed = text.trim().to_string();
+                                            if !trimmed.is_empty() {
+                                                if let Ok(mut cs2) = call_state2.0.lock() {
+                                                    cs2.last_recording = samples;
+                                                }
+                                                let _ = app2.emit("call-transcript", trimmed);
+                                            } else {
+                                                if let Ok(mut cs2) = call_state2.0.lock() {
+                                                    cs2.phase = "listening".into();
+                                                }
+                                                let _ = app2.emit("call-phase-changed", "listening");
                                             }
                                         }
-                                    }
-                                    Err(_) => {
-                                        if let Ok(mut cs) = call_state.0.lock() {
-                                            cs.phase = "listening".into();
-                                            let _ = app.emit("call-phase-changed", "listening");
+                                        Err(e) => {
+                                            eprintln!("Call transcription error: {}", e);
+                                            if let Ok(mut cs2) = call_state2.0.lock() {
+                                                cs2.phase = "listening".into();
+                                            }
+                                            let _ = app2.emit("call-phase-changed", "listening");
                                         }
                                     }
-                                }
+                                });
                             }
                         } else {
                             cs.silence_frames = 0;
@@ -1483,7 +1618,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                         };
                         if prob > 0.8 {
                             cs.speech_frames += 1;
-                            if cs.speech_frames >= 6 {
+                            if cs.speech_frames >= 5 {
                                 cs.barge_in = true;
                             }
                         } else {
@@ -2007,7 +2142,7 @@ async fn spawn_api_server(app_handle: AppHandle) {
         let mut messages = req.history.unwrap_or_default();
         messages.push(("user".into(), req.message));
 
-        match chat_inner(&state.app, messages).await {
+        match chat_inner(&state.app, messages, false).await {
             Ok(reply) => Ok(Json(serde_json::json!({ "reply": reply }))),
             Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
         }
@@ -2257,15 +2392,15 @@ fn classify_app(name: &str) -> &'static str {
 // ── Chat command ──
 
 #[tauri::command]
-async fn chat(app: AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
+async fn chat(app: AppHandle, messages: Vec<(String, String)>, call_mode: Option<bool>) -> Result<String, String> {
     let busy = &app.state::<LlmBusy>().0;
     busy.store(true, Ordering::Relaxed);
-    let result = chat_inner(&app, messages).await;
+    let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await;
     busy.store(false, Ordering::Relaxed);
     result
 }
 
-async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<String, String> {
+async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode: bool) -> Result<String, String> {
     let client = &app.state::<HttpClient>().0;
 
     // Build system prompt with current date/time context + full week lookup table
@@ -2291,7 +2426,11 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<
         now_local.format("%H:%M"),
         days_ahead,
     );
-    let system_content = format!("{}{}", SYSTEM_PROMPT, date_context);
+    let system_content = if call_mode {
+        format!("{}{}\n\n[CALL MODE] You are in voice call mode — like Jarvis. Rules:\n- Answer in 1-2 short sentences MAX. Be extremely concise.\n- No action blocks unless the user explicitly asks to do something.\n- No lists, no formatting, no code blocks — just natural speech.\n- Respond in the user's language.", SYSTEM_PROMPT, date_context)
+    } else {
+        format!("{}{}", SYSTEM_PROMPT, date_context)
+    };
 
     let mut chat_messages = vec![ChatMessage {
         role: "system".into(),
@@ -2333,9 +2472,9 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>) -> Result<
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: 1024,
+        max_tokens: if call_mode { 150 } else { 1024 },
         stream: true,
-        temperature: 0.7,
+        temperature: if call_mode { 0.5 } else { 0.7 },
     };
 
     let response = client
