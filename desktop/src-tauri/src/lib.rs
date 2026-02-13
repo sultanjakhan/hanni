@@ -2477,12 +2477,21 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
         temperature: if call_mode { 0.5 } else { 0.7 },
     };
 
-    let response = client
-        .post(MLX_URL)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| format!("MLX connection error: {}", e))?;
+    // Retry connection up to 3 times (MLX server may still be loading model)
+    let mut response = None;
+    for attempt in 0..3 {
+        match client.post(MLX_URL).json(&request).send().await {
+            Ok(r) => { response = Some(r); break; }
+            Err(e) => {
+                if attempt < 2 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                } else {
+                    return Err(format!("MLX connection error: {}", e));
+                }
+            }
+        }
+    }
+    let response = response.unwrap();
 
     let mut stream = response.bytes_stream();
     let mut full_reply = String::new();
@@ -6880,6 +6889,11 @@ fn updater_with_headers(app: &AppHandle) -> Result<tauri_plugin_updater::Updater
 }
 
 #[tauri::command]
+fn get_app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
 async fn check_update(app: AppHandle) -> Result<String, String> {
     let updater = updater_with_headers(&app)?;
     match updater.check().await {
@@ -6989,6 +7003,7 @@ pub fn run() {
             get_calendar_events,
             get_now_playing,
             get_browser_tab,
+            get_app_version,
             check_update,
             get_proactive_settings,
             set_proactive_settings,
