@@ -136,26 +136,11 @@ body {
   flex-shrink: 0;
 }
 
-.tab-item::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 8px;
-  right: 8px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: transparent;
-  transition: background var(--transition-fast);
-}
-
 .tab-item:hover { background: var(--bg-hover); color: var(--text-secondary); }
 
 .tab-item.active {
   color: var(--text-primary);
-}
-
-.tab-item.active::after {
-  background: var(--text-primary);
+  background: var(--bg-elevated);
 }
 
 .tab-item-icon { flex-shrink: 0; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
@@ -2260,27 +2245,6 @@ body.dragover::after {
 }
 
 .memory-item-btn:hover { color: var(--text-secondary); background: var(--bg-card); }
-
-.memory-add-form,
-.memory-edit-form {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 10px;
-  background: var(--bg-card);
-  border-radius: var(--radius-md);
-  margin-bottom: 8px;
-  width: 100%;
-}
-
-.memory-add-form select,
-.memory-edit-form select { width: 120px; flex-shrink: 0; }
-
-.memory-add-form .memory-add-key,
-.memory-edit-form .memory-edit-key { width: 150px; flex-shrink: 0; }
-
-.memory-edit-save,
-.memory-edit-cancel { flex-shrink: 0; padding: 4px 10px; font-size: 12px; }
 
 .memory-edit-btn { font-size: 12px; }
 
