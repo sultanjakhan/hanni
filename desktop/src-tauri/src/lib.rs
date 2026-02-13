@@ -2120,25 +2120,46 @@ fn find_python() -> Option<String> {
 }
 
 fn start_mlx_server() -> Option<Child> {
-    let python = find_python()?;
+    let python = match find_python() {
+        Some(p) => p,
+        None => {
+            eprintln!("[mlx] No python3 found — cannot start MLX server");
+            return None;
+        }
+    };
 
     // Check if server is already running
     let check = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(1))
+        .timeout(std::time::Duration::from_secs(2))
         .build()
         .ok()?;
     if check.get("http://127.0.0.1:8234/v1/models").send().map(|r| r.status().is_success()).unwrap_or(false) {
-        return None; // Already running
+        eprintln!("[mlx] Server already running on port 8234");
+        return None;
     }
 
+    eprintln!("[mlx] Starting MLX server with {} -m mlx_lm.server --model {} --port 8234", python, MODEL);
+    // Log MLX stderr to file for debugging
+    let log_path = hanni_data_dir().join("mlx_server.log");
+    let stderr_file = std::fs::File::create(&log_path)
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(|_| std::process::Stdio::null());
     let child = Command::new(&python)
         .args(["-m", "mlx_lm.server", "--model", MODEL, "--port", "8234"])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(stderr_file)
+        .spawn();
 
-    Some(child)
+    match child {
+        Ok(child) => {
+            eprintln!("[mlx] Server process spawned (pid {})", child.id());
+            Some(child)
+        }
+        Err(e) => {
+            eprintln!("[mlx] Failed to spawn server: {}", e);
+            None
+        }
+    }
 }
 
 // ── Calendar access guard ──
