@@ -2273,14 +2273,14 @@ fn start_mlx_server() -> Option<Child> {
         return None;
     }
 
-    eprintln!("[mlx] Starting MLX server with {} -m mlx_lm.server --model {} --port 8234", python, MODEL);
+    eprintln!("[mlx] Starting MLX server with {} -m mlx_lm server --model {} --port 8234", python, MODEL);
     // Log MLX stderr to file for debugging
     let log_path = hanni_data_dir().join("mlx_server.log");
     let stderr_file = std::fs::File::create(&log_path)
         .map(std::process::Stdio::from)
         .unwrap_or_else(|_| std::process::Stdio::null());
     let child = Command::new(&python)
-        .args(["-m", "mlx_lm.server", "--model", MODEL, "--port", "8234"])
+        .args(["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234"])
         .stdout(std::process::Stdio::null())
         .stderr(stderr_file)
         .spawn();
