@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
-use chrono::Timelike;
+use chrono::{Timelike, Datelike};
 use std::collections::HashMap;
 use std::process::{Child, Command};
 use std::io::Write;
@@ -171,6 +171,13 @@ struct ProactiveState {
     last_message_text: String,
     consecutive_skips: u32,
     user_is_typing: bool,
+    // v0.11.0: enhanced autonomy fields
+    recent_messages: Vec<(String, chrono::DateTime<chrono::Local>)>, // last 5 proactive msgs with timestamps
+    last_context_snapshot: String,        // context from previous proactive call (for delta)
+    last_proactive_id: Option<i64>,       // ID in proactive_history table
+    engagement_rate: f64,                 // rolling average reply rate (0.0-1.0)
+    last_user_chat_time: Option<chrono::DateTime<chrono::Local>>,
+    pending_triggers: Vec<String>,        // triggers from snapshot collector
 }
 
 impl ProactiveState {
@@ -181,6 +188,12 @@ impl ProactiveState {
             last_message_text: String::new(),
             consecutive_skips: 0,
             user_is_typing: false,
+            recent_messages: Vec::new(),
+            last_context_snapshot: String::new(),
+            last_proactive_id: None,
+            engagement_rate: 0.5,
+            last_user_chat_time: None,
+            pending_triggers: Vec::new(),
         }
     }
 }
@@ -750,6 +763,28 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             is_default INTEGER DEFAULT 0,
             position INTEGER,
             created_at TEXT NOT NULL
+        );
+
+        -- v0.11.0: Activity snapshots for background learning
+        CREATE TABLE IF NOT EXISTS activity_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            captured_at TEXT NOT NULL,
+            hour INTEGER NOT NULL,
+            weekday INTEGER NOT NULL,
+            frontmost_app TEXT NOT NULL DEFAULT '',
+            browser_url TEXT NOT NULL DEFAULT '',
+            music_playing TEXT NOT NULL DEFAULT '',
+            productive_min REAL DEFAULT 0,
+            distraction_min REAL DEFAULT 0
+        );
+
+        -- v0.11.0: Proactive message history + engagement tracking
+        CREATE TABLE IF NOT EXISTS proactive_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sent_at TEXT NOT NULL,
+            message TEXT NOT NULL,
+            user_replied INTEGER DEFAULT 0,
+            reply_delay_secs INTEGER
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -1206,6 +1241,18 @@ fn call_mode_resume_listening(
 }
 
 #[tauri::command]
+fn call_mode_set_speaking(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+) -> Result<(), String> {
+    let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    if !cs.active { return Ok(()); }
+    cs.phase = "speaking".into();
+    cs.speech_frames = 0;
+    cs.barge_in = false;
+    Ok(())
+}
+
+#[tauri::command]
 fn call_mode_check_bargein(
     call_state: tauri::State<'_, Arc<CallMode>>,
 ) -> Result<bool, String> {
@@ -1296,15 +1343,17 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
         };
         let _ = stream.play();
 
-        // Initialize VAD
-        let mut vad = match voice_activity_detector::VoiceActivityDetector::builder()
+        // Initialize VAD (try Silero, fallback to energy-based)
+        let mut vad_opt: Option<voice_activity_detector::VoiceActivityDetector> = None;
+        match voice_activity_detector::VoiceActivityDetector::builder()
             .sample_rate(16000)
             .chunk_size(512usize)
             .build() {
-            Ok(v) => v,
+            Ok(v) => {
+                vad_opt = Some(v);
+            }
             Err(e) => {
-                eprintln!("VAD init error: {}", e);
-                return;
+                eprintln!("VAD init error: {} — using energy-based detection", e);
             }
         };
 
@@ -1338,7 +1387,15 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             while process_buf.len() >= 512 {
                 let chunk: Vec<f32> = process_buf.drain(..512).collect();
 
-                let prob = vad.predict(chunk.clone());
+                let prob = if let Some(ref mut vad) = vad_opt {
+                    vad.predict(chunk.clone())
+                } else {
+                    // Energy-based voice detection fallback
+                    let energy: f32 = chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32;
+                    let rms = energy.sqrt();
+                    // Map RMS to 0-1 probability (threshold ~0.01 for speech)
+                    (rms * 50.0).min(1.0)
+                };
 
                 // Read phase fresh for each chunk
                 let phase = {
@@ -5779,6 +5836,12 @@ const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion livi
 
 Your job: write a short, natural message. Like texting a friend you live with.
 
+YOU HAVE ACCESS TO:
+- Activity delta: what changed since your last message (app, music, browser)
+- Recent conversation: last messages from the chat (for continuity)
+- Active triggers: time-sensitive events (upcoming calendar, distraction alerts)
+- Engagement rate: how often the user responds to your messages
+
 VARIETY IS KEY — pick a DIFFERENT style each time:
 - Observation: comment on their screen/music/browsing
 - Calendar: mention upcoming events, warn about events starting soon
@@ -5793,14 +5856,19 @@ VARIETY IS KEY — pick a DIFFERENT style each time:
 - Digest: MORNING ONLY (8-10am) — give a brief summary: today's events, deadlines, yesterday mood/sleep if known
 - Accountability: if they've been in the same app (YouTube, Reddit, Twitter, TikTok, etc.) for 30+ min, gently point it out
 - Schedule: if there's an upcoming event within 30 min, remind them to prepare
+- Continuity: continue or follow up on a topic from the recent conversation
+
+PRIORITY RULES:
+- If there's an active trigger → prioritize (Schedule/Accountability)
+- If there's a recent conversation → prefer Continuity style
+- If it's morning (8-10am) and first message → prefer Digest style
+- If a distracting app is open 30+ min → prefer Accountability style
+- If engagement rate is low (<30%) → be more relevant/useful, less chatty
 
 RULES:
-- 1-2 sentences max, Russian by default
-- NEVER repeat your last message style or content
+- 1-3 sentences max, Russian by default
+- NEVER repeat your recent proactive messages' style or content
 - Be genuine — a companion, not a notification bot
-- If it's morning (8-10am) and first message, prefer Digest style
-- If a distracting app is open 30+ min, prefer Accountability style
-- If an event is within 30 min, prefer Schedule style
 - Only reply [SKIP] if nothing meaningful to say
 
 Reply with your message text, or [SKIP]."#;
@@ -5815,6 +5883,53 @@ async fn gather_context() -> String {
         Ok(Ok(ctx)) => ctx,
         _ => format!("Current time: {}\n", chrono::Local::now().format("%H:%M %A, %d %B %Y")),
     }
+}
+
+// ── Reusable OS-context helpers (used by both gather_context and snapshot collector) ──
+
+fn get_frontmost_app() -> String {
+    run_osascript(
+        "tell application \"System Events\" to return name of first application process whose frontmost is true"
+    ).unwrap_or_default().trim().to_string()
+}
+
+fn get_browser_url() -> String {
+    let browsers = [
+        ("Arc", "tell application \"Arc\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
+        ("Google Chrome", "tell application \"Google Chrome\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
+        ("Safari", "tell application \"Safari\" to return URL of front document & \" | \" & name of front document"),
+    ];
+    for (name, script) in &browsers {
+        let check = run_osascript(&format!(
+            "tell application \"System Events\" to (name of processes) contains \"{}\"", name
+        ));
+        if let Ok(ref val) = check {
+            if val == "true" {
+                if let Ok(info) = run_osascript(script) {
+                    return format!("{}: {}", name, info);
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn get_now_playing_sync() -> String {
+    let music_check = run_osascript(
+        "tell application \"System Events\" to (name of processes) contains \"Music\""
+    );
+    if let Ok(ref val) = music_check {
+        if val == "true" {
+            if let Ok(info) = run_osascript(
+                "tell application \"Music\" to if player state is playing then \
+                 return (name of current track) & \" — \" & (artist of current track) \
+                 else return \"Music paused\" end if"
+            ) {
+                return info;
+            }
+        }
+    }
+    String::new()
 }
 
 fn gather_context_blocking() -> String {
@@ -5853,48 +5968,22 @@ fn gather_context_blocking() -> String {
     }
 
     // Now playing
-    let music_check = run_osascript(
-        "tell application \"System Events\" to (name of processes) contains \"Music\""
-    );
-    if let Ok(ref val) = music_check {
-        if val == "true" {
-            if let Ok(info) = run_osascript(
-                "tell application \"Music\" to if player state is playing then \
-                 return (name of current track) & \" — \" & (artist of current track) \
-                 else return \"Music paused\" end if"
-            ) {
-                ctx.push_str(&format!("\n--- Music ---\nApple Music: {}\n", info));
-            }
-        }
+    let music = get_now_playing_sync();
+    if !music.is_empty() {
+        ctx.push_str(&format!("\n--- Music ---\nApple Music: {}\n", music));
     }
 
     // Browser tab
-    let browsers = [
-        ("Arc", "tell application \"Arc\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
-        ("Google Chrome", "tell application \"Google Chrome\" to return URL of active tab of front window & \" | \" & title of active tab of front window"),
-        ("Safari", "tell application \"Safari\" to return URL of front document & \" | \" & name of front document"),
-    ];
-    for (name, script) in &browsers {
-        let check = run_osascript(&format!(
-            "tell application \"System Events\" to (name of processes) contains \"{}\"", name
-        ));
-        if let Ok(ref val) = check {
-            if val == "true" {
-                if let Ok(info) = run_osascript(script) {
-                    ctx.push_str(&format!("\n--- Browser ---\n{}: {}\n", name, info));
-                    break;
-                }
-            }
-        }
+    let browser = get_browser_url();
+    if !browser.is_empty() {
+        ctx.push_str(&format!("\n--- Browser ---\n{}\n", browser));
     }
 
     // Active (frontmost) app and how long it's been in focus
-    if let Ok(front_app) = run_osascript(
-        "tell application \"System Events\" to return name of first application process whose frontmost is true"
-    ) {
-        ctx.push_str(&format!("\n--- Active App ---\nFrontmost: {}\n", front_app.trim()));
-        // Check how long this app has been the top app today from Screen Time
-        if let Ok(minutes) = get_app_focus_minutes(&front_app.trim()) {
+    let front_app = get_frontmost_app();
+    if !front_app.is_empty() {
+        ctx.push_str(&format!("\n--- Active App ---\nFrontmost: {}\n", front_app));
+        if let Ok(minutes) = get_app_focus_minutes(&front_app) {
             ctx.push_str(&format!("Focus time today: {:.0} min\n", minutes));
             let distracting = ["YouTube", "Reddit", "Twitter", "TikTok", "Instagram", "Telegram", "Discord", "VK"];
             let is_distracting = distracting.iter().any(|d| front_app.contains(d));
@@ -6067,24 +6156,107 @@ struct NonStreamResponse {
     choices: Vec<NonStreamChoice>,
 }
 
+fn compute_activity_delta(old_ctx: &str, new_ctx: &str) -> String {
+    let mut deltas = Vec::new();
+    // Extract sections from context strings
+    fn extract_section(ctx: &str, tag: &str) -> String {
+        ctx.lines()
+            .skip_while(|l| !l.contains(tag))
+            .skip(1)
+            .take_while(|l| !l.starts_with("---"))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string()
+    }
+    let old_app = extract_section(old_ctx, "Active App");
+    let new_app = extract_section(new_ctx, "Active App");
+    if !old_app.is_empty() && !new_app.is_empty() && old_app != new_app {
+        deltas.push(format!("App changed: {} → {}", old_app.lines().next().unwrap_or(""), new_app.lines().next().unwrap_or("")));
+    }
+    let old_music = extract_section(old_ctx, "Music");
+    let new_music = extract_section(new_ctx, "Music");
+    if !old_music.is_empty() && old_music != new_music {
+        deltas.push(format!("Music changed: {} → {}", old_music, if new_music.is_empty() { "stopped" } else { &new_music }));
+    }
+    let old_browser = extract_section(old_ctx, "Browser");
+    let new_browser = extract_section(new_ctx, "Browser");
+    if !old_browser.is_empty() && old_browser != new_browser && !new_browser.is_empty() {
+        deltas.push(format!("Browser: {} → {}", old_browser, new_browser));
+    }
+    deltas.join("\n")
+}
+
+fn get_recent_chat_snippet(conn: &rusqlite::Connection, limit: usize) -> String {
+    // Get the latest conversation and extract last N messages
+    let messages_json: String = conn.query_row(
+        "SELECT messages FROM conversations ORDER BY id DESC LIMIT 1",
+        [], |row| row.get(0),
+    ).unwrap_or_default();
+    if messages_json.is_empty() {
+        return String::new();
+    }
+    // Messages stored as JSON array of [role, content] pairs
+    if let Ok(msgs) = serde_json::from_str::<Vec<Vec<String>>>(&messages_json) {
+        let start = msgs.len().saturating_sub(limit);
+        msgs[start..].iter()
+            .map(|m| {
+                let role = m.first().map(|s| s.as_str()).unwrap_or("?");
+                let content = m.get(1).map(|s| s.as_str()).unwrap_or("");
+                // Truncate long messages
+                let short = if content.len() > 150 { &content[..150] } else { content };
+                format!("{}: {}", if role == "user" { "User" } else { "Hanni" }, short)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    }
+}
+
 async fn proactive_llm_call(
     client: &reqwest::Client,
     context: &str,
-    last_message: &str,
+    recent_messages: &[(String, chrono::DateTime<chrono::Local>)],
     consecutive_skips: u32,
     memory_context: &str,
+    delta: &str,
+    triggers: &[String],
+    chat_snippet: &str,
+    engagement_rate: f64,
 ) -> Result<Option<String>, String> {
     let mut user_content = String::new();
     if !memory_context.is_empty() {
         user_content.push_str(&format!("[Your memories]\n{}\n\n", memory_context));
     }
     user_content.push_str(&format!("{}\n", context));
-    if !last_message.is_empty() {
-        user_content.push_str(&format!("Your last proactive message was: \"{}\"\n", last_message));
+
+    // Activity delta
+    if !delta.is_empty() {
+        user_content.push_str(&format!("\n[Changes since last check]\n{}\n", delta));
     }
+
+    // Active triggers
+    if !triggers.is_empty() {
+        user_content.push_str(&format!("\n[Active triggers]\n{}\n", triggers.join("\n")));
+    }
+
+    // Recent chat snippet
+    if !chat_snippet.is_empty() {
+        user_content.push_str(&format!("\n[Recent conversation]\n{}\n", chat_snippet));
+    }
+
+    // Last 5 proactive messages with timestamps
+    if !recent_messages.is_empty() {
+        user_content.push_str("\n[Your recent proactive messages]\n");
+        for (msg, ts) in recent_messages {
+            user_content.push_str(&format!("  {} — \"{}\"\n", ts.format("%H:%M"), msg));
+        }
+    }
+
     user_content.push_str(&format!(
-        "You've skipped {} times in a row since your last message.\n/no_think",
-        consecutive_skips
+        "\nSkips in a row: {}. Engagement rate: {:.0}%.\n/no_think",
+        consecutive_skips, engagement_rate * 100.0
     ));
 
     let request = ChatRequest {
@@ -6099,7 +6271,7 @@ async fn proactive_llm_call(
                 content: user_content,
             },
         ],
-        max_tokens: 200,
+        max_tokens: 300,
         stream: false,
         temperature: 0.7,
     };
@@ -6500,6 +6672,44 @@ async fn set_user_typing(
     Ok(())
 }
 
+#[tauri::command]
+async fn report_proactive_engagement(
+    state: tauri::State<'_, Arc<Mutex<ProactiveState>>>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let mut pstate = state.lock().await;
+    // Mark the last proactive message as replied
+    if let Some(pid) = pstate.last_proactive_id {
+        if let Ok(conn) = db.0.lock() {
+            let delay = pstate.last_message_time
+                .map(|t| (chrono::Local::now() - t).num_seconds())
+                .unwrap_or(0);
+            let _ = conn.execute(
+                "UPDATE proactive_history SET user_replied = 1, reply_delay_secs = ?1 WHERE id = ?2",
+                rusqlite::params![delay, pid],
+            );
+        }
+    }
+    // Recompute engagement rate: rolling avg of last 20 proactive messages
+    if let Ok(conn) = db.0.lock() {
+        let rate: f64 = conn.query_row(
+            "SELECT COALESCE(AVG(CAST(user_replied AS REAL)), 0.5) FROM (SELECT user_replied FROM proactive_history ORDER BY id DESC LIMIT 20)",
+            [], |row| row.get(0),
+        ).unwrap_or(0.5);
+        pstate.engagement_rate = rate;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn report_user_chat_activity(
+    state: tauri::State<'_, Arc<Mutex<ProactiveState>>>,
+) -> Result<(), String> {
+    let mut pstate = state.lock().await;
+    pstate.last_user_chat_time = Some(chrono::Local::now());
+    Ok(())
+}
+
 // ── Updater ──
 
 fn updater_with_headers(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
@@ -6623,6 +6833,8 @@ pub fn run() {
             get_proactive_settings,
             set_proactive_settings,
             set_user_typing,
+            report_proactive_engagement,
+            report_user_chat_activity,
             memory_remember,
             memory_recall,
             memory_forget,
@@ -6810,6 +7022,7 @@ pub fn run() {
             start_call_mode,
             stop_call_mode,
             call_mode_resume_listening,
+            call_mode_set_speaking,
             call_mode_check_bargein,
             speak_text_blocking,
             save_voice_note,
@@ -6891,6 +7104,202 @@ pub fn run() {
                 }
             });
 
+            // Activity snapshot collector — lightweight OS data every 10 min
+            let snapshot_handle = app.handle().clone();
+            let snapshot_proactive_ref = proactive_state.clone();
+            tauri::async_runtime::spawn(async move {
+                // Initial delay
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(600)).await; // 10 min
+
+                    // Collect OS data in blocking thread
+                    let (app_name, browser, music) = tokio::task::spawn_blocking(|| {
+                        (get_frontmost_app(), get_browser_url(), get_now_playing_sync())
+                    }).await.unwrap_or_default();
+
+                    let now = chrono::Local::now();
+                    let hour = now.hour() as i64;
+                    let weekday = now.weekday().num_days_from_monday() as i64;
+
+                    // Compute productive vs distraction minutes from Screen Time
+                    let (prod_min, dist_min) = {
+                        let distracting_apps = ["YouTube", "Reddit", "Twitter", "TikTok", "Instagram", "Telegram", "Discord", "VK"];
+                        let is_distracting = distracting_apps.iter().any(|d| app_name.contains(d) || browser.contains(d));
+                        if is_distracting { (0.0_f64, 10.0_f64) } else { (10.0_f64, 0.0_f64) }
+                    };
+
+                    // Write to DB
+                    let db = snapshot_handle.state::<HanniDb>();
+                    if let Ok(conn) = db.0.lock() {
+                        let _ = conn.execute(
+                            "INSERT INTO activity_snapshots (captured_at, hour, weekday, frontmost_app, browser_url, music_playing, productive_min, distraction_min) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            rusqlite::params![
+                                now.to_rfc3339(),
+                                hour,
+                                weekday,
+                                &app_name,
+                                &browser,
+                                &music,
+                                prod_min,
+                                dist_min,
+                            ],
+                        );
+
+                        // Auto-cleanup: remove snapshots older than 30 days
+                        let _ = conn.execute(
+                            "DELETE FROM activity_snapshots WHERE captured_at < datetime('now', '-30 days')",
+                            [],
+                        );
+                    }
+
+                    // Check triggers and push to ProactiveState
+                    let mut triggers: Vec<String> = Vec::new();
+
+                    // Trigger: distraction >30 min
+                    if let Ok(conn) = snapshot_handle.state::<HanniDb>().0.lock() {
+                        let dist_total: f64 = conn.query_row(
+                            "SELECT COALESCE(SUM(distraction_min), 0) FROM activity_snapshots WHERE captured_at > datetime('now', '-30 minutes')",
+                            [], |row| row.get(0),
+                        ).unwrap_or(0.0);
+                        if dist_total >= 30.0 {
+                            triggers.push(format!("Дистракция: пользователь отвлекается уже {:.0} мин", dist_total));
+                        }
+                    }
+
+                    // Trigger: upcoming event within 15 min
+                    if let Ok(upcoming) = get_upcoming_events_soon() {
+                        if !upcoming.is_empty() {
+                            triggers.push(format!("Скоро событие: {}", upcoming.lines().next().unwrap_or("")));
+                        }
+                    }
+
+                    if !triggers.is_empty() {
+                        let mut state = snapshot_proactive_ref.lock().await;
+                        state.pending_triggers = triggers;
+                    }
+                }
+            });
+
+            // Background learning loop — analyze activity patterns every 30 min
+            let learning_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(60))
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new());
+
+                // Initial delay — let DB populate with some snapshots first
+                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(1800)).await; // 30 min
+
+                    // Skip if LLM is busy
+                    let llm_busy = learning_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);
+                    if llm_busy { continue; }
+
+                    // Read last 18 snapshots (3 hours) and existing observation facts
+                    let (snapshots_text, existing_obs) = {
+                        let db = learning_handle.state::<HanniDb>();
+                        let conn = match db.0.lock() {
+                            Ok(c) => c,
+                            Err(_) => continue,
+                        };
+                        let mut snap_lines = Vec::new();
+                        if let Ok(mut stmt) = conn.prepare(
+                            "SELECT captured_at, frontmost_app, browser_url, music_playing, productive_min, distraction_min FROM activity_snapshots ORDER BY id DESC LIMIT 18"
+                        ) {
+                            if let Ok(rows) = stmt.query_map([], |row| {
+                                Ok(format!(
+                                    "{}: app={}, browser={}, music={}, prod={:.0}min, dist={:.0}min",
+                                    row.get::<_, String>(0).unwrap_or_default(),
+                                    row.get::<_, String>(1).unwrap_or_default(),
+                                    row.get::<_, String>(2).unwrap_or_default(),
+                                    row.get::<_, String>(3).unwrap_or_default(),
+                                    row.get::<_, f64>(4).unwrap_or(0.0),
+                                    row.get::<_, f64>(5).unwrap_or(0.0),
+                                ))
+                            }) {
+                                for row in rows.flatten() { snap_lines.push(row); }
+                            }
+                        }
+                        let mut obs = Vec::new();
+                        if let Ok(mut stmt) = conn.prepare(
+                            "SELECT value FROM facts WHERE source = 'observation' ORDER BY updated_at DESC LIMIT 20"
+                        ) {
+                            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                                for row in rows.flatten() { obs.push(row); }
+                            }
+                        }
+                        (snap_lines.join("\n"), obs.join("\n"))
+                    };
+
+                    if snapshots_text.is_empty() { continue; }
+
+                    let prompt = format!(
+                        "Проанализируй активность пользователя за последние 3 часа и найди паттерны.\n\n\
+                        Снимки активности (от новых к старым):\n{}\n\n\
+                        Уже известные наблюдения (не дублируй):\n{}\n\n\
+                        Найди: рутины, привычки, продуктивность, предпочтения, аномалии.\n\
+                        Формат: одно наблюдение на строку, начиная с '- '. Только новые, не дублируй известные.\n\
+                        Если ничего нового — ответь [NONE].\n/no_think",
+                        snapshots_text, if existing_obs.is_empty() { "нет" } else { &existing_obs }
+                    );
+
+                    let request = ChatRequest {
+                        model: MODEL.into(),
+                        messages: vec![
+                            ChatMessage {
+                                role: "system".into(),
+                                content: "Ты — аналитик поведения. Твоя задача — находить паттерны в активности пользователя. Будь краток и конкретен. Отвечай на русском.".into(),
+                            },
+                            ChatMessage {
+                                role: "user".into(),
+                                content: prompt,
+                            },
+                        ],
+                        max_tokens: 400,
+                        stream: false,
+                        temperature: 0.3,
+                    };
+
+                    let resp = client.post(MLX_URL).json(&request).send().await;
+                    if let Ok(resp) = resp {
+                        if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
+                            let raw = parsed.choices.first().map(|c| c.message.content.clone()).unwrap_or_default();
+                            // Strip think tags
+                            let re = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+                            let text = re.replace_all(&raw, "").trim().to_string();
+
+                            if !text.contains("[NONE]") && !text.is_empty() {
+                                // Parse lines starting with '- '
+                                let observations: Vec<&str> = text.lines()
+                                    .filter(|l| l.trim().starts_with("- "))
+                                    .map(|l| l.trim().trim_start_matches("- "))
+                                    .collect();
+
+                                if !observations.is_empty() {
+                                    let db = learning_handle.state::<HanniDb>();
+                                    let conn = db.0.lock();
+                                    if let Ok(conn) = conn {
+                                        let now = chrono::Local::now().to_rfc3339();
+                                        for obs in observations.iter().take(5) {
+                                            let key = format!("obs_{}", &now[..16]);
+                                            let _ = conn.execute(
+                                                "INSERT INTO facts (category, key, value, source, created_at, updated_at) VALUES ('observation', ?1, ?2, 'observation', ?3, ?3)",
+                                                rusqlite::params![key, obs, now],
+                                            );
+                                        }
+                                        eprintln!("[learning] saved {} observations", observations.len().min(5));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
             // Proactive messaging background loop
             let proactive_handle = app.handle().clone();
             let proactive_state_ref = proactive_state.clone();
@@ -6910,7 +7319,7 @@ pub fn run() {
                     // Poll every 5 seconds so we react quickly to settings changes
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-                    let (enabled, interval, quiet_start, quiet_end, is_typing, last_msg, skips, voice_enabled, voice_name) = {
+                    let (enabled, interval, quiet_start, quiet_end, is_typing, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat) = {
                         let state = proactive_state_ref.lock().await;
                         (
                             state.settings.enabled,
@@ -6918,10 +7327,14 @@ pub fn run() {
                             state.settings.quiet_hours_start,
                             state.settings.quiet_hours_end,
                             state.user_is_typing,
-                            state.last_message_text.clone(),
                             state.consecutive_skips,
                             state.settings.voice_enabled,
                             state.settings.voice_name.clone(),
+                            state.recent_messages.clone(),
+                            state.last_context_snapshot.clone(),
+                            state.engagement_rate,
+                            state.pending_triggers.clone(),
+                            state.last_user_chat_time,
                         )
                     };
 
@@ -6930,10 +7343,64 @@ pub fn run() {
                         continue;
                     }
 
-                    // On first run after enabling, fire immediately; otherwise wait for interval
-                    let interval_secs = if skips >= 6 { interval * 2 * 60 } else { interval * 60 };
-                    if !first_run && last_check.elapsed().as_secs() < interval_secs {
-                        continue;
+                    // ── Smart Adaptive Timing (Step 8) ──
+                    let base_interval_secs = interval * 60;
+                    let elapsed = last_check.elapsed().as_secs();
+                    let time_ratio = elapsed as f64 / base_interval_secs as f64;
+
+                    if !first_run {
+                        // Compute firing score
+                        let mut score: f64 = 0.0;
+
+                        // time_ratio: 0→0, 1→0.3, 2→0.6
+                        score += (time_ratio * 0.3).min(0.6);
+
+                        // upcoming event trigger
+                        if triggers.iter().any(|t| t.contains("событие")) {
+                            score += 0.3;
+                        }
+
+                        // distraction trigger
+                        if triggers.iter().any(|t| t.contains("Дистракция")) {
+                            score += 0.25;
+                        }
+
+                        // pending trigger (generic)
+                        if !triggers.is_empty() {
+                            score += 0.4_f64.min(score + 0.4) - score; // ensure at least +0.15
+                            score += 0.15;
+                        }
+
+                        // context change (will be computed after gather, but approximate from triggers)
+                        // idle: no user chat >30 min
+                        if let Some(last_chat) = last_user_chat {
+                            let idle_min = (chrono::Local::now() - last_chat).num_minutes();
+                            if idle_min > 30 { score += 0.1; }
+                        } else {
+                            score += 0.1; // no chat at all — consider idle
+                        }
+
+                        // high engagement bonus
+                        if engagement > 0.6 { score += 0.1; }
+                        if engagement > 0.8 { score += 0.05; }
+
+                        // deep work hours penalty (10-12, 14-17)
+                        let hour = chrono::Local::now().hour();
+                        if (10..=12).contains(&hour) || (14..=17).contains(&hour) {
+                            score -= 0.1;
+                        }
+
+                        // many skips penalty
+                        if skips > 3 { score -= 0.15; }
+
+                        // Minimum floor: 3 minutes
+                        if elapsed < 180 {
+                            score = 0.0;
+                        }
+
+                        if score < 0.5 {
+                            continue;
+                        }
                     }
 
                     let hour = chrono::Local::now().hour();
@@ -6953,28 +7420,63 @@ pub fn run() {
                     first_run = false;
 
                     let context = gather_context().await;
-                    let mem_ctx = {
+
+                    // Compute delta from last context
+                    let delta = if !last_ctx.is_empty() {
+                        compute_activity_delta(&last_ctx, &context)
+                    } else {
+                        String::new()
+                    };
+
+                    // Build enriched memory context (50 facts instead of 30)
+                    let (mem_ctx, chat_snippet) = {
                         let db = proactive_handle.state::<HanniDb>();
                         let result = match db.0.lock() {
-                            Ok(conn) => build_memory_context_from_db(&conn, "", 30),
-                            Err(_) => String::new(),
+                            Ok(conn) => (
+                                build_memory_context_from_db(&conn, "", 50),
+                                get_recent_chat_snippet(&conn, 6),
+                            ),
+                            Err(_) => (String::new(), String::new()),
                         };
                         result
                     };
-                    match proactive_llm_call(&client, &context, &last_msg, skips, &mem_ctx).await {
+                    match proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement).await {
                         Ok(Some(message)) => {
                             let _ = proactive_handle.emit("proactive-message", &message);
                             if voice_enabled {
                                 speak_tts(&message, &voice_name);
                             }
+                            // Record in proactive_history
+                            let proactive_id = {
+                                let db = proactive_handle.state::<HanniDb>();
+                                let result = if let Ok(conn) = db.0.lock() {
+                                    let _ = conn.execute(
+                                        "INSERT INTO proactive_history (sent_at, message) VALUES (?1, ?2)",
+                                        rusqlite::params![chrono::Local::now().to_rfc3339(), &message],
+                                    );
+                                    Some(conn.last_insert_rowid())
+                                } else {
+                                    None
+                                };
+                                result
+                            };
                             let mut state = proactive_state_ref.lock().await;
                             state.last_message_time = Some(chrono::Local::now());
-                            state.last_message_text = message;
+                            state.last_message_text = message.clone();
                             state.consecutive_skips = 0;
+                            state.last_context_snapshot = context;
+                            state.last_proactive_id = proactive_id;
+                            // Update recent_messages (keep last 5)
+                            state.recent_messages.push((message, chrono::Local::now()));
+                            if state.recent_messages.len() > 5 {
+                                state.recent_messages.remove(0);
+                            }
+                            state.pending_triggers.clear();
                         }
                         Ok(None) => {
                             let mut state = proactive_state_ref.lock().await;
                             state.consecutive_skips += 1;
+                            state.last_context_snapshot = context;
                         }
                         Err(_) => {
                             // LLM server not running — back off
