@@ -2358,7 +2358,7 @@ async function loadAllFacts(el) {
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`; }
 }
 
-const MEMORY_CATEGORIES = ['user', 'preferences', 'people', 'habits', 'work', 'health', 'other'];
+const MEMORY_CATEGORIES = ['user', 'preferences', 'people', 'habits', 'work', 'health', 'observation', 'other'];
 
 function renderMemoryList(memories, el) {
   const list = document.getElementById('settings-mem-list');
