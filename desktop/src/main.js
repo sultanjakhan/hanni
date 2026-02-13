@@ -7,7 +7,13 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('file-input');
 const attachPreview = document.getElementById('attach-preview');
-const APP_VERSION = '0.10.0';
+let APP_VERSION = '?';
+// Fetch real version from Tauri at startup
+(async () => {
+  try {
+    APP_VERSION = await invoke('get_app_version');
+  } catch (_) {}
+})();
 
 let busy = false;
 let history = [];
@@ -4635,10 +4641,22 @@ async function startCallMode() {
   try {
     const hasModel = await invoke('check_whisper_model');
     if (!hasModel) {
-      if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
-        addMsg('bot', 'Скачиваю модель Whisper...');
-        await invoke('download_whisper_model');
-        addMsg('bot', 'Whisper загружен!');
+      if (confirm('Модель Whisper не найдена (~1.5GB). Скачать для голосового ввода?')) {
+        addMsg('bot', 'Скачиваю модель Whisper... Это может занять несколько минут.');
+        const unlisten = await listen('whisper-download-progress', (event) => {
+          const msgs = chat.querySelectorAll('.msg.bot');
+          const last = msgs[msgs.length - 1];
+          if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
+        });
+        try {
+          await invoke('download_whisper_model');
+          addMsg('bot', 'Whisper загружен! Можно использовать голос.');
+        } catch (e) {
+          addMsg('bot', 'Ошибка загрузки Whisper: ' + e);
+          unlisten();
+          return;
+        }
+        unlisten();
       } else {
         return;
       }
