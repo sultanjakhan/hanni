@@ -1206,7 +1206,7 @@ function repairJson(str) {
 
 // ── Stream chat helper ──
 
-async function streamChat(botDiv, t0) {
+async function streamChat(botDiv, t0, callMode = false) {
   const cursor = document.createElement('span');
   cursor.className = 'cursor';
   botDiv.appendChild(cursor);
@@ -1228,7 +1228,7 @@ async function streamChat(botDiv, t0) {
 
   try {
     const msgs = history.slice(-30);
-    await invoke('chat', { messages: msgs });
+    await invoke('chat', { messages: msgs, callMode });
   } catch (e) {
     if (!fullReply) {
       botDiv.textContent = 'MLX сервер недоступен';
@@ -4734,7 +4734,7 @@ listen('call-transcript', async (event) => {
     chat.appendChild(wrapper);
     scrollDown();
 
-    const result = await streamChat(botDiv, t0);
+    const result = await streamChat(botDiv, t0, true);
     if (!result.fullReply) break;
 
     history.push(['assistant', result.fullReply]);
