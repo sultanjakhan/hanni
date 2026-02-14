@@ -2486,6 +2486,11 @@ fn classify_app(name: &str) -> &'static str {
 #[tauri::command]
 async fn chat(app: AppHandle, messages: Vec<(String, String)>, call_mode: Option<bool>) -> Result<String, String> {
     let busy = &app.state::<LlmBusy>().0;
+    // Wait for any in-flight LLM call (e.g. proactive) to finish — MLX is single-threaded
+    for _ in 0..30 {
+        if !busy.load(Ordering::Relaxed) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
     busy.store(true, Ordering::Relaxed);
     let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await;
     busy.store(false, Ordering::Relaxed);
@@ -7713,7 +7718,12 @@ pub fn run() {
                         };
                         result
                     };
-                    match proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement).await {
+                    // Mark LLM as busy during proactive call to prevent concurrent MLX requests
+                    proactive_handle.state::<LlmBusy>().0.store(true, Ordering::Relaxed);
+                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement).await;
+                    proactive_handle.state::<LlmBusy>().0.store(false, Ordering::Relaxed);
+
+                    match proactive_result {
                         Ok(Some(message)) => {
                             let _ = proactive_handle.emit("proactive-message", &message);
                             if voice_enabled {
