@@ -202,6 +202,12 @@ impl ProactiveState {
 
 struct HanniDb(std::sync::Mutex<rusqlite::Connection>);
 
+impl HanniDb {
+    fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// ~/Library/Application Support/Hanni/
 fn hanni_data_dir() -> PathBuf {
     dirs::data_dir()
@@ -1065,7 +1071,7 @@ async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn start_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String, String> {
     let needs_capture = {
-        let mut ws = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let mut ws = state.0.lock().unwrap_or_else(|e| e.into_inner());
         if ws.recording {
             return Err("Already recording".into());
         }
@@ -1083,7 +1089,7 @@ fn start_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<Strin
 
 #[tauri::command]
 fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String, String> {
-    let mut ws = state.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut ws = state.0.lock().unwrap_or_else(|e| e.into_inner());
     ws.recording = false;
 
     if ws.audio_buffer.is_empty() {
@@ -1148,7 +1154,8 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
             Some(d) => d,
             None => {
                 eprintln!("Voice: no input device found");
-                if let Ok(mut ws) = recording_state.0.lock() {
+                {
+                let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
                     ws.capture_running = false;
                     ws.recording = false;
                 }
@@ -1186,7 +1193,8 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
                         }
                         Err(e) => {
                             eprintln!("Voice: no supported config: {}", e);
-                            if let Ok(mut ws) = recording_state.0.lock() {
+                            {
+                let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
                                 ws.capture_running = false;
                                 ws.recording = false;
                             }
@@ -1204,7 +1212,8 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
         let stream = device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if let Ok(mut ws) = state_clone.0.lock() {
+                {
+                let mut ws = state_clone.0.lock().unwrap_or_else(|e| e.into_inner());
                     if ws.recording {
                         if channels == 1 && ratio == 1.0 {
                             ws.audio_buffer.extend_from_slice(data);
@@ -1238,7 +1247,8 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
             Ok(stream) => {
                 if let Err(e) = stream.play() {
                     eprintln!("Voice: stream play error: {}", e);
-                    if let Ok(mut ws) = recording_state.0.lock() {
+                    {
+                let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
                         ws.capture_running = false;
                         ws.recording = false;
                     }
@@ -1246,19 +1256,22 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
                 }
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(100));
-                    if let Ok(ws) = recording_state.0.lock() {
+                    {
+                let ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
                         if !ws.recording {
                             break;
                         }
                     }
                 }
-                if let Ok(mut ws) = recording_state.0.lock() {
+                {
+                let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
                     ws.capture_running = false;
                 }
             }
             Err(e) => {
                 eprintln!("Voice: build stream error: {} — check microphone permissions", e);
-                if let Ok(mut ws) = recording_state.0.lock() {
+                {
+                let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
                     ws.capture_running = false;
                     ws.recording = false;
                 }
@@ -1275,7 +1288,7 @@ fn start_call_mode(
     app: AppHandle,
 ) -> Result<String, String> {
     {
-        let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+        let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
         if cs.active {
             return Ok("Already in call mode".into());
         }
@@ -1297,7 +1310,7 @@ fn stop_call_mode(
     call_state: tauri::State<'_, Arc<CallMode>>,
     app: AppHandle,
 ) -> Result<String, String> {
-    let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
     cs.active = false;
     cs.phase = "idle".into();
     cs.audio_buffer.clear();
@@ -1315,7 +1328,7 @@ fn call_mode_resume_listening(
     call_state: tauri::State<'_, Arc<CallMode>>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
     if !cs.active { return Ok(()); }
     cs.phase = "listening".into();
     cs.audio_buffer.clear();
@@ -1330,7 +1343,7 @@ fn call_mode_resume_listening(
 fn call_mode_set_speaking(
     call_state: tauri::State<'_, Arc<CallMode>>,
 ) -> Result<(), String> {
-    let mut cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
     if !cs.active { return Ok(()); }
     cs.phase = "speaking".into();
     cs.speech_frames = 0;
@@ -1342,7 +1355,7 @@ fn call_mode_set_speaking(
 fn call_mode_check_bargein(
     call_state: tauri::State<'_, Arc<CallMode>>,
 ) -> Result<bool, String> {
-    let cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+    let cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
     Ok(cs.barge_in)
 }
 
@@ -1352,7 +1365,7 @@ fn save_voice_note(
     title: String,
 ) -> Result<String, String> {
     let samples = {
-        let cs = call_state.0.lock().map_err(|e| format!("Lock: {}", e))?;
+        let cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
         if cs.last_recording.is_empty() {
             return Err("No recording available".into());
         }
@@ -1508,10 +1521,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
 
             // Check if call mode still active
             {
-                let cs = match call_state.0.lock() {
-                    Ok(cs) => cs,
-                    Err(_) => break,
-                };
+                let cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                 if !cs.active { break; }
             }
 
@@ -1540,19 +1550,11 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 };
 
                 // Read phase fresh for each chunk
-                let phase = {
-                    match call_state.0.lock() {
-                        Ok(cs) => cs.phase.clone(),
-                        Err(_) => continue,
-                    }
-                };
+                let phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
 
                 match phase.as_str() {
                     "listening" => {
-                        let mut cs = match call_state.0.lock() {
-                            Ok(cs) => cs,
-                            Err(_) => continue,
-                        };
+                        let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                         if prob > 0.5 {
                             cs.speech_frames += 1;
                             cs.audio_buffer.extend_from_slice(&chunk);
@@ -1568,10 +1570,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                         }
                     }
                     "recording" => {
-                        let mut cs = match call_state.0.lock() {
-                            Ok(cs) => cs,
-                            Err(_) => continue,
-                        };
+                        let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                         cs.audio_buffer.extend_from_slice(&chunk);
 
                         if prob < 0.5 {
@@ -1594,12 +1593,14 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                         Ok(text) => {
                                             let trimmed = text.trim().to_string();
                                             if !trimmed.is_empty() {
-                                                if let Ok(mut cs2) = call_state2.0.lock() {
+                                                {
+                                                let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
                                                     cs2.last_recording = samples;
                                                 }
                                                 let _ = app2.emit("call-transcript", trimmed);
                                             } else {
-                                                if let Ok(mut cs2) = call_state2.0.lock() {
+                                                {
+                                                let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
                                                     cs2.phase = "listening".into();
                                                 }
                                                 let _ = app2.emit("call-phase-changed", "listening");
@@ -1607,7 +1608,8 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                         }
                                         Err(e) => {
                                             eprintln!("Call transcription error: {}", e);
-                                            if let Ok(mut cs2) = call_state2.0.lock() {
+                                            {
+                                                let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
                                                 cs2.phase = "listening".into();
                                             }
                                             let _ = app2.emit("call-phase-changed", "listening");
@@ -1621,10 +1623,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                     }
                     "speaking" => {
                         // Check for barge-in with higher threshold
-                        let mut cs = match call_state.0.lock() {
-                            Ok(cs) => cs,
-                            Err(_) => continue,
-                        };
+                        let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                         if prob > 0.8 {
                             cs.speech_frames += 1;
                             if cs.speech_frames >= 5 {
@@ -1684,7 +1683,7 @@ fn start_focus(
     sites: Option<Vec<String>>,
     focus: tauri::State<'_, FocusManager>,
 ) -> Result<String, String> {
-    let mut state = focus.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut state = focus.0.lock().unwrap_or_else(|e| e.into_inner());
 
     if state.active {
         return Err("Focus mode is already active".into());
@@ -1768,7 +1767,7 @@ fn start_focus(
 
 #[tauri::command]
 fn stop_focus(focus: tauri::State<'_, FocusManager>) -> Result<String, String> {
-    let mut state = focus.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let mut state = focus.0.lock().unwrap_or_else(|e| e.into_inner());
 
     if !state.active {
         return Ok("Focus mode is not active".into());
@@ -1789,7 +1788,7 @@ fn stop_focus(focus: tauri::State<'_, FocusManager>) -> Result<String, String> {
 
 #[tauri::command]
 fn get_focus_status(focus: tauri::State<'_, FocusManager>) -> Result<FocusStatus, String> {
-    let state = focus.0.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let state = focus.0.lock().unwrap_or_else(|e| e.into_inner());
     let remaining = if let Some(end) = state.end_time {
         let diff = end - chrono::Local::now();
         if diff.num_seconds() > 0 { diff.num_seconds() as u64 } else { 0 }
@@ -1922,7 +1921,7 @@ async fn set_clipboard(text: String) -> Result<String, String> {
 
 #[tauri::command]
 fn get_training_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
 
     let conv_count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM conversations WHERE message_count >= 4",
@@ -1952,7 +1951,7 @@ fn get_training_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value
 
 #[tauri::command]
 fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
 
     // Load all feedback ratings into a map: conversation_id -> { message_index -> rating }
     let mut feedback_map: HashMap<i64, HashMap<i64, i64>> = HashMap::new();
@@ -2084,7 +2083,7 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
 
 #[tauri::command]
 fn rate_message(db: tauri::State<'_, HanniDb>, conversation_id: i64, message_index: i64, rating: i64) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "INSERT OR REPLACE INTO message_feedback (conversation_id, message_index, rating, created_at)
          VALUES (?1, ?2, ?3, datetime('now'))",
@@ -2095,7 +2094,7 @@ fn rate_message(db: tauri::State<'_, HanniDb>, conversation_id: i64, message_ind
 
 #[tauri::command]
 fn get_message_ratings(db: tauri::State<'_, HanniDb>, conversation_id: i64) -> Result<Vec<(i64, i64)>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT message_index, rating FROM message_feedback WHERE conversation_id = ?1"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -2184,7 +2183,7 @@ async fn spawn_api_server(app_handle: AppHandle) {
     ) -> Json<serde_json::Value> {
         // No auth required for status — allows frontend health check
         let busy = state.app.state::<LlmBusy>().0.load(Ordering::Relaxed);
-        let focus_active = state.app.state::<FocusManager>().0.lock().map(|s| s.active).unwrap_or(false);
+        let focus_active = state.app.state::<FocusManager>().0.lock().unwrap_or_else(|e| e.into_inner()).active;
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
@@ -2229,7 +2228,7 @@ async fn spawn_api_server(app_handle: AppHandle) {
         check_auth(&headers, &state.token)?;
 
         let db = state.app.state::<HanniDb>();
-        let conn = db.0.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)))?;
+        let conn = db.conn();
         let max = params.limit.unwrap_or(20) as i64;
 
         let words: Vec<&str> = params.q.split_whitespace().filter(|w| w.len() > 1).take(10).collect();
@@ -2282,7 +2281,7 @@ async fn spawn_api_server(app_handle: AppHandle) {
         check_auth(&headers, &state.token)?;
 
         let db = state.app.state::<HanniDb>();
-        let conn = db.0.lock().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {}", e)))?;
+        let conn = db.conn();
         let now = chrono::Local::now().to_rfc3339();
         conn.execute(
             "INSERT INTO facts (category, key, value, source, created_at, updated_at)
@@ -2542,7 +2541,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
             .unwrap_or("");
         let ctx = {
             let db = app.state::<HanniDb>();
-            let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+            let conn = db.conn();
             build_memory_context_from_db(&conn, last_user_msg, 80)
         };
         if !ctx.is_empty() {
@@ -3012,7 +3011,7 @@ fn memory_remember(
     value: String,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO facts (category, key, value, source, created_at, updated_at)
@@ -3029,7 +3028,7 @@ fn memory_recall(
     key: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     match key {
         Some(k) => {
             let result: Result<String, _> = conn.query_row(
@@ -3067,7 +3066,7 @@ fn memory_forget(
     key: String,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let deleted = conn.execute(
         "DELETE FROM facts WHERE category=?1 AND key=?2",
         rusqlite::params![category, key],
@@ -3085,7 +3084,7 @@ fn memory_search(
     limit: Option<usize>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let max = limit.unwrap_or(20) as i64;
 
     // Try FTS5 MATCH first
@@ -3139,7 +3138,7 @@ fn save_conversation(
     messages: Vec<(String, String)>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let messages_json = serde_json::to_string(&messages)
         .map_err(|e| format!("Serialize error: {}", e))?;
@@ -3157,7 +3156,7 @@ fn update_conversation(
     messages: Vec<(String, String)>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let messages_json = serde_json::to_string(&messages)
         .map_err(|e| format!("Serialize error: {}", e))?;
@@ -3174,7 +3173,7 @@ fn get_conversations(
     limit: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let max = limit.unwrap_or(30);
     let mut stmt = conn.prepare(
         "SELECT id, started_at, summary, message_count FROM conversations
@@ -3198,7 +3197,7 @@ fn get_conversation(
     id: i64,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let (messages_json, summary, started_at): (String, Option<String>, String) = conn.query_row(
         "SELECT messages, summary, started_at FROM conversations WHERE id=?1",
         rusqlite::params![id],
@@ -3219,7 +3218,7 @@ fn delete_conversation(
     id: i64,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM conversations WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -3231,7 +3230,7 @@ fn search_conversations(
     limit: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let max = limit.unwrap_or(20);
     let words: Vec<&str> = query.split_whitespace().filter(|w| w.len() > 1).take(10).collect();
     if words.is_empty() {
@@ -3346,7 +3345,7 @@ async fn process_conversation_end(
 
     if let Ok(result) = serde_json::from_str::<ExtractionResult>(json_str) {
         let db = app.state::<HanniDb>();
-        let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+        let conn = db.conn();
         let now = chrono::Local::now().to_rfc3339();
 
         // Update conversation summary
@@ -3384,7 +3383,7 @@ fn start_activity(
     db: tauri::State<'_, HanniDb>,
     focus: tauri::State<'_, FocusManager>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO activities (title, category, started_at, focus_mode, created_at) VALUES (?1, ?2, ?3, ?4, ?3)",
@@ -3406,7 +3405,7 @@ fn stop_activity(
     db: tauri::State<'_, HanniDb>,
     focus: tauri::State<'_, FocusManager>,
 ) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     // Find current (unfinished) activity
     let result: Result<(i64, String), _> = conn.query_row(
@@ -3439,7 +3438,7 @@ fn stop_activity(
 
 #[tauri::command]
 fn get_current_activity(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let result: Result<(i64, String, String, String), _> = conn.query_row(
         "SELECT id, title, category, started_at FROM activities WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1",
         [],
@@ -3461,7 +3460,7 @@ fn get_current_activity(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
 
 #[tauri::command]
 fn get_activity_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let target_date = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut stmt = conn.prepare(
         "SELECT id, title, category, started_at, ended_at, duration_minutes FROM activities
@@ -3488,7 +3487,7 @@ fn get_activity_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Resu
 
 #[tauri::command]
 fn create_note(title: String, content: String, tags: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO notes (title, content, tags, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
@@ -3503,7 +3502,7 @@ fn update_note(
     pinned: Option<bool>, archived: Option<bool>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     // Get current values for pinned/archived if not provided
     let (cur_pinned, cur_archived): (i32, i32) = conn.query_row(
@@ -3521,7 +3520,7 @@ fn update_note(
 
 #[tauri::command]
 fn delete_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM notes WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -3529,7 +3528,7 @@ fn delete_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
 
 #[tauri::command]
 fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let rows = if let Some(q) = search {
         if q.trim().is_empty() { get_notes_all(&conn)? }
         else {
@@ -3578,7 +3577,7 @@ fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Err
 
 #[tauri::command]
 fn get_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.query_row(
         "SELECT id, title, content, tags, pinned, archived, created_at, updated_at FROM notes WHERE id=?1",
         rusqlite::params![id],
@@ -3590,7 +3589,7 @@ fn get_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value,
 
 #[tauri::command]
 fn create_event(title: String, description: String, date: String, time: String, duration_minutes: i64, category: String, color: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO events (title, description, date, time, duration_minutes, category, color, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -3601,7 +3600,7 @@ fn create_event(title: String, description: String, date: String, time: String, 
 
 #[tauri::command]
 fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let prefix = format!("{}-{:02}", year, month);
     let mut stmt = conn.prepare(
         "SELECT id, title, description, date, time, duration_minutes, category, color, completed, COALESCE(source,'manual') FROM events WHERE date LIKE ?1 ORDER BY date, time"
@@ -3626,7 +3625,7 @@ fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<Ve
 
 #[tauri::command]
 fn delete_event(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM events WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -3708,7 +3707,7 @@ async fn sync_apple_calendar(month: u32, year: i32, db: tauri::State<'_, HanniDb
             }));
         }
     };
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
 
     // Clear old apple events for this month
@@ -3995,7 +3994,7 @@ async fn sync_google_ics(url: String, month: u32, year: i32, db: tauri::State<'_
         .map_err(|e| format!("Read error: {}", e))?;
 
     let prefix = format!("{}-{:02}", year, month);
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
 
     // Clear old google events for this month
@@ -4093,7 +4092,7 @@ async fn sync_google_ics(url: String, month: u32, year: i32, db: tauri::State<'_
 
 #[tauri::command]
 fn create_project(name: String, description: String, color: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO projects (name, description, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
@@ -4104,7 +4103,7 @@ fn create_project(name: String, description: String, color: String, db: tauri::S
 
 #[tauri::command]
 fn get_projects(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT p.id, p.name, p.description, p.status, p.color, p.created_at,
                 (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as task_count
@@ -4125,7 +4124,7 @@ fn get_projects(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>,
 
 #[tauri::command]
 fn create_task(project_id: i64, title: String, description: String, priority: String, due_date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO tasks (project_id, title, description, priority, due_date, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -4136,7 +4135,7 @@ fn create_task(project_id: i64, title: String, description: String, priority: St
 
 #[tauri::command]
 fn get_tasks(project_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, title, description, status, priority, due_date, completed_at FROM tasks
          WHERE project_id=?1 ORDER BY CASE status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC"
@@ -4157,7 +4156,7 @@ fn get_tasks(project_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde
 
 #[tauri::command]
 fn update_task_status(id: i64, status: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let completed_at = if status == "done" { Some(now.clone()) } else { None };
     conn.execute(
@@ -4171,7 +4170,7 @@ fn update_task_status(id: i64, status: String, db: tauri::State<'_, HanniDb>) ->
 
 #[tauri::command]
 fn create_learning_item(item_type: String, title: String, description: String, url: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO learning_items (type, title, description, url, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
@@ -4182,7 +4181,7 @@ fn create_learning_item(item_type: String, title: String, description: String, u
 
 #[tauri::command]
 fn get_learning_items(type_filter: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let rows = if let Some(t) = type_filter {
         let mut stmt = conn.prepare(
             "SELECT id, type, title, description, url, progress, status, category FROM learning_items WHERE type=?1 ORDER BY updated_at DESC"
@@ -4218,7 +4217,7 @@ fn learning_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite:
 
 #[tauri::command]
 fn create_hobby(name: String, category: String, icon: String, color: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO hobbies (name, category, icon, color, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -4229,7 +4228,7 @@ fn create_hobby(name: String, category: String, icon: String, color: String, db:
 
 #[tauri::command]
 fn get_hobbies(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT h.id, h.name, h.category, h.icon, h.color,
                 COALESCE((SELECT SUM(duration_minutes) FROM hobby_entries WHERE hobby_id=h.id), 0) / 60.0 as total_hours
@@ -4250,7 +4249,7 @@ fn get_hobbies(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, 
 
 #[tauri::command]
 fn log_hobby_entry(hobby_id: i64, duration_minutes: i64, notes: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     conn.execute(
@@ -4262,7 +4261,7 @@ fn log_hobby_entry(hobby_id: i64, duration_minutes: i64, notes: String, db: taur
 
 #[tauri::command]
 fn get_hobby_entries(hobby_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, date, duration_minutes, notes FROM hobby_entries WHERE hobby_id=?1 ORDER BY date DESC LIMIT 30"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -4281,7 +4280,7 @@ fn get_hobby_entries(hobby_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec
 
 #[tauri::command]
 fn create_workout(workout_type: String, title: String, duration_minutes: i64, calories: Option<i64>, notes: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     conn.execute(
@@ -4293,7 +4292,7 @@ fn create_workout(workout_type: String, title: String, duration_minutes: i64, ca
 
 #[tauri::command]
 fn get_workouts(_date_range: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, type, title, date, duration_minutes, calories, notes FROM workouts ORDER BY date DESC, created_at DESC LIMIT 50"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -4313,7 +4312,7 @@ fn get_workouts(_date_range: Option<String>, db: tauri::State<'_, HanniDb>) -> R
 
 #[tauri::command]
 fn get_workout_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let week_ago = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
     let (count, total_min, total_cal): (i64, i64, i64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(duration_minutes), 0), COALESCE(SUM(calories), 0) FROM workouts WHERE date >= ?1",
@@ -4327,7 +4326,7 @@ fn get_workout_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value,
 
 #[tauri::command]
 fn log_health(health_type: String, value: f64, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     let unit = match health_type.as_str() {
@@ -4357,7 +4356,7 @@ fn log_health(health_type: String, value: f64, notes: Option<String>, db: tauri:
 
 #[tauri::command]
 fn get_health_today(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut stmt = conn.prepare(
         "SELECT type, value FROM health_log WHERE date=?1"
@@ -4374,7 +4373,7 @@ fn get_health_today(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, 
 
 #[tauri::command]
 fn create_habit(name: String, icon: String, frequency: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO habits (name, icon, frequency, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -4385,7 +4384,7 @@ fn create_habit(name: String, icon: String, frequency: String, db: tauri::State<
 
 #[tauri::command]
 fn check_habit(habit_id: i64, date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let target_date = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let now = chrono::Local::now().to_rfc3339();
     // Toggle: if exists, delete; else insert
@@ -4408,7 +4407,7 @@ fn check_habit(habit_id: i64, date: Option<String>, db: tauri::State<'_, HanniDb
 
 #[tauri::command]
 fn get_habits_today(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut stmt = conn.prepare(
         "SELECT h.id, h.name, h.icon, h.frequency,
@@ -4436,7 +4435,7 @@ fn get_habits_today(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Val
 
 #[tauri::command]
 fn get_dashboard_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let today_pattern = format!("{}%", today);
 
@@ -4499,7 +4498,7 @@ fn get_dashboard_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value
 
 #[tauri::command]
 fn get_all_memories(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(q) = search {
         if !q.trim().is_empty() {
             let like = format!("%{}%", q);
@@ -4533,7 +4532,7 @@ fn get_all_memories(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Re
 
 #[tauri::command]
 fn delete_memory(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM facts WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -4541,7 +4540,7 @@ fn delete_memory(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
 
 #[tauri::command]
 fn update_memory(id: i64, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute("UPDATE facts SET value=?1, updated_at=?2 WHERE id=?3", rusqlite::params![value, now, id])
         .map_err(|e| format!("DB error: {}", e))?;
@@ -4557,7 +4556,7 @@ fn add_media_item(
     rating: Option<i32>, progress: Option<i32>, total_episodes: Option<i32>,
     notes: Option<String>, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO media_items (media_type, title, original_title, year, description, cover_url, status, rating, progress, total_episodes, notes, created_at, updated_at)
@@ -4578,7 +4577,7 @@ fn update_media_item(
     id: i64, status: Option<String>, rating: Option<i32>, progress: Option<i32>,
     notes: Option<String>, title: Option<String>, db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     // Build dynamic update
     let (cur_status, cur_rating, cur_progress, cur_notes, cur_title): (String, i32, i32, String, String) = conn.query_row(
@@ -4597,7 +4596,7 @@ fn update_media_item(
 
 #[tauri::command]
 fn delete_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM list_items WHERE media_item_id=?1", rusqlite::params![id]).ok();
     conn.execute("DELETE FROM media_items WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
@@ -4606,7 +4605,7 @@ fn delete_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), Strin
 
 #[tauri::command]
 fn get_media_items(media_type: String, status: Option<String>, show_hidden: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let hidden = if show_hidden.unwrap_or(false) { 1 } else { 0 };
     if let Some(s) = status {
         let mut stmt = conn.prepare(
@@ -4646,7 +4645,7 @@ fn media_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Er
 
 #[tauri::command]
 fn hide_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE media_items SET hidden=1 WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -4654,7 +4653,7 @@ fn hide_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String>
 
 #[tauri::command]
 fn unhide_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE media_items SET hidden=0 WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -4662,7 +4661,7 @@ fn unhide_media_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), Strin
 
 #[tauri::command]
 fn create_user_list(name: String, description: Option<String>, color: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO user_lists (name, description, color, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -4673,7 +4672,7 @@ fn create_user_list(name: String, description: Option<String>, color: Option<Str
 
 #[tauri::command]
 fn get_user_lists(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT ul.id, ul.name, ul.description, ul.color,
                 (SELECT COUNT(*) FROM list_items WHERE list_id=ul.id) as item_count
@@ -4693,7 +4692,7 @@ fn get_user_lists(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value
 
 #[tauri::command]
 fn add_to_list(list_id: i64, media_item_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT OR IGNORE INTO list_items (list_id, media_item_id, added_at) VALUES (?1, ?2, ?3)",
@@ -4704,7 +4703,7 @@ fn add_to_list(list_id: i64, media_item_id: i64, db: tauri::State<'_, HanniDb>) 
 
 #[tauri::command]
 fn remove_from_list(list_id: i64, media_item_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "DELETE FROM list_items WHERE list_id=?1 AND media_item_id=?2",
         rusqlite::params![list_id, media_item_id],
@@ -4714,7 +4713,7 @@ fn remove_from_list(list_id: i64, media_item_id: i64, db: tauri::State<'_, Hanni
 
 #[tauri::command]
 fn get_list_items(list_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT m.id, m.media_type, m.title, m.status, m.rating, m.cover_url
          FROM list_items li JOIN media_items m ON m.id = li.media_item_id
@@ -4735,7 +4734,7 @@ fn get_list_items(list_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<ser
 
 #[tauri::command]
 fn get_media_stats(media_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(mt) = media_type {
         let (total, completed, in_progress, avg_rating): (i64, i64, i64, f64) = conn.query_row(
             "SELECT COUNT(*), SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),
@@ -4769,7 +4768,7 @@ fn log_food(
     calories: Option<i64>, protein: Option<f64>, carbs: Option<f64>, fat: Option<f64>,
     notes: Option<String>, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
     conn.execute(
@@ -4783,7 +4782,7 @@ fn log_food(
 
 #[tauri::command]
 fn get_food_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut stmt = conn.prepare(
         "SELECT id, meal_type, name, calories, protein, carbs, fat, notes FROM food_log WHERE date=?1 ORDER BY created_at"
@@ -4801,14 +4800,14 @@ fn get_food_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<V
 
 #[tauri::command]
 fn delete_food_entry(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM food_log WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_food_stats(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let d = days.unwrap_or(7);
     let since = (chrono::Local::now() - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
     let (total_cal, avg_cal, total_protein): (i64, f64, f64) = conn.query_row(
@@ -4825,7 +4824,7 @@ fn create_recipe(
     prep_time: Option<i64>, cook_time: Option<i64>, servings: Option<i64>,
     calories: Option<i64>, tags: Option<String>, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO recipes (name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, created_at, updated_at)
@@ -4839,7 +4838,7 @@ fn create_recipe(
 
 #[tauri::command]
 fn get_recipes(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(q) = search {
         let like = format!("%{}%", q);
         let mut stmt = conn.prepare(
@@ -4867,7 +4866,7 @@ fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::E
 
 #[tauri::command]
 fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -4878,7 +4877,7 @@ fn add_product(
     expiry_date: Option<String>, location: Option<String>, notes: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO products (name, category, quantity, unit, expiry_date, location, notes, purchased_at, created_at)
@@ -4892,7 +4891,7 @@ fn add_product(
 
 #[tauri::command]
 fn get_products(location: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(loc) = location {
         let mut stmt = conn.prepare(
             "SELECT id, name, category, quantity, unit, expiry_date, location, notes FROM products WHERE location=?1 ORDER BY expiry_date NULLS LAST"
@@ -4919,7 +4918,7 @@ fn product_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::
 
 #[tauri::command]
 fn update_product(id: i64, quantity: Option<f64>, expiry_date: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let (cur_qty, cur_exp, cur_notes): (f64, Option<String>, String) = conn.query_row(
         "SELECT quantity, expiry_date, notes FROM products WHERE id=?1", rusqlite::params![id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -4933,14 +4932,14 @@ fn update_product(id: i64, quantity: Option<f64>, expiry_date: Option<String>, n
 
 #[tauri::command]
 fn delete_product(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM products WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_expiring_products(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let d = days.unwrap_or(3);
     let deadline = (chrono::Local::now() + chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
     let mut stmt = conn.prepare(
@@ -4960,7 +4959,7 @@ fn add_transaction(
     category: String, description: Option<String>, recurring: Option<bool>,
     recurring_period: Option<String>, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
     conn.execute(
@@ -4975,7 +4974,7 @@ fn add_transaction(
 
 #[tauri::command]
 fn get_transactions(month: Option<String>, transaction_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let prefix = month.unwrap_or_else(|| chrono::Local::now().format("%Y-%m").to_string());
     let pattern = format!("{}%", prefix);
     if let Some(t) = transaction_type {
@@ -5004,14 +5003,14 @@ fn tx_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Error
 
 #[tauri::command]
 fn delete_transaction(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM transactions WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_transaction_stats(month: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let prefix = month.unwrap_or_else(|| chrono::Local::now().format("%Y-%m").to_string());
     let pattern = format!("{}%", prefix);
     let (total_expense, total_income): (f64, f64) = conn.query_row(
@@ -5032,7 +5031,7 @@ fn get_transaction_stats(month: Option<String>, db: tauri::State<'_, HanniDb>) -
 
 #[tauri::command]
 fn create_budget(category: String, amount: f64, period: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let p = period.unwrap_or_else(|| "monthly".into());
     conn.execute(
@@ -5045,7 +5044,7 @@ fn create_budget(category: String, amount: f64, period: Option<String>, db: taur
 
 #[tauri::command]
 fn get_budgets(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let month = chrono::Local::now().format("%Y-%m").to_string();
     let pattern = format!("{}%", month);
     let mut stmt = conn.prepare(
@@ -5065,14 +5064,14 @@ fn get_budgets(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, 
 
 #[tauri::command]
 fn delete_budget(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM budgets WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn create_savings_goal(name: String, target_amount: f64, deadline: Option<String>, color: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO savings_goals (name, target_amount, deadline, color, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -5083,7 +5082,7 @@ fn create_savings_goal(name: String, target_amount: f64, deadline: Option<String
 
 #[tauri::command]
 fn get_savings_goals(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, name, target_amount, current_amount, deadline, color FROM savings_goals ORDER BY created_at DESC"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -5103,7 +5102,7 @@ fn get_savings_goals(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Va
 
 #[tauri::command]
 fn update_savings_goal(id: i64, add_amount: Option<f64>, target_amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(add) = add_amount {
         conn.execute("UPDATE savings_goals SET current_amount = current_amount + ?1 WHERE id=?2", rusqlite::params![add, id])
             .map_err(|e| format!("DB error: {}", e))?;
@@ -5117,14 +5116,14 @@ fn update_savings_goal(id: i64, add_amount: Option<f64>, target_amount: Option<f
 
 #[tauri::command]
 fn delete_savings_goal(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM savings_goals WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn add_subscription(name: String, amount: f64, currency: Option<String>, period: Option<String>, next_payment: Option<String>, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO subscriptions (name, amount, currency, period, next_payment, category, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -5136,7 +5135,7 @@ fn add_subscription(name: String, amount: f64, currency: Option<String>, period:
 
 #[tauri::command]
 fn get_subscriptions(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, name, amount, currency, period, next_payment, category, active FROM subscriptions ORDER BY active DESC, name"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -5153,7 +5152,7 @@ fn get_subscriptions(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Va
 
 #[tauri::command]
 fn update_subscription(id: i64, active: Option<bool>, amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(a) = active { conn.execute("UPDATE subscriptions SET active=?1 WHERE id=?2", rusqlite::params![a as i32, id]).map_err(|e| format!("DB error: {}", e))?; }
     if let Some(amt) = amount { conn.execute("UPDATE subscriptions SET amount=?1 WHERE id=?2", rusqlite::params![amt, id]).map_err(|e| format!("DB error: {}", e))?; }
     Ok(())
@@ -5161,14 +5160,14 @@ fn update_subscription(id: i64, active: Option<bool>, amount: Option<f64>, db: t
 
 #[tauri::command]
 fn delete_subscription(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM subscriptions WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn add_debt(name: String, debt_type: String, amount: f64, interest_rate: Option<f64>, due_date: Option<String>, description: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO debts (name, type, amount, remaining, interest_rate, due_date, description, created_at) VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7)",
@@ -5179,7 +5178,7 @@ fn add_debt(name: String, debt_type: String, amount: f64, interest_rate: Option<
 
 #[tauri::command]
 fn get_debts(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, name, type, amount, remaining, interest_rate, due_date, description FROM debts WHERE remaining > 0 ORDER BY due_date NULLS LAST"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -5199,7 +5198,7 @@ fn get_debts(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, St
 
 #[tauri::command]
 fn update_debt(id: i64, pay_amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(pay) = pay_amount {
         conn.execute("UPDATE debts SET remaining = MAX(0, remaining - ?1) WHERE id=?2", rusqlite::params![pay, id])
             .map_err(|e| format!("DB error: {}", e))?;
@@ -5209,7 +5208,7 @@ fn update_debt(id: i64, pay_amount: Option<f64>, db: tauri::State<'_, HanniDb>) 
 
 #[tauri::command]
 fn delete_debt(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM debts WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -5223,7 +5222,7 @@ fn save_journal_entry(
     wins: Option<String>, struggles: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
     conn.execute(
@@ -5238,7 +5237,7 @@ fn save_journal_entry(
 
 #[tauri::command]
 fn get_journal_entries(period: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let days = period.unwrap_or(30);
     let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
     let mut stmt = conn.prepare(
@@ -5258,7 +5257,7 @@ fn get_journal_entries(period: Option<i64>, db: tauri::State<'_, HanniDb>) -> Re
 
 #[tauri::command]
 fn get_journal_entry(date: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.query_row(
         "SELECT id, date, mood, energy, stress, gratitude, reflection, wins, struggles FROM journal_entries WHERE date=?1",
         rusqlite::params![date], |row| {
@@ -5275,7 +5274,7 @@ fn get_journal_entry(date: String, db: tauri::State<'_, HanniDb>) -> Result<serd
 
 #[tauri::command]
 fn log_mood(mood: i32, note: Option<String>, trigger: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now();
     conn.execute(
         "INSERT INTO mood_log (date, time, mood, note, trigger_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -5287,7 +5286,7 @@ fn log_mood(mood: i32, note: Option<String>, trigger: Option<String>, db: tauri:
 
 #[tauri::command]
 fn get_mood_history(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let d = days.unwrap_or(7);
     let since = (chrono::Local::now() - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
     let mut stmt = conn.prepare(
@@ -5305,7 +5304,7 @@ fn get_mood_history(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<
 
 #[tauri::command]
 fn create_principle(title: String, description: Option<String>, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO principles (title, description, category, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -5316,7 +5315,7 @@ fn create_principle(title: String, description: Option<String>, category: Option
 
 #[tauri::command]
 fn get_principles(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, title, description, category, active FROM principles ORDER BY category, created_at"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -5332,7 +5331,7 @@ fn get_principles(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value
 
 #[tauri::command]
 fn update_principle(id: i64, active: Option<bool>, title: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(a) = active { conn.execute("UPDATE principles SET active=?1 WHERE id=?2", rusqlite::params![a as i32, id]).map_err(|e| format!("DB error: {}", e))?; }
     if let Some(t) = title { conn.execute("UPDATE principles SET title=?1 WHERE id=?2", rusqlite::params![t, id]).map_err(|e| format!("DB error: {}", e))?; }
     Ok(())
@@ -5340,14 +5339,14 @@ fn update_principle(id: i64, active: Option<bool>, title: Option<String>, db: ta
 
 #[tauri::command]
 fn delete_principle(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM principles WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_mindset_check(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let week_ago = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
     let (avg_mood, avg_energy, avg_stress, journal_count): (f64, f64, f64, i64) = conn.query_row(
         "SELECT COALESCE(AVG(mood),3), COALESCE(AVG(energy),3), COALESCE(AVG(stress),3), COUNT(*)
@@ -5366,7 +5365,7 @@ fn get_mindset_check(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value,
 
 #[tauri::command]
 fn add_to_blocklist(block_type: String, value: String, schedule: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO blocklist (type, value, schedule, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -5377,14 +5376,14 @@ fn add_to_blocklist(block_type: String, value: String, schedule: Option<String>,
 
 #[tauri::command]
 fn remove_from_blocklist(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM blocklist WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_blocklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, type, value, schedule, active FROM blocklist ORDER BY type, value"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -5400,7 +5399,7 @@ fn get_blocklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>
 
 #[tauri::command]
 fn toggle_blocklist_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE blocklist SET active = 1 - active WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -5410,7 +5409,7 @@ fn toggle_blocklist_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), S
 
 #[tauri::command]
 fn create_goal(tab_name: String, title: String, target_value: f64, unit: Option<String>, deadline: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO tab_goals (tab_name, title, target_value, unit, deadline, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -5421,7 +5420,7 @@ fn create_goal(tab_name: String, title: String, target_value: f64, unit: Option<
 
 #[tauri::command]
 fn get_goals(tab_name: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(t) = tab_name {
         let mut stmt = conn.prepare(
             "SELECT id, tab_name, title, target_value, current_value, unit, deadline, status FROM tab_goals WHERE tab_name=?1 AND status='active' ORDER BY created_at"
@@ -5452,7 +5451,7 @@ fn goal_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Err
 
 #[tauri::command]
 fn update_goal(id: i64, current_value: Option<f64>, status: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(v) = current_value { conn.execute("UPDATE tab_goals SET current_value=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {}", e))?; }
     if let Some(s) = status { conn.execute("UPDATE tab_goals SET status=?1 WHERE id=?2", rusqlite::params![s, id]).map_err(|e| format!("DB error: {}", e))?; }
     Ok(())
@@ -5460,14 +5459,14 @@ fn update_goal(id: i64, current_value: Option<f64>, status: Option<String>, db: 
 
 #[tauri::command]
 fn delete_goal(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM tab_goals WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",
         rusqlite::params![key, value],
@@ -5481,7 +5480,7 @@ fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>) ->
 
 #[tauri::command]
 fn get_app_setting(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<String>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let result: Option<String> = conn.query_row(
         "SELECT value FROM app_settings WHERE key=?1", rusqlite::params![key], |row| row.get(0),
     ).ok();
@@ -5492,7 +5491,7 @@ fn get_app_setting(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<
 
 #[tauri::command]
 fn add_home_item(name: String, category: String, quantity: Option<f64>, unit: Option<String>, location: String, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("INSERT INTO home_items (name,category,quantity,unit,location,notes) VALUES (?1,?2,?3,?4,?5,?6)",
         rusqlite::params![name, category, quantity, unit, location, notes]).map_err(|e| e.to_string())?;
     Ok("added".into())
@@ -5500,7 +5499,7 @@ fn add_home_item(name: String, category: String, quantity: Option<f64>, unit: Op
 
 #[tauri::command]
 fn get_home_items(category: Option<String>, needed_only: bool, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut sql = "SELECT id,name,category,quantity,unit,location,needed,notes,created_at FROM home_items".to_string();
     let mut conditions = Vec::new();
     if let Some(ref c) = category { conditions.push(format!("category='{}'", c)); }
@@ -5522,7 +5521,7 @@ fn get_home_items(category: Option<String>, needed_only: bool, db: tauri::State<
 
 #[tauri::command]
 fn update_home_item(id: i64, name: Option<String>, quantity: Option<f64>, location: Option<String>, notes: Option<String>, needed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut updates = vec!["updated_at=datetime('now')".to_string()];
     if let Some(v) = &name { updates.push(format!("name='{}'", v)); }
     if let Some(v) = quantity { updates.push(format!("quantity={}", v)); }
@@ -5535,14 +5534,14 @@ fn update_home_item(id: i64, name: Option<String>, quantity: Option<f64>, locati
 
 #[tauri::command]
 fn delete_home_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM home_items WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("deleted".into())
 }
 
 #[tauri::command]
 fn toggle_home_item_needed(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE home_items SET needed = CASE WHEN needed=1 THEN 0 ELSE 1 END, updated_at=datetime('now') WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("toggled".into())
 }
@@ -5561,7 +5560,7 @@ fn add_contact(
     block_reason: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "INSERT INTO contacts (name, phone, email, category, relationship, notes, blocked, block_reason, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,datetime('now'),datetime('now'))",
         rusqlite::params![name, phone, email, category.unwrap_or("other".into()), relationship, notes, blocked.unwrap_or(false) as i32, block_reason],
@@ -5571,7 +5570,7 @@ fn add_contact(
 
 #[tauri::command]
 fn get_contacts(category: Option<String>, blocked: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut sql = "SELECT id, name, phone, email, category, relationship, notes, blocked, block_reason, favorite, created_at, updated_at FROM contacts WHERE 1=1".to_string();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(ref cat) = category {
@@ -5619,7 +5618,7 @@ fn update_contact(
     favorite: Option<bool>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(v) = name { conn.execute("UPDATE contacts SET name=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
     if let Some(v) = phone { conn.execute("UPDATE contacts SET phone=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
     if let Some(v) = email { conn.execute("UPDATE contacts SET email=?1, updated_at=datetime('now') WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
@@ -5634,21 +5633,21 @@ fn update_contact(
 
 #[tauri::command]
 fn delete_contact(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM contacts WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("deleted".into())
 }
 
 #[tauri::command]
 fn toggle_contact_blocked(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE contacts SET blocked = CASE WHEN blocked=1 THEN 0 ELSE 1 END, updated_at=datetime('now') WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("toggled".into())
 }
 
 #[tauri::command]
 fn toggle_contact_favorite(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE contacts SET favorite = CASE WHEN favorite=1 THEN 0 ELSE 1 END, updated_at=datetime('now') WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("toggled".into())
 }
@@ -5663,7 +5662,7 @@ fn add_contact_block(
     reason: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "INSERT INTO contact_blocks (contact_id, block_type, value, reason) VALUES (?1,?2,?3,?4)",
         rusqlite::params![contact_id, block_type.unwrap_or("site".into()), value, reason],
@@ -5673,7 +5672,7 @@ fn add_contact_block(
 
 #[tauri::command]
 fn get_contact_blocks(contact_id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare("SELECT id, contact_id, block_type, value, reason, active, created_at FROM contact_blocks WHERE contact_id=?1 ORDER BY created_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map(rusqlite::params![contact_id], |row| {
@@ -5693,14 +5692,14 @@ fn get_contact_blocks(contact_id: i64, db: tauri::State<'_, HanniDb>) -> Result<
 
 #[tauri::command]
 fn delete_contact_block(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM contact_blocks WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("deleted".into())
 }
 
 #[tauri::command]
 fn toggle_contact_block_active(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("UPDATE contact_blocks SET active = CASE WHEN active=1 THEN 0 ELSE 1 END WHERE id=?1", rusqlite::params![id]).map_err(|e| e.to_string())?;
     Ok("toggled".into())
 }
@@ -5709,7 +5708,7 @@ fn toggle_contact_block_active(id: i64, db: tauri::State<'_, HanniDb>) -> Result
 
 #[tauri::command]
 fn get_page_meta(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let result = conn.query_row(
         "SELECT tab_id, emoji, title, description, updated_at FROM page_meta WHERE tab_id=?1",
         rusqlite::params![tab_id],
@@ -5729,7 +5728,7 @@ fn get_page_meta(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_
 
 #[tauri::command]
 fn update_page_meta(tab_id: String, emoji: Option<String>, title: Option<String>, description: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO page_meta (tab_id, emoji, title, description, updated_at)
@@ -5744,7 +5743,7 @@ fn update_page_meta(tab_id: String, emoji: Option<String>, title: Option<String>
 
 #[tauri::command]
 fn get_property_definitions(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, tab_id, name, type, position, color, options, default_value, visible
          FROM property_definitions WHERE tab_id=?1 ORDER BY position"
@@ -5767,7 +5766,7 @@ fn get_property_definitions(tab_id: String, db: tauri::State<'_, HanniDb>) -> Re
 
 #[tauri::command]
 fn create_property_definition(tab_id: String, name: String, prop_type: String, position: Option<i64>, color: Option<String>, options: Option<String>, default_value: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let pos = position.unwrap_or_else(|| {
         conn.query_row("SELECT COALESCE(MAX(position), 0) + 1 FROM property_definitions WHERE tab_id=?1",
@@ -5783,7 +5782,7 @@ fn create_property_definition(tab_id: String, name: String, prop_type: String, p
 
 #[tauri::command]
 fn update_property_definition(id: i64, name: Option<String>, prop_type: Option<String>, position: Option<i64>, color: Option<String>, options: Option<String>, visible: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(n) = name { conn.execute("UPDATE property_definitions SET name=?1 WHERE id=?2", rusqlite::params![n, id]).map_err(|e| e.to_string())?; }
     if let Some(t) = prop_type { conn.execute("UPDATE property_definitions SET type=?1 WHERE id=?2", rusqlite::params![t, id]).map_err(|e| e.to_string())?; }
     if let Some(p) = position { conn.execute("UPDATE property_definitions SET position=?1 WHERE id=?2", rusqlite::params![p, id]).map_err(|e| e.to_string())?; }
@@ -5795,7 +5794,7 @@ fn update_property_definition(id: i64, name: Option<String>, prop_type: Option<S
 
 #[tauri::command]
 fn delete_property_definition(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute("DELETE FROM property_values WHERE property_id=?1", rusqlite::params![id]).ok();
     conn.execute("DELETE FROM property_definitions WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
@@ -5804,7 +5803,7 @@ fn delete_property_definition(id: i64, db: tauri::State<'_, HanniDb>) -> Result<
 
 #[tauri::command]
 fn get_property_values(record_table: String, record_ids: Vec<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if record_ids.is_empty() { return Ok(vec![]); }
     let placeholders: Vec<String> = record_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 2)).collect();
     let sql = format!(
@@ -5834,7 +5833,7 @@ fn get_property_values(record_table: String, record_ids: Vec<i64>, db: tauri::St
 
 #[tauri::command]
 fn set_property_value(record_id: i64, record_table: String, property_id: i64, value: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "INSERT INTO property_values (record_id, record_table, property_id, value)
          VALUES (?1, ?2, ?3, ?4)
@@ -5846,7 +5845,7 @@ fn set_property_value(record_id: i64, record_table: String, property_id: i64, va
 
 #[tauri::command]
 fn delete_property_value(record_id: i64, record_table: String, property_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     conn.execute(
         "DELETE FROM property_values WHERE record_id=?1 AND record_table=?2 AND property_id=?3",
         rusqlite::params![record_id, record_table, property_id],
@@ -5856,7 +5855,7 @@ fn delete_property_value(record_id: i64, record_table: String, property_id: i64,
 
 #[tauri::command]
 fn get_view_configs(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let mut stmt = conn.prepare(
         "SELECT id, tab_id, name, view_type, filter_json, sort_json, visible_columns, is_default, position
          FROM view_configs WHERE tab_id=?1 ORDER BY position"
@@ -5879,7 +5878,7 @@ fn get_view_configs(tab_id: String, db: tauri::State<'_, HanniDb>) -> Result<Vec
 
 #[tauri::command]
 fn create_view_config(tab_id: String, name: String, view_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let vt = view_type.unwrap_or_else(|| "table".into());
     conn.execute(
@@ -5891,7 +5890,7 @@ fn create_view_config(tab_id: String, name: String, view_type: Option<String>, d
 
 #[tauri::command]
 fn update_view_config(id: i64, filter_json: Option<String>, sort_json: Option<String>, visible_columns: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let conn = db.conn();
     if let Some(f) = filter_json { conn.execute("UPDATE view_configs SET filter_json=?1 WHERE id=?2", rusqlite::params![f, id]).map_err(|e| e.to_string())?; }
     if let Some(s) = sort_json { conn.execute("UPDATE view_configs SET sort_json=?1 WHERE id=?2", rusqlite::params![s, id]).map_err(|e| e.to_string())?; }
     if let Some(v) = visible_columns { conn.execute("UPDATE view_configs SET visible_columns=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| e.to_string())?; }
@@ -6813,7 +6812,7 @@ async fn speak_text(text: String, voice: Option<String>, db: tauri::State<'_, Ha
     let clean = clean_text_for_tts(&text);
     // Check for remote TTS server
     let remote_url = {
-        let conn = db.0.lock().map_err(|e| format!("DB lock: {}", e))?;
+        let conn = db.conn();
         conn.query_row("SELECT value FROM app_settings WHERE key='tts_server_url'", [], |row| row.get::<_, String>(0)).ok()
     };
     if let Some(url) = remote_url {
@@ -6946,7 +6945,8 @@ async fn report_proactive_engagement(
     let mut pstate = state.lock().await;
     // Mark the last proactive message as replied
     if let Some(pid) = pstate.last_proactive_id {
-        if let Ok(conn) = db.0.lock() {
+        {
+                let conn = db.conn();
             let delay = pstate.last_message_time
                 .map(|t| (chrono::Local::now() - t).num_seconds())
                 .unwrap_or(0);
@@ -6957,7 +6957,8 @@ async fn report_proactive_engagement(
         }
     }
     // Recompute engagement rate: rolling avg of last 20 proactive messages
-    if let Ok(conn) = db.0.lock() {
+    {
+                let conn = db.conn();
         let rate: f64 = conn.query_row(
             "SELECT COALESCE(AVG(CAST(user_replied AS REAL)), 0.5) FROM (SELECT user_replied FROM proactive_history ORDER BY id DESC LIMIT 20)",
             [], |row| row.get(0),
@@ -7343,10 +7344,7 @@ pub fn run() {
 
                     let focus = focus_handle.state::<FocusManager>();
                     let (active, end_time, apps) = {
-                        let state = match focus.0.lock() {
-                            Ok(s) => s,
-                            Err(_) => continue,
-                        };
+                        let state = focus.0.lock().unwrap_or_else(|e| e.into_inner());
                         (state.active, state.end_time, state.blocked_apps.clone())
                     };
 
@@ -7360,7 +7358,8 @@ pub fn run() {
                             // Auto-stop focus mode
                             let script = "do shell script \"sed -i '' '/# === HANNI FOCUS BLOCKER ===/,/# === END HANNI FOCUS BLOCKER ===/d' /etc/hosts && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges";
                             let _ = run_osascript(script);
-                            if let Ok(mut state) = focus.0.lock() {
+                            {
+                                let mut state = focus.0.lock().unwrap_or_else(|e| e.into_inner());
                                 state.active = false;
                                 state.end_time = None;
                                 state.blocked_apps.clear();
@@ -7409,7 +7408,8 @@ pub fn run() {
 
                     // Write to DB
                     let db = snapshot_handle.state::<HanniDb>();
-                    if let Ok(conn) = db.0.lock() {
+                    {
+                let conn = db.conn();
                         let _ = conn.execute(
                             "INSERT INTO activity_snapshots (captured_at, hour, weekday, frontmost_app, browser_url, music_playing, productive_min, distraction_min) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                             rusqlite::params![
@@ -7435,7 +7435,9 @@ pub fn run() {
                     let mut triggers: Vec<String> = Vec::new();
 
                     // Trigger: distraction >30 min
-                    if let Ok(conn) = snapshot_handle.state::<HanniDb>().0.lock() {
+                    {
+                        let db = snapshot_handle.state::<HanniDb>();
+                        let conn = db.conn();
                         let dist_total: f64 = conn.query_row(
                             "SELECT COALESCE(SUM(distraction_min), 0) FROM activity_snapshots WHERE captured_at > datetime('now', '-30 minutes')",
                             [], |row| row.get(0),
@@ -7480,10 +7482,7 @@ pub fn run() {
                     // Read last 18 snapshots (3 hours) and existing observation facts
                     let (snapshots_text, existing_obs) = {
                         let db = learning_handle.state::<HanniDb>();
-                        let conn = match db.0.lock() {
-                            Ok(c) => c,
-                            Err(_) => continue,
-                        };
+                        let conn = db.conn();
                         let mut snap_lines = Vec::new();
                         if let Ok(mut stmt) = conn.prepare(
                             "SELECT captured_at, frontmost_app, browser_url, music_playing, productive_min, distraction_min FROM activity_snapshots ORDER BY id DESC LIMIT 18"
@@ -7559,18 +7558,16 @@ pub fn run() {
 
                                 if !observations.is_empty() {
                                     let db = learning_handle.state::<HanniDb>();
-                                    let conn = db.0.lock();
-                                    if let Ok(conn) = conn {
-                                        let now = chrono::Local::now().to_rfc3339();
-                                        for obs in observations.iter().take(5) {
-                                            let key = format!("obs_{}", &now[..16]);
-                                            let _ = conn.execute(
-                                                "INSERT INTO facts (category, key, value, source, created_at, updated_at) VALUES ('observation', ?1, ?2, 'observation', ?3, ?3)",
-                                                rusqlite::params![key, obs, now],
-                                            );
-                                        }
-                                        eprintln!("[learning] saved {} observations", observations.len().min(5));
+                                    let conn = db.conn();
+                                    let now = chrono::Local::now().to_rfc3339();
+                                    for obs in observations.iter().take(5) {
+                                        let key = format!("obs_{}", &now[..16]);
+                                        let _ = conn.execute(
+                                            "INSERT INTO facts (category, key, value, source, created_at, updated_at) VALUES ('observation', ?1, ?2, 'observation', ?3, ?3)",
+                                            rusqlite::params![key, obs, now],
+                                        );
                                     }
+                                    eprintln!("[learning] saved {} observations", observations.len().min(5));
                                 }
                             }
                         }
@@ -7709,14 +7706,11 @@ pub fn run() {
                     // Build enriched memory context (50 facts instead of 30)
                     let (mem_ctx, chat_snippet) = {
                         let db = proactive_handle.state::<HanniDb>();
-                        let result = match db.0.lock() {
-                            Ok(conn) => (
-                                build_memory_context_from_db(&conn, "", 50),
-                                get_recent_chat_snippet(&conn, 6),
-                            ),
-                            Err(_) => (String::new(), String::new()),
-                        };
-                        result
+                        let conn = db.conn();
+                        (
+                            build_memory_context_from_db(&conn, "", 50),
+                            get_recent_chat_snippet(&conn, 6),
+                        )
                     };
                     // Mark LLM as busy during proactive call to prevent concurrent MLX requests
                     proactive_handle.state::<LlmBusy>().0.store(true, Ordering::Relaxed);
@@ -7732,16 +7726,12 @@ pub fn run() {
                             // Record in proactive_history
                             let proactive_id = {
                                 let db = proactive_handle.state::<HanniDb>();
-                                let result = if let Ok(conn) = db.0.lock() {
-                                    let _ = conn.execute(
-                                        "INSERT INTO proactive_history (sent_at, message) VALUES (?1, ?2)",
-                                        rusqlite::params![chrono::Local::now().to_rfc3339(), &message],
-                                    );
-                                    Some(conn.last_insert_rowid())
-                                } else {
-                                    None
-                                };
-                                result
+                                let conn = db.conn();
+                                let _ = conn.execute(
+                                    "INSERT INTO proactive_history (sent_at, message) VALUES (?1, ?2)",
+                                    rusqlite::params![chrono::Local::now().to_rfc3339(), &message],
+                                );
+                                Some(conn.last_insert_rowid())
                             };
                             let mut state = proactive_state_ref.lock().await;
                             state.last_message_time = Some(chrono::Local::now());
@@ -7776,7 +7766,8 @@ pub fn run() {
         .run(move |_app, event| {
             if let tauri::RunEvent::Exit = event {
                 // Kill MLX server process on app exit
-                if let Ok(mut child) = mlx_cleanup.0.lock() {
+                {
+                    let mut child = mlx_cleanup.0.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(ref mut proc) = *child {
                         let _ = proc.kill();
                     }
