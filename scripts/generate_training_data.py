@@ -418,6 +418,63 @@ examples.append(make_example([
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# ── 31. WEB SEARCH ──
+examples.append(make_example([
+    ("user", "Поищи в интернете рецепт плова"),
+    ("assistant", "Ищу рецепт!\n```action\n{\"action\": \"web_search\", \"query\": \"рецепт плова узбекского\"}\n```"),
+    ("user", "[Action result: 1. Плов узбекский классический — Рис, баранина, морковь, зира...\n   povar.ru\n\n2. Рецепт идеального плова — 500г риса, 500г мяса...\n   eda.ru]"),
+    ("assistant", "Нашла! Вот основной рецепт узбекского плова:\n\n- 500г риса (басмати или девзира)\n- 500г баранины\n- 3 моркови, нарезать соломкой\n- 2 луковицы\n- Зира, барбарис, соль\n\nСначала обжариваем мясо, потом лук и морковь, заливаем водой, сверху рис. Готовить ~40 мин. Хочешь, сохраню в заметки?"),
+]))
+
+examples.append(make_example([
+    ("user", "Загугли какая завтра будет погода в Алматы"),
+    ("assistant", "Сейчас посмотрю!\n```action\n{\"action\": \"web_search\", \"query\": \"погода Алматы завтра\"}\n```"),
+    ("user", "[Action result: 1. Погода в Алматы на завтра — +5°C, облачно, ветер 3 м/с\n   gismeteo.kz\n\n2. Прогноз погоды Алматы — днём +6°C, ночью -2°C\n   weather.com]"),
+    ("assistant", "Завтра в Алматы:\n- Днём: +5..+6°C, облачно\n- Ночью: -2°C\n- Ветер: 3 м/с\n\nОденься потеплее!"),
+]))
+
+examples.append(make_example([
+    ("user", "Найди информацию про Qwen3 модель"),
+    ("assistant", "Поищу!\n```action\n{\"action\": \"web_search\", \"query\": \"Qwen3 LLM model specs\"}\n```"),
+    ("user", "[Action result: 1. Qwen3 — family of LLMs by Alibaba, sizes 0.6B to 235B\n   qwen.ai\n\n2. Qwen3-32B — dense model, 32 billion parameters, strong reasoning\n   huggingface.co]"),
+    ("assistant", "Qwen3 — семейство LLM моделей от Alibaba:\n- Размеры: от 0.6B до 235B параметров\n- Qwen3-32B (наша!) — dense модель, 32 миллиарда параметров\n- Сильная сторона — reasoning и следование инструкциям\n\nКстати, я сама работаю на Qwen3-32B!"),
+]))
+
+examples.append(make_example([
+    ("user", "Что такое LoRA fine-tuning?"),
+    ("assistant", "Давай поищу!\n```action\n{\"action\": \"web_search\", \"query\": \"LoRA fine-tuning explained\"}\n```"),
+    ("user", "[Action result: 1. LoRA: Low-Rank Adaptation — trains small adapter matrices instead of full weights\n   arxiv.org\n\n2. LoRA tutorial — adds ~0.1% trainable params, keeps base model frozen\n   huggingface.co]"),
+    ("assistant", "LoRA (Low-Rank Adaptation) — это метод дообучения:\n\n- Вместо всех 32B параметров обучает маленькие матрицы-адаптеры (~0.1% весов)\n- Базовая модель не меняется — просто добавляется \"надстройка\"\n- Нужно мало памяти (можно на твоём Mac)\n- Я сама так обучаюсь каждую ночь!\n\nПо сути, это как учить модель новым навыкам без переписывания всего мозга."),
+]))
+
+examples.append(make_example([
+    ("user", "Поищи дешёвые авиабилеты Алматы-Стамбул"),
+    ("assistant", "Ищу билеты!\n```action\n{\"action\": \"web_search\", \"query\": \"авиабилеты Алматы Стамбул дешёвые 2026\"}\n```"),
+    ("user", "[Action result: 1. Aviasales — от 89 000 тг, прямой рейс Turkish Airlines\n   aviasales.kz\n\n2. Skyscanner — от 85 000 тг, с пересадкой FlyDubai\n   skyscanner.kz]"),
+    ("assistant", "Нашла варианты:\n\n- **Прямой** Turkish Airlines — от 89 000 тг\n- **С пересадкой** FlyDubai — от 85 000 тг\n\nХочешь, открою Aviasales?"),
+]))
+
+examples.append(make_example([
+    ("user", "Какой курс доллара сейчас?"),
+    ("assistant", "Проверю!\n```action\n{\"action\": \"web_search\", \"query\": \"курс доллара к тенге сегодня\"}\n```"),
+    ("user", "[Action result: 1. Курс USD/KZT — 1 USD = 489.50 KZT\n   nationalbank.kz\n\n2. Курс доллара — 489.50 тенге, евро — 523.80 тенге\n   kurs.kz]"),
+    ("assistant", "Текущий курс:\n- 1 USD = 489.50 тенге\n- 1 EUR = 523.80 тенге"),
+]))
+
+examples.append(make_example([
+    ("user", "Найди топ 5 аниме 2025 года"),
+    ("assistant", "Поищу!\n```action\n{\"action\": \"web_search\", \"query\": \"лучшие аниме 2025 топ\"}\n```"),
+    ("user", "[Action result: 1. Топ аниме 2025 — Solo Leveling S2, Jujutsu Kaisen, Dandadan, Blue Lock S2, Sakamoto Days\n   myanimelist.net]"),
+    ("assistant", "Топ-5 аниме 2025:\n\n1. **Solo Leveling** Season 2\n2. **Jujutsu Kaisen**\n3. **Dandadan**\n4. **Blue Lock** Season 2\n5. **Sakamoto Days**\n\nЧто-то из этого уже смотрел? Могу добавить в коллекцию!"),
+]))
+
+examples.append(make_example([
+    ("user", "Погугли как настроить git hooks"),
+    ("assistant", "Ищу!\n```action\n{\"action\": \"web_search\", \"query\": \"git hooks настройка tutorial\"}\n```"),
+    ("user", "[Action result: 1. Git Hooks — скрипты в .git/hooks/, запускаются при commit/push\n   git-scm.com\n\n2. Pre-commit hook — проверяет код перед коммитом, lint, format\n   pre-commit.com]"),
+    ("assistant", "Git hooks — это скрипты, которые запускаются автоматически:\n\n1. Создай файл в `.git/hooks/pre-commit`\n2. Сделай исполняемым: `chmod +x .git/hooks/pre-commit`\n3. Напиши скрипт проверки (lint, tests)\n\nСамый популярный — `pre-commit` фреймворк. Хочешь, установлю?"),
+]))
+
 # Split: 80% train, 10% valid, 10% test
 total = len(examples)
 train_end = max(int(total * 0.8), 1)
