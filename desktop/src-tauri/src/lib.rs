@@ -95,6 +95,7 @@ Focus:
 - start_focus(duration,apps?,sites?), stop_focus — block sites/apps
 System:
 - run_shell(command), open_url(url), send_notification(title,body), set_volume(level), get_clipboard, set_clipboard(text)
+- web_search(query) — search the web and return top 5 results. Use for current info, facts, recipes, etc.
 macOS Info:
 - get_activity, get_calendar, get_music, get_browser
 Media:
@@ -138,6 +139,7 @@ const ACTION_KEYWORDS: &[&str] = &[
     "log_", "add_", "start_", "stop_", "get_", "run_", "open_", "set_",
     "купил", "поел", "ел ", "завтрак", "обед", "ужин", "перекус",
     "вес ", "шаг", "вод", "сон",
+    "загугли", "найди в интернете", "поищи", "погугли", "search", "web_search",
 ];
 
 fn needs_full_prompt(user_msg: &str) -> bool {
@@ -1938,6 +1940,57 @@ async fn set_clipboard(text: String) -> Result<String, String> {
     }
     child.wait().map_err(|e| format!("Wait error: {}", e))?;
     Ok("Copied to clipboard".into())
+}
+
+// ── Web Search ──
+
+#[tauri::command]
+async fn web_search(query: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
+
+    // Use DuckDuckGo HTML (no API key needed)
+    let url = format!(
+        "https://html.duckduckgo.com/html/?q={}",
+        query.replace(' ', "+").replace('&', "%26").replace('#', "%23")
+    );
+
+    let response = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Search error: {}", e))?;
+
+    let html = response.text().await.map_err(|e| format!("Read error: {}", e))?;
+
+    // Parse results from DuckDuckGo HTML
+    let mut results = Vec::new();
+    let re_title = regex::Regex::new(r#"class="result__a"[^>]*>([^<]+)</a>"#).unwrap();
+    let re_snippet = regex::Regex::new(r#"class="result__snippet"[^>]*>(.*?)</a>"#).unwrap();
+    let re_url = regex::Regex::new(r#"class="result__url"[^>]*>([^<]+)</[^>]+>"#).unwrap();
+
+    let titles: Vec<String> = re_title.captures_iter(&html).map(|c| c[1].to_string()).collect();
+    let snippets: Vec<String> = re_snippet.captures_iter(&html).map(|c| {
+        // Strip HTML tags from snippet
+        let raw = c[1].to_string();
+        regex::Regex::new(r"<[^>]+>").unwrap().replace_all(&raw, "").to_string()
+    }).collect();
+    let urls: Vec<String> = re_url.captures_iter(&html).map(|c| c[1].trim().to_string()).collect();
+
+    for i in 0..titles.len().min(5) {
+        let snippet = snippets.get(i).map(|s| s.as_str()).unwrap_or("");
+        let url = urls.get(i).map(|s| s.as_str()).unwrap_or("");
+        results.push(format!("{}. {} — {}\n   {}", i + 1, titles[i], snippet, url));
+    }
+
+    if results.is_empty() {
+        Ok(format!("No results found for '{}'", query))
+    } else {
+        Ok(results.join("\n\n"))
+    }
 }
 
 // ── Phase 3: Training Data Export ──
@@ -7236,6 +7289,7 @@ pub fn run() {
             set_volume,
             get_clipboard,
             set_clipboard,
+            web_search,
             // v0.7.0: Activities (Focus)
             start_activity,
             stop_activity,

@@ -1091,6 +1091,10 @@ async function executeAction(actionJson) {
       case 'set_clipboard':
         result = await invoke('set_clipboard', { text: action.text || '' });
         break;
+      case 'web_search':
+      case 'search_web':
+        result = await invoke('web_search', { query: action.query || '' });
+        break;
       // Media
       case 'add_media_item':
       case 'add_media':
