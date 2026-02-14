@@ -1,6 +1,7 @@
 #!/bin/bash
 # Hanni Nightly LoRA Training Script
 # Runs at 3 AM via LaunchAgent — exports training data, fine-tunes, restarts MLX server
+# Optional: runs Claude distillation first if claude CLI is available
 set -euo pipefail
 
 HANNI_DIR="$HOME/Library/Application Support/Hanni"
@@ -12,6 +13,7 @@ MLX_PLIST="$HOME/Library/LaunchAgents/com.hanni.mlx-server.plist"
 MODEL="mlx-community/Qwen3-32B-4bit"
 LOG="$HANNI_DIR/training.log"
 SYSTEM_PROMPT_FILE="$HANNI_DIR/system_prompt.txt"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MIN_FEEDBACK=10
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
@@ -120,6 +122,16 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 log "Export complete"
+
+# 2.5. Run Claude distillation if claude CLI is available
+if command -v claude &>/dev/null; then
+    log "Claude CLI found — running distillation..."
+    "$SCRIPT_DIR/claude_distill.sh" --focus agentic --count 10 >> "$LOG" 2>&1 || {
+        log "Distillation failed (non-fatal), continuing with existing data"
+    }
+else
+    log "Claude CLI not found — skipping distillation"
+fi
 
 # 3. Stop MLX server
 log "Stopping MLX server..."
