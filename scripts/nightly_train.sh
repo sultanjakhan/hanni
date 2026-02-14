@@ -153,14 +153,16 @@ log "Starting LoRA training..."
 TRAIN_START=$(date +%s)
 
 python3 -m mlx_lm lora \
+    --train \
     --model "$MODEL" \
     --data "$TRAINING_DIR" \
     --adapter-path "$ADAPTER_DIR" \
     --mask-prompt \
-    --batch-size 4 \
-    --iters 300 \
-    --lora-rank 8 \
-    --learning-rate 1e-5 \
+    --batch-size 1 \
+    --iters 50 \
+    --learning-rate 2e-5 \
+    --grad-checkpoint \
+    --test \
     >> "$LOG" 2>&1
 
 TRAIN_STATUS=$?
