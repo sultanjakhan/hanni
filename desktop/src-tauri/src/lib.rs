@@ -2574,7 +2574,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
-            build_memory_context_from_db(&conn, last_user_msg, 80)
+            build_memory_context_from_db(&conn, last_user_msg, if use_full { 80 } else { 10 })
         };
         if !ctx.is_empty() {
             chat_messages.push(ChatMessage {
@@ -2584,8 +2584,12 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
         }
     }
 
-    let msg_count = messages.len();
-    for (i, (role, content)) in messages.iter().enumerate() {
+    // For lite mode, use only last 6 messages to keep prompt small
+    let history_limit = if use_full || call_mode { messages.len() } else { 6 };
+    let skip = messages.len().saturating_sub(history_limit);
+    let trimmed: Vec<_> = messages.iter().skip(skip).collect();
+    let msg_count = trimmed.len();
+    for (i, (role, content)) in trimmed.iter().enumerate() {
         let mut c = content.clone();
         // Append /no_think to the last user message for reliable thinking suppression
         if i == msg_count - 1 && role == "user" {
