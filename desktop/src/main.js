@@ -1300,7 +1300,7 @@ async function streamChat(botDiv, t0, callMode = false) {
   const unlistenDone = await listen('chat-done', () => {});
 
   try {
-    const msgs = history.slice(-30);
+    const msgs = history.slice(-20);
     await invoke('chat', { messages: msgs, callMode });
   } catch (e) {
     if (!fullReply) {
