@@ -7315,6 +7315,10 @@ pub fn run() {
                 }
             });
 
+            // Save system prompt for nightly training script
+            let prompt_path = hanni_data_dir().join("system_prompt.txt");
+            let _ = std::fs::write(&prompt_path, SYSTEM_PROMPT);
+
             // HTTP API server (Phase 4)
             let api_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

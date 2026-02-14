@@ -1479,10 +1479,27 @@ async function send() {
       } else {
         currentConversationId = await invoke('save_conversation', { messages: history });
       }
-      // Add feedback buttons to last bot message now that we have conversation ID
-      const lastW = chat.querySelector('.msg-wrapper:last-of-type');
-      if (lastW && !lastW.querySelector('.feedback-btn') && currentConversationId) {
-        addFeedbackButtons(lastW, currentConversationId, history.length - 1);
+      // Add feedback buttons to ALL bot messages that don't have them yet
+      if (currentConversationId) {
+        const allWrappers = chat.querySelectorAll('.msg-wrapper');
+        allWrappers.forEach(w => {
+          if (!w.querySelector('.feedback-btn')) {
+            // Find which history index this message corresponds to
+            const allWrappersArr = [...chat.querySelectorAll('.msg-wrapper')];
+            const wrapperIdx = allWrappersArr.indexOf(w);
+            // Map wrapper index to history index (assistant messages only)
+            let assistantCount = 0;
+            for (let i = 0; i < history.length; i++) {
+              if (history[i][0] === 'assistant') {
+                if (assistantCount === wrapperIdx) {
+                  addFeedbackButtons(w, currentConversationId, i);
+                  break;
+                }
+                assistantCount++;
+              }
+            }
+          }
+        });
       }
       if (history.length >= 4) {
         await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });
