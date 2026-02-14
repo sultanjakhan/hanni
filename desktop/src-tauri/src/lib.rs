@@ -123,6 +123,29 @@ CRITICAL RULES:
 - Your memories are already in context — use search_memory only for specific lookups.
 - Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly)."#;
 
+const SYSTEM_PROMPT_LITE: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language.
+- Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly).
+- Keep responses short (1-3 sentences) for casual chat.
+- You have memory about the user — use it naturally."#;
+
+const ACTION_KEYWORDS: &[&str] = &[
+    "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
+    "трекай", "таймер", "стоп ", "событи", "встреч", "задач", "цел", "тренировк",
+    "здоровь", "спал", "выпил", "фокус", "открой", "отправь", "установи", "буфер",
+    "календар", "музык", "аниме", "манга", "фильм", "сериал", "книг", "рецепт",
+    "продукт", "расход", "доход", "бюджет", "подписк", "блокируй", "разблокируй",
+    "напомни", "удали", "создай", "action", "```", "покажи стат", "сколько",
+    "log_", "add_", "start_", "stop_", "get_", "run_", "open_", "set_",
+    "купил", "поел", "ел ", "завтрак", "обед", "ужин", "перекус",
+    "вес ", "шаг", "вод", "сон",
+];
+
+fn needs_full_prompt(user_msg: &str) -> bool {
+    let lower = user_msg.to_lowercase();
+    if lower.len() > 200 { return true; }
+    ACTION_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
 fn data_file_path() -> PathBuf {
     hanni_data_dir().join("life-tracker-data.json")
 }
@@ -2522,10 +2545,19 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
         now_local.format("%H:%M"),
         days_ahead,
     );
+    // Adaptive prompt: use full prompt only when actions are needed
+    let last_user_msg = messages.iter().rev()
+        .find(|(role, _)| role == "user")
+        .map(|(_, c)| c.as_str())
+        .unwrap_or("");
+    let use_full = needs_full_prompt(last_user_msg);
+
     let system_content = if call_mode {
-        format!("{}{}\n\n[CALL MODE] You are in voice call mode — like Jarvis. Rules:\n- Answer in 1-2 short sentences MAX. Be extremely concise.\n- No action blocks unless the user explicitly asks to do something.\n- No lists, no formatting, no code blocks — just natural speech.\n- Respond in the user's language.", SYSTEM_PROMPT, date_context)
-    } else {
+        format!("{}{}\n\n[CALL MODE] You are in voice call mode — like Jarvis. Rules:\n- Answer in 1-2 short sentences MAX. Be extremely concise.\n- No action blocks unless the user explicitly asks to do something.\n- No lists, no formatting, no code blocks — just natural speech.\n- Respond in the user's language.", SYSTEM_PROMPT_LITE, date_context)
+    } else if use_full {
         format!("{}{}", SYSTEM_PROMPT, date_context)
+    } else {
+        format!("{}{}", SYSTEM_PROMPT_LITE, date_context)
     };
 
     let mut chat_messages = vec![ChatMessage {
@@ -2568,7 +2600,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: if call_mode { 150 } else { 1024 },
+        max_tokens: if call_mode { 150 } else if use_full { 1024 } else { 256 },
         stream: true,
         temperature: if call_mode { 0.5 } else { 0.7 },
     };
