@@ -1091,6 +1091,60 @@ body {
   50% { opacity: 0.5; }
 }
 
+.msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
+.feedback-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--transition-fast);
+  opacity: 0;
+}
+
+.msg-wrapper:hover .feedback-btn,
+.feedback-btn.active {
+  opacity: 1;
+}
+
+.feedback-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.feedback-btn.thumb-up.active {
+  color: var(--accent-green);
+  background: var(--color-green-bg);
+  border-color: var(--color-green-bg);
+  opacity: 1;
+}
+
+.feedback-btn.thumb-down.active {
+  color: var(--accent-red);
+  background: var(--color-red-bg);
+  border-color: var(--color-red-bg);
+  opacity: 1;
+}
+
+.feedback-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
 /* ── Drag & drop overlay ── */
 
 body.dragover::after {

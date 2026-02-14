@@ -320,8 +320,17 @@ async function loadConversation(id) {
     currentConversationId = id;
     history = conv.messages || [];
     chat.innerHTML = '';
+    // Load existing ratings
+    let ratingsMap = {};
+    try {
+      const ratings = await invoke('get_message_ratings', { conversationId: id });
+      for (const [idx, rating] of ratings) {
+        ratingsMap[idx] = rating;
+      }
+    } catch (_) {}
     // Render all messages
-    for (const [role, content] of history) {
+    for (let i = 0; i < history.length; i++) {
+      const [role, content] = history[i];
       if (role === 'user' && content.startsWith('[Action result:')) {
         const div = document.createElement('div');
         div.className = 'action-result success';
@@ -329,6 +338,15 @@ async function loadConversation(id) {
         chat.appendChild(div);
       } else {
         addMsg(role === 'assistant' ? 'bot' : role, content);
+        // Add feedback buttons to bot messages
+        if (role === 'assistant') {
+          const wrapper = chat.querySelector('.msg-wrapper:last-of-type');
+          if (wrapper) {
+            const { thumbUp, thumbDown } = addFeedbackButtons(wrapper, id, i);
+            if (ratingsMap[i] === 1) thumbUp.classList.add('active');
+            if (ratingsMap[i] === -1) thumbDown.classList.add('active');
+          }
+        }
       }
     }
     scrollDown();
@@ -842,6 +860,51 @@ function addMsg(role, text) {
   chat.appendChild(div);
   scrollDown();
   return div;
+}
+
+function addFeedbackButtons(wrapper, conversationId, messageIndex) {
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  const thumbUp = document.createElement('button');
+  thumbUp.className = 'feedback-btn thumb-up';
+  thumbUp.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2 20h2V10H2v10zm20-9a2 2 0 0 0-2-2h-6.31l.95-4.57.03-.32a1.5 1.5 0 0 0-.44-1.06L13.17 2 7.59 7.59A2 2 0 0 0 7 9v10a2 2 0 0 0 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>';
+  thumbUp.title = 'Хороший ответ';
+
+  const thumbDown = document.createElement('button');
+  thumbDown.className = 'feedback-btn thumb-down';
+  thumbDown.innerHTML = '<svg viewBox="0 0 24 24"><path d="M22 4h-2v10h2V4zM2 13a2 2 0 0 0 2 2h6.31l-.95 4.57-.03.32c0 .4.17.77.44 1.06L10.83 22l5.58-5.59A2 2 0 0 0 17 15V5a2 2 0 0 0-2-2H6c-.83 0-1.54.5-1.84 1.22L1.14 11.27c-.09.23-.14.47-.14.73v2z"/></svg>';
+  thumbDown.title = 'Плохой ответ';
+
+  const handleClick = async (btn, rating) => {
+    const isActive = btn.classList.contains('active');
+    // Remove active from both
+    thumbUp.classList.remove('active');
+    thumbDown.classList.remove('active');
+    if (!isActive) {
+      btn.classList.add('active');
+      try {
+        await invoke('rate_message', { conversationId, messageIndex, rating });
+      } catch (e) {
+        console.error('Rate error:', e);
+      }
+    } else {
+      // Toggled off — rate as 0 to clear
+      try {
+        await invoke('rate_message', { conversationId, messageIndex, rating: 0 });
+      } catch (e) {
+        console.error('Rate error:', e);
+      }
+    }
+  };
+
+  thumbUp.addEventListener('click', () => handleClick(thumbUp, 1));
+  thumbDown.addEventListener('click', () => handleClick(thumbDown, -1));
+
+  actions.appendChild(thumbUp);
+  actions.appendChild(thumbDown);
+  wrapper.appendChild(actions);
+  return { thumbUp, thumbDown };
 }
 
 // ── File attachment ──
@@ -1415,6 +1478,11 @@ async function send() {
         await invoke('update_conversation', { id: currentConversationId, messages: history });
       } else {
         currentConversationId = await invoke('save_conversation', { messages: history });
+      }
+      // Add feedback buttons to last bot message now that we have conversation ID
+      const lastW = chat.querySelector('.msg-wrapper:last-of-type');
+      if (lastW && !lastW.querySelector('.feedback-btn') && currentConversationId) {
+        addFeedbackButtons(lastW, currentConversationId, history.length - 1);
       }
       if (history.length >= 4) {
         await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });

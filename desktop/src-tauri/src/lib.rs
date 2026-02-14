@@ -785,6 +785,15 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             message TEXT NOT NULL,
             user_replied INTEGER DEFAULT 0,
             reply_delay_secs INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS message_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            message_index INTEGER NOT NULL,
+            rating INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            exported INTEGER DEFAULT 0,
+            UNIQUE(conversation_id, message_index)
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -1945,24 +1954,42 @@ fn get_training_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value
 fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
 
+    // Load all feedback ratings into a map: conversation_id -> { message_index -> rating }
+    let mut feedback_map: HashMap<i64, HashMap<i64, i64>> = HashMap::new();
+    {
+        let mut fb_stmt = conn.prepare(
+            "SELECT conversation_id, message_index, rating FROM message_feedback"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let fb_rows = fb_stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+        }).map_err(|e| format!("Query error: {}", e))?;
+        for row in fb_rows.filter_map(|r| r.ok()) {
+            feedback_map.entry(row.0).or_default().insert(row.1, row.2);
+        }
+    }
+
     let mut stmt = conn.prepare(
-        "SELECT messages, summary FROM conversations WHERE message_count >= 4 ORDER BY started_at"
+        "SELECT id, messages, summary FROM conversations WHERE message_count >= 4 ORDER BY started_at"
     ).map_err(|e| format!("DB error: {}", e))?;
 
-    let rows: Vec<(String, Option<String>)> = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    let rows: Vec<(i64, String, Option<String>)> = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))
     })
     .map_err(|e| format!("Query error: {}", e))?
     .filter_map(|r| r.ok())
     .collect();
 
-    let mut training_examples: Vec<serde_json::Value> = Vec::new();
+    let mut rated_examples: Vec<serde_json::Value> = Vec::new();
+    let mut unrated_examples: Vec<serde_json::Value> = Vec::new();
 
-    for (messages_json, _summary) in &rows {
+    for (conv_id, messages_json, _summary) in &rows {
         let messages: Vec<(String, String)> = match serde_json::from_str(messages_json) {
             Ok(m) => m,
             Err(_) => continue,
         };
+
+        let ratings = feedback_map.get(conv_id);
+        let has_positive = ratings.map_or(false, |r| r.values().any(|&v| v == 1));
 
         // Filter: skip if fewer than 2 real messages
         let real_msgs: Vec<&(String, String)> = messages.iter()
@@ -1982,9 +2009,16 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
             "content": SYSTEM_PROMPT
         })];
 
-        for (role, content) in &messages {
+        for (idx, (role, content)) in messages.iter().enumerate() {
             if role == "user" || role == "assistant" {
-                // Strip /no_think suffix from user messages
+                // Skip assistant messages with negative ratings
+                if role == "assistant" {
+                    if let Some(r) = ratings {
+                        if r.get(&(idx as i64)) == Some(&-1) {
+                            continue;
+                        }
+                    }
+                }
                 let clean = content.trim_end_matches(" /no_think").to_string();
                 chat_msgs.push(serde_json::json!({
                     "role": role,
@@ -1993,18 +2027,29 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
             }
         }
 
-        training_examples.push(serde_json::json!({
-            "messages": chat_msgs
-        }));
+        let example = serde_json::json!({ "messages": chat_msgs });
+        if has_positive {
+            rated_examples.push(example);
+        } else {
+            unrated_examples.push(example);
+        }
     }
+
+    // Prioritize rated conversations: rated first, then unrated
+    let mut training_examples = rated_examples;
+    training_examples.extend(unrated_examples);
 
     if training_examples.is_empty() {
         return Err("No conversations suitable for training".into());
     }
 
-    // 80/20 split
-    let split_idx = (training_examples.len() as f64 * 0.8).ceil() as usize;
-    let (train, valid) = training_examples.split_at(split_idx);
+    // 80/10/10 split (mlx_lm wants train/valid/test)
+    let total = training_examples.len();
+    let train_end = (total as f64 * 0.8).ceil() as usize;
+    let valid_end = train_end + (total as f64 * 0.1).ceil() as usize;
+    let train = &training_examples[..train_end];
+    let valid = &training_examples[train_end..valid_end.min(total)];
+    let test = &training_examples[valid_end.min(total)..];
 
     // Write files
     let output_dir = hanni_data_dir().join("training");
@@ -2012,26 +2057,54 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
 
     let train_path = output_dir.join("train.jsonl");
     let valid_path = output_dir.join("valid.jsonl");
+    let test_path = output_dir.join("test.jsonl");
 
-    let mut train_file = std::fs::File::create(&train_path).map_err(|e| format!("File error: {}", e))?;
-    for example in train {
-        writeln!(train_file, "{}", serde_json::to_string(example).unwrap_or_default())
-            .map_err(|e| format!("Write error: {}", e))?;
+    for (path, data) in [(&train_path, train), (&valid_path, valid), (&test_path, test)] {
+        let mut f = std::fs::File::create(path).map_err(|e| format!("File error: {}", e))?;
+        for example in data {
+            writeln!(f, "{}", serde_json::to_string(example).unwrap_or_default())
+                .map_err(|e| format!("Write error: {}", e))?;
+        }
     }
 
-    let mut valid_file = std::fs::File::create(&valid_path).map_err(|e| format!("File error: {}", e))?;
-    for example in valid {
-        writeln!(valid_file, "{}", serde_json::to_string(example).unwrap_or_default())
-            .map_err(|e| format!("Write error: {}", e))?;
-    }
+    // Mark feedback as exported
+    conn.execute("UPDATE message_feedback SET exported = 1 WHERE exported = 0", [])
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(serde_json::json!({
         "train_path": train_path.to_string_lossy(),
         "valid_path": valid_path.to_string_lossy(),
+        "test_path": test_path.to_string_lossy(),
         "train_count": train.len(),
         "valid_count": valid.len(),
-        "total": training_examples.len(),
+        "test_count": test.len(),
+        "total": total,
     }))
+}
+
+#[tauri::command]
+fn rate_message(db: tauri::State<'_, HanniDb>, conversation_id: i64, message_index: i64, rating: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    conn.execute(
+        "INSERT OR REPLACE INTO message_feedback (conversation_id, message_index, rating, created_at)
+         VALUES (?1, ?2, ?3, datetime('now'))",
+        rusqlite::params![conversation_id, message_index, rating],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_message_ratings(db: tauri::State<'_, HanniDb>, conversation_id: i64) -> Result<Vec<(i64, i64)>, String> {
+    let conn = db.0.lock().map_err(|e| format!("DB lock error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT message_index, rating FROM message_feedback WHERE conversation_id = ?1"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![conversation_id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+    }).map_err(|e| format!("Query error: {}", e))?
+    .filter_map(|r| r.ok())
+    .collect();
+    Ok(rows)
 }
 
 // ── Phase 4: HTTP API ──
@@ -2273,14 +2346,32 @@ fn start_mlx_server() -> Option<Child> {
         return None;
     }
 
-    eprintln!("[mlx] Starting MLX server with {} -m mlx_lm server --model {} --port 8234", python, MODEL);
+    // Check if LoRA adapter exists
+    let adapter_path = hanni_data_dir().join("lora-adapter").join("adapters.safetensors");
+    let adapter_dir = hanni_data_dir().join("lora-adapter");
+    let has_adapter = adapter_path.exists();
+
+    if has_adapter {
+        eprintln!("[mlx] LoRA adapter found at {:?}", adapter_dir);
+    }
+
+    let mut args = vec!["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234"];
+    let adapter_dir_str = adapter_dir.to_string_lossy().to_string();
+    if has_adapter {
+        args.push("--adapter-path");
+        args.push(&adapter_dir_str);
+        eprintln!("[mlx] Starting MLX server with adapter: {} {:?}", python, args);
+    } else {
+        eprintln!("[mlx] Starting MLX server: {} {:?}", python, args);
+    }
+
     // Log MLX stderr to file for debugging
     let log_path = hanni_data_dir().join("mlx_server.log");
     let stderr_file = std::fs::File::create(&log_path)
         .map(std::process::Stdio::from)
         .unwrap_or_else(|_| std::process::Stdio::null());
     let child = Command::new(&python)
-        .args(["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234"])
+        .args(&args)
         .stdout(std::process::Stdio::null())
         .stderr(stderr_file)
         .spawn();
@@ -7038,6 +7129,8 @@ pub fn run() {
             // Phase 3: Training
             get_training_stats,
             export_training_data,
+            rate_message,
+            get_message_ratings,
             // Phase 5: Actions
             run_shell,
             open_url,
