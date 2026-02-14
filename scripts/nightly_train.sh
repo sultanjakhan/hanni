@@ -11,18 +11,21 @@ ADAPTER_BACKUP="$HANNI_DIR/lora-adapter-backup"
 MLX_PLIST="$HOME/Library/LaunchAgents/com.hanni.mlx-server.plist"
 MODEL="mlx-community/Qwen3-32B-4bit"
 LOG="$HANNI_DIR/training.log"
-MIN_POSITIVE_RATINGS=10
+SYSTEM_PROMPT_FILE="$HANNI_DIR/system_prompt.txt"
+MIN_FEEDBACK=10
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"; }
 
 log "=== Nightly training started ==="
 
-# 1. Check if we have enough positive ratings
+# 1. Check if we have enough feedback (positive or negative)
+FEEDBACK_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM message_feedback WHERE rating != 0 AND exported = 0;" 2>/dev/null || echo "0")
 POSITIVE_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM message_feedback WHERE rating = 1 AND exported = 0;" 2>/dev/null || echo "0")
-log "Unexported positive ratings: $POSITIVE_COUNT"
+NEGATIVE_COUNT=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM message_feedback WHERE rating = -1 AND exported = 0;" 2>/dev/null || echo "0")
+log "Unexported feedback: $FEEDBACK_COUNT total ($POSITIVE_COUNT positive, $NEGATIVE_COUNT negative)"
 
-if [ "$POSITIVE_COUNT" -lt "$MIN_POSITIVE_RATINGS" ]; then
-    log "Not enough positive ratings ($POSITIVE_COUNT < $MIN_POSITIVE_RATINGS). Skipping."
+if [ "$FEEDBACK_COUNT" -lt "$MIN_FEEDBACK" ]; then
+    log "Not enough feedback ($FEEDBACK_COUNT < $MIN_FEEDBACK). Skipping."
     exit 0
 fi
 
@@ -49,9 +52,13 @@ rows = conn.execute(
     "SELECT id, messages FROM conversations WHERE message_count >= 4 ORDER BY started_at"
 ).fetchall()
 
-# Read system prompt from the first few lines pattern - use a simple placeholder
-# The actual system prompt will be included from the app's export
-SYSTEM_PROMPT = "You are Hanni, a personal AI assistant."
+# Read actual system prompt saved by Hanni at startup
+prompt_file = os.path.join(hanni_dir, "system_prompt.txt")
+if os.path.exists(prompt_file):
+    SYSTEM_PROMPT = open(prompt_file).read()
+else:
+    SYSTEM_PROMPT = "You are Hanni, a personal AI assistant."
+    print("WARNING: system_prompt.txt not found, using fallback")
 
 rated = []
 unrated = []
