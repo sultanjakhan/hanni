@@ -12,6 +12,10 @@ let APP_VERSION = '?';
 (async () => {
   try {
     APP_VERSION = await invoke('get_app_version');
+    // Update version labels that rendered before this resolved
+    document.querySelectorAll('.version-label').forEach(el => {
+      el.textContent = `v${APP_VERSION}`;
+    });
   } catch (_) {}
 })();
 
@@ -1300,7 +1304,12 @@ async function streamChat(botDiv, t0, callMode = false) {
     await invoke('chat', { messages: msgs, callMode });
   } catch (e) {
     if (!fullReply) {
-      botDiv.textContent = 'MLX сервер недоступен';
+      const errMsg = String(e);
+      if (errMsg.includes('connection') || errMsg.includes('Connection') || errMsg.includes('refused')) {
+        botDiv.textContent = 'MLX сервер недоступен — модель загружается...';
+      } else {
+        botDiv.textContent = 'Ошибка: ' + errMsg;
+      }
     }
   }
 
