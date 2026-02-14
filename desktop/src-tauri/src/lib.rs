@@ -2355,7 +2355,8 @@ fn start_mlx_server() -> Option<Child> {
         eprintln!("[mlx] LoRA adapter found at {:?}", adapter_dir);
     }
 
-    let mut args = vec!["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234"];
+    let mut args = vec!["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234",
+        "--chat-template-args", r#"{"enable_thinking":false}"#];
     let adapter_dir_str = adapter_dir.to_string_lossy().to_string();
     if has_adapter {
         args.push("--adapter-path");
