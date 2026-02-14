@@ -195,7 +195,7 @@ struct ProactiveState {
     consecutive_skips: u32,
     user_is_typing: bool,
     // v0.11.0: enhanced autonomy fields
-    recent_messages: Vec<(String, chrono::DateTime<chrono::Local>)>, // last 5 proactive msgs with timestamps
+    recent_messages: Vec<(String, chrono::DateTime<chrono::Local>)>, // last 15 proactive msgs with timestamps
     last_context_snapshot: String,        // context from previous proactive call (for delta)
     last_proactive_id: Option<i64>,       // ID in proactive_history table
     engagement_rate: f64,                 // rolling average reply rate (0.0-1.0)
@@ -6166,9 +6166,16 @@ PRIORITY RULES:
 - If a distracting app is open 30+ min → prefer Accountability style
 - If engagement rate is low (<30%) → be more relevant/useful, less chatty
 
+ANTI-REPETITION (CRITICAL):
+- Check [Your recent proactive messages] and [Topics covered today] carefully
+- ABSOLUTELY DO NOT mention any topic, event, or theme that appears in those lists
+- If a calendar event was already mentioned today — DO NOT mention it again
+- Each message must cover a COMPLETELY NEW topic
+- If you can't think of a new topic → reply [SKIP]
+- Always use "ты" form, never "вы"
+
 RULES:
 - 1-3 sentences max, Russian by default
-- NEVER repeat your recent proactive messages' style or content
 - Be genuine — a companion, not a notification bot
 - Only reply [SKIP] if nothing meaningful to say
 
@@ -6515,6 +6522,31 @@ fn get_recent_chat_snippet(conn: &rusqlite::Connection, limit: usize) -> String 
     }
 }
 
+fn get_todays_proactive_messages(conn: &rusqlite::Connection) -> Vec<String> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut msgs = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT message FROM proactive_history WHERE sent_at >= ?1 ORDER BY id ASC"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| {
+            row.get::<_, String>(0)
+        }) {
+            for msg in rows.flatten() {
+                msgs.push(msg);
+            }
+        }
+    }
+    msgs
+}
+
+fn get_user_name_from_memory(conn: &rusqlite::Connection) -> String {
+    // Look for user's name in facts table
+    conn.query_row(
+        "SELECT value FROM facts WHERE category = 'user' AND (key LIKE '%имя%' OR key LIKE '%name%' OR key LIKE '%зовут%') LIMIT 1",
+        [], |row| row.get::<_, String>(0),
+    ).unwrap_or_default()
+}
+
 async fn proactive_llm_call(
     client: &reqwest::Client,
     context: &str,
@@ -6525,7 +6557,18 @@ async fn proactive_llm_call(
     triggers: &[String],
     chat_snippet: &str,
     engagement_rate: f64,
+    user_name: &str,
+    todays_messages: &[String],
 ) -> Result<Option<String>, String> {
+    // Build dynamic system prompt with user name
+    let mut sys_prompt = PROACTIVE_SYSTEM_PROMPT.to_string();
+    if !user_name.is_empty() {
+        sys_prompt = format!(
+            "IMPORTANT: The user's name is {}. Always call them {} (на \"ты\").\n\n{}",
+            user_name, user_name, sys_prompt
+        );
+    }
+
     let mut user_content = String::new();
     if !memory_context.is_empty() {
         user_content.push_str(&format!("[Your memories]\n{}\n\n", memory_context));
@@ -6547,11 +6590,23 @@ async fn proactive_llm_call(
         user_content.push_str(&format!("\n[Recent conversation]\n{}\n", chat_snippet));
     }
 
-    // Last 5 proactive messages with timestamps
+    // Last N proactive messages with timestamps (in-memory buffer)
     if !recent_messages.is_empty() {
-        user_content.push_str("\n[Your recent proactive messages]\n");
+        user_content.push_str("\n[Your recent proactive messages — DO NOT repeat these]\n");
         for (msg, ts) in recent_messages {
             user_content.push_str(&format!("  {} — \"{}\"\n", ts.format("%H:%M"), msg));
+        }
+    }
+
+    // All today's proactive messages (from DB — survives restart)
+    if !todays_messages.is_empty() {
+        user_content.push_str(&format!(
+            "\n[Topics covered today — {} messages sent, DO NOT repeat ANY of these topics]\n",
+            todays_messages.len()
+        ));
+        for (i, msg) in todays_messages.iter().enumerate() {
+            let short = if msg.len() > 100 { &msg[..100] } else { msg.as_str() };
+            user_content.push_str(&format!("  {}. \"{}\"\n", i + 1, short));
         }
     }
 
@@ -6565,7 +6620,7 @@ async fn proactive_llm_call(
         messages: vec![
             ChatMessage {
                 role: "system".into(),
-                content: PROACTIVE_SYSTEM_PROMPT.into(),
+                content: sys_prompt,
             },
             ChatMessage {
                 role: "user".into(),
@@ -6574,7 +6629,7 @@ async fn proactive_llm_call(
         ],
         max_tokens: 300,
         stream: false,
-        temperature: 0.7,
+        temperature: 0.85,
     };
 
     let response = client
@@ -7623,6 +7678,35 @@ pub fn run() {
                 // Initial delay — let the app fully start
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
+                // Load recent proactive messages from DB (survives app restart)
+                let loaded_msgs: Vec<(String, chrono::DateTime<chrono::Local>)> = {
+                    let db = proactive_handle.state::<HanniDb>();
+                    let conn = db.conn();
+                    let mut result = Vec::new();
+                    if let Ok(mut stmt) = conn.prepare(
+                        "SELECT message, sent_at FROM proactive_history ORDER BY id DESC LIMIT 15"
+                    ) {
+                        if let Ok(rows) = stmt.query_map([], |row| {
+                            let msg: String = row.get(0)?;
+                            let ts_str: String = row.get(1)?;
+                            Ok((msg, ts_str))
+                        }) {
+                            for row in rows.flatten() {
+                                let ts = chrono::DateTime::parse_from_rfc3339(&row.1)
+                                    .map(|dt| dt.with_timezone(&chrono::Local))
+                                    .unwrap_or_else(|_| chrono::Local::now());
+                                result.push((row.0, ts));
+                            }
+                        }
+                    }
+                    result.reverse(); // oldest first
+                    result
+                };
+                if !loaded_msgs.is_empty() {
+                    let mut state = proactive_state_ref.lock().await;
+                    state.recent_messages = loaded_msgs;
+                }
+
                 let mut last_check = std::time::Instant::now();
                 let mut first_run = true;
 
@@ -7739,18 +7823,20 @@ pub fn run() {
                         String::new()
                     };
 
-                    // Build enriched memory context (50 facts instead of 30)
-                    let (mem_ctx, chat_snippet) = {
+                    // Build memory context (15 facts — less noise, faster)
+                    let (mem_ctx, chat_snippet, user_name, todays_msgs) = {
                         let db = proactive_handle.state::<HanniDb>();
                         let conn = db.conn();
                         (
-                            build_memory_context_from_db(&conn, "", 50),
+                            build_memory_context_from_db(&conn, "", 15),
                             get_recent_chat_snippet(&conn, 6),
+                            get_user_name_from_memory(&conn),
+                            get_todays_proactive_messages(&conn),
                         )
                     };
                     // Mark LLM as busy during proactive call to prevent concurrent MLX requests
                     proactive_handle.state::<LlmBusy>().0.store(true, Ordering::Relaxed);
-                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement).await;
+                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs).await;
                     proactive_handle.state::<LlmBusy>().0.store(false, Ordering::Relaxed);
 
                     match proactive_result {
@@ -7775,9 +7861,9 @@ pub fn run() {
                             state.consecutive_skips = 0;
                             state.last_context_snapshot = context;
                             state.last_proactive_id = proactive_id;
-                            // Update recent_messages (keep last 5)
+                            // Update recent_messages (keep last 15)
                             state.recent_messages.push((message, chrono::Local::now()));
-                            if state.recent_messages.len() > 5 {
+                            if state.recent_messages.len() > 15 {
                                 state.recent_messages.remove(0);
                             }
                             state.pending_triggers.clear();
