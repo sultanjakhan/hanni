@@ -3558,15 +3558,37 @@ async fn process_conversation_end(
     let re = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap();
     let text = re.replace_all(&raw, "").trim().to_string();
 
-    // Try to parse JSON from the response (it might be wrapped in ```json blocks)
-    let json_str = if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
-            &text[start..=end]
-        } else {
-            &text
+    // Extract JSON from response — handles ```json blocks and surrounding text
+    let json_str = {
+        let mut s = text.as_str();
+        // Strip markdown code blocks first
+        if let Some(fence) = s.find("```") {
+            let after = &s[fence + 3..];
+            let inner = after.strip_prefix("json").unwrap_or(after);
+            if let Some(end_fence) = inner.find("```") {
+                let candidate = inner[..end_fence].trim();
+                if candidate.starts_with('{') { s = candidate; }
+            }
         }
-    } else {
-        &text
+        // Find first balanced JSON object via brace counting
+        if !s.starts_with('{') {
+            if let Some(start) = s.find('{') {
+                let bytes = s.as_bytes();
+                let (mut depth, mut in_str, mut esc, mut end) = (0i32, false, false, start);
+                for i in start..bytes.len() {
+                    if esc { esc = false; continue; }
+                    match bytes[i] {
+                        b'\\' if in_str => esc = true,
+                        b'"' => in_str = !in_str,
+                        b'{' if !in_str => depth += 1,
+                        b'}' if !in_str => { depth -= 1; if depth == 0 { end = i; break; } }
+                        _ => {}
+                    }
+                }
+                if depth == 0 && end > start { s = &s[start..=end]; }
+            }
+        }
+        s
     };
 
     #[derive(Deserialize)]
