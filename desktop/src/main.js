@@ -2401,7 +2401,7 @@ async function loadAllFacts(el) {
             <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
           </div>
           <div class="form-group"><label class="form-label">Значение</label>
-            <input class="form-input memory-edit-val" value="${escapeHtml(m.value)}" placeholder="Значение">
+            <textarea class="form-input memory-edit-val" placeholder="Значение" rows="3" style="resize:vertical;">${escapeHtml(m.value)}</textarea>
           </div>
           <div class="modal-actions">
             <button class="btn-secondary mem-cancel">Отмена</button>
@@ -2417,8 +2417,7 @@ async function loadAllFacts(el) {
           const val = overlay.querySelector('.memory-edit-val').value.trim();
           if (!key || !val) return;
           try {
-            await invoke('delete_memory', { id });
-            await invoke('memory_remember', { category: cat, key, value: val });
+            await invoke('update_memory', { id, category: cat, key, value: val });
           } catch (err) { console.error('Memory edit error:', err); }
           overlay.remove();
           loadAllFacts(el);
@@ -2501,7 +2500,7 @@ function renderMemoryList(memories, el) {
           <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
         </div>
         <div class="form-group"><label class="form-label">Значение</label>
-          <input class="form-input memory-edit-val" value="${escapeHtml(m.value)}" placeholder="Значение">
+          <textarea class="form-input memory-edit-val" placeholder="Значение" rows="3" style="resize:vertical;">${escapeHtml(m.value)}</textarea>
         </div>
         <div class="modal-actions">
           <button class="btn-secondary mem-cancel">Отмена</button>
@@ -2517,8 +2516,7 @@ function renderMemoryList(memories, el) {
         const val = overlay.querySelector('.memory-edit-val').value.trim();
         if (!key || !val) return;
         try {
-          await invoke('delete_memory', { id });
-          await invoke('memory_remember', { category: cat, key, value: val });
+          await invoke('update_memory', { id, category: cat, key, value: val });
         } catch (err) { console.error('Failed to update memory:', err); }
         overlay.remove();
         loadMemoryInSettings(el);

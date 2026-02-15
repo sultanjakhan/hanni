@@ -4641,11 +4641,21 @@ fn delete_memory(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_memory(id: i64, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+fn update_memory(id: i64, category: Option<String>, key: Option<String>, value: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    conn.execute("UPDATE facts SET value=?1, updated_at=?2 WHERE id=?3", rusqlite::params![value, now, id])
-        .map_err(|e| format!("DB error: {}", e))?;
+    if let Some(cat) = &category {
+        conn.execute("UPDATE facts SET category=?1, updated_at=?2 WHERE id=?3", rusqlite::params![cat, now, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    if let Some(k) = &key {
+        conn.execute("UPDATE facts SET key=?1, updated_at=?2 WHERE id=?3", rusqlite::params![k, now, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    if let Some(v) = &value {
+        conn.execute("UPDATE facts SET value=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
     Ok(())
 }
 

@@ -252,14 +252,13 @@ body {
 }
 
 .sub-sidebar-item {
-  padding: 7px 12px;
+  padding: 7px 20px;
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
   transition: background var(--transition-fast), color var(--transition-fast);
-  border-radius: var(--radius-md);
-  margin: 1px 8px;
+  margin: 0;
 }
 
 .sub-sidebar-item:hover { color: var(--text-secondary); background: var(--bg-hover); }
@@ -2279,12 +2278,8 @@ body.dragover::after {
 .memory-item-actions {
   display: flex;
   gap: 2px;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
   flex-shrink: 0;
 }
-
-.memory-item:hover .memory-item-actions { opacity: 1; }
 
 .memory-item-btn {
   width: 24px;
