@@ -1087,7 +1087,7 @@ struct TokenPayload {
 }
 
 struct HttpClient(reqwest::Client);
-struct LlmBusy(AtomicBool);
+struct LlmBusy(tokio::sync::Semaphore);
 
 struct MlxProcess(std::sync::Mutex<Option<Child>>);
 
@@ -2393,7 +2393,7 @@ async fn spawn_api_server(app_handle: AppHandle) {
         AxumState(state): AxumState<ApiState>,
     ) -> Json<serde_json::Value> {
         // No auth required for status — allows frontend health check
-        let busy = state.app.state::<LlmBusy>().0.load(Ordering::Relaxed);
+        let busy = state.app.state::<LlmBusy>().0.available_permits() == 0;
         let focus_active = state.app.state::<FocusManager>().0.lock().unwrap_or_else(|e| e.into_inner()).active;
 
         let client = reqwest::Client::builder()
@@ -2694,15 +2694,15 @@ fn classify_app(name: &str) -> &'static str {
 
 #[tauri::command]
 async fn chat(app: AppHandle, messages: Vec<(String, String)>, call_mode: Option<bool>) -> Result<String, String> {
-    let busy = &app.state::<LlmBusy>().0;
+    let llm_state = app.state::<LlmBusy>();
     // Wait for any in-flight LLM call (e.g. proactive) to finish — MLX is single-threaded
-    for _ in 0..30 {
-        if !busy.load(Ordering::Relaxed) { break; }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-    busy.store(true, Ordering::Relaxed);
+    let _permit = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        llm_state.0.acquire(),
+    ).await
+        .map_err(|_| "LLM busy — timeout after 15s".to_string())?
+        .map_err(|_| "LLM semaphore closed".to_string())?;
     let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await;
-    busy.store(false, Ordering::Relaxed);
     result
 }
 
@@ -7450,7 +7450,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
-        .manage(LlmBusy(AtomicBool::new(false)))
+        .manage(LlmBusy(tokio::sync::Semaphore::new(1)))
         .manage(proactive_state.clone())
         .manage(hanni_db)
         .manage(audio_state)
@@ -7865,9 +7865,12 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(1800)).await; // 30 min
 
-                    // Skip if LLM is busy
-                    let llm_busy = learning_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);
-                    if llm_busy { continue; }
+                    // Acquire LLM semaphore — skip if busy, hold permit through LLM call
+                    let llm_sem = learning_handle.state::<LlmBusy>();
+                    let _llm_permit = match llm_sem.0.try_acquire() {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
 
                     // Read last 18 snapshots (3 hours) and existing observation facts
                     let (snapshots_text, existing_obs) = {
@@ -8107,7 +8110,7 @@ pub fn run() {
                         now_min >= quiet_start_min && now_min < quiet_end_min
                     };
 
-                    let llm_busy = proactive_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);
+                    let llm_busy = proactive_handle.state::<LlmBusy>().0.available_permits() == 0;
 
                     if in_quiet || is_typing || llm_busy {
                         continue;
@@ -8136,10 +8139,14 @@ pub fn run() {
                             get_todays_proactive_messages(&conn),
                         )
                     };
-                    // Mark LLM as busy during proactive call to prevent concurrent MLX requests
-                    proactive_handle.state::<LlmBusy>().0.store(true, Ordering::Relaxed);
+                    // Acquire LLM semaphore during proactive call to prevent concurrent MLX requests
+                    let proactive_sem = proactive_handle.state::<LlmBusy>();
+                    let _proactive_permit = match proactive_sem.0.try_acquire() {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
                     let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles).await;
-                    proactive_handle.state::<LlmBusy>().0.store(false, Ordering::Relaxed);
+                    drop(_proactive_permit);
 
                     match proactive_result {
                         Ok(Some(message)) => {
