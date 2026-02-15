@@ -188,6 +188,8 @@ struct ProactiveSettings {
     interval_minutes: u64,
     quiet_hours_start: u32,
     quiet_hours_end: u32,
+    #[serde(default)]
+    enabled_styles: Vec<String>,
 }
 
 impl Default for ProactiveSettings {
@@ -199,6 +201,7 @@ impl Default for ProactiveSettings {
             interval_minutes: 10,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
+            enabled_styles: Vec::new(), // empty = all styles enabled (backward compat)
         }
     }
 }
@@ -6209,7 +6212,7 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 
 // ── Proactive messaging logic ──
 
-const PROACTIVE_SYSTEM_PROMPT: &str = r#"You are Hanni, a warm AI companion living on the user's Mac. You're like a close friend who shares the same space.
+const PROACTIVE_PROMPT_HEADER: &str = r#"You are Hanni, a warm AI companion living on the user's Mac. You're like a close friend who shares the same space.
 
 Your job: write a short, natural message. Like texting a friend you live with.
 
@@ -6219,22 +6222,10 @@ YOU HAVE ACCESS TO:
 - Active triggers: time-sensitive events (upcoming calendar, distraction alerts)
 - Engagement rate: how often the user responds to your messages
 
-VARIETY IS KEY — pick a DIFFERENT style each time:
-- Observation: comment on their screen/music/browsing
-- Calendar: mention upcoming events, warn about events starting soon
-- Nudge: gentle productivity/health reminder
-- Curiosity: ask about their day/project/mood
-- Humor: light joke or playful tease about their habits
-- Care: check in on mood trends, suggest breaks
-- Memory: reference something you remember about them
-- Food: warn about expiring products if any
-- Goals: celebrate progress or remind about deadlines
-- Journal: remind them to write evening reflection
-- Digest: MORNING ONLY (8-10am) — give a brief summary: today's events, deadlines, yesterday mood/sleep if known
-- Accountability: if they've been in the same app (YouTube, Reddit, Twitter, TikTok, etc.) for 30+ min, gently point it out
-- Schedule: if there's an upcoming event within 30 min, remind them to prepare
-- Continuity: continue or follow up on a topic from the recent conversation
+VARIETY IS KEY — pick a DIFFERENT style each time from these enabled styles:
+"#;
 
+const PROACTIVE_PROMPT_FOOTER: &str = r#"
 PRIORITY RULES:
 - If there's an active trigger → prioritize (Schedule/Accountability)
 - If there's a recent conversation → prefer Continuity style
@@ -6256,6 +6247,45 @@ RULES:
 - Only reply [SKIP] if nothing meaningful to say
 
 Reply with your message text, or [SKIP]."#;
+
+struct ProactiveStyleDef {
+    id: &'static str,
+    description: &'static str,
+}
+
+const ALL_PROACTIVE_STYLES: &[ProactiveStyleDef] = &[
+    ProactiveStyleDef { id: "observation", description: "Observation: comment on their screen/music/browsing" },
+    ProactiveStyleDef { id: "calendar", description: "Calendar: mention upcoming events, warn about events starting soon" },
+    ProactiveStyleDef { id: "nudge", description: "Nudge: gentle productivity/health reminder" },
+    ProactiveStyleDef { id: "curiosity", description: "Curiosity: ask about their day/project/mood" },
+    ProactiveStyleDef { id: "humor", description: "Humor: light joke or playful tease about their habits" },
+    ProactiveStyleDef { id: "care", description: "Care: check in on mood trends, suggest breaks" },
+    ProactiveStyleDef { id: "memory", description: "Memory: reference something you remember about them" },
+    ProactiveStyleDef { id: "food", description: "Food: warn about expiring products if any" },
+    ProactiveStyleDef { id: "goals", description: "Goals: celebrate progress or remind about deadlines" },
+    ProactiveStyleDef { id: "journal", description: "Journal: remind them to write evening reflection" },
+    ProactiveStyleDef { id: "digest", description: "Digest: MORNING ONLY (8-10am) — give a brief summary: today's events, deadlines, yesterday mood/sleep if known" },
+    ProactiveStyleDef { id: "accountability", description: "Accountability: if they've been in the same app (YouTube, Reddit, Twitter, TikTok, etc.) for 30+ min, gently point it out" },
+    ProactiveStyleDef { id: "schedule", description: "Schedule: if there's an upcoming event within 30 min, remind them to prepare" },
+    ProactiveStyleDef { id: "continuity", description: "Continuity: continue or follow up on a topic from the recent conversation" },
+];
+
+fn build_proactive_system_prompt(enabled_styles: &[String]) -> String {
+    let mut prompt = PROACTIVE_PROMPT_HEADER.to_string();
+    let styles: Vec<&ProactiveStyleDef> = if enabled_styles.is_empty() {
+        // Empty = all enabled (backward compat)
+        ALL_PROACTIVE_STYLES.iter().collect()
+    } else {
+        ALL_PROACTIVE_STYLES.iter()
+            .filter(|s| enabled_styles.iter().any(|e| e == s.id))
+            .collect()
+    };
+    for style in &styles {
+        prompt.push_str(&format!("- {}\n", style.description));
+    }
+    prompt.push_str(PROACTIVE_PROMPT_FOOTER);
+    prompt
+}
 
 async fn gather_context() -> String {
     // All context functions are internally blocking (run_osascript, rusqlite).
@@ -6635,9 +6665,10 @@ async fn proactive_llm_call(
     engagement_rate: f64,
     user_name: &str,
     todays_messages: &[String],
+    enabled_styles: &[String],
 ) -> Result<Option<String>, String> {
-    // Build dynamic system prompt with user name
-    let mut sys_prompt = PROACTIVE_SYSTEM_PROMPT.to_string();
+    // Build dynamic system prompt from enabled styles
+    let mut sys_prompt = build_proactive_system_prompt(enabled_styles);
     if !user_name.is_empty() {
         sys_prompt = format!(
             "IMPORTANT: The user's name is {}. Always call them {} (на \"ты\").\n\n{}",
@@ -7791,7 +7822,7 @@ pub fn run() {
                     // Poll every 5 seconds so we react quickly to settings changes
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-                    let (enabled, interval, quiet_start, quiet_end, is_typing, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat) = {
+                    let (enabled, interval, quiet_start, quiet_end, is_typing, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles) = {
                         let state = proactive_state_ref.lock().await;
                         (
                             state.settings.enabled,
@@ -7807,6 +7838,7 @@ pub fn run() {
                             state.engagement_rate,
                             state.pending_triggers.clone(),
                             state.last_user_chat_time,
+                            state.settings.enabled_styles.clone(),
                         )
                     };
 
@@ -7913,7 +7945,7 @@ pub fn run() {
                     };
                     // Mark LLM as busy during proactive call to prevent concurrent MLX requests
                     proactive_handle.state::<LlmBusy>().0.store(true, Ordering::Relaxed);
-                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs).await;
+                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles).await;
                     proactive_handle.state::<LlmBusy>().0.store(false, Ordering::Relaxed);
 
                     match proactive_result {
