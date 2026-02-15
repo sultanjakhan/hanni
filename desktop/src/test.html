@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hanni — UI Preview</title>
+<link rel="stylesheet" href="styles.css">
+<script src="tauri-mock.js"></script>
+<style>
+  /* Browser preview adjustments */
+  #tab-bar { padding-left: 12px; }
+  body { height: 100vh; }
+</style>
+</head>
+<body>
+<!-- Top tab bar (browser-like) -->
+<div id="tab-bar">
+  <div class="tab-bar-left">
+    <div id="tab-list"></div>
+    <button id="tab-add" title="Открыть вкладку">+</button>
+  </div>
+  <div id="tab-bar-right"></div>
+</div>
+
+<!-- Tab add dropdown -->
+<div id="tab-dropdown" class="hidden">
+  <div id="tab-dropdown-list"></div>
+</div>
+
+<div id="app-body">
+  <!-- Left sub-sidebar -->
+  <div id="sub-sidebar" class="hidden">
+    <div id="sub-sidebar-items"></div>
+    <div id="sub-sidebar-goals" class="sub-sidebar-section hidden">
+      <div class="sub-sidebar-section-title" id="goals-toggle">Goals</div>
+      <div id="goals-list" class="hidden"></div>
+    </div>
+    <div id="sub-sidebar-settings" class="sub-sidebar-bottom"></div>
+  </div>
+
+  <!-- Main content area -->
+  <div id="content-area">
+    <!-- Chat view -->
+    <div id="view-chat" class="view active">
+      <div id="chat-container">
+        <div id="conversations-panel">
+          <div id="conv-header">
+            <button id="new-chat-btn" title="Новый чат">+ Новый чат</button>
+          </div>
+          <div id="conv-search-box">
+            <input id="conv-search" type="text" placeholder="Поиск..." autocomplete="off">
+          </div>
+          <div id="conv-list"></div>
+        </div>
+        <div id="chat-main">
+          <div id="chat"></div>
+        </div>
+      </div>
+      <div id="chat-settings-content" class="tab-content"></div>
+      <div id="attach-preview"></div>
+      <div id="input-area">
+        <div id="input-wrapper">
+          <button id="attach" title="Прикрепить файл">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 7.5l-5.793 5.793a3.5 3.5 0 01-4.95-4.95L9.05 2.05a2 2 0 012.828 2.828L5.586 11.17a.5.5 0 01-.707-.707L11.17 4.17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <input id="file-input" type="file" style="display:none">
+          <input id="input" type="text" placeholder="Напиши сообщение..." autocomplete="off">
+          <button id="record" title="Голосовой ввод">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 00-2.5 2.5v4a2.5 2.5 0 005 0v-4A2.5 2.5 0 008 1z" stroke="currentColor" stroke-width="1.5"/><path d="M4 7.5a4 4 0 008 0M8 13v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <button id="send">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 13V3l11 5-11 5z" fill="currentColor"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Generic content views (rendered dynamically) -->
+    <div id="view-dashboard" class="view"><div id="dashboard-content" class="tab-content"></div></div>
+    <div id="view-calendar" class="view"><div id="calendar-content" class="tab-content"></div></div>
+    <div id="view-focus" class="view"><div id="focus-content" class="tab-content"></div></div>
+    <div id="view-notes" class="view"><div id="notes-content" class="tab-content"></div></div>
+    <div id="view-work" class="view"><div id="work-content" class="tab-content"></div></div>
+    <div id="view-development" class="view"><div id="development-content" class="tab-content"></div></div>
+    <div id="view-hobbies" class="view"><div id="hobbies-content" class="tab-content"></div></div>
+    <div id="view-home" class="view"><div id="home-content" class="tab-content"></div></div>
+    <div id="view-sports" class="view"><div id="sports-content" class="tab-content"></div></div>
+    <div id="view-health" class="view"><div id="health-content" class="tab-content"></div></div>
+    <div id="view-mindset" class="view"><div id="mindset-content" class="tab-content"></div></div>
+    <div id="view-food" class="view"><div id="food-content" class="tab-content"></div></div>
+    <div id="view-money" class="view"><div id="money-content" class="tab-content"></div></div>
+    <div id="view-people" class="view"><div id="people-content" class="tab-content"></div></div>
+    <div id="view-settings" class="view"><div id="settings-content" class="tab-content"></div></div>
+  </div>
+</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
