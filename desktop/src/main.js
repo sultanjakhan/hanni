@@ -3992,12 +3992,14 @@ async function renderDatabaseView(el, tabId, recordTable, records, options = {})
   // Render header
   const headerHtml = `<div class="database-view-header">
     ${addButton ? `<button class="btn-primary" id="dbv-add-btn">${addButton}</button>` : ''}
-    <button class="btn-secondary dbv-add-prop-btn" id="dbv-add-prop" style="font-size:11px;padding:4px 10px;">+ Property</button>
   </div>`;
 
   // Render table
   const thFixed = fixedColumns.map(c => `<th class="sortable-header" data-sort="${c.key}">${c.label}</th>`).join('');
-  const thCustom = visibleProps.map(p => `<th class="sortable-header" data-sort="prop_${p.id}">${escapeHtml(p.name)}</th>`).join('');
+  const thCustom = visibleProps.map(p =>
+    `<th class="sortable-header prop-header" data-sort="prop_${p.id}" data-prop-id="${p.id}"><span class="col-type-icon">${getTypeIcon(p.type)}</span>${escapeHtml(p.name)}</th>`
+  ).join('');
+  const thAddCol = `<th class="add-prop-col" id="dbv-add-prop-col" title="Добавить свойство">+</th>`;
 
   let tbodyHtml = '';
   for (const record of filteredRecords) {
@@ -4013,17 +4015,17 @@ async function renderDatabaseView(el, tabId, recordTable, records, options = {})
       return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}'>${displayVal}</td>`;
     }).join('');
 
-    tbodyHtml += `<tr class="data-table-row" data-id="${rid}">${tdFixed}${tdCustom}</tr>`;
+    tbodyHtml += `<tr class="data-table-row" data-id="${rid}">${tdFixed}${tdCustom}<td></td></tr>`;
   }
 
   if (filteredRecords.length === 0) {
-    const colspan = fixedColumns.length + visibleProps.length;
-    tbodyHtml = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-faint);padding:24px;">No items yet</td></tr>`;
+    const colspan = fixedColumns.length + visibleProps.length + 1;
+    tbodyHtml = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-faint);padding:24px;">Пока пусто</td></tr>`;
   }
 
   el.innerHTML = headerHtml + `
     <table class="data-table database-view">
-      <thead><tr>${thFixed}${thCustom}</tr></thead>
+      <thead><tr>${thFixed}${thCustom}${thAddCol}</tr></thead>
       <tbody>${tbodyHtml}</tbody>
     </table>`;
 
@@ -4053,9 +4055,21 @@ async function renderDatabaseView(el, tabId, recordTable, records, options = {})
     });
   });
 
-  // Bind add property button
-  document.getElementById('dbv-add-prop')?.addEventListener('click', () => {
+  // Bind + column header to add property
+  el.querySelector('#dbv-add-prop-col')?.addEventListener('click', () => {
     showAddPropertyModal(tabId, reloadFn);
+  });
+
+  // Bind custom property header clicks to context menu
+  el.querySelectorAll('.prop-header').forEach(th => {
+    th.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const propId = parseInt(th.dataset.propId);
+      const prop = customProps.find(p => p.id === propId);
+      if (!prop) return;
+      const rect = th.getBoundingClientRect();
+      showColumnMenu(prop, rect, tabId, recordTable, reloadFn, el, records, allValues, fixedColumns, visibleProps, valuesMap, idField, options);
+    });
   });
 
   // Bind add button
@@ -4063,8 +4077,8 @@ async function renderDatabaseView(el, tabId, recordTable, records, options = {})
     document.getElementById('dbv-add-btn')?.addEventListener('click', options.onAdd);
   }
 
-  // Bind sortable headers
-  el.querySelectorAll('.sortable-header').forEach(th => {
+  // Bind sortable headers (fixed columns only — custom props use context menu)
+  el.querySelectorAll('.sortable-header:not(.prop-header)').forEach(th => {
     th.addEventListener('click', () => {
       const sortKey = th.dataset.sort;
       const currentDir = th.dataset.dir || 'none';
@@ -4165,52 +4179,240 @@ function startInlineEdit(cell, recordTable, reloadFn) {
   }
 }
 
+const PROPERTY_TYPE_DEFS = [
+  { id: 'text', icon: 'Aa', name: 'Текст' },
+  { id: 'number', icon: '#', name: 'Число' },
+  { id: 'select', icon: '◉', name: 'Выбор' },
+  { id: 'multi_select', icon: '☰', name: 'Мульти-выбор' },
+  { id: 'date', icon: '◫', name: 'Дата' },
+  { id: 'checkbox', icon: '☑', name: 'Чекбокс' },
+  { id: 'url', icon: '↗', name: 'Ссылка' },
+];
+
+function getTypeIcon(typeId) {
+  const t = PROPERTY_TYPE_DEFS.find(d => d.id === typeId);
+  return t ? t.icon : 'Aa';
+}
+
+function getTypeName(typeId) {
+  const t = PROPERTY_TYPE_DEFS.find(d => d.id === typeId);
+  return t ? t.name : typeId;
+}
+
 function showAddPropertyModal(tabId, reloadFn) {
+  let selectedType = 'text';
+  let optionsList = [];
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal modal-compact">
-    <div class="modal-title">Add Property</div>
-    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="prop-name" placeholder="Property name"></div>
-    <div class="form-group"><label class="form-label">Type</label>
-      <select class="form-select" id="prop-type" style="width:100%;">
-        <option value="text">Text</option><option value="number">Number</option>
-        <option value="select">Select</option><option value="multi_select">Multi Select</option>
-        <option value="date">Date</option><option value="checkbox">Checkbox</option>
-        <option value="url">URL</option>
-      </select>
-    </div>
-    <div class="form-group" id="prop-options-group" style="display:none;">
-      <label class="form-label">Options (comma-separated)</label>
-      <input class="form-input" id="prop-options" placeholder="Option 1, Option 2, Option 3">
-    </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-      <button class="btn-primary" id="prop-save">Add</button>
-    </div>
-  </div>`;
+
+  function renderModal() {
+    const needsOptions = ['select', 'multi_select'].includes(selectedType);
+    const typeGrid = PROPERTY_TYPE_DEFS.map(t =>
+      `<div class="prop-type-card${t.id === selectedType ? ' selected' : ''}" data-type="${t.id}">
+        <div class="prop-type-icon">${t.icon}</div>
+        <div class="prop-type-name">${t.name}</div>
+      </div>`
+    ).join('');
+
+    const optionsHtml = needsOptions ? `
+      <div class="prop-config-section">
+        <div class="prop-section-label">Варианты</div>
+        <div class="prop-options-container">
+          <div class="prop-options-tags" id="prop-tags">
+            ${optionsList.map((o, i) => `<span class="prop-option-tag">${escapeHtml(o)}<span class="prop-option-tag-remove" data-idx="${i}">&times;</span></span>`).join('')}
+          </div>
+          <div class="prop-option-add">
+            <input id="prop-option-input" type="text" placeholder="Новый вариант..." autocomplete="off">
+            <button id="prop-option-add-btn">+</button>
+          </div>
+        </div>
+      </div>` : '';
+
+    overlay.innerHTML = `<div class="modal modal-property">
+      <div class="modal-title">Новое свойство</div>
+      <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="prop-name" placeholder="Без названия" autocomplete="off"></div>
+      <div class="form-group">
+        <label class="form-label">Тип</label>
+        <div class="prop-type-grid">${typeGrid}</div>
+      </div>
+      ${optionsHtml}
+      <div class="modal-actions">
+        <button class="btn-secondary" id="prop-cancel">Отмена</button>
+        <button class="btn-primary" id="prop-save">Добавить</button>
+      </div>
+    </div>`;
+
+    // Bind type selection
+    overlay.querySelectorAll('.prop-type-card').forEach(card => {
+      card.addEventListener('click', () => {
+        selectedType = card.dataset.type;
+        const nameVal = document.getElementById('prop-name')?.value || '';
+        renderModal();
+        const nameInput = document.getElementById('prop-name');
+        if (nameInput) nameInput.value = nameVal;
+      });
+    });
+
+    // Bind option tag removal
+    overlay.querySelectorAll('.prop-option-tag-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx);
+        optionsList.splice(idx, 1);
+        const nameVal = document.getElementById('prop-name')?.value || '';
+        renderModal();
+        document.getElementById('prop-name').value = nameVal;
+      });
+    });
+
+    // Bind add option
+    const addOptBtn = overlay.querySelector('#prop-option-add-btn');
+    const addOptInput = overlay.querySelector('#prop-option-input');
+    const addOption = () => {
+      const val = addOptInput?.value?.trim();
+      if (val && !optionsList.includes(val)) {
+        optionsList.push(val);
+        const nameVal = document.getElementById('prop-name')?.value || '';
+        renderModal();
+        document.getElementById('prop-name').value = nameVal;
+        document.getElementById('prop-option-input')?.focus();
+      }
+    };
+    addOptBtn?.addEventListener('click', addOption);
+    addOptInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addOption(); } });
+
+    // Bind cancel
+    overlay.querySelector('#prop-cancel')?.addEventListener('click', () => overlay.remove());
+
+    // Bind save
+    overlay.querySelector('#prop-save')?.addEventListener('click', async () => {
+      const name = document.getElementById('prop-name')?.value?.trim() || 'Без названия';
+      let options = null;
+      if (['select', 'multi_select'].includes(selectedType) && optionsList.length > 0) {
+        options = JSON.stringify(optionsList);
+      }
+      try {
+        await invoke('create_property_definition', { tabId, name, propType: selectedType, position: null, color: null, options, defaultValue: null });
+        overlay.remove();
+        if (reloadFn) reloadFn();
+      } catch (err) { alert('Error: ' + err); }
+    });
+  }
+
+  renderModal();
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  setTimeout(() => document.getElementById('prop-name')?.focus(), 50);
+}
 
-  document.getElementById('prop-type')?.addEventListener('change', (e) => {
-    const show = ['select', 'multi_select'].includes(e.target.value);
-    document.getElementById('prop-options-group').style.display = show ? 'block' : 'none';
-  });
+function showColumnMenu(propDef, anchorRect, tabId, recordTable, reloadFn, el, records, allValues, fixedColumns, visibleProps, valuesMap, idField, options) {
+  // Remove any existing menu
+  document.querySelectorAll('.col-context-menu').forEach(m => m.remove());
 
-  document.getElementById('prop-save')?.addEventListener('click', async () => {
-    const name = document.getElementById('prop-name')?.value?.trim();
-    if (!name) return;
-    const propType = document.getElementById('prop-type')?.value || 'text';
-    let options = null;
-    if (['select', 'multi_select'].includes(propType)) {
-      const raw = document.getElementById('prop-options')?.value?.trim();
-      if (raw) options = JSON.stringify(raw.split(',').map(s => s.trim()).filter(Boolean));
+  const menu = document.createElement('div');
+  menu.className = 'col-context-menu';
+
+  const needsOptions = ['select', 'multi_select'].includes(propDef.type);
+
+  menu.innerHTML = `
+    <div class="col-menu-section">
+      <input class="col-menu-name-input" value="${escapeHtml(propDef.name)}" id="col-rename-input" autocomplete="off">
+    </div>
+    <div class="col-menu-section">
+      <div class="col-menu-item" data-action="type">
+        <span class="col-menu-icon">${getTypeIcon(propDef.type)}</span>
+        <span>${getTypeName(propDef.type)}</span>
+      </div>
+    </div>
+    <div class="col-menu-section">
+      <div class="col-menu-item" data-action="sort-asc">
+        <span class="col-menu-icon">↑</span>
+        <span>Сортировка А→Я</span>
+      </div>
+      <div class="col-menu-item" data-action="sort-desc">
+        <span class="col-menu-icon">↓</span>
+        <span>Сортировка Я→А</span>
+      </div>
+    </div>
+    <div class="col-menu-section">
+      <div class="col-menu-item" data-action="hide">
+        <span class="col-menu-icon">◻</span>
+        <span>Скрыть</span>
+      </div>
+      <div class="col-menu-item col-menu-item danger" data-action="delete">
+        <span class="col-menu-icon">✕</span>
+        <span>Удалить</span>
+      </div>
+    </div>
+  `;
+
+  // Position menu below the header
+  menu.style.left = Math.min(anchorRect.left, window.innerWidth - 220) + 'px';
+  menu.style.top = anchorRect.bottom + 4 + 'px';
+
+  document.body.appendChild(menu);
+
+  // Rename on Enter/blur
+  const renameInput = menu.querySelector('#col-rename-input');
+  const doRename = async () => {
+    const newName = renameInput.value.trim();
+    if (newName && newName !== propDef.name) {
+      try {
+        await invoke('update_property_definition', { id: propDef.id, name: newName, propType: null, position: null, color: null, options: null, visible: null });
+        if (reloadFn) reloadFn();
+      } catch {}
     }
-    try {
-      await invoke('create_property_definition', { tabId, name, propType, position: null, color: null, options, defaultValue: null });
-      overlay.remove();
-      if (reloadFn) reloadFn();
-    } catch (err) { alert('Error: ' + err); }
+  };
+  renameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); doRename(); menu.remove(); }
+    if (e.key === 'Escape') { menu.remove(); }
+    e.stopPropagation();
   });
+  renameInput.addEventListener('blur', () => { doRename(); });
+
+  // Menu item clicks
+  menu.querySelectorAll('.col-menu-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      const action = item.dataset.action;
+      switch (action) {
+        case 'sort-asc':
+        case 'sort-desc': {
+          const dir = action === 'sort-asc' ? 'asc' : 'desc';
+          const sortKey = `prop_${propDef.id}`;
+          el.querySelectorAll('.sortable-header').forEach(h => { h.dataset.dir = 'none'; h.classList.remove('sort-asc', 'sort-desc'); });
+          sortDatabaseView(el, records, allValues, sortKey, dir, fixedColumns, visibleProps, valuesMap, idField, options);
+          menu.remove();
+          break;
+        }
+        case 'hide':
+          try {
+            await invoke('update_property_definition', { id: propDef.id, name: null, propType: null, position: null, color: null, options: null, visible: false });
+            if (reloadFn) reloadFn();
+          } catch {}
+          menu.remove();
+          break;
+        case 'delete':
+          if (confirm(`Удалить свойство "${propDef.name}"?`)) {
+            try {
+              await invoke('delete_property_definition', { id: propDef.id });
+              if (reloadFn) reloadFn();
+            } catch {}
+          }
+          menu.remove();
+          break;
+      }
+    });
+  });
+
+  // Close on outside click
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      doRename();
+      menu.remove();
+      document.removeEventListener('mousedown', closeMenu);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', closeMenu), 10);
 }
 
 function sortDatabaseView(el, records, allValues, sortKey, dir, fixedColumns, visibleProps, valuesMap, idField, options) {
