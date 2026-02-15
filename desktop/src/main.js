@@ -5182,7 +5182,14 @@ listen('call-transcript', async (event) => {
   callOverlay.setAttribute('data-phase', 'processing');
   callPhaseText.textContent = PHASE_LABELS.processing;
 
-  // Run LLM — same agentic loop as send()
+  // Get voice for TTS
+  let callVoice = 'ru-RU-SvetlanaNeural';
+  try {
+    const ps = await invoke('get_proactive_settings');
+    callVoice = ps.voice_name || callVoice;
+  } catch (_) {}
+
+  // Run LLM with streaming TTS — speak sentences as they arrive
   const t0 = performance.now();
   let iteration = 0;
   const MAX_ITERATIONS = 5;
@@ -5200,7 +5207,8 @@ listen('call-transcript', async (event) => {
     chat.appendChild(wrapper);
     scrollDown();
 
-    const result = await streamChat(botDiv, t0, true);
+    // Use streaming TTS for the first non-action iteration
+    const result = await streamChatWithTTS(botDiv, t0, callVoice);
     if (!result.fullReply) break;
 
     history.push(['assistant', result.fullReply]);
@@ -5227,7 +5235,10 @@ listen('call-transcript', async (event) => {
 
   // Show bot reply in overlay
   if (lastReply) {
-    const displayText = lastReply.replace(/```action[\s\S]*?```/g, '').trim();
+    const displayText = lastReply
+      .replace(/```action[\s\S]*?```/g, '')
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .trim();
     if (displayText) {
       const botBubble = document.createElement('div');
       botBubble.className = 'call-transcript-bot';
@@ -5237,7 +5248,7 @@ listen('call-transcript', async (event) => {
     }
   }
 
-  // Save conversation
+  // Save conversation (non-blocking)
   (async () => {
     try {
       if (currentConversationId) {
@@ -5252,13 +5263,177 @@ listen('call-transcript', async (event) => {
     } catch (_) {}
   })();
 
-  // Speak the reply, then resume listening
-  if (lastReply && callModeActive) {
-    await speakAndListen(lastReply);
-  } else if (callModeActive) {
+  // Resume listening if no sentences were spoken (e.g. empty reply or only actions)
+  if (!lastReply && callModeActive) {
     await invoke('call_mode_resume_listening').catch(() => {});
   }
 });
+
+/**
+ * Stream LLM response and speak sentences as they complete.
+ * This is the core of the Jarvis effect — minimal latency between LLM output and voice.
+ */
+async function streamChatWithTTS(botDiv, t0, voice) {
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  botDiv.appendChild(cursor);
+
+  let firstToken = 0;
+  let tokens = 0;
+  let fullReply = '';
+  let ttsBuffer = '';       // Accumulates text for sentence detection
+  let sentenceQueue = [];   // Completed sentences ready to speak
+  let inActionBlock = false;
+  let inThinkBlock = false;
+  let ttsStarted = false;
+  let bargedIn = false;
+  let ttsDone = false;
+
+  // Listen for tokens
+  const unlisten = await listen('chat-token', (event) => {
+    if (!firstToken) firstToken = performance.now() - t0;
+    tokens++;
+    const token = event.payload.token;
+    fullReply += token;
+    botDiv.insertBefore(document.createTextNode(token), cursor);
+    scrollDown();
+
+    // Track action/think blocks — don't TTS those
+    if (token.includes('```action')) inActionBlock = true;
+    if (inActionBlock && token.includes('```') && fullReply.endsWith('```') && fullReply.split('```').length > 2) {
+      inActionBlock = false;
+      return;
+    }
+    if (token.includes('<think>')) inThinkBlock = true;
+    if (token.includes('</think>')) { inThinkBlock = false; return; }
+    if (inActionBlock || inThinkBlock) return;
+
+    // Accumulate text for sentence splitting
+    ttsBuffer += token;
+
+    // Check if we have a complete sentence (ends with . ! ? ...)
+    const sentenceEnd = /[.!?…]\s*$/;
+    if (sentenceEnd.test(ttsBuffer)) {
+      const clean = ttsBuffer.trim();
+      if (clean) sentenceQueue.push(clean);
+      ttsBuffer = '';
+    }
+  });
+
+  const unlistenDone = await listen('chat-done', () => {});
+
+  // Start TTS consumer — runs in parallel with LLM streaming
+  const ttsPromise = (async () => {
+    // Wait for first sentence or stream completion
+    while (!ttsDone || sentenceQueue.length > 0) {
+      if (bargedIn || !callModeActive) break;
+
+      if (sentenceQueue.length > 0) {
+        if (!ttsStarted) {
+          // Switch to speaking phase on first sentence
+          ttsStarted = true;
+          callOverlay.setAttribute('data-phase', 'speaking');
+          callPhaseText.textContent = PHASE_LABELS.speaking;
+          await invoke('call_mode_set_speaking').catch(() => {});
+        }
+
+        const sentence = sentenceQueue.shift();
+        try {
+          await invoke('speak_sentence_blocking', { sentence, voice });
+        } catch (_) {}
+
+        // Check barge-in after each sentence
+        if (callModeActive && !bargedIn) {
+          try {
+            const b = await invoke('call_mode_check_bargein');
+            if (b) {
+              bargedIn = true;
+              await invoke('stop_speaking').catch(() => {});
+              if (callModeActive) {
+                await invoke('call_mode_resume_listening').catch(() => {});
+              }
+              break;
+            }
+          } catch (_) {}
+        }
+      } else {
+        // No sentence ready yet — wait briefly
+        await new Promise(r => setTimeout(r, 50));
+      }
+    }
+
+    // Speak any remaining text after stream is done
+    if (!bargedIn && callModeActive && ttsBuffer.trim()) {
+      if (!ttsStarted) {
+        ttsStarted = true;
+        callOverlay.setAttribute('data-phase', 'speaking');
+        callPhaseText.textContent = PHASE_LABELS.speaking;
+        await invoke('call_mode_set_speaking').catch(() => {});
+      }
+      try {
+        await invoke('speak_sentence_blocking', { sentence: ttsBuffer.trim(), voice });
+      } catch (_) {}
+    }
+
+    // Resume listening after all TTS is done
+    if (!bargedIn && callModeActive) {
+      await invoke('call_mode_resume_listening').catch(() => {});
+    }
+  })();
+
+  // Also poll barge-in during TTS
+  const bargeInterval = setInterval(async () => {
+    if (!callModeActive || bargedIn) { clearInterval(bargeInterval); return; }
+    if (!ttsStarted) return; // Don't check until we're actually speaking
+    try {
+      const b = await invoke('call_mode_check_bargein');
+      if (b) {
+        bargedIn = true;
+        clearInterval(bargeInterval);
+        await invoke('stop_speaking').catch(() => {});
+        if (callModeActive) {
+          await invoke('call_mode_resume_listening').catch(() => {});
+        }
+      }
+    } catch (_) {}
+  }, 150);
+
+  // Wait for LLM stream to finish
+  try {
+    const msgs = history.slice(-20);
+    await invoke('chat', { messages: msgs, callMode: true });
+  } catch (e) {
+    if (!fullReply) {
+      const errMsg = String(e);
+      if (errMsg.includes('connection') || errMsg.includes('refused')) {
+        botDiv.textContent = 'MLX сервер недоступен — модель загружается...';
+      } else {
+        botDiv.textContent = 'Ошибка: ' + errMsg;
+      }
+    }
+  }
+
+  // Signal that LLM stream is done — TTS consumer can finish remaining
+  ttsDone = true;
+
+  unlisten();
+  unlistenDone();
+  cursor.remove();
+  clearInterval(bargeInterval);
+
+  // Wait for TTS to finish speaking
+  await ttsPromise;
+
+  return { fullReply, tokens, firstToken };
+}
+
+/// Split text into sentences for streaming TTS
+function splitIntoSentences(text) {
+  // Split on sentence-ending punctuation, keeping the punctuation attached
+  const parts = text.match(/[^.!?…]+[.!?…]+|[^.!?…]+$/g);
+  if (!parts) return [text];
+  return parts.map(s => s.trim()).filter(s => s.length > 0);
+}
 
 async function speakAndListen(text) {
   if (!callModeActive) return;
@@ -5275,14 +5450,20 @@ async function speakAndListen(text) {
     voice = ps.voice_name || voice;
   } catch (_) {}
 
-  // Strip action blocks for TTS
-  const ttsText = text.replace(/```action[\s\S]*?```/g, '').trim();
+  // Strip action blocks and think blocks for TTS
+  const ttsText = text
+    .replace(/```action[\s\S]*?```/g, '')
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .trim();
   if (!ttsText) {
     if (callModeActive) {
       await invoke('call_mode_resume_listening').catch(() => {});
     }
     return;
   }
+
+  // Split into sentences for streaming TTS
+  const sentences = splitIntoSentences(ttsText);
 
   // Start barge-in polling
   let bargedIn = false;
@@ -5299,12 +5480,28 @@ async function speakAndListen(text) {
         }
       }
     } catch (_) {}
-  }, 200);
+  }, 150); // Faster polling for quicker barge-in response
 
-  // Speak blocking
-  try {
-    await invoke('speak_text_blocking', { text: ttsText, voice });
-  } catch (_) {}
+  // Speak each sentence sequentially, checking barge-in between them
+  for (const sentence of sentences) {
+    if (bargedIn || !callModeActive) break;
+    try {
+      await invoke('speak_sentence_blocking', { sentence, voice });
+    } catch (_) {}
+    // Check barge-in right after each sentence finishes
+    if (!bargedIn && callModeActive) {
+      try {
+        const b = await invoke('call_mode_check_bargein');
+        if (b) {
+          bargedIn = true;
+          await invoke('stop_speaking').catch(() => {});
+          if (callModeActive) {
+            await invoke('call_mode_resume_listening').catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
+  }
 
   clearInterval(bargeInterval);
 
@@ -5316,6 +5513,21 @@ async function speakAndListen(text) {
 
 callBtn.addEventListener('click', toggleCallMode);
 callEndBtn.addEventListener('click', endCallMode);
+
+// Global shortcut: Cmd+Shift+H toggles call mode (works even when app is minimized)
+listen('global-toggle-call', async () => {
+  // Show window if hidden/minimized when starting call
+  if (!callModeActive) {
+    try {
+      const { getCurrentWindow } = window.__TAURI__.window;
+      const win = getCurrentWindow();
+      await win.unminimize();
+      await win.show();
+      await win.setFocus();
+    } catch (_) {}
+  }
+  toggleCallMode();
+});
 
 // Keyboard shortcut: Escape ends call
 document.addEventListener('keydown', (e) => {

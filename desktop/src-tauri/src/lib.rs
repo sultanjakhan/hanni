@@ -1102,12 +1102,22 @@ struct WhisperState {
 struct AudioRecording(std::sync::Mutex<WhisperState>);
 
 fn whisper_model_path() -> PathBuf {
-    hanni_data_dir().join("models/ggml-medium.bin")
+    let turbo = hanni_data_dir().join("models/ggml-large-v3-turbo.bin");
+    if turbo.exists() { return turbo; }
+    // Fallback to medium if turbo not yet downloaded
+    let medium = hanni_data_dir().join("models/ggml-medium.bin");
+    if medium.exists() { return medium; }
+    // Default to turbo for new downloads
+    turbo
+}
+
+fn whisper_turbo_path() -> PathBuf {
+    hanni_data_dir().join("models/ggml-large-v3-turbo.bin")
 }
 
 #[tauri::command]
 async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
-    let model_path = whisper_model_path();
+    let model_path = whisper_turbo_path();
     if model_path.exists() {
         return Ok("Model already downloaded".into());
     }
@@ -1116,7 +1126,7 @@ async fn download_whisper_model(app: AppHandle) -> Result<String, String> {
         std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create dir: {}", e))?;
     }
 
-    let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin";
+    let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
     let client = reqwest::Client::new();
     let response = client.get(url).send().await.map_err(|e| format!("Download error: {}", e))?;
 
@@ -1198,11 +1208,14 @@ fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
     let mut state = ctx.create_state().map_err(|e| format!("Whisper state error: {}", e))?;
 
     let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(None);
+    params.set_language(Some("ru"));
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+    params.set_initial_prompt("Привет, как дела? Расскажи мне что-нибудь интересное. Хорошо, давай посмотрим.");
+    params.set_no_speech_thold(0.6);
+    params.set_suppress_blank(true);
 
     state.full(params, samples).map_err(|e| format!("Transcription error: {}", e))?;
 
@@ -1588,6 +1601,9 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
 
         // Process loop
         let mut process_buf: Vec<f32> = Vec::new();
+        // Adaptive noise floor tracking
+        let mut noise_floor: f32 = 0.003;
+        let noise_alpha: f32 = 0.01; // Slow adaptation
 
         loop {
             std::thread::sleep(std::time::Duration::from_millis(16));
@@ -1613,10 +1629,19 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             while process_buf.len() >= 512 {
                 let chunk: Vec<f32> = process_buf.drain(..512).collect();
 
-                // Noise gate: skip very quiet chunks (background noise < -50dB)
+                // Compute RMS energy
                 let energy: f32 = chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32;
                 let rms = energy.sqrt();
-                if rms < 0.003 {
+
+                // Adaptive noise floor: update during silence
+                let phase_for_noise = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
+                if phase_for_noise == "listening" && rms < noise_floor * 3.0 {
+                    noise_floor = noise_floor * (1.0 - noise_alpha) + rms * noise_alpha;
+                    noise_floor = noise_floor.max(0.001); // Minimum floor
+                }
+                let noise_gate = (noise_floor * 2.0).max(0.003); // Gate at 2x noise floor
+
+                if rms < noise_gate {
                     // Below noise floor — treat as definite silence
                     let phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
                     match phase.as_str() {
@@ -1630,7 +1655,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                             let should_process = {
                                 let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                                 cs.silence_frames += 1;
-                                cs.silence_frames >= 20
+                                cs.silence_frames >= 15
                             };
                             if should_process {
                                 // Transition to processing — same logic as VAD silence path
@@ -1702,7 +1727,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
 
                         if prob < 0.5 {
                             cs.silence_frames += 1;
-                            if cs.silence_frames >= 20 {
+                            if cs.silence_frames >= 15 {
                                 // ~640ms silence — done recording (faster turn-taking)
                                 cs.phase = "processing".into();
                                 let samples = cs.audio_buffer.clone();
@@ -1750,17 +1775,20 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                     }
                     "speaking" => {
                         // Barge-in detection — must be loud enough to not be speaker echo
-                        // Speaker echo typically has RMS 0.01-0.05, direct speech is 0.05+
+                        // Speaker echo with headphones typically has RMS 0.01-0.04
+                        // Direct speech into mic is typically 0.05+
+                        // Use adaptive noise floor for smarter threshold
+                        let barge_rms_thresh = (noise_floor * 8.0).max(0.04);
                         let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                        if prob > 0.85 && rms > 0.05 {
+                        if prob > 0.8 && rms > barge_rms_thresh {
                             cs.speech_frames += 1;
-                            if cs.speech_frames >= 10 {
-                                // 10 frames * 32ms = 320ms of loud confirmed speech
+                            if cs.speech_frames >= 6 {
+                                // 6 frames * 32ms = ~192ms of loud confirmed speech
                                 cs.barge_in = true;
                             }
                         } else {
                             // Reset only if clearly not speech; don't reset on borderline
-                            if prob < 0.5 {
+                            if prob < 0.4 {
                                 cs.speech_frames = 0;
                             }
                         }
@@ -2712,7 +2740,29 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
     let use_full = needs_full_prompt(last_user_msg);
 
     let system_content = if call_mode {
-        format!("{}{}\n\n[CALL MODE] You are in voice call mode — like Jarvis. Rules:\n- Answer in 1-2 short sentences MAX. Be extremely concise.\n- No action blocks unless the user explicitly asks to do something.\n- No lists, no formatting, no code blocks — just natural speech.\n- Respond in the user's language.", SYSTEM_PROMPT_LITE, date_context)
+        format!(r#"{date_ctx}
+
+[CALL MODE — VOICE ASSISTANT]
+You are Hanni, a voice assistant like Jarvis from Iron Man. The user is talking to you through a real-time voice call with headphones.
+
+STRICT RULES FOR VOICE OUTPUT:
+1. Speak naturally — short, conversational sentences. 1-3 sentences max.
+2. NEVER use markdown, lists, bullet points, numbering, code blocks, or any text formatting.
+3. NEVER use emoji, parentheses for asides, or special symbols.
+4. Write numbers as words: "около пяти тысяч" not "5000", "три часа" not "3 часа".
+5. Use conversational fillers naturally: "Так...", "Ну смотри...", "Хм, дай подумать...", "Слушай..."
+6. Be warm, witty, and caring — like a smart friend, not a robotic assistant.
+7. If the user's message is unclear or too short, ask to clarify briefly.
+8. Use context: greet differently based on time of day, reference memories about the user.
+9. Keep action blocks ONLY when the user explicitly asks to DO something (create, add, set, etc.).
+10. Respond in the user's language (Russian by default).
+
+VOICE STYLE:
+- Sound like you're talking, not writing. Imagine your text will be read aloud by TTS.
+- Avoid complex sentence structures. Use simple, direct phrasing.
+- Pause naturally between thoughts with "..." or short sentences.
+- Show personality — light humor, genuine curiosity, playful warmth."#,
+            date_ctx = date_context)
     } else if use_full {
         format!("{}{}", SYSTEM_PROMPT, date_context)
     } else {
@@ -2733,7 +2783,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
-            build_memory_context_from_db(&conn, last_user_msg, if use_full { 80 } else { 10 })
+            build_memory_context_from_db(&conn, last_user_msg, if use_full || call_mode { 80 } else { 10 })
         };
         if !ctx.is_empty() {
             chat_messages.push(ChatMessage {
@@ -2757,9 +2807,9 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: if call_mode { 150 } else if use_full { 1024 } else { 256 },
+        max_tokens: if call_mode { 200 } else if use_full { 1024 } else { 256 },
         stream: true,
-        temperature: if call_mode { 0.5 } else { 0.7 },
+        temperature: if call_mode { 0.6 } else { 0.7 },
     };
 
     // Retry connection up to 3 times (MLX server may still be loading model)
@@ -6852,18 +6902,34 @@ async fn proactive_llm_call(
     }
 }
 
+/// Adaptive TTS rate: short phrases faster, long text slower for clarity
+fn adaptive_tts_rate(text: &str) -> String {
+    let word_count = text.split_whitespace().count();
+    let rate = if word_count <= 5 {
+        "+35%"    // Short phrase — speak briskly
+    } else if word_count <= 15 {
+        "+25%"    // Medium — comfortable pace
+    } else if word_count <= 30 {
+        "+15%"    // Longer — slow down for clarity
+    } else {
+        "+10%"    // Very long — easy pace
+    };
+    rate.to_string()
+}
+
 fn speak_edge_tts(text: &str, voice: &str) {
     let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
     let tmp2 = tmp.clone();
     let voice_owned = voice.to_string();
     let text_owned = text.to_string();
+    let rate = adaptive_tts_rate(text);
     std::thread::spawn(move || {
         // Try direct edge-tts binary with PATH fallbacks
         let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
         let mut success = false;
         for cmd in &candidates {
             let status = std::process::Command::new(cmd)
-                .args(["--voice", &voice_owned, "--rate", "+25%", "--text", &text_owned, "--write-media", &tmp2])
+                .args(["--voice", &voice_owned, "--rate", &rate, "--text", &text_owned, "--write-media", &tmp2])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -6875,7 +6941,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         if !success {
             if let Some(python) = find_python() {
                 let status = std::process::Command::new(&python)
-                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", "+25%", "--text", &text_owned, "--write-media", &tmp2])
+                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", &rate, "--text", &text_owned, "--write-media", &tmp2])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
@@ -6918,10 +6984,25 @@ fn speak_remote_tts(text: &str, voice: &str, server_url: &str) {
 }
 
 fn clean_text_for_tts(text: &str) -> String {
-    let mut s = text.replace('"', "'");
+    // Remove action blocks first
+    let re_action = regex::Regex::new(r"(?s)```action.*?```").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
+    let mut s = re_action.replace_all(text, "").to_string();
+    // Remove think blocks
+    let re_think = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
+    s = re_think.replace_all(&s, "").to_string();
+    // Remove URLs
+    let re_url = regex::Regex::new(r"https?://\S+").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
+    s = re_url.replace_all(&s, "").to_string();
     // Remove markdown formatting
+    s = s.replace('"', "'");
     s = s.replace("```", "").replace('`', "").replace("**", "").replace('*', "");
     s = s.replace("###", "").replace("##", "").replace('#', "");
+    // Remove parenthetical asides: (text here)
+    let re_parens = regex::Regex::new(r"\([^)]*\)").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
+    s = re_parens.replace_all(&s, "").to_string();
+    // Remove square brackets: [text here]
+    let re_brackets = regex::Regex::new(r"\[[^\]]*\]").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
+    s = re_brackets.replace_all(&s, "").to_string();
     // Remove emojis and misc symbols (Unicode ranges)
     s = s.chars().filter(|c| {
         let cp = *c as u32;
@@ -7028,11 +7109,12 @@ fn speak_tts_sync(text: &str, voice: &str) {
 
 fn speak_edge_tts_sync(text: &str, voice: &str) {
     let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
+    let rate = adaptive_tts_rate(text);
     let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
     let mut success = false;
     for cmd in &candidates {
         let status = std::process::Command::new(cmd)
-            .args(["--voice", voice, "--rate", "+30%", "--text", text, "--write-media", &tmp])
+            .args(["--voice", voice, "--rate", &rate, "--text", text, "--write-media", &tmp])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -7043,7 +7125,7 @@ fn speak_edge_tts_sync(text: &str, voice: &str) {
     if !success {
         if let Some(python) = find_python() {
             let status = std::process::Command::new(&python)
-                .args(["-m", "edge_tts", "--voice", voice, "--rate", "+30%", "--text", text, "--write-media", &tmp])
+                .args(["-m", "edge_tts", "--voice", voice, "--rate", &rate, "--text", text, "--write-media", &tmp])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -7084,6 +7166,18 @@ async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), 
     let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
     tokio::task::spawn_blocking(move || {
         speak_tts_sync(&text, &v);
+    }).await.map_err(|e| format!("TTS join error: {}", e))?;
+    Ok(())
+}
+
+/// Speak a single sentence synchronously — for streaming TTS in call mode
+#[tauri::command]
+async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Result<(), String> {
+    let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
+    let clean = clean_text_for_tts(&sentence);
+    if clean.is_empty() { return Ok(()); }
+    tokio::task::spawn_blocking(move || {
+        speak_tts_sync(&clean, &v);
     }).await.map_err(|e| format!("TTS join error: {}", e))?;
     Ok(())
 }
@@ -7367,6 +7461,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             chat,
             read_file,
@@ -7583,6 +7678,7 @@ pub fn run() {
             call_mode_set_speaking,
             call_mode_check_bargein,
             speak_text_blocking,
+            speak_sentence_blocking,
             save_voice_note,
         ])
         .setup(move |app| {
@@ -7614,6 +7710,17 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 spawn_api_server(api_handle).await;
             });
+
+            // Global shortcut: Cmd+Shift+H to toggle Call Mode
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                let shortcut_handle = app.handle().clone();
+                let _ = app.global_shortcut().on_shortcut("CommandOrControl+Shift+H", move |_app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        let _ = shortcut_handle.emit("global-toggle-call", ());
+                    }
+                });
+            }
 
             // Focus mode monitor loop
             let focus_handle = app.handle().clone();
