@@ -37,6 +37,24 @@ let currentProjectId = null;
 let devFilter = 'all';
 let mediaStatusFilter = 'all';
 
+// ── Proactive style definitions ──
+const PROACTIVE_STYLE_DEFINITIONS = [
+  { id: 'observation', icon: '👀', name: 'Наблюдение', desc: 'Комментарий к экрану, музыке, браузеру' },
+  { id: 'calendar', icon: '📅', name: 'Календарь', desc: 'Упоминание предстоящих событий' },
+  { id: 'nudge', icon: '💪', name: 'Подталкивание', desc: 'Мягкие напоминания о продуктивности/здоровье' },
+  { id: 'curiosity', icon: '🤔', name: 'Любопытство', desc: 'Вопросы о дне, проекте, настроении' },
+  { id: 'humor', icon: '😄', name: 'Юмор', desc: 'Лёгкие шутки о привычках' },
+  { id: 'care', icon: '💙', name: 'Забота', desc: 'Проверка настроения, предложение отдыха' },
+  { id: 'memory', icon: '🧠', name: 'Память', desc: 'Ссылки на сохранённые факты' },
+  { id: 'food', icon: '🍽️', name: 'Еда', desc: 'Предупреждения о сроках годности' },
+  { id: 'goals', icon: '🎯', name: 'Цели', desc: 'Прогресс и дедлайны по целям' },
+  { id: 'journal', icon: '📝', name: 'Дневник', desc: 'Напоминание написать рефлексию' },
+  { id: 'digest', icon: '☀️', name: 'Дайджест', desc: 'Утренняя сводка (8–10 утра)' },
+  { id: 'accountability', icon: '⏰', name: 'Контроль', desc: 'Мягкое указание на отвлечение 30+ мин' },
+  { id: 'schedule', icon: '🔔', name: 'Расписание', desc: 'Напоминание за 30 мин до события' },
+  { id: 'continuity', icon: '💬', name: 'Продолжение', desc: 'Продолжение темы из чата' },
+];
+
 // ── SVG Icon set (Lucide-style, 16x16, stroke 1.5) ──
 const _s = (d) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const TAB_ICONS = {
@@ -432,11 +450,13 @@ document.getElementById('conv-search')?.addEventListener('input', (e) => {
 function renderTabBar() {
   const tabList = document.getElementById('tab-list');
   tabList.innerHTML = '';
+  const items = [];
   for (const tabId of openTabs) {
     const reg = TAB_REGISTRY[tabId];
     if (!reg) continue;
     const item = document.createElement('div');
     item.className = 'tab-item' + (tabId === activeTab ? ' active' : '');
+    item.dataset.tabId = tabId;
     item.innerHTML = `<span class="tab-item-icon">${reg.icon || ''}</span><span class="tab-item-label">${reg.label}</span>` +
       (reg.closable ? `<button class="tab-item-close" data-tab="${tabId}">&times;</button>` : '');
     item.addEventListener('click', (e) => {
@@ -450,6 +470,13 @@ function renderTabBar() {
       });
     }
     tabList.appendChild(item);
+    items.push({ el: item, tabId });
+  }
+  // Mark tab before active for hiding its divider
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].tabId === activeTab && i > 0) {
+      items[i - 1].el.classList.add('before-active');
+    }
   }
 }
 
@@ -471,7 +498,7 @@ function renderSubSidebar() {
     const item = document.createElement('div');
     item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
     const subIcon = reg.subIcons?.[sub];
-    if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.textContent = sub; }
+    if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.innerHTML = `<span class="sub-sidebar-dot"></span>${sub}`; }
     item.addEventListener('click', () => {
       activeSubTab[activeTab] = sub;
       saveTabs();
@@ -699,6 +726,8 @@ async function loadChatSettings() {
     const langOrder = ['ru-RU', 'kk-KZ', 'en-US'];
     const sortedLangs = [...langOrder.filter(l => voicesByLang[l]), ...Object.keys(voicesByLang).filter(l => !langOrder.includes(l)).sort()];
 
+    const enabledStyles = proactive.enabled_styles || PROACTIVE_STYLE_DEFINITIONS.map(s => s.id);
+
     el.innerHTML = `
       <div class="settings-section">
         <div class="settings-section-title">Автономный режим</div>
@@ -711,19 +740,46 @@ async function loadChatSettings() {
         </div>
         <div class="settings-row">
           <span class="settings-label">Интервал</span>
-          <div class="pill-group" id="chat-proactive-interval">
-            ${[5, 10, 15, 30].map(v =>
-              `<button class="pill${proactive.interval_minutes === v ? ' active' : ''}" data-value="${v}">${v}м</button>`
-            ).join('')}
+          <div class="proactive-interval-row">
+            <input type="range" id="chat-proactive-slider" class="proactive-slider" min="1" max="60" value="${proactive.interval_minutes}">
+            <input type="number" id="chat-proactive-number" class="proactive-interval-number" min="1" max="120" value="${proactive.interval_minutes}">
+            <span class="proactive-interval-unit">мин</span>
           </div>
         </div>
         <div class="settings-row">
           <span class="settings-label">Тихие часы</span>
-          <div style="display:flex;align-items:center;gap:6px">
-            <input type="number" id="chat-quiet-start" class="form-input" style="width:60px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_start ?? 23}">
-            <span class="settings-value">:00 —</span>
-            <input type="number" id="chat-quiet-end" class="form-input" style="width:60px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_end ?? 8}">
-            <span class="settings-value">:00</span>
+          <div class="quiet-hours-row">
+            <span class="quiet-hours-label">С</span>
+            <input type="number" id="chat-quiet-start" class="form-input" style="width:56px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_start ?? 23}">
+            <span class="quiet-hours-separator">—</span>
+            <span class="quiet-hours-label">До</span>
+            <input type="number" id="chat-quiet-end" class="form-input" style="width:56px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_end ?? 8}">
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Стили сообщений</div>
+        <div class="proactive-styles-section">
+          <div class="proactive-styles-desc">Выберите, какие стили проактивных сообщений будут использоваться</div>
+          <div class="proactive-styles-actions">
+            <button class="btn-small" id="proactive-select-all">Все</button>
+            <button class="btn-small" id="proactive-select-none">Снять все</button>
+          </div>
+          <div class="proactive-styles-grid" id="proactive-styles-grid">
+            ${PROACTIVE_STYLE_DEFINITIONS.map(s => {
+              const isEnabled = enabledStyles.includes(s.id);
+              return `<div class="proactive-style-card${isEnabled ? ' enabled' : ''}" data-style-id="${s.id}">
+                <span class="proactive-style-icon">${s.icon}</span>
+                <div class="proactive-style-info">
+                  <div class="proactive-style-name">${s.name}</div>
+                  <div class="proactive-style-desc">${s.desc}</div>
+                </div>
+                <label class="mini-toggle proactive-style-toggle">
+                  <input type="checkbox" ${isEnabled ? 'checked' : ''} data-style="${s.id}">
+                  <span class="mini-toggle-slider"></span>
+                </label>
+              </div>`;
+            }).join('')}
           </div>
         </div>
       </div>
@@ -770,13 +826,18 @@ async function loadChatSettings() {
       </div>`;
 
     // Save handlers
+    const getEnabledStyles = () => {
+      const checks = document.querySelectorAll('#proactive-styles-grid input[data-style]');
+      return Array.from(checks).filter(c => c.checked).map(c => c.dataset.style);
+    };
     const getChatProactiveValues = () => ({
       enabled: document.getElementById('chat-proactive-enabled').checked,
       voice_enabled: document.getElementById('chat-voice-enabled').checked,
       voice_name: document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural',
-      interval_minutes: parseInt(document.querySelector('#chat-proactive-interval .pill.active')?.dataset.value || '10'),
+      interval_minutes: parseInt(document.getElementById('chat-proactive-number')?.value || '10'),
       quiet_hours_start: parseInt(document.getElementById('chat-quiet-start')?.value) || 23,
       quiet_hours_end: parseInt(document.getElementById('chat-quiet-end')?.value) || 8,
+      enabled_styles: getEnabledStyles(),
     });
     const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
 
@@ -786,12 +847,44 @@ async function loadChatSettings() {
     document.getElementById('chat-quiet-start')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-quiet-end')?.addEventListener('change', saveChatSettings);
 
-    document.querySelectorAll('#chat-proactive-interval .pill').forEach(pill => {
-      pill.addEventListener('click', () => {
-        document.querySelectorAll('#chat-proactive-interval .pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
+    // Interval slider <-> number sync
+    const slider = document.getElementById('chat-proactive-slider');
+    const numInput = document.getElementById('chat-proactive-number');
+    slider?.addEventListener('input', () => {
+      numInput.value = slider.value;
+    });
+    slider?.addEventListener('change', saveChatSettings);
+    numInput?.addEventListener('input', () => {
+      const v = Math.max(1, Math.min(120, parseInt(numInput.value) || 1));
+      if (v <= 60) slider.value = v;
+      saveChatSettings();
+    });
+
+    // Style toggles
+    document.querySelectorAll('#proactive-styles-grid .proactive-style-card').forEach(card => {
+      const checkbox = card.querySelector('input[data-style]');
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.mini-toggle')) return;
+        checkbox.checked = !checkbox.checked;
+        card.classList.toggle('enabled', checkbox.checked);
         saveChatSettings();
       });
+      checkbox?.addEventListener('change', () => {
+        card.classList.toggle('enabled', checkbox.checked);
+        saveChatSettings();
+      });
+    });
+
+    // Select all / none
+    document.getElementById('proactive-select-all')?.addEventListener('click', () => {
+      document.querySelectorAll('#proactive-styles-grid input[data-style]').forEach(c => { c.checked = true; });
+      document.querySelectorAll('#proactive-styles-grid .proactive-style-card').forEach(c => c.classList.add('enabled'));
+      saveChatSettings();
+    });
+    document.getElementById('proactive-select-none')?.addEventListener('click', () => {
+      document.querySelectorAll('#proactive-styles-grid input[data-style]').forEach(c => { c.checked = false; });
+      document.querySelectorAll('#proactive-styles-grid .proactive-style-card').forEach(c => c.classList.remove('enabled'));
+      saveChatSettings();
     });
 
     document.getElementById('chat-test-voice')?.addEventListener('click', async () => {
