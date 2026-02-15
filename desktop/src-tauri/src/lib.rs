@@ -1231,101 +1231,84 @@ fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
 
 // ── Audio capture via cpal ──
 
+/// Initialize audio input device: try 16kHz mono, fallback to device default with resampling
+fn init_audio_device() -> Result<(cpal::Device, cpal::StreamConfig, f64, usize), String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    let device = host.default_input_device()
+        .ok_or_else(|| "no input device found".to_string())?;
+
+    let target = cpal::StreamConfig {
+        channels: 1,
+        sample_rate: cpal::SampleRate(16000),
+        buffer_size: cpal::BufferSize::Default,
+    };
+    match device.build_input_stream(&target, |_: &[f32], _: &cpal::InputCallbackInfo| {}, |_| {}, None) {
+        Ok(_) => Ok((device, target, 1.0, 1)),
+        Err(_) => {
+            let supported = device.default_input_config()
+                .map_err(|e| format!("no supported config: {}", e))?;
+            let rate = supported.sample_rate().0;
+            let ch = supported.channels();
+            eprintln!("Audio: using device config {}Hz {}ch (resampling to 16kHz)", rate, ch);
+            let cfg = cpal::StreamConfig {
+                channels: ch,
+                sample_rate: cpal::SampleRate(rate),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            Ok((device, cfg, rate as f64 / 16000.0, ch as usize))
+        }
+    }
+}
+
+/// Downmix multi-channel audio to mono and resample to 16kHz into target buffer
+fn downmix_resample_into(data: &[f32], channels: usize, ratio: f64, buf: &mut Vec<f32>) {
+    if channels == 1 && ratio == 1.0 {
+        buf.extend_from_slice(data);
+        return;
+    }
+    let mono: Vec<f32> = if channels > 1 {
+        data.chunks(channels).map(|ch| ch.iter().sum::<f32>() / channels as f32).collect()
+    } else {
+        data.to_vec()
+    };
+    if ratio > 1.0 {
+        let mut pos = 0.0_f64;
+        while (pos as usize) < mono.len() {
+            buf.push(mono[pos as usize]);
+            pos += ratio;
+        }
+    } else {
+        buf.extend_from_slice(&mono);
+    }
+}
+
 fn start_audio_capture(recording_state: Arc<AudioRecording>) {
     std::thread::spawn(move || {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        use cpal::traits::{DeviceTrait, StreamTrait};
 
-        let host = cpal::default_host();
-        let device = match host.default_input_device() {
-            Some(d) => d,
-            None => {
-                eprintln!("Voice: no input device found");
-                {
+        let (device, config, ratio, channels) = match init_audio_device() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Voice: {}", e);
                 let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                    ws.capture_running = false;
-                    ws.recording = false;
-                }
+                ws.capture_running = false;
+                ws.recording = false;
                 return;
             }
         };
 
-        // Try 16kHz mono first (Whisper native), fallback to device default
-        let (config, resample_ratio) = {
-            let target = cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(16000),
-                buffer_size: cpal::BufferSize::Default,
-            };
-            match device.build_input_stream(
-                &target,
-                |_: &[f32], _: &cpal::InputCallbackInfo| {},
-                |_| {},
-                None,
-            ) {
-                Ok(_) => (target, 1.0_f64),
-                Err(_) => {
-                    // Fallback to device default config
-                    match device.default_input_config() {
-                        Ok(supported) => {
-                            let rate = supported.sample_rate().0;
-                            let ch = supported.channels();
-                            eprintln!("Voice: using device config {}Hz {}ch (will resample to 16kHz)", rate, ch);
-                            let cfg = cpal::StreamConfig {
-                                channels: ch,
-                                sample_rate: cpal::SampleRate(rate),
-                                buffer_size: cpal::BufferSize::Default,
-                            };
-                            (cfg, rate as f64 / 16000.0)
-                        }
-                        Err(e) => {
-                            eprintln!("Voice: no supported config: {}", e);
-                            {
-                let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                                ws.capture_running = false;
-                                ws.recording = false;
-                            }
-                            return;
-                        }
-                    }
-                }
-            }
-        };
-
-        let channels = config.channels as usize;
-        let ratio = resample_ratio;
         let state_clone = recording_state.clone();
-
         let stream = device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                {
                 let mut ws = state_clone.0.lock().unwrap_or_else(|e| e.into_inner());
-                    if ws.recording {
-                        if channels == 1 && ratio == 1.0 {
-                            ws.audio_buffer.extend_from_slice(data);
-                        } else {
-                            // Downmix to mono + resample to 16kHz
-                            let mono: Vec<f32> = if channels > 1 {
-                                data.chunks(channels).map(|ch| ch.iter().sum::<f32>() / channels as f32).collect()
-                            } else {
-                                data.to_vec()
-                            };
-                            if ratio > 1.0 {
-                                let mut pos = 0.0_f64;
-                                while (pos as usize) < mono.len() {
-                                    ws.audio_buffer.push(mono[pos as usize]);
-                                    pos += ratio;
-                                }
-                            } else {
-                                ws.audio_buffer.extend_from_slice(&mono);
-                            }
-                        }
-                    }
+                if ws.recording {
+                    downmix_resample_into(data, channels, ratio, &mut ws.audio_buffer);
                 }
             },
-            |err| {
-                eprintln!("Audio capture error: {}", err);
-            },
+            |err| eprintln!("Audio capture error: {}", err),
             None,
         );
 
@@ -1487,84 +1470,26 @@ fn save_voice_note(
 
 fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
     std::thread::spawn(move || {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        use cpal::traits::{StreamTrait, DeviceTrait};
 
-        let host = cpal::default_host();
-        let device = match host.default_input_device() {
-            Some(d) => d,
-            None => {
-                eprintln!("Call mode: no input device");
+        let (device, config, ratio, channels) = match init_audio_device() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Call mode: {}", e);
                 let _ = app.emit("call-phase-changed", "idle");
                 return;
-            }
-        };
-
-        // Try 16kHz mono first, fallback to device default with resampling
-        let (config, resample_ratio, num_channels) = {
-            let target = cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(16000),
-                buffer_size: cpal::BufferSize::Default,
-            };
-            match device.build_input_stream(
-                &target,
-                |_: &[f32], _: &cpal::InputCallbackInfo| {},
-                |_| {},
-                None,
-            ) {
-                Ok(_) => (target, 1.0_f64, 1usize),
-                Err(_) => {
-                    match device.default_input_config() {
-                        Ok(supported) => {
-                            let rate = supported.sample_rate().0;
-                            let ch = supported.channels();
-                            eprintln!("Call: using device config {}Hz {}ch (resampling to 16kHz)", rate, ch);
-                            let cfg = cpal::StreamConfig {
-                                channels: ch,
-                                sample_rate: cpal::SampleRate(rate),
-                                buffer_size: cpal::BufferSize::Default,
-                            };
-                            (cfg, rate as f64 / 16000.0, ch as usize)
-                        }
-                        Err(e) => {
-                            eprintln!("Call: no supported config: {}", e);
-                            let _ = app.emit("call-phase-changed", "idle");
-                            return;
-                        }
-                    }
-                }
             }
         };
 
         // Shared ring buffer for raw audio chunks (already 16kHz mono after resampling)
         let chunk_buf: Arc<std::sync::Mutex<Vec<f32>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
         let chunk_buf_writer = chunk_buf.clone();
-        let ratio = resample_ratio;
-        let channels = num_channels;
 
         let stream = device.build_input_stream(
             &config,
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 if let Ok(mut buf) = chunk_buf_writer.lock() {
-                    if channels == 1 && ratio == 1.0 {
-                        buf.extend_from_slice(data);
-                    } else {
-                        // Downmix to mono + resample
-                        let mono: Vec<f32> = if channels > 1 {
-                            data.chunks(channels).map(|ch| ch.iter().sum::<f32>() / channels as f32).collect()
-                        } else {
-                            data.to_vec()
-                        };
-                        if ratio > 1.0 {
-                            let mut pos = 0.0_f64;
-                            while (pos as usize) < mono.len() {
-                                buf.push(mono[pos as usize]);
-                                pos += ratio;
-                            }
-                        } else {
-                            buf.extend_from_slice(&mono);
-                        }
-                    }
+                    downmix_resample_into(data, channels, ratio, &mut buf);
                 }
             },
             |err| eprintln!("Call audio error: {}", err),
