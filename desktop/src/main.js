@@ -965,6 +965,16 @@ function scrollDown() {
   chat.scrollTop = chat.scrollHeight;
 }
 
+// Scroll-to-bottom floating button
+const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
+chat.addEventListener('scroll', () => {
+  const distFromBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
+  scrollBottomBtn?.classList.toggle('visible', distFromBottom > 200);
+});
+scrollBottomBtn?.addEventListener('click', () => {
+  chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+});
+
 function addMsg(role, text) {
   if (role === 'bot') {
     const wrapper = document.createElement('div');
