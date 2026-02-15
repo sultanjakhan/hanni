@@ -4,5 +4,9 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hanni needs microphone access for voice input and call mode.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Hanni needs calendar access to show and manage your events.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Hanni needs automation access to interact with other apps (Music, Calendar, etc.).</string>
 </dict>
 </plist>

@@ -35,7 +35,8 @@
     ],
     "createUpdaterArtifacts": true,
     "macOS": {
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
     }
   },
   "plugins": {
