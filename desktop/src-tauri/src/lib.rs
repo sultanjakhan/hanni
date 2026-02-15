@@ -1613,12 +1613,66 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             while process_buf.len() >= 512 {
                 let chunk: Vec<f32> = process_buf.drain(..512).collect();
 
+                // Noise gate: skip very quiet chunks (background noise < -50dB)
+                let energy: f32 = chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32;
+                let rms = energy.sqrt();
+                if rms < 0.003 {
+                    // Below noise floor — treat as definite silence
+                    let phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
+                    match phase.as_str() {
+                        "listening" => {
+                            let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                            cs.speech_frames = 0;
+                            cs.audio_buffer.clear();
+                        }
+                        "recording" => {
+                            // Count as silence and check threshold
+                            let should_process = {
+                                let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                                cs.silence_frames += 1;
+                                cs.silence_frames >= 20
+                            };
+                            if should_process {
+                                // Transition to processing — same logic as VAD silence path
+                                let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                                cs.phase = "processing".into();
+                                let samples = cs.audio_buffer.clone();
+                                cs.audio_buffer.clear();
+                                cs.speech_frames = 0;
+                                cs.silence_frames = 0;
+                                let _ = app.emit("call-phase-changed", "processing");
+                                drop(cs);
+                                let call_state2 = call_state.clone();
+                                let app2 = app.clone();
+                                std::thread::spawn(move || {
+                                    match transcribe_samples(&samples) {
+                                        Ok(text) => {
+                                            let trimmed = text.trim().to_string();
+                                            if !trimmed.is_empty() {
+                                                { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).last_recording = samples; }
+                                                let _ = app2.emit("call-transcript", trimmed);
+                                            } else {
+                                                { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).phase = "listening".into(); }
+                                                let _ = app2.emit("call-phase-changed", "listening");
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Call transcription error: {}", e);
+                                            { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).phase = "listening".into(); }
+                                            let _ = app2.emit("call-phase-changed", "listening");
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 let prob = if let Some(ref mut vad) = vad_opt {
                     vad.predict(chunk.clone())
                 } else {
-                    // Energy-based voice detection fallback
-                    let energy: f32 = chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32;
-                    let rms = energy.sqrt();
                     (rms * 50.0).min(1.0)
                 };
 
@@ -6811,7 +6865,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         let mut success = false;
         for cmd in &candidates {
             let status = std::process::Command::new(cmd)
-                .args(["--voice", &voice_owned, "--rate", "+10%", "--text", &text_owned, "--write-media", &tmp2])
+                .args(["--voice", &voice_owned, "--rate", "+25%", "--text", &text_owned, "--write-media", &tmp2])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
@@ -6823,7 +6877,7 @@ fn speak_edge_tts(text: &str, voice: &str) {
         if !success {
             if let Some(python) = find_python() {
                 let status = std::process::Command::new(&python)
-                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", "+10%", "--text", &text_owned, "--write-media", &tmp2])
+                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", "+25%", "--text", &text_owned, "--write-media", &tmp2])
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
@@ -6980,7 +7034,7 @@ fn speak_edge_tts_sync(text: &str, voice: &str) {
     let mut success = false;
     for cmd in &candidates {
         let status = std::process::Command::new(cmd)
-            .args(["--voice", voice, "--rate", "+10%", "--text", text, "--write-media", &tmp])
+            .args(["--voice", voice, "--rate", "+30%", "--text", text, "--write-media", &tmp])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -6991,7 +7045,7 @@ fn speak_edge_tts_sync(text: &str, voice: &str) {
     if !success {
         if let Some(python) = find_python() {
             let status = std::process::Command::new(&python)
-                .args(["-m", "edge_tts", "--voice", voice, "--rate", "+10%", "--text", text, "--write-media", &tmp])
+                .args(["-m", "edge_tts", "--voice", voice, "--rate", "+30%", "--text", text, "--write-media", &tmp])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
