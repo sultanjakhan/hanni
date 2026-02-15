@@ -5167,6 +5167,10 @@ listen('call-transcript', async (event) => {
   addMsg('user', userText);
   history.push(['user', userText]);
 
+  // Update UI phase to "processing" while LLM thinks
+  callOverlay.setAttribute('data-phase', 'processing');
+  callPhaseText.textContent = PHASE_LABELS.processing;
+
   // Run LLM — same agentic loop as send()
   const t0 = performance.now();
   let iteration = 0;
