@@ -694,6 +694,23 @@ body {
 #send:disabled { opacity: 0.3; cursor: not-allowed; }
 #send:hover:not(:disabled) { opacity: 0.85; }
 
+#stop-tts {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--color-red);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  animation: pulse-record 1.2s infinite;
+}
+
+#stop-tts:hover { opacity: 0.85; }
+
 #attach, #record {
   width: 32px;
   height: 32px;

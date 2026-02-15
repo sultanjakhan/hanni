@@ -1474,17 +1474,13 @@ function showAgentIndicator(step) {
 
 async function toggleTTS(btn, text) {
   if (isSpeaking) {
-    await invoke('stop_speaking').catch(() => {});
-    document.querySelectorAll('.tts-btn.speaking').forEach(b => {
-      b.classList.remove('speaking');
-      b.innerHTML = '&#9654;';
-    });
-    isSpeaking = false;
+    await stopAllTTS();
     return;
   }
   isSpeaking = true;
   btn.classList.add('speaking');
   btn.innerHTML = '&#9632;';
+  document.getElementById('stop-tts')?.classList.remove('hidden');
   try {
     let voice = 'ru-RU-SvetlanaNeural';
     try {
@@ -1498,13 +1494,28 @@ async function toggleTTS(btn, text) {
       btn.classList.remove('speaking');
       btn.innerHTML = '&#9654;';
       isSpeaking = false;
+      document.getElementById('stop-tts')?.classList.add('hidden');
     }, durationMs);
   } catch (_) {
     btn.classList.remove('speaking');
     btn.innerHTML = '&#9654;';
     isSpeaking = false;
+    document.getElementById('stop-tts')?.classList.add('hidden');
   }
 }
+
+async function stopAllTTS() {
+  await invoke('stop_speaking').catch(() => {});
+  document.querySelectorAll('.tts-btn.speaking').forEach(b => {
+    b.classList.remove('speaking');
+    b.innerHTML = '&#9654;';
+  });
+  isSpeaking = false;
+  document.getElementById('stop-tts')?.classList.add('hidden');
+}
+
+// Stop TTS button
+document.getElementById('stop-tts')?.addEventListener('click', stopAllTTS);
 
 // ── Send message ──
 

@@ -1749,15 +1749,20 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                         }
                     }
                     "speaking" => {
-                        // Check for barge-in with higher threshold
+                        // Barge-in detection — must be loud enough to not be speaker echo
+                        // Speaker echo typically has RMS 0.01-0.05, direct speech is 0.05+
                         let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                        if prob > 0.8 {
+                        if prob > 0.85 && rms > 0.05 {
                             cs.speech_frames += 1;
-                            if cs.speech_frames >= 5 {
+                            if cs.speech_frames >= 10 {
+                                // 10 frames * 32ms = 320ms of loud confirmed speech
                                 cs.barge_in = true;
                             }
                         } else {
-                            cs.speech_frames = 0;
+                            // Reset only if clearly not speech; don't reset on borderline
+                            if prob < 0.5 {
+                                cs.speech_frames = 0;
+                            }
                         }
                     }
                     _ => {} // processing, idle — no-op
@@ -2532,8 +2537,7 @@ fn start_mlx_server() -> Option<Child> {
         eprintln!("[mlx] LoRA adapter found at {:?}", adapter_dir);
     }
 
-    let mut args = vec!["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234",
-        "--chat-template-args", r#"{"enable_thinking":false}"#];
+    let mut args = vec!["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234"];
     let adapter_dir_str = adapter_dir.to_string_lossy().to_string();
     if has_adapter {
         args.push("--adapter-path");
@@ -2743,16 +2747,10 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
     let history_limit = if use_full || call_mode { messages.len() } else { 6 };
     let skip = messages.len().saturating_sub(history_limit);
     let trimmed: Vec<_> = messages.iter().skip(skip).collect();
-    let msg_count = trimmed.len();
-    for (i, (role, content)) in trimmed.iter().enumerate() {
-        let mut c = content.clone();
-        // Append /no_think to the last user message for reliable thinking suppression
-        if i == msg_count - 1 && role == "user" {
-            c.push_str(" /no_think");
-        }
+    for (role, content) in trimmed.iter() {
         chat_messages.push(ChatMessage {
             role: role.clone(),
-            content: c,
+            content: content.clone(),
         });
     }
 
