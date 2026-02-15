@@ -670,6 +670,7 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
   e.stopPropagation();
   const dropdown = document.getElementById('tab-dropdown');
   const list = document.getElementById('tab-dropdown-list');
+  const btn = document.getElementById('tab-add');
   list.innerHTML = '';
   for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
     if (openTabs.includes(id)) continue;
@@ -679,6 +680,9 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
     item.addEventListener('click', () => { dropdown.classList.add('hidden'); openTab(id); });
     list.appendChild(item);
   }
+  // Position dropdown near + button
+  const rect = btn.getBoundingClientRect();
+  dropdown.style.left = Math.max(8, rect.left) + 'px';
   dropdown.classList.toggle('hidden');
 });
 
@@ -727,64 +731,45 @@ async function loadChatSettings() {
     const sortedLangs = [...langOrder.filter(l => voicesByLang[l]), ...Object.keys(voicesByLang).filter(l => !langOrder.includes(l)).sort()];
 
     const enabledStyles = proactive.enabled_styles || PROACTIVE_STYLE_DEFINITIONS.map(s => s.id);
+    const quietStart = proactive.quiet_start_time || `${String(proactive.quiet_hours_start ?? 23).padStart(2,'0')}:00`;
+    const quietEnd = proactive.quiet_end_time || `${String(proactive.quiet_hours_end ?? 8).padStart(2,'0')}:00`;
 
     el.innerHTML = `
-      <div class="settings-section">
-        <div class="settings-section-title">Автономный режим</div>
-        <div class="settings-row">
-          <span class="settings-label">Включён</span>
-          <label class="toggle">
-            <input type="checkbox" id="chat-proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Интервал</span>
-          <div class="proactive-interval-row">
-            <input type="range" id="chat-proactive-slider" class="proactive-slider" min="1" max="60" value="${proactive.interval_minutes}">
-            <input type="number" id="chat-proactive-number" class="proactive-interval-number" min="1" max="120" value="${proactive.interval_minutes}">
-            <span class="proactive-interval-unit">мин</span>
-          </div>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Тихие часы</span>
-          <div class="quiet-hours-row">
-            <span class="quiet-hours-label">С</span>
-            <input type="number" id="chat-quiet-start" class="form-input" style="width:56px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_start ?? 23}">
-            <span class="quiet-hours-separator">—</span>
-            <span class="quiet-hours-label">До</span>
-            <input type="number" id="chat-quiet-end" class="form-input" style="width:56px;text-align:center" min="0" max="23" value="${proactive.quiet_hours_end ?? 8}">
-          </div>
-        </div>
+      <div class="chat-settings-tabs">
+        <button class="chat-settings-tab active" data-panel="general">Основные</button>
+        <button class="chat-settings-tab" data-panel="styles">Стили сообщений</button>
       </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Стили сообщений</div>
-        <div class="proactive-styles-section">
-          <div class="proactive-styles-desc">Выберите, какие стили проактивных сообщений будут использоваться</div>
-          <div class="proactive-styles-actions">
-            <button class="btn-small" id="proactive-select-all">Все</button>
-            <button class="btn-small" id="proactive-select-none">Снять все</button>
+      <div class="chat-settings-panel active" id="cs-panel-general">
+        <div class="settings-section">
+          <div class="settings-section-title">Автономный режим</div>
+          <div class="settings-row">
+            <span class="settings-label">Включён</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <div class="proactive-styles-grid" id="proactive-styles-grid">
-            ${PROACTIVE_STYLE_DEFINITIONS.map(s => {
-              const isEnabled = enabledStyles.includes(s.id);
-              return `<div class="proactive-style-card${isEnabled ? ' enabled' : ''}" data-style-id="${s.id}">
-                <span class="proactive-style-icon">${s.icon}</span>
-                <div class="proactive-style-info">
-                  <div class="proactive-style-name">${s.name}</div>
-                  <div class="proactive-style-desc">${s.desc}</div>
-                </div>
-                <label class="mini-toggle proactive-style-toggle">
-                  <input type="checkbox" ${isEnabled ? 'checked' : ''} data-style="${s.id}">
-                  <span class="mini-toggle-slider"></span>
-                </label>
-              </div>`;
-            }).join('')}
+          <div class="settings-row">
+            <span class="settings-label">Интервал</span>
+            <div class="proactive-interval-row">
+              <input type="range" id="chat-proactive-slider" class="proactive-slider" min="1" max="60" value="${proactive.interval_minutes}">
+              <input type="number" id="chat-proactive-number" class="proactive-interval-number" min="1" max="120" value="${proactive.interval_minutes}">
+              <span class="proactive-interval-unit">мин</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Тихие часы</span>
+            <div class="quiet-hours-row">
+              <span class="quiet-hours-label">С</span>
+              <input type="time" id="chat-quiet-start" class="form-input" style="width:90px;text-align:center" value="${quietStart}">
+              <span class="quiet-hours-separator">—</span>
+              <span class="quiet-hours-label">До</span>
+              <input type="time" id="chat-quiet-end" class="form-input" style="width:90px;text-align:center" value="${quietEnd}">
+            </div>
           </div>
         </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Голос</div>
+        <div class="settings-section">
+          <div class="settings-section-title">Голос</div>
         <div class="settings-row">
           <span class="settings-label">Включён</span>
           <label class="toggle">
@@ -823,22 +808,69 @@ async function loadChatSettings() {
           <span class="settings-label"></span>
           <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
         </div>
+      </div>
+      </div>
+      <div class="chat-settings-panel" id="cs-panel-styles">
+        <div class="settings-section">
+          <div class="settings-section-title">Стили проактивных сообщений</div>
+          <div class="proactive-styles-section">
+            <div class="proactive-styles-desc">Выберите, какие стили сообщений Hanni может использовать в автономном режиме. Отключённые стили не будут включены в промпт.</div>
+            <div class="proactive-styles-actions">
+              <button class="btn-small" id="proactive-select-all">Все</button>
+              <button class="btn-small" id="proactive-select-none">Снять все</button>
+            </div>
+            <div class="proactive-styles-grid" id="proactive-styles-grid">
+              ${PROACTIVE_STYLE_DEFINITIONS.map(s => {
+                const isEnabled = enabledStyles.includes(s.id);
+                return `<div class="proactive-style-card${isEnabled ? ' enabled' : ''}" data-style-id="${s.id}">
+                  <span class="proactive-style-icon">${s.icon}</span>
+                  <div class="proactive-style-info">
+                    <div class="proactive-style-name">${s.name}</div>
+                    <div class="proactive-style-desc">${s.desc}</div>
+                  </div>
+                  <label class="mini-toggle proactive-style-toggle">
+                    <input type="checkbox" ${isEnabled ? 'checked' : ''} data-style="${s.id}">
+                    <span class="mini-toggle-slider"></span>
+                  </label>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
       </div>`;
+
+    // Sub-tab switching
+    document.querySelectorAll('.chat-settings-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.chat-settings-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.chat-settings-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`cs-panel-${tab.dataset.panel}`)?.classList.add('active');
+      });
+    });
 
     // Save handlers
     const getEnabledStyles = () => {
       const checks = document.querySelectorAll('#proactive-styles-grid input[data-style]');
       return Array.from(checks).filter(c => c.checked).map(c => c.dataset.style);
     };
-    const getChatProactiveValues = () => ({
-      enabled: document.getElementById('chat-proactive-enabled').checked,
-      voice_enabled: document.getElementById('chat-voice-enabled').checked,
-      voice_name: document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural',
-      interval_minutes: parseInt(document.getElementById('chat-proactive-number')?.value || '10'),
-      quiet_hours_start: parseInt(document.getElementById('chat-quiet-start')?.value) || 23,
-      quiet_hours_end: parseInt(document.getElementById('chat-quiet-end')?.value) || 8,
-      enabled_styles: getEnabledStyles(),
-    });
+    const getChatProactiveValues = () => {
+      const qStart = document.getElementById('chat-quiet-start')?.value || '23:00';
+      const qEnd = document.getElementById('chat-quiet-end')?.value || '08:00';
+      const [sh, sm] = qStart.split(':').map(Number);
+      const [eh, em] = qEnd.split(':').map(Number);
+      return {
+        enabled: document.getElementById('chat-proactive-enabled').checked,
+        voice_enabled: document.getElementById('chat-voice-enabled').checked,
+        voice_name: document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural',
+        interval_minutes: parseInt(document.getElementById('chat-proactive-number')?.value || '10'),
+        quiet_hours_start: sh,
+        quiet_hours_end: eh,
+        quiet_start_time: qStart,
+        quiet_end_time: qEnd,
+        enabled_styles: getEnabledStyles(),
+      };
+    };
     const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
 
     document.getElementById('chat-proactive-enabled')?.addEventListener('change', saveChatSettings);

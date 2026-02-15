@@ -189,7 +189,37 @@ struct ProactiveSettings {
     quiet_hours_start: u32,
     quiet_hours_end: u32,
     #[serde(default)]
+    quiet_start_time: String, // "HH:MM" format, e.g. "23:30"
+    #[serde(default)]
+    quiet_end_time: String,   // "HH:MM" format, e.g. "08:00"
+    #[serde(default)]
     enabled_styles: Vec<String>,
+}
+
+impl ProactiveSettings {
+    /// Returns quiet start as minutes since midnight.
+    /// Falls back to quiet_hours_start if quiet_start_time is empty.
+    fn quiet_start_minutes(&self) -> u32 {
+        parse_time_to_minutes(&self.quiet_start_time)
+            .unwrap_or(self.quiet_hours_start * 60)
+    }
+
+    /// Returns quiet end as minutes since midnight.
+    fn quiet_end_minutes(&self) -> u32 {
+        parse_time_to_minutes(&self.quiet_end_time)
+            .unwrap_or(self.quiet_hours_end * 60)
+    }
+}
+
+fn parse_time_to_minutes(s: &str) -> Option<u32> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() == 2 {
+        let h = parts[0].parse::<u32>().ok()?;
+        let m = parts[1].parse::<u32>().ok()?;
+        Some(h * 60 + m)
+    } else {
+        None
+    }
 }
 
 impl Default for ProactiveSettings {
@@ -201,6 +231,8 @@ impl Default for ProactiveSettings {
             interval_minutes: 10,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
+            quiet_start_time: String::new(),
+            quiet_end_time: String::new(),
             enabled_styles: Vec::new(), // empty = all styles enabled (backward compat)
         }
     }
@@ -7822,13 +7854,13 @@ pub fn run() {
                     // Poll every 5 seconds so we react quickly to settings changes
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-                    let (enabled, interval, quiet_start, quiet_end, is_typing, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles) = {
+                    let (enabled, interval, quiet_start_min, quiet_end_min, is_typing, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles) = {
                         let state = proactive_state_ref.lock().await;
                         (
                             state.settings.enabled,
                             state.settings.interval_minutes,
-                            state.settings.quiet_hours_start,
-                            state.settings.quiet_hours_end,
+                            state.settings.quiet_start_minutes(),
+                            state.settings.quiet_end_minutes(),
                             state.user_is_typing,
                             state.consecutive_skips,
                             state.settings.voice_enabled,
@@ -7907,11 +7939,13 @@ pub fn run() {
                         }
                     }
 
-                    let hour = chrono::Local::now().hour();
-                    let in_quiet = if quiet_start > quiet_end {
-                        hour >= quiet_start || hour < quiet_end
+                    let now_t = chrono::Local::now();
+                    let now_min = now_t.hour() * 60 + now_t.minute();
+                    let in_quiet = if quiet_start_min > quiet_end_min {
+                        // Wraps midnight: e.g. 23:30 → 08:00
+                        now_min >= quiet_start_min || now_min < quiet_end_min
                     } else {
-                        hour >= quiet_start && hour < quiet_end
+                        now_min >= quiet_start_min && now_min < quiet_end_min
                     };
 
                     let llm_busy = proactive_handle.state::<LlmBusy>().0.load(Ordering::Relaxed);

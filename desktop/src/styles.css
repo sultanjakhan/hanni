@@ -93,7 +93,7 @@ body {
   display: flex;
   align-items: flex-end;
   -webkit-app-region: drag;
-  padding-left: 80px;
+  padding-left: 76px;
   overflow: hidden;
 }
 
@@ -103,6 +103,7 @@ body {
   align-items: flex-end;
   overflow-x: auto;
   min-width: 0;
+  padding-top: 4px;
 }
 
 #tab-bar > .tab-bar-left {
@@ -119,9 +120,9 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 16px;
-  min-width: 140px;
-  max-width: 260px;
+  padding: 0 14px;
+  min-width: 120px;
+  max-width: 220px;
   height: 32px;
   cursor: pointer;
   color: var(--text-muted);
@@ -131,19 +132,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   -webkit-app-region: no-drag;
-  transition: background var(--transition-fast), color var(--transition-fast), height var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
   position: relative;
   flex-shrink: 0;
   border-radius: 6px 6px 0 0;
+  margin-left: 1px;
 }
 
 /* Vertical dividers between inactive tabs */
 .tab-item::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
+  left: -1px;
+  top: 8px;
+  bottom: 8px;
   width: 1px;
   background: var(--border-default);
   transition: opacity var(--transition-fast);
@@ -154,6 +156,7 @@ body {
 .tab-item.before-active::before { opacity: 0; }
 
 .tab-item:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.tab-item:hover::before { opacity: 0; }
 
 .tab-item.active {
   color: var(--text-primary);
@@ -162,6 +165,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--bg-page);
   margin-bottom: -1px;
+  z-index: 1;
 }
 
 .tab-item-icon { flex-shrink: 0; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
@@ -203,9 +207,10 @@ body {
   align-items: center;
   justify-content: center;
   -webkit-app-region: no-drag;
-  margin: 0 2px;
+  margin: 0 4px 6px;
   flex-shrink: 0;
   transition: all var(--transition-fast);
+  align-self: flex-end;
 }
 
 #tab-add:hover { background: var(--bg-hover); color: var(--text-primary); }
@@ -219,17 +224,23 @@ body {
 #tab-dropdown {
   position: fixed;
   top: 40px;
-  left: 80px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   padding: 6px;
   z-index: 500;
   min-width: 200px;
+  max-width: 320px;
   max-height: 400px;
   overflow-y: auto;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
   animation: scaleIn 0.1s ease-out;
+}
+
+.tab-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .tab-dropdown-item {
@@ -3054,4 +3065,45 @@ body.dragover::after {
 .mini-toggle input:checked + .mini-toggle-slider::before {
   transform: translateX(12px);
   background: #fff;
+}
+
+/* ── Chat settings sub-tabs ── */
+
+.chat-settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 20px;
+}
+
+.chat-settings-tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: inherit;
+}
+
+.chat-settings-tab:hover {
+  color: var(--text-secondary);
+}
+
+.chat-settings-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-blue);
+}
+
+.chat-settings-panel {
+  display: none;
+}
+
+.chat-settings-panel.active {
+  display: block;
 }
