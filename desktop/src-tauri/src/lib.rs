@@ -2496,15 +2496,18 @@ fn start_mlx_server() -> Option<Child> {
         eprintln!("[mlx] LoRA adapter found at {:?}", adapter_dir);
     }
 
-    let mut args = vec!["-m", "mlx_lm", "server", "--model", MODEL, "--port", "8234"];
+    let mut args = vec![
+        "-m", "mlx_lm", "server",
+        "--model", MODEL,
+        "--port", "8234",
+        "--chat-template-args", r#"{"enable_thinking":false}"#,
+    ];
     let adapter_dir_str = adapter_dir.to_string_lossy().to_string();
     if has_adapter {
         args.push("--adapter-path");
         args.push(&adapter_dir_str);
-        eprintln!("[mlx] Starting MLX server with adapter: {} {:?}", python, args);
-    } else {
-        eprintln!("[mlx] Starting MLX server: {} {:?}", python, args);
     }
+    eprintln!("[mlx] Starting MLX server: {} {:?}", python, args);
 
     // Log MLX stderr to file for debugging
     let log_path = hanni_data_dir().join("mlx_server.log");
