@@ -17,124 +17,17 @@ const MODEL: &str = "mlx-community/Qwen3-32B-4bit";
 
 const SYSTEM_PROMPT: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language.
 
-You execute actions using ```action blocks. EXAMPLES:
+You have tools available to execute actions. Use them whenever the user asks to DO something (remember, add, track, log, search, etc.).
 
-User: "Запомни, я учусь в КБТУ"
-You: "Запомнила!"
-```action
-{"action": "remember", "category": "user", "key": "university", "value": "Учится в КБТУ"}
-```
-
-User: "Запиши заметку: купить молоко"
-You: "Записала!"
-```action
-{"action": "add_note", "title": "Купить молоко", "content": "Купить молоко"}
-```
-
-User: "Заблокируй youtube на час"
-You: "Заблокировала YouTube на час!"
-```action
-{"action": "start_focus", "duration": 60, "sites": ["youtube.com"]}
-```
-
-User: "Потратил 5000 на еду"
-You: "Записала расход!"
-```action
-{"action": "add_transaction", "transaction_type": "expense", "amount": 5000, "category": "food", "description": "Еда"}
-```
-
-User: "Настроение 4, день был хороший"
-You: "Записала!"
-```action
-{"action": "log_mood", "mood": 4, "note": "День был хороший"}
-```
-
-User: "Завтра встреча с Артёмом в 15:00" (assume today is 2026-02-11)
-You: "Добавила в календарь на завтра!"
-```action
-{"action": "create_event", "title": "Встреча с Артёмом", "date": "2026-02-12", "time": "15:00", "duration": 60}
-```
-(IMPORTANT: For dates, calculate from [Current context] Today field. "завтра"=Today+1, "послезавтра"=Today+2, "в пятницу"=next Friday. Always output YYYY-MM-DD.)
-
-User: "Начни трекать время — работаю над проектом"
-You: "Запустила таймер!"
-```action
-{"action": "start_activity", "name": "Работа над проектом", "category": "work"}
-```
-
-User: "Стоп, закончил"
-You: "Остановила! Хорошая сессия."
-```action
-{"action": "stop_activity"}
-```
-
-User: "Спал 7 часов, выпил 5 стаканов воды"
-You: "Записала здоровье!"
-```action
-{"action": "log_health", "sleep": 7, "water": 5}
-```
-
-User: "Какой курс доллара сейчас?"
-You: "Сейчас поищу!"
-```action
-{"action": "web_search", "query": "курс доллара к тенге сегодня"}
-```
-(After receiving [Action result: ...], summarize the findings naturally.)
-
-User: "Найди рецепт борща"
-You: "Поищу рецепт!"
-```action
-{"action": "web_search", "query": "рецепт борща классический"}
-```
-
-ALL ACTIONS (use "action" key in JSON):
-Memory:
-- remember(category,key,value) — ALWAYS use when user shares personal info. Categories: user, preferences, world, tasks, people, habits
-- recall(category), forget(category,key), search_memory(query,limit?)
-Notes & Life Tracker:
-- add_note(title,content) — notes, lists, reminders
-- add_purchase(amount,category,description), add_time(activity,duration,category,productive), add_goal(title,category), get_stats
-Calendar & Events:
-- create_event(title,date,time?,duration?,description?,category?,color?) — add to calendar. USE THIS for meetings, deadlines, exams, all-day events (time="" duration=0). Look up date from [Current context] Next 14 days.
-- delete_event(id) — remove event
-- sync_calendar(month?,year?) — sync with Apple/Google Calendar
-Time Tracking:
-- start_activity(name,category?) — start tracking time on an activity
-- stop_activity — stop current activity
-- get_current_activity — check what's being tracked
-Projects & Tasks:
-- create_task(title,project_id?,description?,priority?,due_date?) — add task
-Focus:
-- start_focus(duration,apps?,sites?), stop_focus — block sites/apps
-System:
-- run_shell(command), open_url(url), send_notification(title,body), set_volume(level), get_clipboard, set_clipboard(text)
-- web_search(query) — search the web and return top 5 results. PREFERRED over open_url for any search/lookup. Use for current info, facts, recipes, prices, weather, news, etc.
-macOS Info:
-- get_activity, get_calendar, get_music, get_browser
-Media:
-- add_media(media_type,title,status?,rating?,progress?,total_episodes?) — types: music,anime,manga,movie,series,cartoon,game,book,podcast
-Food:
-- log_food(meal_type,name,calories?,protein?,carbs?,fat?) — meals: breakfast,lunch,dinner,snack
-- add_product(name,category?,expiry_date?,location?)
-Home:
-- add_home_item(name,category?,quantity?,unit?,location?) — track supplies
-Money:
-- add_transaction(transaction_type,amount,category,description?,currency?) — types: expense,income
-Fitness:
-- add_workout(type,title,duration?,calories?,notes?) — types: cardio,strength,yoga,stretching,swimming,running,cycling,martial_arts,other. Example: {"action":"add_workout","type":"strength","title":"Жим лёжа + присед","duration":60,"calories":400}
-Health:
-- log_health(sleep?,water?,steps?,weight?,notes?) — log daily health metrics. Example: {"action":"log_health","sleep":7,"water":5}
-- log_mood(mood,note?,trigger?) — mood: 1-5
-- save_journal(mood,energy,stress,gratitude?,reflection?,wins?,struggles?)
-Goals:
-- create_goal(tab,title,target,unit?,deadline?), update_goal(id,current?,status?)
-
-CRITICAL RULES:
-- When the user asks to remember, note, track, block, add, or DO anything — ALWAYS output a ```action block. NEVER just say "ok" without an action!
-- Call one action per message. After [Action result: ...], call another or give final answer.
-- Do NOT repeat raw action results. Summarize naturally.
-- Proactively remember important user facts (name, preferences, habits, people, language).
+RULES:
+- When the user asks to remember, note, track, block, add, or DO anything — ALWAYS call the appropriate tool. NEVER just say "ok" without an action!
+- You can call multiple tools in a single response when the user asks for multiple things.
+- For dates, calculate from [Current context] Today field. "завтра"=Today+1, "послезавтра"=Today+2, "в пятницу"=next Friday. Always use YYYY-MM-DD.
+- For all-day events: create_event with time="" and duration=0.
+- Proactively remember important user facts (name, preferences, habits, people, language) using the remember tool.
 - Your memories are already in context — use search_memory only for specific lookups.
+- After receiving tool results, summarize them naturally. Do NOT repeat raw results.
+- Use web_search for any current info, facts, recipes, prices, weather, news.
 - Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly)."#;
 
 const SYSTEM_PROMPT_LITE: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language.
@@ -159,6 +52,362 @@ fn needs_full_prompt(user_msg: &str) -> bool {
     let lower = user_msg.to_lowercase();
     if lower.len() > 200 { return true; }
     ACTION_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
+fn tool(name: &str, desc: &str, params: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": params
+        }
+    })
+}
+
+fn build_tool_definitions() -> Vec<serde_json::Value> {
+    vec![
+        // Memory
+        tool("remember", "Save a fact about the user. ALWAYS use when user shares personal info.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["user","preferences","world","tasks","people","habits"], "description": "Fact category"},
+                "key": {"type": "string", "description": "Short key, e.g. 'university'"},
+                "value": {"type": "string", "description": "The fact to remember"}
+            },
+            "required": ["category","key","value"]
+        })),
+        tool("recall", "Recall stored facts by category", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Category to recall"},
+                "key": {"type": "string", "description": "Optional specific key"}
+            },
+            "required": ["category"]
+        })),
+        tool("forget", "Remove a stored fact", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "key": {"type": "string"}
+            },
+            "required": ["category","key"]
+        })),
+        tool("search_memory", "Search stored memories by text query", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer"}
+            },
+            "required": ["query"]
+        })),
+        // Notes & Life Tracker
+        tool("add_note", "Create a note or reminder", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"}
+            },
+            "required": ["title","content"]
+        })),
+        tool("add_purchase", "Log a purchase", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number"},
+                "category": {"type": "string"},
+                "description": {"type": "string"}
+            },
+            "required": ["amount","category"]
+        })),
+        tool("add_time", "Log time spent on an activity", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "activity": {"type": "string"},
+                "duration": {"type": "number", "description": "Minutes"},
+                "category": {"type": "string"},
+                "productive": {"type": "boolean"}
+            },
+            "required": ["activity","duration"]
+        })),
+        tool("add_goal", "Add a simple goal", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "category": {"type": "string"}
+            },
+            "required": ["title"]
+        })),
+        tool("get_stats", "Get life tracker statistics", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // Calendar & Events
+        tool("create_event", "Create a calendar event. For dates use YYYY-MM-DD. For all-day events set time='' and duration=0.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "time": {"type": "string", "description": "HH:MM or empty for all-day"},
+                "duration": {"type": "integer", "description": "Duration in minutes, 0 for all-day"},
+                "description": {"type": "string"},
+                "category": {"type": "string"},
+                "color": {"type": "string"}
+            },
+            "required": ["title","date"]
+        })),
+        tool("delete_event", "Delete a calendar event by ID", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"}
+            },
+            "required": ["id"]
+        })),
+        tool("sync_calendar", "Sync with Apple Calendar", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "month": {"type": "integer"},
+                "year": {"type": "integer"}
+            }
+        })),
+        // Time Tracking
+        tool("start_activity", "Start tracking time on an activity", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"}
+            },
+            "required": ["name"]
+        })),
+        tool("stop_activity", "Stop current time-tracked activity", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_current_activity", "Check what activity is being tracked", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // Tasks
+        tool("create_task", "Create a task", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "project_id": {"type": "integer"},
+                "description": {"type": "string"},
+                "priority": {"type": "string", "enum": ["low","medium","high"]},
+                "due_date": {"type": "string"}
+            },
+            "required": ["title"]
+        })),
+        // Focus
+        tool("start_focus", "Start focus mode — block distracting sites/apps", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "duration": {"type": "integer", "description": "Minutes"},
+                "apps": {"type": "array", "items": {"type": "string"}},
+                "sites": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["duration"]
+        })),
+        tool("stop_focus", "Stop focus mode", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // System
+        tool("run_shell", "Run a shell command on macOS", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"}
+            },
+            "required": ["command"]
+        })),
+        tool("open_url", "Open a URL in the browser", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"}
+            },
+            "required": ["url"]
+        })),
+        tool("send_notification", "Send a macOS notification", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "body": {"type": "string"}
+            },
+            "required": ["body"]
+        })),
+        tool("set_volume", "Set system volume (0-100)", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer"}
+            },
+            "required": ["level"]
+        })),
+        tool("get_clipboard", "Get clipboard contents", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("set_clipboard", "Set clipboard contents", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"}
+            },
+            "required": ["text"]
+        })),
+        tool("web_search", "Search the web and return top results. Use for current info, facts, recipes, prices, weather, news.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"}
+            },
+            "required": ["query"]
+        })),
+        // macOS Info
+        tool("get_activity", "Get current user activity summary (active app, idle time)", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_calendar", "Get upcoming calendar events", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_music", "Get currently playing music", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_browser", "Get active browser tab URL and title", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // Media
+        tool("add_media", "Add a media item to collection", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "media_type": {"type": "string", "enum": ["music","anime","manga","movie","series","cartoon","game","book","podcast"]},
+                "title": {"type": "string"},
+                "status": {"type": "string", "enum": ["planned","watching","completed","dropped","on_hold"]},
+                "rating": {"type": "number"},
+                "progress": {"type": "integer"},
+                "total_episodes": {"type": "integer"},
+                "original_title": {"type": "string"},
+                "year": {"type": "integer"},
+                "description": {"type": "string"},
+                "notes": {"type": "string"}
+            },
+            "required": ["media_type","title"]
+        })),
+        // Food
+        tool("log_food", "Log a meal with optional nutrition info", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "meal_type": {"type": "string", "enum": ["breakfast","lunch","dinner","snack"]},
+                "name": {"type": "string"},
+                "calories": {"type": "number"},
+                "protein": {"type": "number"},
+                "carbs": {"type": "number"},
+                "fat": {"type": "number"},
+                "date": {"type": "string"},
+                "notes": {"type": "string"}
+            },
+            "required": ["meal_type","name"]
+        })),
+        tool("add_product", "Add a product with optional expiry tracking", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "quantity": {"type": "number"},
+                "unit": {"type": "string"},
+                "expiry_date": {"type": "string"},
+                "location": {"type": "string", "enum": ["fridge","pantry","freezer","other"]}
+            },
+            "required": ["name"]
+        })),
+        // Money
+        tool("add_transaction", "Record an expense or income", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "transaction_type": {"type": "string", "enum": ["expense","income"]},
+                "amount": {"type": "number"},
+                "category": {"type": "string"},
+                "description": {"type": "string"},
+                "currency": {"type": "string", "default": "KZT"},
+                "date": {"type": "string"},
+                "recurring": {"type": "boolean"},
+                "recurring_period": {"type": "string"}
+            },
+            "required": ["transaction_type","amount","category"]
+        })),
+        // Mindset
+        tool("log_mood", "Log current mood (1-5 scale)", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "mood": {"type": "integer", "minimum": 1, "maximum": 5},
+                "note": {"type": "string"},
+                "trigger": {"type": "string"}
+            },
+            "required": ["mood"]
+        })),
+        tool("save_journal", "Save a journal entry with mood, energy, stress", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "mood": {"type": "integer", "minimum": 1, "maximum": 5},
+                "energy": {"type": "integer", "minimum": 1, "maximum": 5},
+                "stress": {"type": "integer", "minimum": 1, "maximum": 5},
+                "gratitude": {"type": "string"},
+                "reflection": {"type": "string"},
+                "wins": {"type": "string"},
+                "struggles": {"type": "string"}
+            },
+            "required": ["mood","energy","stress"]
+        })),
+        // Home
+        tool("add_home_item", "Track a home supply item", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "quantity": {"type": "number"},
+                "unit": {"type": "string"},
+                "location": {"type": "string"},
+                "notes": {"type": "string"}
+            },
+            "required": ["name"]
+        })),
+        // Health
+        tool("log_health", "Log daily health metrics (sleep hours, water glasses, steps, weight)", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "sleep": {"type": "number", "description": "Hours slept"},
+                "water": {"type": "number", "description": "Glasses of water"},
+                "steps": {"type": "integer"},
+                "weight": {"type": "number", "description": "kg"},
+                "notes": {"type": "string"}
+            }
+        })),
+        // Fitness
+        tool("add_workout", "Log a workout session", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["cardio","strength","yoga","stretching","swimming","running","cycling","martial_arts","other"]},
+                "title": {"type": "string"},
+                "duration": {"type": "integer", "description": "Minutes"},
+                "calories": {"type": "integer"},
+                "notes": {"type": "string"}
+            },
+            "required": ["type","title"]
+        })),
+        // Goals
+        tool("create_goal", "Create a goal with target value", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "tab": {"type": "string", "description": "Tab name for the goal"},
+                "title": {"type": "string"},
+                "target": {"type": "number"},
+                "unit": {"type": "string"},
+                "deadline": {"type": "string"}
+            },
+            "required": ["title","target"]
+        })),
+        tool("update_goal", "Update goal progress", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "current": {"type": "number"},
+                "status": {"type": "string"}
+            },
+            "required": ["id"]
+        })),
+    ]
 }
 
 fn data_file_path() -> PathBuf {
@@ -1051,10 +1300,39 @@ fn save_proactive_settings(settings: &ProactiveSettings) -> Result<(), String> {
 
 // ── Chat types ──
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct ChatMessage {
     role: String,
-    content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<ToolCallResult>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+impl ChatMessage {
+    fn text(role: &str, content: &str) -> Self {
+        Self {
+            role: role.into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+    #[allow(dead_code)]
+    fn tool_result(tool_call_id: &str, name: &str, content: &str) -> Self {
+        Self {
+            role: "tool".into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+            name: Some(name.into()),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -1070,21 +1348,70 @@ struct ChatRequest {
     stream: bool,
     temperature: f32,
     chat_template_kwargs: ChatTemplateKwargs,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<serde_json::Value>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct Delta {
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCallDelta>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct Choice {
     delta: Option<Delta>,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct StreamChunk {
     choices: Vec<Choice>,
+}
+
+// ── Tool calling types ──
+
+#[derive(Deserialize, Debug, Clone)]
+struct ToolCallDelta {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<ToolCallFunction>,
+    #[serde(rename = "type", default)]
+    #[allow(dead_code)]
+    call_type: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ToolCallFunction {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ToolCallResult {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: ToolCallResultFunction,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ToolCallResultFunction {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ChatResult {
+    text: String,
+    tool_calls: Vec<ToolCallResult>,
+    finish_reason: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -2304,7 +2631,7 @@ async fn spawn_api_server(app_handle: AppHandle) {
     #[derive(Deserialize)]
     struct ChatReq {
         message: String,
-        history: Option<Vec<(String, String)>>,
+        history: Option<Vec<serde_json::Value>>,
     }
 
     #[derive(Deserialize)]
@@ -2354,10 +2681,10 @@ async fn spawn_api_server(app_handle: AppHandle) {
         check_auth(&headers, &state.token)?;
 
         let mut messages = req.history.unwrap_or_default();
-        messages.push(("user".into(), req.message));
+        messages.push(serde_json::json!({"role": "user", "content": req.message}));
 
         match chat_inner(&state.app, messages, false).await {
-            Ok(reply) => Ok(Json(serde_json::json!({ "reply": reply }))),
+            Ok(result) => Ok(Json(serde_json::json!({ "reply": result.text, "tool_calls": result.tool_calls }))),
             Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
         }
     }
@@ -2627,7 +2954,7 @@ fn classify_app(name: &str) -> &'static str {
 // ── Chat command ──
 
 #[tauri::command]
-async fn chat(app: AppHandle, messages: Vec<(String, String)>, call_mode: Option<bool>) -> Result<String, String> {
+async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Option<bool>) -> Result<String, String> {
     let llm_state = app.state::<LlmBusy>();
     // Wait for any in-flight LLM call (e.g. proactive) to finish — MLX is single-threaded
     let _permit = tokio::time::timeout(
@@ -2636,11 +2963,11 @@ async fn chat(app: AppHandle, messages: Vec<(String, String)>, call_mode: Option
     ).await
         .map_err(|_| "LLM busy — timeout after 15s".to_string())?
         .map_err(|_| "LLM semaphore closed".to_string())?;
-    let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await;
-    result
+    let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await?;
+    serde_json::to_string(&result).map_err(|e| format!("Serialize error: {}", e))
 }
 
-async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode: bool) -> Result<String, String> {
+async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
 
     // Read thinking mode setting (default: off)
@@ -2678,8 +3005,8 @@ async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode:
     );
     // Adaptive prompt: use full prompt only when actions are needed
     let last_user_msg = messages.iter().rev()
-        .find(|(role, _)| role == "user")
-        .map(|(_, c)| c.as_str())
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("");
     let use_full = needs_full_prompt(last_user_msg);
 
@@ -2713,27 +3040,21 @@ VOICE STYLE:
         format!("{}{}", SYSTEM_PROMPT_LITE, date_context)
     };
 
-    let mut chat_messages = vec![ChatMessage {
-        role: "system".into(),
-        content: system_content,
-    }];
+    let mut chat_messages = vec![ChatMessage::text("system", &system_content)];
 
     // Inject memory context from SQLite
     {
-        let last_user_msg = messages.iter().rev()
-            .find(|(role, _)| role == "user")
-            .map(|(_, c)| c.as_str())
+        let mem_user_msg = messages.iter().rev()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .and_then(|m| m.get("content").and_then(|c| c.as_str()))
             .unwrap_or("");
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
-            build_memory_context_from_db(&conn, last_user_msg, if use_full || call_mode { 80 } else { 10 })
+            build_memory_context_from_db(&conn, mem_user_msg, if use_full || call_mode { 80 } else { 10 })
         };
         if !ctx.is_empty() {
-            chat_messages.push(ChatMessage {
-                role: "system".into(),
-                content: format!("[Your memories]\n{}", ctx),
-            });
+            chat_messages.push(ChatMessage::text("system", &format!("[Your memories]\n{}", ctx)));
         }
     }
 
@@ -2741,12 +3062,14 @@ VOICE STYLE:
     let history_limit = if use_full || call_mode { messages.len() } else { 6 };
     let skip = messages.len().saturating_sub(history_limit);
     let trimmed: Vec<_> = messages.iter().skip(skip).collect();
-    for (role, content) in trimmed.iter() {
-        chat_messages.push(ChatMessage {
-            role: role.clone(),
-            content: content.clone(),
-        });
+    for msg_val in trimmed.iter() {
+        // Deserialize history message to ChatMessage (handles both old tuple and new object format)
+        if let Ok(cm) = serde_json::from_value::<ChatMessage>((*msg_val).clone()) {
+            chat_messages.push(cm);
+        }
     }
+
+    let tools_param = if use_full && !call_mode { Some(build_tool_definitions()) } else { None };
 
     let request = ChatRequest {
         model: MODEL.into(),
@@ -2755,6 +3078,7 @@ VOICE STYLE:
         stream: true,
         temperature: if call_mode { 0.6 } else { 0.7 },
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
+        tools: tools_param,
     };
 
     // Retry connection up to 3 times (MLX server may still be loading model)
@@ -2777,6 +3101,12 @@ VOICE STYLE:
     let mut full_reply = String::new();
     let mut in_think = false;
     let mut buffer = String::new();
+    let mut finish_reason: Option<String> = None;
+
+    // Tool call accumulator: index → (id, name, arguments)
+    let mut tc_ids: HashMap<usize, String> = HashMap::new();
+    let mut tc_names: HashMap<usize, String> = HashMap::new();
+    let mut tc_args: HashMap<usize, String> = HashMap::new();
 
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| format!("Stream error: {}", e))?;
@@ -2795,7 +3125,30 @@ VOICE STYLE:
 
             if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
                 if let Some(choice) = chunk.choices.first() {
+                    // Capture finish_reason
+                    if let Some(ref fr) = choice.finish_reason {
+                        finish_reason = Some(fr.clone());
+                    }
+
                     if let Some(delta) = &choice.delta {
+                        // Accumulate tool call deltas
+                        if let Some(ref tcs) = delta.tool_calls {
+                            for tc in tcs {
+                                let idx = tc.index;
+                                if let Some(ref id) = tc.id {
+                                    tc_ids.insert(idx, id.clone());
+                                }
+                                if let Some(ref func) = tc.function {
+                                    if let Some(ref name) = func.name {
+                                        tc_names.insert(idx, name.clone());
+                                    }
+                                    if let Some(ref args) = func.arguments {
+                                        tc_args.entry(idx).or_default().push_str(args);
+                                    }
+                                }
+                            }
+                        }
+
                         if let Some(token) = &delta.content {
                             if token.contains("<think>") {
                                 in_think = true;
@@ -2822,7 +3175,27 @@ VOICE STYLE:
         }
     }
 
-    Ok(full_reply)
+    // Build tool_calls from accumulated deltas
+    let mut tool_calls: Vec<ToolCallResult> = Vec::new();
+    let mut indices: Vec<usize> = tc_ids.keys().chain(tc_names.keys()).chain(tc_args.keys())
+        .copied().collect::<std::collections::HashSet<_>>().into_iter().collect();
+    indices.sort();
+    for idx in indices {
+        let id = tc_ids.remove(&idx).unwrap_or_else(|| format!("call_{}", idx));
+        let name = tc_names.remove(&idx).unwrap_or_default();
+        let arguments = tc_args.remove(&idx).unwrap_or_default();
+        tool_calls.push(ToolCallResult {
+            id,
+            call_type: "function".into(),
+            function: ToolCallResultFunction { name, arguments },
+        });
+    }
+
+    Ok(ChatResult {
+        text: full_reply,
+        tool_calls,
+        finish_reason,
+    })
 }
 
 // ── File commands ──
@@ -3319,7 +3692,7 @@ fn memory_search(
 
 #[tauri::command]
 fn save_conversation(
-    messages: Vec<(String, String)>,
+    messages: Vec<serde_json::Value>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
@@ -3337,7 +3710,7 @@ fn save_conversation(
 #[tauri::command]
 fn update_conversation(
     id: i64,
-    messages: Vec<(String, String)>,
+    messages: Vec<serde_json::Value>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
@@ -3387,7 +3760,7 @@ fn get_conversation(
         rusqlite::params![id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).map_err(|e| format!("Not found: {}", e))?;
-    let messages: Vec<(String, String)> = serde_json::from_str(&messages_json)
+    let messages: serde_json::Value = serde_json::from_str(&messages_json)
         .map_err(|e| format!("Parse error: {}", e))?;
     Ok(serde_json::json!({
         "id": id,
@@ -3443,7 +3816,7 @@ fn search_conversations(
 
 #[tauri::command]
 async fn process_conversation_end(
-    messages: Vec<(String, String)>,
+    messages: Vec<serde_json::Value>,
     conversation_id: i64,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -3451,8 +3824,15 @@ async fn process_conversation_end(
 
     // Build a compact version of the conversation for the LLM
     let conv_text: String = messages.iter()
-        .filter(|(role, _)| role == "user" || role == "assistant")
-        .map(|(role, content)| format!("{}: {}", role, content))
+        .filter(|m| {
+            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            role == "user" || role == "assistant"
+        })
+        .map(|m| {
+            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            format!("{}: {}", role, content)
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -3475,13 +3855,14 @@ async fn process_conversation_end(
     let request = ChatRequest {
         model: MODEL.into(),
         messages: vec![
-            ChatMessage { role: "system".into(), content: "You extract structured data from conversations. Return only valid JSON.".into() },
-            ChatMessage { role: "user".into(), content: prompt },
+            ChatMessage::text("system", "You extract structured data from conversations. Return only valid JSON."),
+            ChatMessage::text("user", &prompt),
         ],
         max_tokens: 800,
         stream: false,
         temperature: 0.3,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+        tools: None,
     };
 
     let response = client
@@ -6827,19 +7208,14 @@ async fn proactive_llm_call(
     let request = ChatRequest {
         model: MODEL.into(),
         messages: vec![
-            ChatMessage {
-                role: "system".into(),
-                content: sys_prompt,
-            },
-            ChatMessage {
-                role: "user".into(),
-                content: user_content,
-            },
+            ChatMessage::text("system", &sys_prompt),
+            ChatMessage::text("user", &user_content),
         ],
         max_tokens: 300,
         stream: false,
         temperature: 0.85,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+        tools: None,
     };
 
     let response = client
@@ -7889,19 +8265,14 @@ pub fn run() {
                     let request = ChatRequest {
                         model: MODEL.into(),
                         messages: vec![
-                            ChatMessage {
-                                role: "system".into(),
-                                content: "Ты — аналитик поведения. Твоя задача — находить паттерны в активности пользователя. Будь краток и конкретен. Отвечай на русском.".into(),
-                            },
-                            ChatMessage {
-                                role: "user".into(),
-                                content: prompt,
-                            },
+                            ChatMessage::text("system", "Ты — аналитик поведения. Твоя задача — находить паттерны в активности пользователя. Будь краток и конкретен. Отвечай на русском."),
+                            ChatMessage::text("user", &prompt),
                         ],
                         max_tokens: 400,
                         stream: false,
                         temperature: 0.3,
                         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+                        tools: None,
                     };
 
                     let resp = client.post(MLX_URL).json(&request).send().await;
