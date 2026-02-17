@@ -2278,7 +2278,7 @@ async fn run_shell(command: String) -> Result<String, String> {
     if output.status.success() {
         let result = stdout.trim().to_string();
         if result.len() > 5000 {
-            Ok(format!("{}...\n[truncated, {} bytes total]", &result[..5000], result.len()))
+            Ok(format!("{}...\n[truncated, {} bytes total]", truncate_utf8(&result, 5000), result.len()))
         } else {
             Ok(result)
         }
@@ -7084,6 +7084,16 @@ fn compute_activity_delta(old_ctx: &str, new_ctx: &str) -> String {
     deltas.join("\n")
 }
 
+/// Truncate a UTF-8 string to at most `max_bytes` bytes on a char boundary.
+fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes { return s; }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn get_recent_chat_snippet(conn: &rusqlite::Connection, limit: usize) -> String {
     // Get the latest conversation and extract last N messages
     let messages_json: String = conn.query_row(
@@ -7093,16 +7103,23 @@ fn get_recent_chat_snippet(conn: &rusqlite::Connection, limit: usize) -> String 
     if messages_json.is_empty() {
         return String::new();
     }
-    // Messages stored as JSON array of [role, content] pairs
-    if let Ok(msgs) = serde_json::from_str::<Vec<Vec<String>>>(&messages_json) {
+    // Messages stored as JSON array — handle both old [role, content] and new {role, content} formats
+    if let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(&messages_json) {
         let start = msgs.len().saturating_sub(limit);
         msgs[start..].iter()
-            .map(|m| {
-                let role = m.first().map(|s| s.as_str()).unwrap_or("?");
-                let content = m.get(1).map(|s| s.as_str()).unwrap_or("");
-                // Truncate long messages
-                let short = if content.len() > 150 { &content[..150] } else { content };
-                format!("{}: {}", if role == "user" { "User" } else { "Hanni" }, short)
+            .filter_map(|m| {
+                let (role, content) = if let Some(arr) = m.as_array() {
+                    // Old format: ["role", "content"]
+                    (arr.first().and_then(|v| v.as_str()).unwrap_or("?"),
+                     arr.get(1).and_then(|v| v.as_str()).unwrap_or(""))
+                } else {
+                    // New format: {role, content, ...}
+                    (m.get("role").and_then(|v| v.as_str()).unwrap_or("?"),
+                     m.get("content").and_then(|v| v.as_str()).unwrap_or(""))
+                };
+                if role == "tool" { return None; }
+                let short = truncate_utf8(content, 150);
+                Some(format!("{}: {}", if role == "user" { "User" } else { "Hanni" }, short))
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -7195,7 +7212,7 @@ async fn proactive_llm_call(
             todays_messages.len()
         ));
         for (i, msg) in todays_messages.iter().enumerate() {
-            let short = if msg.len() > 100 { &msg[..100] } else { msg.as_str() };
+            let short = truncate_utf8(msg, 100);
             user_content.push_str(&format!("  {}. \"{}\"\n", i + 1, short));
         }
     }
