@@ -22,6 +22,22 @@ let APP_VERSION = '?';
 let busy = false;
 let history = [];
 let attachedFile = null;
+
+// Normalize history message: supports both old [role, content] tuples and new {role, content, ...} objects
+function normalizeHistoryMessage(msg) {
+  if (Array.isArray(msg)) {
+    return { role: msg[0], content: msg[1] };
+  }
+  return msg;
+}
+function getRole(msg) {
+  if (Array.isArray(msg)) return msg[0];
+  return msg.role;
+}
+function getContent(msg) {
+  if (Array.isArray(msg)) return msg[1];
+  return msg.content || '';
+}
 let isRecording = false;
 let currentConversationId = null;
 let isSpeaking = false;
@@ -177,7 +193,7 @@ listen('proactive-message', (event) => {
   chat.appendChild(ts);
 
   // Add to history so user can reply naturally
-  history.push(['assistant', text]);
+  history.push({ role: 'assistant', content: text });
   scrollDown();
   autoSaveConversation();
 
@@ -340,7 +356,8 @@ async function loadConversation(id) {
     await autoSaveConversation();
     const conv = await invoke('get_conversation', { id });
     currentConversationId = id;
-    history = conv.messages || [];
+    // Normalize messages: handle both old [role, content] and new {role, content} formats
+    history = (conv.messages || []).map(normalizeHistoryMessage);
     chat.innerHTML = '';
     // Load existing ratings
     let ratingsMap = {};
@@ -352,13 +369,22 @@ async function loadConversation(id) {
     } catch (_) {}
     // Render all messages
     for (let i = 0; i < history.length; i++) {
-      const [role, content] = history[i];
+      const role = getRole(history[i]);
+      const content = getContent(history[i]);
+      // Skip tool result messages in UI
+      if (role === 'tool') {
+        const div = document.createElement('div');
+        div.className = 'action-result success';
+        div.textContent = content;
+        chat.appendChild(div);
+        continue;
+      }
       if (role === 'user' && content.startsWith('[Action result:')) {
         const div = document.createElement('div');
         div.className = 'action-result success';
         div.textContent = content;
         chat.appendChild(div);
-      } else {
+      } else if (role === 'user' || role === 'assistant') {
         addMsg(role === 'assistant' ? 'bot' : role, content);
         // Add feedback buttons to bot messages
         if (role === 'assistant') {
@@ -1426,6 +1452,8 @@ async function streamChat(botDiv, t0, callMode = false) {
   let firstToken = 0;
   let tokens = 0;
   let fullReply = '';
+  let toolCalls = [];
+  let finishReason = null;
 
   const unlisten = await listen('chat-token', (event) => {
     if (!firstToken) firstToken = performance.now() - t0;
@@ -1439,8 +1467,25 @@ async function streamChat(botDiv, t0, callMode = false) {
   const unlistenDone = await listen('chat-done', () => {});
 
   try {
-    const msgs = history.slice(-20);
-    await invoke('chat', { messages: msgs, callMode });
+    const msgs = history.slice(-20).map(normalizeHistoryMessage);
+    const resultJson = await invoke('chat', { messages: msgs, callMode });
+    // Parse ChatResult JSON from Rust
+    try {
+      const chatResult = JSON.parse(resultJson);
+      if (chatResult.tool_calls && chatResult.tool_calls.length > 0) {
+        toolCalls = chatResult.tool_calls;
+      }
+      finishReason = chatResult.finish_reason || null;
+      // fullReply was already built by streaming tokens; use chatResult.text as fallback
+      if (!fullReply && chatResult.text) {
+        fullReply = chatResult.text;
+      }
+    } catch (_) {
+      // If not valid JSON, treat as plain text (backward compat)
+      if (!fullReply && typeof resultJson === 'string') {
+        fullReply = resultJson;
+      }
+    }
   } catch (e) {
     if (!fullReply) {
       const errMsg = String(e);
@@ -1456,7 +1501,7 @@ async function streamChat(botDiv, t0, callMode = false) {
   unlistenDone();
   cursor.remove();
 
-  return { fullReply, tokens, firstToken };
+  return { fullReply, tokens, firstToken, toolCalls, finishReason };
 }
 
 // ── Agent step indicator ──
@@ -1546,7 +1591,7 @@ async function send() {
     addMsg('user', text);
   }
 
-  history.push(['user', userContent]);
+  history.push({ role: 'user', content: userContent });
 
   const MAX_ITERATIONS = 5;
   const t0 = performance.now();
@@ -1576,11 +1621,50 @@ async function send() {
     if (!firstToken && result.firstToken) firstToken = result.firstToken;
     totalTokens += result.tokens;
 
+    // Primary path: native tool calls from the model
+    if (result.toolCalls && result.toolCalls.length > 0) {
+      // Push assistant message with tool_calls into history
+      const assistantMsg = { role: 'assistant', content: result.fullReply || null, tool_calls: result.toolCalls };
+      history.push(assistantMsg);
+
+      // If no visible text, hide the empty bot div
+      if (!result.fullReply) {
+        botDiv.classList.add('intermediate');
+      } else {
+        botDiv.classList.add('intermediate');
+      }
+
+      // Execute each tool call and push results
+      for (const tc of result.toolCalls) {
+        let args;
+        try { args = JSON.parse(tc.function.arguments); } catch (_) { args = {}; }
+        // Inject action type for executeAction compatibility
+        args.action = tc.function.name;
+        const actionJson = JSON.stringify(args);
+        const { success, result: actionResult } = await executeAction(actionJson);
+        const actionDiv = document.createElement('div');
+        actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
+        actionDiv.textContent = actionResult;
+        chat.appendChild(actionDiv);
+        scrollDown();
+
+        // Push tool result into history
+        history.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          name: tc.function.name,
+          content: String(actionResult)
+        });
+      }
+      // Continue loop — model will respond with a summary
+      continue;
+    }
+
     if (!result.fullReply) break;
 
-    history.push(['assistant', result.fullReply]);
+    history.push({ role: 'assistant', content: result.fullReply });
 
-    // Parse actions from response
+    // Fallback path: parse ```action blocks from text (backward compat)
     const actions = parseAndExecuteActions(result.fullReply);
 
     // No actions — this is the final answer, stop the loop
@@ -1602,7 +1686,7 @@ async function send() {
     }
 
     // Feed results back into history so the model sees them
-    history.push(['user', `[Action result: ${results.join('; ')}]`]);
+    history.push({ role: 'user', content: `[Action result: ${results.join('; ')}]` });
   }
 
   // Add TTS button to last bot wrapper
@@ -1643,13 +1727,11 @@ async function send() {
         const allWrappers = chat.querySelectorAll('.msg-wrapper');
         allWrappers.forEach(w => {
           if (!w.querySelector('.feedback-btn')) {
-            // Find which history index this message corresponds to
             const allWrappersArr = [...chat.querySelectorAll('.msg-wrapper')];
             const wrapperIdx = allWrappersArr.indexOf(w);
-            // Map wrapper index to history index (assistant messages only)
             let assistantCount = 0;
             for (let i = 0; i < history.length; i++) {
-              if (history[i][0] === 'assistant') {
+              if (getRole(history[i]) === 'assistant') {
                 if (assistantCount === wrapperIdx) {
                   addFeedbackButtons(w, currentConversationId, i);
                   break;
@@ -5186,7 +5268,7 @@ listen('call-transcript', async (event) => {
 
   // Also add to actual chat history
   addMsg('user', userText);
-  history.push(['user', userText]);
+  history.push({ role: 'user', content: userText });
 
   // Update UI phase to "processing" while LLM thinks
   callOverlay.setAttribute('data-phase', 'processing');
@@ -5211,11 +5293,35 @@ listen('call-transcript', async (event) => {
     scrollDown();
 
     const result = await streamChat(botDiv, t0, true);
+
+    // Primary path: native tool calls
+    if (result.toolCalls && result.toolCalls.length > 0) {
+      history.push({ role: 'assistant', content: result.fullReply || null, tool_calls: result.toolCalls });
+      lastReply = result.fullReply || '';
+      botDiv.classList.add('intermediate');
+
+      for (const tc of result.toolCalls) {
+        let args;
+        try { args = JSON.parse(tc.function.arguments); } catch (_) { args = {}; }
+        args.action = tc.function.name;
+        const actionJson = JSON.stringify(args);
+        const { success, result: actionResult } = await executeAction(actionJson);
+        const actionDiv = document.createElement('div');
+        actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
+        actionDiv.textContent = actionResult;
+        chat.appendChild(actionDiv);
+        scrollDown();
+        history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: String(actionResult) });
+      }
+      continue;
+    }
+
     if (!result.fullReply) break;
 
-    history.push(['assistant', result.fullReply]);
+    history.push({ role: 'assistant', content: result.fullReply });
     lastReply = result.fullReply;
 
+    // Fallback: parse ```action blocks
     const actions = parseAndExecuteActions(result.fullReply);
     if (actions.length === 0) break;
 
@@ -5230,7 +5336,7 @@ listen('call-transcript', async (event) => {
       scrollDown();
       results.push(actionResult);
     }
-    history.push(['user', `[Action result: ${results.join('; ')}]`]);
+    history.push({ role: 'user', content: `[Action result: ${results.join('; ')}]` });
   }
 
   if (!callModeActive) return;
