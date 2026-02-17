@@ -2941,6 +2941,7 @@ async function loadAbout(el) {
         <div class="settings-section-title">Модель</div>
         <div class="settings-row"><span class="settings-label">Название</span><span class="settings-value">${info.model_name||'?'}</span></div>
         <div class="settings-row"><span class="settings-label">Сервер</span><span class="settings-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
+        <div class="settings-row"><span class="settings-label">Thinking mode</span><span class="settings-hint">Глубокое размышление (медленнее, для сложных задач)</span><label class="toggle"><input type="checkbox" id="about-thinking-toggle"><span class="toggle-slider"></span></label></div>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">Данные</div>
@@ -2965,6 +2966,15 @@ async function loadAbout(el) {
       catch (err) { btn.textContent = String(err).substring(0, 30); }
       setTimeout(() => { btn.textContent = 'Экспорт JSONL'; btn.disabled = false; }, 4000);
     });
+    // Thinking mode toggle
+    const thinkToggle = document.getElementById('about-thinking-toggle');
+    if (thinkToggle) {
+      const thinkVal = await invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null);
+      thinkToggle.checked = thinkVal === 'true';
+      thinkToggle.addEventListener('change', () => {
+        invoke('set_app_setting', { key: 'enable_thinking', value: thinkToggle.checked ? 'true' : 'false' }).catch(() => {});
+      });
+    }
     try {
       const resp = await fetch('http://127.0.0.1:8235/api/status');
       const apiEl = document.getElementById('about-api-status');

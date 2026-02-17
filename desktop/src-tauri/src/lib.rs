@@ -1058,12 +1058,18 @@ struct ChatMessage {
 }
 
 #[derive(Serialize)]
+struct ChatTemplateKwargs {
+    enable_thinking: bool,
+}
+
+#[derive(Serialize)]
 struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
     max_tokens: u32,
     stream: bool,
     temperature: f32,
+    chat_template_kwargs: ChatTemplateKwargs,
 }
 
 #[derive(Deserialize)]
@@ -2634,6 +2640,16 @@ async fn chat(app: AppHandle, messages: Vec<(String, String)>, call_mode: Option
 async fn chat_inner(app: &AppHandle, messages: Vec<(String, String)>, call_mode: bool) -> Result<String, String> {
     let client = &app.state::<HttpClient>().0;
 
+    // Read thinking mode setting (default: off)
+    let thinking_enabled = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key='enable_thinking'",
+            [], |row| row.get::<_, String>(0),
+        ).ok().map(|v| v == "true").unwrap_or(false)
+    };
+
     // Build system prompt with current date/time context + full week lookup table
     let now_local = chrono::Local::now();
     let weekday_ru = match now_local.format("%u").to_string().as_str() {
@@ -2735,6 +2751,7 @@ VOICE STYLE:
         max_tokens: if call_mode { 200 } else if use_full { 1024 } else { 256 },
         stream: true,
         temperature: if call_mode { 0.6 } else { 0.7 },
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
     };
 
     // Retry connection up to 3 times (MLX server may still be loading model)
@@ -3461,6 +3478,7 @@ async fn process_conversation_end(
         max_tokens: 800,
         stream: false,
         temperature: 0.3,
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
     };
 
     let response = client
@@ -6818,6 +6836,7 @@ async fn proactive_llm_call(
         max_tokens: 300,
         stream: false,
         temperature: 0.85,
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
     };
 
     let response = client
@@ -7879,6 +7898,7 @@ pub fn run() {
                         max_tokens: 400,
                         stream: false,
                         temperature: 0.3,
+                        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
                     };
 
                     let resp = client.post(MLX_URL).json(&request).send().await;
