@@ -410,6 +410,116 @@ fn build_tool_definitions() -> Vec<serde_json::Value> {
     ]
 }
 
+/// Select a small set of relevant tools based on message keywords (max ~5-8).
+/// Sending all 40 tools adds ~3000 tokens and kills performance on 32B models.
+fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
+    let all = build_tool_definitions();
+    let lower = user_msg.to_lowercase();
+
+    // keyword → tool names that should be included
+    let rules: &[(&[&str], &[&str])] = &[
+        // Money
+        (&["потратил", "купил", "расход", "доход", "заплатил", "стоил", "цена", "транзакц"],
+         &["add_transaction"]),
+        // Memory
+        (&["запомни", "помни", "забудь", "вспомни", "запиши факт"],
+         &["remember", "recall", "forget", "search_memory"]),
+        // Notes
+        (&["заметк", "запиши", "напомни", "заметку", "записку", "note"],
+         &["add_note"]),
+        // Calendar
+        (&["встреч", "событи", "календар", "дедлайн", "экзамен", "расписан"],
+         &["create_event", "delete_event", "sync_calendar"]),
+        // Time tracking
+        (&["трекай", "таймер", "трекинг", "начни отсле", "стоп"],
+         &["start_activity", "stop_activity", "get_current_activity"]),
+        // Focus
+        (&["заблокируй", "блокируй", "фокус", "сконцентр"],
+         &["start_focus", "stop_focus"]),
+        // Food
+        (&["поел", "ел ", "завтрак", "обед", "ужин", "перекус", "калори", "еда", "еду"],
+         &["log_food"]),
+        (&["продукт", "срок годн", "холодильник"],
+         &["add_product"]),
+        // Health
+        (&["спал", "сон", "вод", "вес ", "шаг", "здоровь"],
+         &["log_health"]),
+        (&["настроен", "mood", "грустн", "весел", "плохо", "хорошо"],
+         &["log_mood"]),
+        (&["дневник", "рефлекс", "журнал"],
+         &["save_journal"]),
+        // Fitness
+        (&["тренировк", "зал ", "спорт", "бег ", "йога", "присед"],
+         &["add_workout"]),
+        // Media
+        (&["аниме", "манга", "фильм", "сериал", "книг", "музык", "игр", "подкаст", "смотрю", "читаю", "играю"],
+         &["add_media"]),
+        // Web search
+        (&["загугли", "найди", "поищи", "погугли", "search", "web_search", "курс", "погод", "рецепт", "новост"],
+         &["web_search"]),
+        // System
+        (&["открой", "open_url", "ссылк", "сайт"],
+         &["open_url"]),
+        (&["команд", "терминал", "shell", "run_shell"],
+         &["run_shell"]),
+        (&["уведомлен", "notification"],
+         &["send_notification"]),
+        (&["громкост", "volume", "звук"],
+         &["set_volume"]),
+        (&["буфер", "clipboard", "скопируй"],
+         &["get_clipboard", "set_clipboard"]),
+        // macOS info
+        (&["активность", "чем заним", "что делаю"],
+         &["get_activity"]),
+        (&["что играет", "какая песня", "музыка сейчас"],
+         &["get_music"]),
+        (&["вкладк", "браузер", "какой сайт"],
+         &["get_browser"]),
+        // Home
+        (&["запас", "дом ", "домой", "supplies", "shopping"],
+         &["add_home_item"]),
+        // Tasks
+        (&["задач", "task", "проект"],
+         &["create_task"]),
+        // Goals
+        (&["цел", "goal"],
+         &["create_goal", "update_goal"]),
+    ];
+
+    let mut selected_names: Vec<&str> = Vec::new();
+
+    for (keywords, tool_names) in rules {
+        if keywords.iter().any(|kw| lower.contains(kw)) {
+            for name in *tool_names {
+                if !selected_names.contains(name) {
+                    selected_names.push(name);
+                }
+            }
+        }
+    }
+
+    // Always include remember (model should proactively remember facts)
+    if !selected_names.contains(&"remember") {
+        selected_names.push("remember");
+    }
+
+    // If nothing matched (generic action request), include a basic set
+    if selected_names.len() <= 1 {
+        selected_names.extend_from_slice(&["add_note", "web_search", "create_event", "add_transaction"]);
+    }
+
+    // Filter the full tool list
+    all.into_iter()
+        .filter(|t| {
+            t.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .map(|n| selected_names.contains(&n))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
 fn data_file_path() -> PathBuf {
     hanni_data_dir().join("life-tracker-data.json")
 }
@@ -3069,7 +3179,9 @@ VOICE STYLE:
         }
     }
 
-    let tools_param = if use_full && !call_mode { Some(build_tool_definitions()) } else { None };
+    let tools_param = if use_full && !call_mode {
+        Some(select_relevant_tools(last_user_msg))
+    } else { None };
 
     let request = ChatRequest {
         model: MODEL.into(),

@@ -1288,7 +1288,7 @@ async function executeAction(actionJson) {
       // Money
       case 'add_transaction':
         result = await invoke('add_transaction', {
-          date: action.date || null, txType: action.transaction_type || action.tx_type || 'expense',
+          date: action.date || null, transactionType: action.transaction_type || action.tx_type || 'expense',
           amount: action.amount || 0, currency: action.currency || 'KZT',
           category: action.category || 'other', description: action.description || '',
           recurring: action.recurring || false, recurringPeriod: action.recurring_period || null,
