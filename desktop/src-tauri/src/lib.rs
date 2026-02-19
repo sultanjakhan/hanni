@@ -1920,6 +1920,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             Err(e) => {
                 eprintln!("Call mode: {}", e);
                 let _ = app.emit("call-phase-changed", "idle");
+                let _ = app.emit("call-error", format!("Ошибка микрофона: {}", e));
                 return;
             }
         };
@@ -1944,12 +1945,14 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
             Err(e) => {
                 eprintln!("Call mode stream error: {} — check microphone permissions", e);
                 let _ = app.emit("call-phase-changed", "idle");
+                let _ = app.emit("call-error", format!("Нет доступа к микрофону: {}", e));
                 return;
             }
         };
         if let Err(e) = stream.play() {
             eprintln!("Call: stream play error: {}", e);
             let _ = app.emit("call-phase-changed", "idle");
+            let _ = app.emit("call-error", format!("Не удалось запустить аудио: {}", e));
             return;
         }
 
@@ -2009,6 +2012,16 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 }
                 let noise_gate = (noise_floor * 2.0).max(0.003); // Gate at 2x noise floor
 
+                // Emit audio level for waveform visualization (throttled: every 3rd chunk)
+                {
+                    static LEVEL_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    let count = LEVEL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if count % 3 == 0 {
+                        let level = ((rms / 0.15).min(1.0) * 100.0) as u32;
+                        let _ = app.emit("call-audio-level", level);
+                    }
+                }
+
                 if rms < noise_gate {
                     // Below noise floor — treat as definite silence
                     let phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
@@ -2046,12 +2059,14 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                                 let _ = app2.emit("call-transcript", trimmed);
                                             } else {
                                                 { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).phase = "listening".into(); }
+                                                let _ = app2.emit("call-not-heard", "empty");
                                                 let _ = app2.emit("call-phase-changed", "listening");
                                             }
                                         }
                                         Err(e) => {
                                             eprintln!("Call transcription error: {}", e);
                                             { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).phase = "listening".into(); }
+                                            let _ = app2.emit("call-not-heard", format!("error: {}", e));
                                             let _ = app2.emit("call-phase-changed", "listening");
                                         }
                                     }
@@ -2143,20 +2158,21 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                     }
                     "speaking" => {
                         // Barge-in detection — must be loud enough to not be speaker echo
-                        // Speaker echo with headphones typically has RMS 0.01-0.04
-                        // Direct speech into mic is typically 0.05+
-                        // Use adaptive noise floor for smarter threshold
-                        let barge_rms_thresh = (noise_floor * 8.0).max(0.04);
+                        // Speaker echo typically has RMS 0.01-0.04 (from built-in speakers)
+                        // Direct speech into mic is typically 0.06+
+                        // Higher threshold prevents false barge-in from TTS audio leaking into mic
+                        let barge_rms_thresh = (noise_floor * 15.0).max(0.06);
                         let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                        if prob > 0.8 && rms > barge_rms_thresh {
+                        if prob > 0.85 && rms > barge_rms_thresh {
                             cs.speech_frames += 1;
-                            if cs.speech_frames >= 6 {
-                                // 6 frames * 32ms = ~192ms of loud confirmed speech
+                            if cs.speech_frames >= 8 {
+                                // 8 frames * 32ms = ~256ms of loud confirmed speech
                                 cs.barge_in = true;
+                                let _ = app.emit("call-barge-in", true);
                             }
                         } else {
                             // Reset only if clearly not speech; don't reset on borderline
-                            if prob < 0.4 {
+                            if prob < 0.3 {
                                 cs.speech_frames = 0;
                             }
                         }
@@ -3124,25 +3140,17 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         format!(r#"{date_ctx}
 
 [CALL MODE — VOICE ASSISTANT]
-You are Hanni, a voice assistant like Jarvis from Iron Man. The user is talking to you through a real-time voice call with headphones.
+You are Hanni, a voice assistant like Jarvis from Iron Man. The user is talking to you through a real-time voice call.
 
-STRICT RULES FOR VOICE OUTPUT:
-1. Speak naturally — short, conversational sentences. 1-3 sentences max.
-2. NEVER use markdown, lists, bullet points, numbering, code blocks, or any text formatting.
-3. NEVER use emoji, parentheses for asides, or special symbols.
-4. Write numbers as words: "около пяти тысяч" not "5000", "три часа" not "3 часа".
-5. Use conversational fillers naturally: "Так...", "Ну смотри...", "Хм, дай подумать...", "Слушай..."
-6. Be warm, witty, and caring — like a smart friend, not a robotic assistant.
-7. If the user's message is unclear or too short, ask to clarify briefly.
-8. Use context: greet differently based on time of day, reference memories about the user.
-9. Keep action blocks ONLY when the user explicitly asks to DO something (create, add, set, etc.).
-10. Respond in the user's language (Russian by default).
+VOICE RULES:
+1. Short, natural sentences. 1-3 sentences max. Speak like a human, not a robot.
+2. NEVER use markdown, lists, bullet points, code blocks, emoji, or formatting.
+3. Write numbers as words: "пять тысяч" not "5000".
+4. Use fillers naturally: "Так...", "Ну смотри...", "Слушай..."
+5. Be warm, witty — like a smart friend.
+6. Respond in Russian.
 
-VOICE STYLE:
-- Sound like you're talking, not writing. Imagine your text will be read aloud by TTS.
-- Avoid complex sentence structures. Use simple, direct phrasing.
-- Pause naturally between thoughts with "..." or short sentences.
-- Show personality — light humor, genuine curiosity, playful warmth."#,
+TOOLS: When the user asks to DO something (add expense, remember, create event, etc.), use the provided tools. You CAN call tools in voice mode. After calling tools, briefly confirm what you did in natural speech."#,
             date_ctx = date_context)
     } else if use_full {
         format!("{}{}", SYSTEM_PROMPT, date_context)
@@ -3179,7 +3187,7 @@ VOICE STYLE:
         }
     }
 
-    let tools_param = if use_full && !call_mode {
+    let tools_param = if use_full || call_mode {
         Some(select_relevant_tools(last_user_msg))
     } else { None };
 
@@ -7558,6 +7566,7 @@ fn speak_tts(text: &str, voice: &str) {
 fn speak_tts_sync(text: &str, voice: &str) {
     let clean = clean_text_for_tts(text);
     if clean.is_empty() { return; }
+    // 1. Try remote TTS server (PC with NVIDIA)
     let data_dir = hanni_data_dir();
     let db_path = data_dir.join("hanni.db");
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
@@ -7567,21 +7576,21 @@ fn speak_tts_sync(text: &str, voice: &str) {
             |row| row.get::<_, String>(0),
         ) {
             if !url.is_empty() {
-                speak_remote_tts_sync(&clean, voice, &url);
-                return;
+                if speak_remote_tts_sync(&clean, voice, &url) { return; }
+                eprintln!("[TTS] Remote server failed, falling back to edge-tts");
             }
         }
     }
-    if voice.contains("Neural") {
-        speak_edge_tts_sync(&clean, voice);
-    } else {
-        let _ = std::process::Command::new("say")
-            .args(["-v", voice, "-r", "210", &clean])
-            .status(); // .status() blocks
-    }
+    // 2. Try edge-tts (Neural voices)
+    if speak_edge_tts_sync(&clean, voice) { return; }
+    // 3. Fallback to macOS say
+    eprintln!("[TTS] edge-tts failed, falling back to macOS say");
+    let _ = std::process::Command::new("say")
+        .args(["-r", "210", &clean])
+        .status();
 }
 
-fn speak_edge_tts_sync(text: &str, voice: &str) {
+fn speak_edge_tts_sync(text: &str, voice: &str) -> bool {
     let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
     let rate = adaptive_tts_rate(text);
     let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
@@ -7610,29 +7619,33 @@ fn speak_edge_tts_sync(text: &str, voice: &str) {
         let _ = std::process::Command::new("afplay").arg(&tmp).status();
         let _ = std::fs::remove_file(&tmp);
     }
+    success
 }
 
-fn speak_remote_tts_sync(text: &str, voice: &str, server_url: &str) {
+fn speak_remote_tts_sync(text: &str, voice: &str, server_url: &str) -> bool {
     let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
     let url = format!("{}/tts", server_url.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build();
-    if let Ok(client) = client {
-        let resp = client.post(&url)
-            .json(&serde_json::json!({"text": text, "voice": voice}))
-            .send();
-        if let Ok(resp) = resp {
-            if resp.status().is_success() {
-                if let Ok(bytes) = resp.bytes() {
-                    if std::fs::write(&tmp, &bytes).is_ok() {
-                        let _ = std::process::Command::new("afplay").arg(&tmp).status();
-                        let _ = std::fs::remove_file(&tmp);
-                    }
-                }
-            }
-        }
-    }
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let resp = match client.post(&url)
+        .json(&serde_json::json!({"text": text, "voice": voice}))
+        .send() {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    if !resp.status().is_success() { return false; }
+    let bytes = match resp.bytes() {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    if std::fs::write(&tmp, &bytes).is_err() { return false; }
+    let _ = std::process::Command::new("afplay").arg(&tmp).status();
+    let _ = std::fs::remove_file(&tmp);
+    true
 }
 
 #[tauri::command]
