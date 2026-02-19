@@ -225,9 +225,10 @@ recordBtn.addEventListener('click', async () => {
     recordBtn.title = 'Голосовой ввод';
     try {
       const text = await invoke('stop_recording');
-      if (text) {
-        input.value = (input.value ? input.value + ' ' : '') + text;
-        input.focus();
+      if (text && text.trim()) {
+        input.value = (input.value ? input.value + ' ' : '') + text.trim();
+        // Auto-send the transcribed text
+        sendBtn.click();
       }
     } catch (e) {
       addMsg('bot', 'Ошибка транскрипции: ' + e);
@@ -269,6 +270,17 @@ recordBtn.addEventListener('click', async () => {
     } catch (e) {
       addMsg('bot', 'Ошибка записи: ' + e);
     }
+  }
+});
+
+// Cancel recording with Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isRecording) {
+    e.preventDefault();
+    isRecording = false;
+    recordBtn.classList.remove('recording');
+    recordBtn.title = 'Голосовой ввод';
+    invoke('stop_recording').catch(() => {}); // discard result
   }
 });
 
@@ -1626,13 +1638,10 @@ async function send() {
       // Push assistant message with tool_calls into history
       const assistantMsg = { role: 'assistant', content: result.fullReply || null, tool_calls: result.toolCalls };
       history.push(assistantMsg);
+      wrapper.dataset.historyIdx = String(history.length - 1);
 
-      // If no visible text, hide the empty bot div
-      if (!result.fullReply) {
-        botDiv.classList.add('intermediate');
-      } else {
-        botDiv.classList.add('intermediate');
-      }
+      // Mark as intermediate (tool calls, not final answer)
+      botDiv.classList.add('intermediate');
 
       // Execute each tool call and push results
       for (const tc of result.toolCalls) {
@@ -1663,6 +1672,7 @@ async function send() {
     if (!result.fullReply) break;
 
     history.push({ role: 'assistant', content: result.fullReply });
+    wrapper.dataset.historyIdx = String(history.length - 1);
 
     // Fallback path: parse ```action blocks from text (backward compat)
     const actions = parseAndExecuteActions(result.fullReply);
@@ -1722,23 +1732,13 @@ async function send() {
       } else {
         currentConversationId = await invoke('save_conversation', { messages: history });
       }
-      // Add feedback buttons to ALL bot messages that don't have them yet
+      // Add feedback buttons to bot messages that have a history index
       if (currentConversationId) {
-        const allWrappers = chat.querySelectorAll('.msg-wrapper');
-        allWrappers.forEach(w => {
-          if (!w.querySelector('.feedback-btn')) {
-            const allWrappersArr = [...chat.querySelectorAll('.msg-wrapper')];
-            const wrapperIdx = allWrappersArr.indexOf(w);
-            let assistantCount = 0;
-            for (let i = 0; i < history.length; i++) {
-              if (getRole(history[i]) === 'assistant') {
-                if (assistantCount === wrapperIdx) {
-                  addFeedbackButtons(w, currentConversationId, i);
-                  break;
-                }
-                assistantCount++;
-              }
-            }
+        chat.querySelectorAll('.msg-wrapper[data-history-idx]').forEach(w => {
+          if (w.querySelector('.feedback-btn')) return;
+          const idx = parseInt(w.dataset.historyIdx, 10);
+          if (!isNaN(idx) && getRole(history[idx]) === 'assistant') {
+            addFeedbackButtons(w, currentConversationId, idx);
           }
         });
       }
@@ -5155,6 +5155,9 @@ const callOverlay = document.getElementById('call-overlay');
 const callPhaseText = document.getElementById('call-phase-text');
 const callTranscriptArea = document.getElementById('call-transcript-area');
 const callEndBtn = document.getElementById('call-end-btn');
+const callWaveform = document.getElementById('call-waveform');
+const callStatusHint = document.getElementById('call-status-hint');
+const callWaveBars = callWaveform ? callWaveform.querySelectorAll('.call-wave-bar') : [];
 
 const PHASE_LABELS = {
   idle: '',
@@ -5208,6 +5211,7 @@ async function startCallMode() {
   callOverlay.setAttribute('data-phase', 'listening');
   callPhaseText.textContent = PHASE_LABELS.listening;
   callTranscriptArea.innerHTML = '';
+  if (callStatusHint) callStatusHint.textContent = '';
 
   // Start a fresh chat for this call
   await autoSaveConversation();
@@ -5234,6 +5238,10 @@ async function endCallMode() {
   callBtn.classList.remove('active');
   callOverlay.classList.add('hidden');
 
+  // Reset waveform
+  for (const bar of callWaveBars) bar.style.height = '4px';
+  if (callStatusHint) callStatusHint.textContent = '';
+
   // Re-enable input
   input.disabled = false;
   sendBtn.disabled = false;
@@ -5252,6 +5260,48 @@ listen('call-phase-changed', (event) => {
   if (!callModeActive && phase !== 'idle') return;
   callOverlay.setAttribute('data-phase', phase);
   callPhaseText.textContent = PHASE_LABELS[phase] || phase;
+});
+
+// Audio level visualization (waveform bars)
+listen('call-audio-level', (event) => {
+  if (!callModeActive || !callWaveBars.length) return;
+  const level = event.payload; // 0-100
+  const barCount = callWaveBars.length;
+  const center = Math.floor(barCount / 2);
+  for (let i = 0; i < barCount; i++) {
+    const dist = Math.abs(i - center);
+    const scale = Math.max(0, 1 - dist * 0.15);
+    const jitter = 0.7 + Math.random() * 0.6;
+    const h = Math.max(4, (level / 100) * 28 * scale * jitter);
+    callWaveBars[i].style.height = h + 'px';
+  }
+});
+
+// Not-heard feedback
+listen('call-not-heard', (event) => {
+  if (!callModeActive || !callStatusHint) return;
+  callStatusHint.textContent = 'Не расслышала, повторите...';
+  callStatusHint.classList.remove('flash');
+  void callStatusHint.offsetWidth; // force reflow
+  callStatusHint.classList.add('flash');
+});
+
+// Barge-in visual feedback
+listen('call-barge-in', () => {
+  if (!callModeActive) return;
+  if (callStatusHint) {
+    callStatusHint.textContent = 'Перебили — слушаю!';
+    callStatusHint.classList.remove('flash');
+    void callStatusHint.offsetWidth;
+    callStatusHint.classList.add('flash');
+  }
+});
+
+// Audio error — auto end call
+listen('call-error', async (event) => {
+  if (!callModeActive) return;
+  addMsg('bot', event.payload || 'Ошибка аудио');
+  await endCallMode();
 });
 
 // Listen for transcripts
