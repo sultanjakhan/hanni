@@ -42,15 +42,19 @@ let isRecording = false;
 const VOICE_SERVER = 'http://127.0.0.1:8237';
 let voiceServerAvailable = null; // null = unknown, true/false after check
 
-async function checkVoiceServer() {
-  try {
-    const r = await fetch(`${VOICE_SERVER}/health`, { signal: AbortSignal.timeout(1000) });
-    voiceServerAvailable = r.ok;
-  } catch (_) { voiceServerAvailable = false; }
-  return voiceServerAvailable;
+async function checkVoiceServer(retries = 1) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(`${VOICE_SERVER}/health`, { signal: AbortSignal.timeout(2000) });
+      if (r.ok) { voiceServerAvailable = true; return true; }
+    } catch (_) {}
+    if (i < retries - 1) await new Promise(r => setTimeout(r, 2000));
+  }
+  voiceServerAvailable = false;
+  return false;
 }
-// Check on startup
-checkVoiceServer();
+// Check on startup with retries (voice server may take time to start)
+setTimeout(() => checkVoiceServer(5), 3000);
 let currentConversationId = null;
 let isSpeaking = false;
 let convSearchTimeout = null;

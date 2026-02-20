@@ -3048,16 +3048,29 @@ fn start_voice_server() -> Option<Child> {
         eprintln!("[voice] Server already running on port 8237");
         return None;
     }
-    // Find voice_server.py relative to the executable or in the source dir
+    // Find voice_server.py: dev dir → next to exe → Tauri resources → app data dir
     let script = {
         let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(|p| p.join("voice_server.py"));
-        let app_path = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("voice_server.py")));
+        let exe_path = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("voice_server.py")));
+        // Tauri bundles resources next to the exe (or in Resources/ on macOS)
+        let resources_path = std::env::current_exe().ok().and_then(|p| {
+            p.parent()
+                .and_then(|d| d.parent())
+                .map(|d| d.join("Resources").join("voice_server.py"))
+        });
+        // Also check app data dir (copied there for persistence)
+        let data_path = Some(hanni_data_dir().join("voice_server.py"));
+
         if dev_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
             dev_path.unwrap()
-        } else if app_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
-            app_path.unwrap()
+        } else if exe_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
+            exe_path.unwrap()
+        } else if resources_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
+            resources_path.unwrap()
+        } else if data_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
+            data_path.unwrap()
         } else {
-            eprintln!("[voice] voice_server.py not found");
+            eprintln!("[voice] voice_server.py not found in any location");
             return None;
         }
     };
@@ -3181,10 +3194,10 @@ async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Optio
     let llm_state = app.state::<LlmBusy>();
     // Wait for any in-flight LLM call (e.g. proactive) to finish — MLX is single-threaded
     let _permit = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(45),
         llm_state.0.acquire(),
     ).await
-        .map_err(|_| "LLM busy — timeout after 15s".to_string())?
+        .map_err(|_| "LLM busy — timeout after 45s".to_string())?
         .map_err(|_| "LLM semaphore closed".to_string())?;
     let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await?;
     serde_json::to_string(&result).map_err(|e| format!("Serialize error: {}", e))
@@ -8004,8 +8017,21 @@ pub fn run() {
     let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
     let mlx_cleanup = mlx_process.clone();
 
-    // Start voice server (Python: sounddevice + webrtcvad + mlx-whisper)
-    let _voice_child = start_voice_server();
+    // Start voice server after delay (let MLX server start first to avoid GPU contention)
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let _voice_child = start_voice_server();
+    });
+
+    // Request microphone permission early (triggers macOS dialog once at startup)
+    std::thread::spawn(|| {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        if let Some(device) = cpal::default_host().default_input_device() {
+            // Just query supported configs — this triggers the permission dialog
+            let _ = device.supported_input_configs();
+            eprintln!("[audio] Microphone permission check done");
+        }
+    });
 
     // Audio recording state (capture starts lazily on first recording)
     let audio_state = Arc::new(AudioRecording(std::sync::Mutex::new(WhisperState {
