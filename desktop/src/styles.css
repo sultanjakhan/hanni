@@ -1106,6 +1106,13 @@ body {
   50% { opacity: 0.5; }
 }
 
+#record.transcribing {
+  background: var(--color-yellow);
+  color: var(--bg-page);
+  animation: pulse-record 0.8s infinite;
+  cursor: wait;
+}
+
 /* ── Focus card ── */
 
 .focus-card {
