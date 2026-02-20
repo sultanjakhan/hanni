@@ -43,14 +43,21 @@ NOISE_FLOOR_MULTIPLIER = 3.0  # speech must be this many times above noise floor
 
 # ── Whisper hallucination filter ──
 HALLUCINATIONS = {
+    # Russian
     "спасибо за внимание", "спасибо за просмотр", "продолжение следует",
+    "субтитры сделал", "субтитры подогнал", "редактор субтитров",
     "подписывайтесь на мой канал", "подписывайтесь на канал",
     "ставьте лайки", "не забудьте подписаться",
     "веселая музыка", "спокойная музыка", "грустная мелодия",
+    "динамичная музыка", "торжественная музыка", "тревожная музыка",
     "музыкальная заставка", "аплодисменты", "смех",
+    "перестрелка", "гудок поезда", "рёв мотора", "шум двигателя",
+    "лай собак", "выстрелы", "стук в дверь",
+    # English
     "thank you for watching", "thanks for watching", "thank you",
     "please subscribe", "subtitles by the amara",
-    "the end", "bye bye", "bye",
+    "transcription by castingwords", "the end", "bye bye", "bye",
+    "satsang with mooji", "bbc radio",
 }
 
 def is_hallucination(text: str) -> bool:
@@ -59,6 +66,12 @@ def is_hallucination(text: str) -> bool:
         return True
     for h in HALLUCINATIONS:
         if h in t:
+            return True
+    # Detect repetitive text (looping hallucination)
+    if len(t) > 20:
+        unique_chars = len(set(t))
+        ratio = len(t) / max(unique_chars, 1)
+        if ratio > 4.0:
             return True
     return False
 
