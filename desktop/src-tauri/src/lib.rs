@@ -3034,6 +3034,52 @@ fn start_mlx_server() -> Option<Child> {
     }
 }
 
+const VOICE_SERVER_URL: &str = "http://127.0.0.1:8237";
+
+fn start_voice_server() -> Option<Child> {
+    let python = find_python()?;
+    // Check if already running
+    let check = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(1))
+        .build().ok()?;
+    if check.get(&format!("{}/health", VOICE_SERVER_URL)).send().map(|r| r.status().is_success()).unwrap_or(false) {
+        eprintln!("[voice] Server already running on port 8237");
+        return None;
+    }
+    // Find voice_server.py relative to the executable or in the source dir
+    let script = {
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(|p| p.join("voice_server.py"));
+        let app_path = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("voice_server.py")));
+        if dev_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
+            dev_path.unwrap()
+        } else if app_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
+            app_path.unwrap()
+        } else {
+            eprintln!("[voice] voice_server.py not found");
+            return None;
+        }
+    };
+    eprintln!("[voice] Starting voice server: {} {}", python, script.display());
+    let log_path = hanni_data_dir().join("voice_server.log");
+    let stderr_file = std::fs::File::create(&log_path)
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(|_| std::process::Stdio::null());
+    match Command::new(&python)
+        .arg(&script)
+        .stdout(std::process::Stdio::null())
+        .stderr(stderr_file)
+        .spawn() {
+        Ok(child) => {
+            eprintln!("[voice] Server process spawned (pid {})", child.id());
+            Some(child)
+        }
+        Err(e) => {
+            eprintln!("[voice] Failed to spawn: {}", e);
+            None
+        }
+    }
+}
+
 // ── Calendar access guard ──
 // Prevents repeated Calendar.app permission prompts by caching denial.
 // Also respects the apple_calendar_enabled user setting from the DB.
@@ -7955,6 +8001,9 @@ pub fn run() {
     let mlx_child = start_mlx_server();
     let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
     let mlx_cleanup = mlx_process.clone();
+
+    // Start voice server (Python: sounddevice + webrtcvad + mlx-whisper)
+    let _voice_child = start_voice_server();
 
     // Audio recording state (capture starts lazily on first recording)
     let audio_state = Arc::new(AudioRecording(std::sync::Mutex::new(WhisperState {

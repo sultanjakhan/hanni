@@ -216,8 +216,9 @@ body {
 #tab-add:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 #tab-bar-right {
-  flex: 1;
-  min-width: 0;
+  padding-right: 12px;
+  border-bottom: 1px solid var(--bg-page);
+  margin-bottom: -1px;
 }
 
 /* ── Tab Dropdown ── */
