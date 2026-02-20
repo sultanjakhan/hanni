@@ -1614,23 +1614,27 @@ fn start_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<Strin
 }
 
 #[tauri::command]
-fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String, String> {
-    let mut ws = state.0.lock().unwrap_or_else(|e| e.into_inner());
-    ws.recording = false;
-
-    if ws.audio_buffer.is_empty() {
-        return Err("No audio recorded".into());
-    }
+async fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<String, String> {
+    let samples = {
+        let mut ws = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        ws.recording = false;
+        if ws.audio_buffer.is_empty() {
+            return Err("No audio recorded".into());
+        }
+        let s = ws.audio_buffer.clone();
+        ws.audio_buffer.clear();
+        s
+    };
 
     let model_path = whisper_model_path();
     if !model_path.exists() {
         return Err("Whisper model not downloaded. Please download it first.".into());
     }
 
-    let samples = ws.audio_buffer.clone();
-    ws.audio_buffer.clear();
-
-    transcribe_samples(&samples)
+    // Run transcription off main thread so UI stays responsive
+    tokio::task::spawn_blocking(move || transcribe_samples(&samples))
+        .await
+        .map_err(|e| format!("Transcription join error: {}", e))?
 }
 
 #[tauri::command]
@@ -1638,7 +1642,47 @@ fn check_whisper_model() -> Result<bool, String> {
     Ok(whisper_model_path().exists())
 }
 
+/// Known Whisper hallucination phrases (from faster-whisper, HuggingFace dataset, Russian gist)
+const WHISPER_HALLUCINATIONS: &[&str] = &[
+    // Russian hallucinations
+    "спасибо за внимание", "спасибо за просмотр", "продолжение следует",
+    "субтитры сделал", "субтитры подогнал", "редактор субтитров",
+    "подписывайтесь на мой канал", "подписывайтесь на канал",
+    "ставьте лайки", "не забудьте подписаться",
+    "веселая музыка", "спокойная музыка", "грустная мелодия",
+    "динамичная музыка", "торжественная музыка", "тревожная музыка",
+    "музыкальная заставка", "аплодисменты", "смех",
+    "перестрелка", "гудок поезда", "рёв мотора", "шум двигателя",
+    "лай собак", "выстрелы", "стук в дверь",
+    // English hallucinations
+    "thank you for watching", "thanks for watching", "thank you",
+    "please subscribe", "subtitles by the amara",
+    "transcription by castingwords", "the end", "bye bye",
+    "satsang with mooji", "bbc radio",
+];
+
+fn is_whisper_hallucination(text: &str) -> bool {
+    let normalized = text.trim().to_lowercase();
+    if normalized.is_empty() || normalized.len() < 2 { return true; }
+    // Check exact matches and substring matches
+    for h in WHISPER_HALLUCINATIONS {
+        if normalized.contains(h) { return true; }
+    }
+    // Detect repetitive text (compression ratio > 2.4 = likely looping hallucination)
+    if normalized.len() > 20 {
+        let unique_chars: std::collections::HashSet<char> = normalized.chars().collect();
+        let ratio = normalized.len() as f32 / unique_chars.len().max(1) as f32;
+        if ratio > 4.0 { return true; } // very repetitive
+    }
+    false
+}
+
 fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
+    // Skip very short audio (< 0.3s at 16kHz = likely noise)
+    if samples.len() < 4800 {
+        return Ok(String::new());
+    }
+
     let model_path = whisper_model_path();
     if !model_path.exists() {
         return Err("Whisper model not downloaded".into());
@@ -1656,7 +1700,7 @@ fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
-    params.set_initial_prompt("Привет, как дела? Расскажи мне что-нибудь интересное. Хорошо, давай посмотрим.");
+    params.set_initial_prompt("Привет, как дела? Давай посмотрим. Хорошо, понял.");
     params.set_no_speech_thold(0.6);
     params.set_suppress_blank(true);
 
@@ -1669,7 +1713,12 @@ fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
             text.push_str(&segment);
         }
     }
-    Ok(text.trim().to_string())
+    let result = text.trim().to_string();
+    // Filter hallucinations
+    if is_whisper_hallucination(&result) {
+        return Ok(String::new());
+    }
+    Ok(result)
 }
 
 // ── Audio capture via cpal ──

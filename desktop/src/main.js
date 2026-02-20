@@ -219,20 +219,24 @@ const recordBtn = document.getElementById('record');
 
 recordBtn.addEventListener('click', async () => {
   if (isRecording) {
-    // Stop recording
+    // Stop recording — show transcribing state
     isRecording = false;
     recordBtn.classList.remove('recording');
-    recordBtn.title = 'Голосовой ввод';
+    recordBtn.classList.add('transcribing');
+    recordBtn.title = 'Распознаю...';
+    recordBtn.disabled = true;
     try {
       const text = await invoke('stop_recording');
       if (text && text.trim()) {
         input.value = (input.value ? input.value + ' ' : '') + text.trim();
-        // Auto-send the transcribed text
         sendBtn.click();
       }
     } catch (e) {
-      addMsg('bot', 'Ошибка транскрипции: ' + e);
+      if (!String(e).includes('No audio')) addMsg('bot', 'Ошибка транскрипции: ' + e);
     }
+    recordBtn.classList.remove('transcribing');
+    recordBtn.disabled = false;
+    recordBtn.title = 'Голосовой ввод';
   } else {
     // Check if whisper model exists
     try {
