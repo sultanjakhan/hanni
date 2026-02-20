@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Hanni Voice Server — lightweight local voice activation.
+Hanni Voice Server — local voice activation with production-grade open-source libs.
 
 Stack:
-  - sounddevice (audio capture)
-  - RMS-based VAD (zero deps, adaptive noise floor)
-  - mlx-whisper (Apple Silicon native Whisper)
+  - sounddevice (audio capture, PortAudio wrapper)
+  - Silero VAD (ONNX, industry-standard voice activity detection)
+  - mlx-whisper (Apple Silicon native Whisper large-v3)
 
 Runs as HTTP server on port 8237. Tauri app communicates via HTTP requests.
 
@@ -20,26 +20,23 @@ Endpoints:
 import json
 import sys
 import time
-import math
 import threading
 import queue
 import numpy as np
 import sounddevice as sd
+import torch
+from silero_vad import load_silero_vad
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ── Config ──
 PORT = 8237
 SAMPLE_RATE = 16000
-FRAME_MS = 30
-FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)  # 480 samples
-SILENCE_TIMEOUT_MS = 1000  # ms of silence to end utterance
+# Silero VAD requires 512-sample chunks at 16kHz (32ms windows)
+VAD_CHUNK_SAMPLES = 512
+SILENCE_TIMEOUT_MS = 800  # ms of silence after speech to end utterance
 MIN_SPEECH_MS = 300  # minimum speech duration to process
+VAD_THRESHOLD = 0.5  # Silero VAD speech probability threshold
 WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
-
-# ── RMS VAD config ──
-RMS_SPEECH_THRESHOLD = 0.015  # absolute minimum RMS to consider speech
-NOISE_FLOOR_ALPHA = 0.05  # smoothing factor for noise floor estimation
-NOISE_FLOOR_MULTIPLIER = 3.0  # speech must be this many times above noise floor
 
 # ── Whisper hallucination filter ──
 HALLUCINATIONS = {
@@ -75,49 +72,11 @@ def is_hallucination(text: str) -> bool:
             return True
     return False
 
-def compute_rms(audio_int16: np.ndarray) -> float:
-    """Compute RMS of int16 audio, return as float in [0, 1] range."""
-    float_data = audio_int16.astype(np.float32) / 32768.0
-    return float(np.sqrt(np.mean(float_data ** 2)))
 
-class AdaptiveVAD:
-    """Simple RMS-based Voice Activity Detection with adaptive noise floor."""
-
-    def __init__(self):
-        self.noise_floor = 0.01  # initial estimate
-        self.calibrated = False
-        self.calibration_frames = []
-        self.calibration_needed = 20  # ~600ms of calibration
-
-    def is_speech(self, audio_int16: np.ndarray) -> bool:
-        rms = compute_rms(audio_int16)
-
-        # Calibration phase: collect noise floor samples
-        if not self.calibrated:
-            self.calibration_frames.append(rms)
-            if len(self.calibration_frames) >= self.calibration_needed:
-                self.noise_floor = np.median(self.calibration_frames) * 1.2
-                self.noise_floor = max(self.noise_floor, 0.002)  # minimum floor
-                self.calibrated = True
-                print(f"[voice] Noise floor calibrated: {self.noise_floor:.4f}")
-            return False
-
-        # Slowly adapt noise floor during silence
-        threshold = max(self.noise_floor * NOISE_FLOOR_MULTIPLIER, RMS_SPEECH_THRESHOLD)
-        is_speech = rms > threshold
-
-        if not is_speech:
-            # Update noise floor slowly
-            self.noise_floor = (1 - NOISE_FLOOR_ALPHA) * self.noise_floor + NOISE_FLOOR_ALPHA * rms
-            self.noise_floor = max(self.noise_floor, 0.002)
-
-        return is_speech
-
-    def reset(self):
-        """Reset for new recording session."""
-        self.calibrated = False
-        self.calibration_frames = []
-        self.noise_floor = 0.01
+# ── Silero VAD ──
+print("[voice] Loading Silero VAD model...")
+vad_model = load_silero_vad(onnx=True)
+print("[voice] Silero VAD loaded")
 
 
 # ── Globals ──
@@ -135,7 +94,6 @@ def ensure_whisper():
     if not _whisper_loaded:
         import mlx_whisper
         print(f"[voice] Loading Whisper model: {WHISPER_MODEL}")
-        # Warm up with a short silent clip to trigger model download + load
         mlx_whisper.transcribe(
             np.zeros(SAMPLE_RATE, dtype=np.float32),
             path_or_hf_repo=WHISPER_MODEL,
@@ -153,36 +111,43 @@ def transcribe_audio(audio_float32: np.ndarray) -> str:
         audio_float32,
         path_or_hf_repo=WHISPER_MODEL,
         language="ru",
-        temperature=(0.0,),  # deterministic, no fallback sampling
-        condition_on_previous_text=False,  # prevent error propagation between segments
+        temperature=(0.0,),
+        condition_on_previous_text=False,
         initial_prompt="Привет, как дела? Хорошо, понял. Давай посмотрим, что можно сделать.",
         no_speech_threshold=0.6,
         compression_ratio_threshold=2.4,
-        hallucination_silence_threshold=2.0,  # skip hallucinatory silent segments
+        hallucination_silence_threshold=2.0,
     )
     text = result.get("text", "").strip()
     if is_hallucination(text):
         return ""
     return text
 
+def silero_vad_speech_prob(audio_int16: np.ndarray) -> float:
+    """Get speech probability from Silero VAD for a 512-sample chunk."""
+    audio_float = audio_int16.astype(np.float32) / 32768.0
+    tensor = torch.from_numpy(audio_float)
+    with torch.no_grad():
+        prob = vad_model(tensor, SAMPLE_RATE).item()
+    return prob
+
 def record_and_transcribe(continuous=False):
     """
-    Record audio, use VAD to detect speech boundaries, transcribe.
+    Record audio, use Silero VAD to detect speech boundaries, transcribe.
     If continuous=True, keep listening and put results in call_mode_results queue.
     """
     ensure_whisper()
 
-    vad = AdaptiveVAD()
-    frames_per_read = FRAME_SAMPLES
-    silence_frames_needed = int(SILENCE_TIMEOUT_MS / FRAME_MS)
-    min_speech_frames = int(MIN_SPEECH_MS / FRAME_MS)
+    chunk_size = VAD_CHUNK_SAMPLES  # 512 samples = 32ms
+    silence_chunks_needed = int(SILENCE_TIMEOUT_MS / (chunk_size / SAMPLE_RATE * 1000))
+    min_speech_chunks = int(MIN_SPEECH_MS / (chunk_size / SAMPLE_RATE * 1000))
 
     try:
         stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=1,
             dtype='int16',
-            blocksize=frames_per_read,
+            blocksize=chunk_size,
         )
         stream.start()
     except Exception as e:
@@ -195,14 +160,15 @@ def record_and_transcribe(continuous=False):
             result_ready.set()
         return
 
-    print("[voice] Recording started")
+    print("[voice] Recording started (Silero VAD)")
 
     while True:
         speech_frames = []
         silence_count = 0
         speech_detected = False
         has_speech = False
-        vad.reset()
+        # Reset Silero VAD state for new utterance
+        vad_model.reset_states()
 
         # Listen for speech
         while not force_stop.is_set():
@@ -212,11 +178,13 @@ def record_and_transcribe(continuous=False):
                 break
 
             try:
-                data, overflowed = stream.read(frames_per_read)
+                data, overflowed = stream.read(chunk_size)
             except Exception:
                 break
 
-            is_speech = vad.is_speech(data.flatten())
+            flat = data.flatten()
+            prob = silero_vad_speech_prob(flat)
+            is_speech = prob > VAD_THRESHOLD
 
             if is_speech:
                 speech_frames.append(data.copy())
@@ -224,22 +192,22 @@ def record_and_transcribe(continuous=False):
                 if not speech_detected:
                     speech_detected = True
                     has_speech = True
-                    print("[voice] Speech detected")
+                    print(f"[voice] Speech detected (prob={prob:.2f})")
             else:
                 if speech_detected:
                     speech_frames.append(data.copy())  # keep trailing silence
                     silence_count += 1
-                    if silence_count >= silence_frames_needed:
-                        print("[voice] End of utterance (silence)")
-                        break  # end of utterance
+                    if silence_count >= silence_chunks_needed:
+                        print(f"[voice] End of utterance (silence, {silence_count} chunks)")
+                        break
 
         if force_stop.is_set():
             force_stop.clear()
             break
 
-        if not has_speech or len(speech_frames) < min_speech_frames:
+        if not has_speech or len(speech_frames) < min_speech_chunks:
             if continuous and call_mode_active.is_set():
-                continue  # keep listening
+                continue
             if not continuous:
                 current_result["text"] = ""
                 result_ready.set()
@@ -260,7 +228,7 @@ def record_and_transcribe(continuous=False):
                 call_mode_results.put({"text": text})
             if not call_mode_active.is_set():
                 break
-            continue  # keep listening
+            continue
         else:
             current_result["text"] = text
             result_ready.set()
@@ -273,7 +241,7 @@ def record_and_transcribe(continuous=False):
 
 class VoiceHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        pass  # suppress default logging
+        pass
 
     def _send_json(self, data, status=200):
         body = json.dumps(data).encode()
@@ -296,10 +264,9 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send_json({"status": "ok", "model": WHISPER_MODEL})
+            self._send_json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero"})
 
         elif self.path == "/listen":
-            # SSE stream for call mode
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -309,11 +276,9 @@ class VoiceHandler(BaseHTTPRequestHandler):
             call_mode_active.set()
             force_stop.clear()
 
-            # Start recording thread
             t = threading.Thread(target=record_and_transcribe, args=(True,), daemon=True)
             t.start()
 
-            # Stream results as SSE
             try:
                 self.wfile.write(b"data: {\"phase\": \"listening\"}\n\n")
                 self.wfile.flush()
@@ -328,7 +293,6 @@ class VoiceHandler(BaseHTTPRequestHandler):
                             self.wfile.write(f"data: {json.dumps(result)}\n\n".encode())
                             self.wfile.flush()
                     except queue.Empty:
-                        # Send keepalive
                         self.wfile.write(b": keepalive\n\n")
                         self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
@@ -342,7 +306,6 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/transcribe":
-            # Single recording: record → VAD → transcribe → return
             recording_active.set()
             force_stop.clear()
             result_ready.clear()
@@ -352,7 +315,6 @@ class VoiceHandler(BaseHTTPRequestHandler):
             t = threading.Thread(target=record_and_transcribe, args=(False,), daemon=True)
             t.start()
 
-            # Wait for result (max 60s)
             result_ready.wait(timeout=60)
             recording_active.clear()
 
@@ -369,7 +331,6 @@ class VoiceHandler(BaseHTTPRequestHandler):
         elif self.path == "/listen/stop":
             call_mode_active.clear()
             force_stop.set()
-            # Drain queue
             while not call_mode_results.empty():
                 try:
                     call_mode_results.get_nowait()
@@ -382,13 +343,12 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    # Pre-load whisper model in background
     threading.Thread(target=ensure_whisper, daemon=True).start()
 
     server = HTTPServer(("127.0.0.1", PORT), VoiceHandler)
     print(f"[voice] Hanni Voice Server running on http://127.0.0.1:{PORT}")
-    print(f"[voice] Model: {WHISPER_MODEL}")
-    print(f"[voice] VAD: adaptive RMS-based (no external deps)")
+    print(f"[voice] Whisper: {WHISPER_MODEL}")
+    print(f"[voice] VAD: Silero VAD (ONNX, threshold={VAD_THRESHOLD})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
