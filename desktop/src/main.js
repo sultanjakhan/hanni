@@ -39,6 +39,18 @@ function getContent(msg) {
   return msg.content || '';
 }
 let isRecording = false;
+const VOICE_SERVER = 'http://127.0.0.1:8237';
+let voiceServerAvailable = null; // null = unknown, true/false after check
+
+async function checkVoiceServer() {
+  try {
+    const r = await fetch(`${VOICE_SERVER}/health`, { signal: AbortSignal.timeout(1000) });
+    voiceServerAvailable = r.ok;
+  } catch (_) { voiceServerAvailable = false; }
+  return voiceServerAvailable;
+}
+// Check on startup
+checkVoiceServer();
 let currentConversationId = null;
 let isSpeaking = false;
 let convSearchTimeout = null;
@@ -219,60 +231,93 @@ const recordBtn = document.getElementById('record');
 
 recordBtn.addEventListener('click', async () => {
   if (isRecording) {
-    // Stop recording — show transcribing state
+    // Stop recording
     isRecording = false;
     recordBtn.classList.remove('recording');
     recordBtn.classList.add('transcribing');
     recordBtn.title = 'Распознаю...';
     recordBtn.disabled = true;
-    try {
-      const text = await invoke('stop_recording');
-      if (text && text.trim()) {
-        input.value = (input.value ? input.value + ' ' : '') + text.trim();
-        sendBtn.click();
+
+    if (voiceServerAvailable) {
+      // Voice server: POST /stop (recording auto-transcribes via VAD)
+      try { await fetch(`${VOICE_SERVER}/stop`, { method: 'POST' }); } catch (_) {}
+    } else {
+      // Fallback: Rust whisper-rs
+      try {
+        const text = await invoke('stop_recording');
+        if (text && text.trim()) {
+          input.value = (input.value ? input.value + ' ' : '') + text.trim();
+          sendBtn.click();
+        }
+      } catch (e) {
+        if (!String(e).includes('No audio')) addMsg('bot', 'Ошибка: ' + e);
       }
-    } catch (e) {
-      if (!String(e).includes('No audio')) addMsg('bot', 'Ошибка транскрипции: ' + e);
     }
     recordBtn.classList.remove('transcribing');
     recordBtn.disabled = false;
     recordBtn.title = 'Голосовой ввод';
   } else {
-    // Check if whisper model exists
-    try {
-      const hasModel = await invoke('check_whisper_model');
-      if (!hasModel) {
-        if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
-          addMsg('bot', 'Скачиваю модель Whisper...');
-          const unlisten = await listen('whisper-download-progress', (event) => {
-            // Update last bot message with progress
-            const msgs = chat.querySelectorAll('.msg.bot');
-            const last = msgs[msgs.length - 1];
-            if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
-          });
-          try {
-            await invoke('download_whisper_model');
-            addMsg('bot', 'Whisper загружен! Можете записывать голос.');
-          } catch (e) {
-            addMsg('bot', 'Ошибка загрузки: ' + e);
-          }
-          unlisten();
-        }
-        return;
-      }
-    } catch (e) {
-      addMsg('bot', 'Ошибка: ' + e);
-      return;
-    }
-
     // Start recording
-    try {
-      await invoke('start_recording');
+    await checkVoiceServer();
+
+    if (voiceServerAvailable) {
+      // Voice server: POST /transcribe (records until silence, auto-transcribes)
       isRecording = true;
       recordBtn.classList.add('recording');
-      recordBtn.title = 'Остановить запись';
-    } catch (e) {
-      addMsg('bot', 'Ошибка записи: ' + e);
+      recordBtn.title = 'Остановить запись (Esc)';
+
+      // Non-blocking: voice server records, uses VAD to detect end, transcribes
+      (async () => {
+        try {
+          const r = await fetch(`${VOICE_SERVER}/transcribe`, { method: 'POST' });
+          const data = await r.json();
+          if (data.text && data.text.trim()) {
+            input.value = (input.value ? input.value + ' ' : '') + data.text.trim();
+            sendBtn.click();
+          }
+        } catch (e) {
+          addMsg('bot', 'Ошибка голоса: ' + e);
+        }
+        isRecording = false;
+        recordBtn.classList.remove('recording');
+        recordBtn.classList.remove('transcribing');
+        recordBtn.disabled = false;
+        recordBtn.title = 'Голосовой ввод';
+      })();
+    } else {
+      // Fallback: Rust cpal + whisper-rs
+      try {
+        const hasModel = await invoke('check_whisper_model');
+        if (!hasModel) {
+          if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
+            addMsg('bot', 'Скачиваю модель Whisper...');
+            const unlisten = await listen('whisper-download-progress', (event) => {
+              const msgs = chat.querySelectorAll('.msg.bot');
+              const last = msgs[msgs.length - 1];
+              if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
+            });
+            try {
+              await invoke('download_whisper_model');
+              addMsg('bot', 'Whisper загружен!');
+            } catch (e) {
+              addMsg('bot', 'Ошибка загрузки: ' + e);
+            }
+            unlisten();
+          }
+          return;
+        }
+      } catch (e) {
+        addMsg('bot', 'Ошибка: ' + e);
+        return;
+      }
+      try {
+        await invoke('start_recording');
+        isRecording = true;
+        recordBtn.classList.add('recording');
+        recordBtn.title = 'Остановить запись (Esc)';
+      } catch (e) {
+        addMsg('bot', 'Ошибка записи: ' + e);
+      }
     }
   }
 });
@@ -5229,11 +5274,54 @@ async function startCallMode() {
   sendBtn.disabled = true;
   recordBtn.disabled = true;
 
-  try {
-    await invoke('start_call_mode');
-  } catch (e) {
-    addMsg('bot', 'Ошибка запуска звонка: ' + e);
-    await endCallMode();
+  await checkVoiceServer();
+
+  if (voiceServerAvailable) {
+    // Use Python voice server for call mode (SSE stream)
+    try {
+      const eventSource = new EventSource(`${VOICE_SERVER}/listen`);
+      window._callEventSource = eventSource;
+
+      eventSource.onmessage = (event) => {
+        if (!callModeActive) { eventSource.close(); return; }
+        try {
+          const data = JSON.parse(event.data);
+          if (data.error) {
+            addMsg('bot', 'Ошибка голоса: ' + data.error);
+            endCallMode();
+            return;
+          }
+          if (data.phase === 'listening') {
+            callOverlay.setAttribute('data-phase', 'listening');
+            callPhaseText.textContent = PHASE_LABELS.listening;
+            return;
+          }
+          if (data.text) {
+            // Dispatch same event as Rust call mode for unified handling
+            const customEvent = new CustomEvent('voice-server-transcript', { detail: data.text });
+            window.dispatchEvent(customEvent);
+          }
+        } catch (_) {}
+      };
+
+      eventSource.onerror = () => {
+        if (callModeActive) {
+          addMsg('bot', 'Соединение с голосовым сервером потеряно');
+          endCallMode();
+        }
+      };
+    } catch (e) {
+      addMsg('bot', 'Ошибка голосового сервера: ' + e);
+      await endCallMode();
+    }
+  } else {
+    // Fallback: Rust call mode
+    try {
+      await invoke('start_call_mode');
+    } catch (e) {
+      addMsg('bot', 'Ошибка запуска звонка: ' + e);
+      await endCallMode();
+    }
   }
 }
 
@@ -5245,6 +5333,13 @@ async function endCallMode() {
   // Reset waveform
   for (const bar of callWaveBars) bar.style.height = '4px';
   if (callStatusHint) callStatusHint.textContent = '';
+
+  // Close voice server SSE if active
+  if (window._callEventSource) {
+    window._callEventSource.close();
+    window._callEventSource = null;
+    fetch(`${VOICE_SERVER}/listen/stop`, { method: 'POST' }).catch(() => {});
+  }
 
   // Re-enable input
   input.disabled = false;
@@ -5308,9 +5403,19 @@ listen('call-error', async (event) => {
   await endCallMode();
 });
 
-// Listen for transcripts
+// Handle transcripts from Python voice server
+window.addEventListener('voice-server-transcript', (event) => {
+  if (!callModeActive || !event.detail) return;
+  handleCallTranscript(event.detail);
+});
+
+// Listen for transcripts from Rust call mode
 listen('call-transcript', async (event) => {
-  const userText = event.payload;
+  if (!callModeActive || !event.payload) return;
+  handleCallTranscript(event.payload);
+});
+
+async function handleCallTranscript(userText) {
   if (!callModeActive || !userText) return;
 
   // Show user bubble in overlay
@@ -5431,7 +5536,7 @@ listen('call-transcript', async (event) => {
   } else if (callModeActive) {
     await invoke('call_mode_resume_listening').catch(() => {});
   }
-});
+}
 
 /// Split text into sentences for streaming TTS
 function splitIntoSentences(text) {
