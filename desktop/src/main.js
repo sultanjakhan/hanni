@@ -191,13 +191,16 @@ listen('update-available', (event) => {
 
 // ── Proactive message listener ──
 let lastProactiveTime = 0; // timestamp of last proactive message for engagement tracking
-listen('proactive-message', (event) => {
+listen('proactive-message', async (event) => {
   const text = event.payload;
   lastProactiveTime = Date.now();
-  const div = document.createElement('div');
-  div.className = 'msg bot proactive';
-  div.textContent = text;
-  chat.appendChild(div);
+
+  // Use addMsg to get proper wrapper with TTS button
+  const msgDiv = addMsg('bot', text);
+  const wrapper = msgDiv.closest('.msg-wrapper');
+  if (wrapper) {
+    msgDiv.classList.add('proactive');
+  }
 
   const ts = document.createElement('div');
   ts.className = 'proactive-time';
@@ -205,9 +208,16 @@ listen('proactive-message', (event) => {
   chat.appendChild(ts);
 
   // Add to history so user can reply naturally
+  const histIdx = history.length;
   history.push({ role: 'assistant', content: text });
   scrollDown();
-  autoSaveConversation();
+  await autoSaveConversation();
+
+  // Add feedback buttons
+  if (wrapper && currentConversationId) {
+    wrapper.dataset.historyIdx = histIdx;
+    addFeedbackButtons(wrapper, currentConversationId, histIdx);
+  }
 
   // Desktop notification if window not focused
   if (!document.hasFocus()) {
