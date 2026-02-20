@@ -34,7 +34,7 @@ FRAME_MS = 30
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)  # 480 samples
 SILENCE_TIMEOUT_MS = 1000  # ms of silence to end utterance
 MIN_SPEECH_MS = 300  # minimum speech duration to process
-WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
 
 # ── RMS VAD config ──
 RMS_SPEECH_THRESHOLD = 0.015  # absolute minimum RMS to consider speech
@@ -135,12 +135,17 @@ def ensure_whisper():
     if not _whisper_loaded:
         import mlx_whisper
         print(f"[voice] Loading Whisper model: {WHISPER_MODEL}")
-        mlx_whisper.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), path_or_hf_repo=WHISPER_MODEL, language="ru")
+        # Warm up with a short silent clip to trigger model download + load
+        mlx_whisper.transcribe(
+            np.zeros(SAMPLE_RATE, dtype=np.float32),
+            path_or_hf_repo=WHISPER_MODEL,
+            language="ru",
+        )
         _whisper_loaded = True
-        print("[voice] Whisper model loaded")
+        print("[voice] Whisper model loaded (large-v3 full)")
 
 def transcribe_audio(audio_float32: np.ndarray) -> str:
-    """Transcribe audio using mlx-whisper."""
+    """Transcribe audio using mlx-whisper with max accuracy settings."""
     import mlx_whisper
     if len(audio_float32) < SAMPLE_RATE * 0.3:  # < 0.3s
         return ""
@@ -148,8 +153,12 @@ def transcribe_audio(audio_float32: np.ndarray) -> str:
         audio_float32,
         path_or_hf_repo=WHISPER_MODEL,
         language="ru",
+        temperature=(0.0,),  # deterministic, no fallback sampling
+        condition_on_previous_text=False,  # prevent error propagation between segments
+        initial_prompt="Привет, как дела? Хорошо, понял. Давай посмотрим, что можно сделать.",
         no_speech_threshold=0.6,
         compression_ratio_threshold=2.4,
+        hallucination_silence_threshold=2.0,  # skip hallucinatory silent segments
     )
     text = result.get("text", "").strip()
     if is_hallucination(text):

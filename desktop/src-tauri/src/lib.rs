@@ -1694,15 +1694,17 @@ fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
 
     let mut state = ctx.create_state().map_err(|e| format!("Whisper state error: {}", e))?;
 
-    let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+    let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
     params.set_language(Some("ru"));
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
-    params.set_initial_prompt("Привет, как дела? Давай посмотрим. Хорошо, понял.");
+    params.set_initial_prompt("Привет, как дела? Давай посмотрим, что можно сделать. Хорошо, понял.");
     params.set_no_speech_thold(0.6);
     params.set_suppress_blank(true);
+    params.set_temperature(0.0);  // deterministic, no random sampling
+    params.set_n_threads(8);  // M3 Pro has plenty of cores
 
     state.full(params, samples).map_err(|e| format!("Transcription error: {}", e))?;
 
