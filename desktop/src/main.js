@@ -961,7 +961,7 @@ async function loadChatSettings() {
       return {
         enabled: document.getElementById('chat-proactive-enabled').checked,
         voice_enabled: document.getElementById('chat-voice-enabled').checked,
-        voice_name: document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural',
+        voice_name: document.getElementById('chat-voice-name')?.value || 'xenia',
         interval_minutes: parseInt(document.getElementById('chat-proactive-number')?.value || '10'),
         quiet_hours_start: sh,
         quiet_hours_end: eh,
@@ -1019,7 +1019,7 @@ async function loadChatSettings() {
     });
 
     document.getElementById('chat-test-voice')?.addEventListener('click', async () => {
-      const voice = document.getElementById('chat-voice-name')?.value || 'ru-RU-SvetlanaNeural';
+      const voice = document.getElementById('chat-voice-name')?.value || 'xenia';
       const btn = document.getElementById('chat-test-voice');
       btn.textContent = 'Говорю...';
       btn.disabled = true;
@@ -1600,10 +1600,10 @@ async function toggleTTS(btn, text) {
   btn.innerHTML = '&#9632;';
   document.getElementById('stop-tts')?.classList.remove('hidden');
   try {
-    let voice = 'ru-RU-SvetlanaNeural';
+    let voice = 'xenia';
     try {
       const ps = await invoke('get_proactive_settings');
-      voice = ps.voice_name || 'ru-RU-SvetlanaNeural';
+      voice = ps.voice_name || 'xenia';
     } catch (_) {}
     await invoke('speak_text', { text, voice });
     const wordCount = text.split(/\s+/).length;
@@ -5586,7 +5586,7 @@ async function speakAndListen(text) {
   if (!useVoiceServer) await invoke('call_mode_set_speaking').catch(() => {});
 
   // Get voice
-  let voice = 'ru-RU-SvetlanaNeural';
+  let voice = 'xenia';
   try {
     const ps = await invoke('get_proactive_settings');
     voice = ps.voice_name || voice;
