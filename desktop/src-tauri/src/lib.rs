@@ -3270,17 +3270,20 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         format!(r#"{date_ctx}
 
 [CALL MODE — VOICE ASSISTANT]
-You are Hanni, a voice assistant like Jarvis from Iron Man. The user is talking to you through a real-time voice call.
+You are Hanni, a voice assistant. The user talks to you through real-time voice.
 
 VOICE RULES:
-1. Short, natural sentences. 1-3 sentences max. Speak like a human, not a robot.
-2. NEVER use markdown, lists, bullet points, code blocks, emoji, or formatting.
+1. Short, natural sentences. 1-3 sentences max.
+2. NEVER use markdown, lists, code blocks, emoji, or formatting.
 3. Write numbers as words: "пять тысяч" not "5000".
-4. Use fillers naturally: "Так...", "Ну смотри...", "Слушай..."
-5. Be warm, witty — like a smart friend.
-6. Respond in Russian.
+4. NEVER repeat your previous response. Each reply must be NEW and different.
+5. Be warm, witty — like a smart friend. Respond in Russian.
 
-TOOLS: When the user asks to DO something (add expense, remember, create event, etc.), use the provided tools. You CAN call tools in voice mode. After calling tools, briefly confirm what you did in natural speech."#,
+TOOLS: When the user asks to DO something — ALWAYS call the tool. Examples:
+- "купил колу за 500" → call add_transaction (expense, 500, food, "кола")
+- "запомни что я люблю кофе" → call remember
+- "завтра встреча в 15:00" → call create_event
+After calling tools, briefly confirm what you did."#,
             date_ctx = date_context)
     } else if use_full {
         format!("{}{}", SYSTEM_PROMPT, date_context)
@@ -3306,8 +3309,8 @@ TOOLS: When the user asks to DO something (add expense, remember, create event, 
         }
     }
 
-    // For lite mode, use only last 6 messages to keep prompt small
-    let history_limit = if use_full || call_mode { messages.len() } else { 6 };
+    // Limit history: call mode=10 (speed), full=all, lite=6
+    let history_limit = if call_mode { 10 } else if use_full { messages.len() } else { 6 };
     let skip = messages.len().saturating_sub(history_limit);
     let trimmed: Vec<_> = messages.iter().skip(skip).collect();
     for msg_val in trimmed.iter() {
@@ -3324,10 +3327,10 @@ TOOLS: When the user asks to DO something (add expense, remember, create event, 
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: if call_mode { 200 } else if use_full { 1024 } else { 256 },
+        max_tokens: if call_mode { 150 } else if use_full { 1024 } else { 256 },
         stream: true,
         temperature: if call_mode { 0.6 } else { 0.7 },
-        repetition_penalty: Some(1.1),
+        repetition_penalty: Some(1.2),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
         tools: tools_param,
     };
@@ -7483,7 +7486,7 @@ async fn proactive_llm_call(
         max_tokens: 300,
         stream: false,
         temperature: 0.85,
-        repetition_penalty: Some(1.1),
+        repetition_penalty: Some(1.2),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
     };

@@ -23,8 +23,8 @@ PORT = 8237
 SAMPLE_RATE = 16000
 VAD_CHUNK_SAMPLES = 512
 SILENCE_TIMEOUT_MS = 800
-MIN_SPEECH_MS = 300
-VAD_THRESHOLD = 0.5
+MIN_SPEECH_MS = 500
+VAD_THRESHOLD = 0.6
 WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
 
 # ── Whisper hallucination filter ──
@@ -89,10 +89,9 @@ def transcribe_audio(audio_float32: np.ndarray) -> str:
         language="ru",
         temperature=(0.0,),
         condition_on_previous_text=False,
-        initial_prompt="Привет, как дела? Хорошо, понял. Давай посмотрим.",
         no_speech_threshold=0.6,
         compression_ratio_threshold=2.4,
-        hallucination_silence_threshold=2.0,
+        hallucination_silence_threshold=1.5,
     )
     text = result.get("text", "").strip()
     if is_hallucination(text):
