@@ -243,107 +243,105 @@ input.addEventListener('input', () => {
 
 const recordBtn = document.getElementById('record');
 
-recordBtn.addEventListener('click', async () => {
-  if (isRecording) {
-    // Stop recording
-    isRecording = false;
-    recordBtn.classList.remove('recording');
-    recordBtn.classList.add('transcribing');
-    recordBtn.title = 'Распознаю...';
-    recordBtn.disabled = true;
+// Telegram-style: press-and-hold to record, release to send
+let recordPending = null; // holds the pending /transcribe fetch promise
 
-    if (voiceServerAvailable) {
-      // Voice server: POST /stop (recording auto-transcribes via VAD)
-      try { await fetch(`${VOICE_SERVER}/stop`, { method: 'POST' }); } catch (_) {}
-    } else {
-      // Fallback: Rust whisper-rs
-      try {
-        const text = await invoke('stop_recording');
-        if (text && text.trim()) {
-          input.value = (input.value ? input.value + ' ' : '') + text.trim();
-          sendBtn.click();
-        }
-      } catch (e) {
-        if (!String(e).includes('No audio')) addMsg('bot', 'Ошибка: ' + e);
-      }
-    }
-    recordBtn.classList.remove('transcribing');
-    recordBtn.disabled = false;
-    recordBtn.title = 'Голосовой ввод';
+async function startRecording() {
+  if (isRecording || busy) return;
+  await checkVoiceServer();
+
+  if (voiceServerAvailable) {
+    isRecording = true;
+    recordBtn.classList.add('recording');
+    recordBtn.title = 'Отпустите для отправки';
+    // Start recording (blocks until silence or /finish)
+    recordPending = fetch(`${VOICE_SERVER}/transcribe`, { method: 'POST' })
+      .then(r => r.json())
+      .catch(() => null);
   } else {
-    // Start recording
-    await checkVoiceServer();
-
-    if (voiceServerAvailable) {
-      // Voice server: POST /transcribe (records until silence, auto-transcribes)
-      isRecording = true;
-      recordBtn.classList.add('recording');
-      recordBtn.title = 'Остановить запись (Esc)';
-
-      // Non-blocking: voice server records, uses VAD to detect end, transcribes
-      (async () => {
-        try {
-          const r = await fetch(`${VOICE_SERVER}/transcribe`, { method: 'POST' });
-          const data = await r.json();
-          if (data.text && data.text.trim()) {
-            input.value = (input.value ? input.value + ' ' : '') + data.text.trim();
-            sendBtn.click();
-          }
-        } catch (e) {
-          addMsg('bot', 'Ошибка голоса: ' + e);
+    // Fallback: Rust cpal + whisper-rs
+    try {
+      const hasModel = await invoke('check_whisper_model');
+      if (!hasModel) {
+        if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
+          addMsg('bot', 'Скачиваю модель Whisper...');
+          const unlisten = await listen('whisper-download-progress', (event) => {
+            const msgs = chat.querySelectorAll('.msg.bot');
+            const last = msgs[msgs.length - 1];
+            if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
+          });
+          try { await invoke('download_whisper_model'); addMsg('bot', 'Whisper загружен!'); } catch (e) { addMsg('bot', 'Ошибка: ' + e); }
+          unlisten();
         }
-        isRecording = false;
-        recordBtn.classList.remove('recording');
-        recordBtn.classList.remove('transcribing');
-        recordBtn.disabled = false;
-        recordBtn.title = 'Голосовой ввод';
-      })();
-    } else {
-      // Fallback: Rust cpal + whisper-rs
-      try {
-        const hasModel = await invoke('check_whisper_model');
-        if (!hasModel) {
-          if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
-            addMsg('bot', 'Скачиваю модель Whisper...');
-            const unlisten = await listen('whisper-download-progress', (event) => {
-              const msgs = chat.querySelectorAll('.msg.bot');
-              const last = msgs[msgs.length - 1];
-              if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
-            });
-            try {
-              await invoke('download_whisper_model');
-              addMsg('bot', 'Whisper загружен!');
-            } catch (e) {
-              addMsg('bot', 'Ошибка загрузки: ' + e);
-            }
-            unlisten();
-          }
-          return;
-        }
-      } catch (e) {
-        addMsg('bot', 'Ошибка: ' + e);
         return;
       }
-      try {
-        await invoke('start_recording');
-        isRecording = true;
-        recordBtn.classList.add('recording');
-        recordBtn.title = 'Остановить запись (Esc)';
-      } catch (e) {
-        addMsg('bot', 'Ошибка записи: ' + e);
+      await invoke('start_recording');
+      isRecording = true;
+      recordBtn.classList.add('recording');
+      recordBtn.title = 'Отпустите для отправки';
+    } catch (e) { addMsg('bot', 'Ошибка записи: ' + e); }
+  }
+}
+
+async function stopRecordingAndSend() {
+  if (!isRecording) return;
+  isRecording = false;
+  recordBtn.classList.remove('recording');
+  recordBtn.classList.add('transcribing');
+  recordBtn.title = 'Распознаю...';
+  recordBtn.disabled = true;
+
+  if (voiceServerAvailable && recordPending) {
+    // Signal voice server to finish recording (triggers transcription of collected audio)
+    try { await fetch(`${VOICE_SERVER}/finish`, { method: 'POST' }); } catch (_) {}
+    const data = await recordPending;
+    recordPending = null;
+    if (data && data.text && data.text.trim()) {
+      input.value = (input.value ? input.value + ' ' : '') + data.text.trim();
+      sendBtn.click();
+    }
+  } else {
+    // Fallback: Rust whisper-rs
+    try {
+      const text = await invoke('stop_recording');
+      if (text && text.trim()) {
+        input.value = (input.value ? input.value + ' ' : '') + text.trim();
+        sendBtn.click();
       }
+    } catch (e) {
+      if (!String(e).includes('No audio')) addMsg('bot', 'Ошибка: ' + e);
     }
   }
-});
+  recordBtn.classList.remove('transcribing');
+  recordBtn.disabled = false;
+  recordBtn.title = 'Удерживайте для записи';
+}
+
+function cancelRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+  recordPending = null;
+  recordBtn.classList.remove('recording');
+  recordBtn.title = 'Удерживайте для записи';
+  if (voiceServerAvailable) {
+    fetch(`${VOICE_SERVER}/stop`, { method: 'POST' }).catch(() => {});
+  } else {
+    invoke('stop_recording').catch(() => {});
+  }
+}
+
+// Press-and-hold handlers
+recordBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startRecording(); });
+recordBtn.addEventListener('mouseup', () => stopRecordingAndSend());
+recordBtn.addEventListener('mouseleave', () => { if (isRecording) cancelRecording(); });
+recordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); }, { passive: false });
+recordBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecordingAndSend(); });
 
 // Cancel recording with Escape
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isRecording) {
     e.preventDefault();
-    isRecording = false;
-    recordBtn.classList.remove('recording');
-    recordBtn.title = 'Голосовой ввод';
-    invoke('stop_recording').catch(() => {}); // discard result
+    cancelRecording();
   }
 });
 
