@@ -9,10 +9,7 @@ Two modes:
 Stack: Silero VAD (ONNX) + MLX Whisper large-v3 + edge-tts
 """
 
-import asyncio
-import io
 import json
-import sys
 import threading
 import queue
 import numpy as np
@@ -29,9 +26,6 @@ SILENCE_TIMEOUT_MS = 800
 MIN_SPEECH_MS = 300
 VAD_THRESHOLD = 0.5
 WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
-LLM_BASE_URL = "http://127.0.0.1:8234/v1"
-LLM_MODEL = "mlx-community/Qwen3-32B-4bit"
-TTS_VOICE = "ru-RU-SvetlanaNeural"
 
 # ── Whisper hallucination filter ──
 HALLUCINATIONS = {
@@ -223,8 +217,12 @@ def record_and_transcribe(continuous=False):
     logger.info("Recording stopped")
 
 
-# ── HTTP + SSE Server ──
+# ── HTTP + SSE Server (threaded so /listen SSE doesn't block /listen/pause etc.) ──
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 class VoiceHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -321,7 +319,7 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
 def main():
     threading.Thread(target=ensure_whisper, daemon=True).start()
-    server = HTTPServer(("127.0.0.1", PORT), VoiceHandler)
+    server = ThreadedHTTPServer(("127.0.0.1", PORT), VoiceHandler)
     logger.info(f"Hanni Voice Server on http://127.0.0.1:{PORT}")
     logger.info(f"Whisper: {WHISPER_MODEL}")
     logger.info(f"VAD: Silero VAD (ONNX, threshold={VAD_THRESHOLD})")
