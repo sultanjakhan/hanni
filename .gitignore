@@ -29,5 +29,9 @@ credentials.json
 token.pickle
 *.pickle
 
+# Python venvs
+.venv*/
+desktop/.venv*/
+
 # APK
 *.apk
