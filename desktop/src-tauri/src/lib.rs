@@ -3040,40 +3040,77 @@ fn start_mlx_server() -> Option<Child> {
 
 const VOICE_SERVER_URL: &str = "http://127.0.0.1:8237";
 
-fn start_voice_server() -> Option<Child> {
-    let python = find_python()?;
-    // Check if already running
-    let check = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(1))
-        .build().ok()?;
-    if check.get(&format!("{}/health", VOICE_SERVER_URL)).send().map(|r| r.status().is_success()).unwrap_or(false) {
-        eprintln!("[voice] Server already running on port 8237");
-        return None;
-    }
+fn ensure_voice_server_launchagent() {
+    let python = match find_python() {
+        Some(p) => p,
+        None => { eprintln!("[voice] No python3 found"); return; }
+    };
+
     // Extract embedded voice_server.py to data dir (always overwrite to keep in sync with binary)
     let script = hanni_data_dir().join("voice_server.py");
     let embedded = include_str!("../../voice_server.py");
     if let Err(e) = std::fs::write(&script, embedded) {
         eprintln!("[voice] Failed to write voice_server.py: {}", e);
-        return None;
+        return;
     }
-    eprintln!("[voice] Starting voice server: {} {}", python, script.display());
+
     let log_path = hanni_data_dir().join("voice_server.log");
-    let stderr_file = std::fs::File::create(&log_path)
-        .map(std::process::Stdio::from)
-        .unwrap_or_else(|_| std::process::Stdio::null());
-    match Command::new(&python)
-        .arg(&script)
-        .stdout(std::process::Stdio::null())
-        .stderr(stderr_file)
-        .spawn() {
-        Ok(child) => {
-            eprintln!("[voice] Server process spawned (pid {})", child.id());
-            Some(child)
+    let plist_path = dirs::home_dir().unwrap().join("Library/LaunchAgents/com.hanni.voice-server.plist");
+    let script_str = script.to_string_lossy();
+    let log_str = log_path.to_string_lossy();
+
+    let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.hanni.voice-server</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{python}</string>
+		<string>{script}</string>
+	</array>
+	<key>KeepAlive</key>
+	<true/>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>{log}</string>
+	<key>StandardOutPath</key>
+	<string>{log}</string>
+</dict>
+</plist>"#, python = python, script = script_str, log = log_str);
+
+    // Check if plist already exists with same content
+    let needs_update = match std::fs::read_to_string(&plist_path) {
+        Ok(existing) => existing != plist_content,
+        Err(_) => true,
+    };
+
+    if needs_update {
+        // Unload old version if exists
+        let _ = Command::new("launchctl").args(["unload", &plist_path.to_string_lossy()]).output();
+        if let Err(e) = std::fs::write(&plist_path, &plist_content) {
+            eprintln!("[voice] Failed to write LaunchAgent: {}", e);
+            return;
         }
-        Err(e) => {
-            eprintln!("[voice] Failed to spawn: {}", e);
-            None
+        let _ = Command::new("launchctl").args(["load", &plist_path.to_string_lossy()]).output();
+        eprintln!("[voice] LaunchAgent installed and loaded");
+    } else {
+        // Just make sure it's running
+        let check = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build();
+        let running = check.ok()
+            .and_then(|c| c.get(&format!("{}/health", VOICE_SERVER_URL)).send().ok())
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+        if !running {
+            let _ = Command::new("launchctl").args(["unload", &plist_path.to_string_lossy()]).output();
+            let _ = Command::new("launchctl").args(["load", &plist_path.to_string_lossy()]).output();
+            eprintln!("[voice] LaunchAgent reloaded");
+        } else {
+            eprintln!("[voice] LaunchAgent already running");
         }
     }
 }
@@ -8003,33 +8040,9 @@ pub fn run() {
     let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
     let mlx_cleanup = mlx_process.clone();
 
-    // Start voice server after delay (let MLX server start first to avoid GPU contention)
+    // Install voice server as LaunchAgent (mic permission stays with Python's stable signature)
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        let _voice_child = start_voice_server();
-    });
-
-    // Request microphone permission early — must actually open a stream to trigger macOS TCC dialog
-    std::thread::spawn(|| {
-        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-        if let Some(device) = cpal::default_host().default_input_device() {
-            let config = cpal::StreamConfig {
-                channels: 1,
-                sample_rate: cpal::SampleRate(16000),
-                buffer_size: cpal::BufferSize::Default,
-            };
-            match device.build_input_stream(&config, |_: &[f32], _: &cpal::InputCallbackInfo| {}, |_| {}, None) {
-                Ok(stream) => {
-                    let _ = stream.play();
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    drop(stream);
-                    eprintln!("[audio] Microphone permission granted");
-                }
-                Err(e) => {
-                    eprintln!("[audio] Microphone permission denied or error: {}", e);
-                }
-            }
-        }
+        ensure_voice_server_launchagent();
     });
 
     // Audio recording state (capture starts lazily on first recording)
