@@ -3048,32 +3048,13 @@ fn start_voice_server() -> Option<Child> {
         eprintln!("[voice] Server already running on port 8237");
         return None;
     }
-    // Find voice_server.py: dev dir → next to exe → Tauri resources → app data dir
-    let script = {
-        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().map(|p| p.join("voice_server.py"));
-        let exe_path = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("voice_server.py")));
-        // Tauri bundles resources next to the exe (or in Resources/ on macOS)
-        let resources_path = std::env::current_exe().ok().and_then(|p| {
-            p.parent()
-                .and_then(|d| d.parent())
-                .map(|d| d.join("Resources").join("voice_server.py"))
-        });
-        // Also check app data dir (copied there for persistence)
-        let data_path = Some(hanni_data_dir().join("voice_server.py"));
-
-        if dev_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
-            dev_path.unwrap()
-        } else if exe_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
-            exe_path.unwrap()
-        } else if resources_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
-            resources_path.unwrap()
-        } else if data_path.as_ref().map(|p| p.exists()).unwrap_or(false) {
-            data_path.unwrap()
-        } else {
-            eprintln!("[voice] voice_server.py not found in any location");
-            return None;
-        }
-    };
+    // Extract embedded voice_server.py to data dir (always overwrite to keep in sync with binary)
+    let script = hanni_data_dir().join("voice_server.py");
+    let embedded = include_str!("../../voice_server.py");
+    if let Err(e) = std::fs::write(&script, embedded) {
+        eprintln!("[voice] Failed to write voice_server.py: {}", e);
+        return None;
+    }
     eprintln!("[voice] Starting voice server: {} {}", python, script.display());
     let log_path = hanni_data_dir().join("voice_server.log");
     let stderr_file = std::fs::File::create(&log_path)
@@ -8023,13 +8004,26 @@ pub fn run() {
         let _voice_child = start_voice_server();
     });
 
-    // Request microphone permission early (triggers macOS dialog once at startup)
+    // Request microphone permission early — must actually open a stream to trigger macOS TCC dialog
     std::thread::spawn(|| {
-        use cpal::traits::{DeviceTrait, HostTrait};
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
         if let Some(device) = cpal::default_host().default_input_device() {
-            // Just query supported configs — this triggers the permission dialog
-            let _ = device.supported_input_configs();
-            eprintln!("[audio] Microphone permission check done");
+            let config = cpal::StreamConfig {
+                channels: 1,
+                sample_rate: cpal::SampleRate(16000),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            match device.build_input_stream(&config, |_: &[f32], _: &cpal::InputCallbackInfo| {}, |_| {}, None) {
+                Ok(stream) => {
+                    let _ = stream.play();
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    drop(stream);
+                    eprintln!("[audio] Microphone permission granted");
+                }
+                Err(e) => {
+                    eprintln!("[audio] Microphone permission denied or error: {}", e);
+                }
+            }
         }
     });
 

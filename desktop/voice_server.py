@@ -318,7 +318,7 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    threading.Thread(target=ensure_whisper, daemon=True).start()
+    # Whisper loads lazily on first transcription to avoid GPU memory contention with LLM
     server = ThreadedHTTPServer(("127.0.0.1", PORT), VoiceHandler)
     logger.info(f"Hanni Voice Server on http://127.0.0.1:{PORT}")
     logger.info(f"Whisper: {WHISPER_MODEL}")
