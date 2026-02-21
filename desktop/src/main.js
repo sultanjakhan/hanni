@@ -245,6 +245,9 @@ const recordBtn = document.getElementById('record');
 
 // Telegram-style: press-and-hold to record, release to send
 let recordPending = null; // holds the pending /transcribe fetch promise
+let lastMessageWasVoice = false;
+let lastSttTimeMs = 0;
+let voiceRecordStartTime = 0;
 
 async function startRecording() {
   if (isRecording || busy) return;
@@ -252,6 +255,7 @@ async function startRecording() {
 
   if (voiceServerAvailable) {
     isRecording = true;
+    voiceRecordStartTime = performance.now();
     recordBtn.classList.add('recording');
     recordBtn.title = 'Отпустите для отправки';
     // Start recording (blocks until silence or /finish)
@@ -297,6 +301,8 @@ async function stopRecordingAndSend() {
     const data = await recordPending;
     recordPending = null;
     if (data && data.text && data.text.trim()) {
+      lastMessageWasVoice = true;
+      lastSttTimeMs = performance.now() - voiceRecordStartTime;
       input.value = (input.value ? input.value + ' ' : '') + data.text.trim();
       sendBtn.click();
     }
@@ -305,6 +311,8 @@ async function stopRecordingAndSend() {
     try {
       const text = await invoke('stop_recording');
       if (text && text.trim()) {
+        lastMessageWasVoice = true;
+        lastSttTimeMs = performance.now() - voiceRecordStartTime;
         input.value = (input.value ? input.value + ' ' : '') + text.trim();
         sendBtn.click();
       }
@@ -1074,7 +1082,7 @@ scrollBottomBtn?.addEventListener('click', () => {
   chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
 });
 
-function addMsg(role, text) {
+function addMsg(role, text, isVoice = false) {
   if (role === 'bot') {
     const wrapper = document.createElement('div');
     wrapper.className = 'msg-wrapper';
@@ -1094,7 +1102,15 @@ function addMsg(role, text) {
   }
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  div.textContent = text;
+  if (isVoice && role === 'user') {
+    const mic = document.createElement('span');
+    mic.className = 'voice-indicator';
+    mic.textContent = '\u{1F3A4} ';
+    div.appendChild(mic);
+    div.appendChild(document.createTextNode(text));
+  } else {
+    div.textContent = text;
+  }
   chat.appendChild(div);
   scrollDown();
   return div;
@@ -1654,6 +1670,11 @@ async function send() {
   }
 
   // Build message with optional file
+  const isVoice = lastMessageWasVoice;
+  const sttTime = lastSttTimeMs;
+  lastMessageWasVoice = false;
+  lastSttTimeMs = 0;
+
   let userContent = text;
   if (attachedFile) {
     userContent += `\n\n📎 Файл: ${attachedFile.name}\n\`\`\`\n${attachedFile.content}\n\`\`\``;
@@ -1661,7 +1682,7 @@ async function send() {
     attachedFile = null;
     attachPreview.style.display = 'none';
   } else {
-    addMsg('user', text);
+    addMsg('user', text, isVoice);
   }
 
   history.push({ role: 'user', content: userContent });
@@ -1781,7 +1802,8 @@ async function send() {
   const timing = document.createElement('div');
   timing.className = 'timing';
   const stepInfo = iteration > 1 ? ` · ${iteration} steps` : '';
-  timing.textContent = `${ttft}s first token · ${total}s total · ${totalTokens} tokens${stepInfo}`;
+  const sttInfo = isVoice && sttTime ? `STT ${(sttTime / 1000).toFixed(1)}s · ` : '';
+  timing.textContent = `${sttInfo}${ttft}s first token · ${total}s total · ${totalTokens} tokens${stepInfo}`;
   chat.appendChild(timing);
   scrollDown();
 
@@ -5438,8 +5460,8 @@ async function handleCallTranscript(userText) {
   callTranscriptArea.appendChild(userBubble);
   callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
 
-  // Also add to actual chat history
-  addMsg('user', userText);
+  // Also add to actual chat history (voice)
+  addMsg('user', userText, true);
   history.push({ role: 'user', content: userText });
 
   // Update UI phase to "processing" while LLM thinks
@@ -5515,7 +5537,7 @@ async function handleCallTranscript(userText) {
 
   if (!callModeActive) return;
 
-  // Show bot reply in overlay
+  // Show bot reply + timing in overlay
   if (lastReply) {
     const displayText = lastReply
       .replace(/```action[\s\S]*?```/g, '')
@@ -5526,6 +5548,13 @@ async function handleCallTranscript(userText) {
       botBubble.className = 'call-transcript-bot';
       botBubble.textContent = displayText;
       callTranscriptArea.appendChild(botBubble);
+
+      // Show timing in call overlay
+      const callTotal = ((performance.now() - t0) / 1000).toFixed(1);
+      const callTiming = document.createElement('div');
+      callTiming.className = 'call-timing';
+      callTiming.textContent = `${callTotal}s`;
+      callTranscriptArea.appendChild(callTiming);
       callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
     }
   }
