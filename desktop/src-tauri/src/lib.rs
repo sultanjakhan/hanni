@@ -1457,6 +1457,8 @@ struct ChatRequest {
     max_tokens: u32,
     stream: bool,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repetition_penalty: Option<f32>,
     chat_template_kwargs: ChatTemplateKwargs,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<serde_json::Value>>,
@@ -3288,6 +3290,7 @@ TOOLS: When the user asks to DO something (add expense, remember, create event, 
         max_tokens: if call_mode { 200 } else if use_full { 1024 } else { 256 },
         stream: true,
         temperature: if call_mode { 0.6 } else { 0.7 },
+        repetition_penalty: Some(1.1),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
         tools: tools_param,
     };
@@ -4072,6 +4075,7 @@ async fn process_conversation_end(
         max_tokens: 800,
         stream: false,
         temperature: 0.3,
+        repetition_penalty: None,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
     };
@@ -7442,6 +7446,7 @@ async fn proactive_llm_call(
         max_tokens: 300,
         stream: false,
         temperature: 0.85,
+        repetition_penalty: Some(1.1),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
     };
@@ -8533,6 +8538,7 @@ pub fn run() {
                         max_tokens: 400,
                         stream: false,
                         temperature: 0.3,
+                        repetition_penalty: None,
                         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
                         tools: None,
                     };

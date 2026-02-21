@@ -299,6 +299,10 @@ class VoiceHandler(BaseHTTPRequestHandler):
             recording_active.clear()
             force_stop.set()
             self._json({"status": "stopped"})
+        elif self.path == "/finish":
+            # Stop recording but let transcription happen (for press-and-hold)
+            recording_active.clear()
+            self._json({"status": "finishing"})
         elif self.path == "/listen/pause":
             call_mode_paused.set()
             self._json({"status": "paused"})
