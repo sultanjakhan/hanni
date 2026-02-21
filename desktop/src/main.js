@@ -5469,6 +5469,7 @@ async function handleCallTranscript(userText) {
     // Primary path: native tool calls
     if (result.toolCalls && result.toolCalls.length > 0) {
       history.push({ role: 'assistant', content: result.fullReply || null, tool_calls: result.toolCalls });
+      wrapper.dataset.historyIdx = String(history.length - 1);
       lastReply = result.fullReply || '';
       botDiv.classList.add('intermediate');
 
@@ -5491,6 +5492,7 @@ async function handleCallTranscript(userText) {
     if (!result.fullReply) break;
 
     history.push({ role: 'assistant', content: result.fullReply });
+    wrapper.dataset.historyIdx = String(history.length - 1);
     lastReply = result.fullReply;
 
     // Fallback: parse ```action blocks
@@ -5528,13 +5530,22 @@ async function handleCallTranscript(userText) {
     }
   }
 
-  // Save conversation (non-blocking)
+  // Save conversation (non-blocking) + add feedback buttons
   (async () => {
     try {
       if (currentConversationId) {
         await invoke('update_conversation', { id: currentConversationId, messages: history });
       } else {
         currentConversationId = await invoke('save_conversation', { messages: history });
+      }
+      if (currentConversationId) {
+        chat.querySelectorAll('.msg-wrapper[data-history-idx]').forEach(w => {
+          if (w.querySelector('.feedback-btn')) return;
+          const idx = parseInt(w.dataset.historyIdx, 10);
+          if (!isNaN(idx) && getRole(history[idx]) === 'assistant') {
+            addFeedbackButtons(w, currentConversationId, idx);
+          }
+        });
       }
       if (history.length >= 4) {
         await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });
