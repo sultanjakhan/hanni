@@ -3302,15 +3302,15 @@ After calling tools, briefly confirm what you did."#,
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
-            build_memory_context_from_db(&conn, mem_user_msg, if use_full || call_mode { 80 } else { 10 })
+            build_memory_context_from_db(&conn, mem_user_msg, if use_full { 80 } else if call_mode { 15 } else { 5 })
         };
         if !ctx.is_empty() {
             chat_messages.push(ChatMessage::text("system", &format!("[Your memories]\n{}", ctx)));
         }
     }
 
-    // Limit history: call mode=10 (speed), full=all, lite=6
-    let history_limit = if call_mode { 10 } else if use_full { messages.len() } else { 6 };
+    // Limit history: call mode=6 (speed), full=all, lite=4
+    let history_limit = if call_mode { 6 } else if use_full { messages.len() } else { 4 };
     let skip = messages.len().saturating_sub(history_limit);
     let trimmed: Vec<_> = messages.iter().skip(skip).collect();
     for msg_val in trimmed.iter() {
@@ -3327,7 +3327,7 @@ After calling tools, briefly confirm what you did."#,
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: if call_mode { 150 } else if use_full { 1024 } else { 256 },
+        max_tokens: if call_mode { 100 } else if use_full { 1024 } else { 256 },
         stream: true,
         temperature: if call_mode { 0.6 } else { 0.7 },
         repetition_penalty: Some(1.2),
