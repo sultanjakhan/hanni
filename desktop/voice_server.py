@@ -27,7 +27,7 @@ VAD_CHUNK_SAMPLES = 512
 SILENCE_TIMEOUT_MS = 800
 MIN_SPEECH_MS = 500
 VAD_THRESHOLD = 0.6
-WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
+WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 
 # ── Whisper hallucination filter ──
 HALLUCINATIONS = {
