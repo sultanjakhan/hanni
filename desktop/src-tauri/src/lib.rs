@@ -586,7 +586,7 @@ impl Default for ProactiveSettings {
         Self {
             enabled: false,
             voice_enabled: false,
-            voice_name: "ru-RU-SvetlanaNeural".into(),
+            voice_name: "xenia".into(),
             interval_minutes: 10,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
@@ -7520,87 +7520,6 @@ async fn proactive_llm_call(
     }
 }
 
-/// Adaptive TTS rate: short phrases faster, long text slower for clarity
-fn adaptive_tts_rate(text: &str) -> String {
-    let word_count = text.split_whitespace().count();
-    let rate = if word_count <= 5 {
-        "+35%"    // Short phrase — speak briskly
-    } else if word_count <= 15 {
-        "+25%"    // Medium — comfortable pace
-    } else if word_count <= 30 {
-        "+15%"    // Longer — slow down for clarity
-    } else {
-        "+10%"    // Very long — easy pace
-    };
-    rate.to_string()
-}
-
-fn speak_edge_tts(text: &str, voice: &str) {
-    let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
-    let tmp2 = tmp.clone();
-    let voice_owned = voice.to_string();
-    let text_owned = text.to_string();
-    let rate = adaptive_tts_rate(text);
-    std::thread::spawn(move || {
-        // Try direct edge-tts binary with PATH fallbacks
-        let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
-        let mut success = false;
-        for cmd in &candidates {
-            let status = std::process::Command::new(cmd)
-                .args(["--voice", &voice_owned, "--rate", &rate, "--text", &text_owned, "--write-media", &tmp2])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if let Ok(s) = status {
-                if s.success() { success = true; break; }
-            }
-        }
-        // Fallback: python3 -m edge_tts
-        if !success {
-            if let Some(python) = find_python() {
-                let status = std::process::Command::new(&python)
-                    .args(["-m", "edge_tts", "--voice", &voice_owned, "--rate", &rate, "--text", &text_owned, "--write-media", &tmp2])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-                if let Ok(s) = status { success = s.success(); }
-            }
-        }
-        if success {
-            let _ = std::process::Command::new("afplay").arg(&tmp2).status();
-            let _ = std::fs::remove_file(&tmp2);
-        }
-    });
-}
-
-fn speak_remote_tts(text: &str, voice: &str, server_url: &str) {
-    let tmp = format!("/tmp/hanni_tts_{}.mp3", std::process::id());
-    let tmp2 = tmp.clone();
-    let url = format!("{}/tts", server_url.trim_end_matches('/'));
-    let text_owned = text.to_string();
-    let voice_owned = voice.to_string();
-    std::thread::spawn(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build();
-        if let Ok(client) = client {
-            let resp = client.post(&url)
-                .json(&serde_json::json!({"text": text_owned, "voice": voice_owned}))
-                .send();
-            if let Ok(resp) = resp {
-                if resp.status().is_success() {
-                    if let Ok(bytes) = resp.bytes() {
-                        if std::fs::write(&tmp2, &bytes).is_ok() {
-                            let _ = std::process::Command::new("afplay").arg(&tmp2).status();
-                            let _ = std::fs::remove_file(&tmp2);
-                        }
-                    }
-                }
-            }
-        }
-    });
-}
-
 fn clean_text_for_tts(text: &str) -> String {
     // Remove action blocks first
     let re_action = regex::Regex::new(r"(?s)```action.*?```").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
@@ -7741,22 +7660,8 @@ fn silero_speaker_for(voice: &str) -> &str {
 
 fn speak_tts(text: &str, voice: &str) {
     let clean = clean_text_for_tts(text);
-    // 1. Try remote TTS server (PC with NVIDIA)
-    let data_dir = hanni_data_dir();
-    let db_path = data_dir.join("hanni.db");
-    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        if let Ok(url) = conn.query_row(
-            "SELECT value FROM app_settings WHERE key='tts_server_url'",
-            [],
-            |row| row.get::<_, String>(0),
-        ) {
-            if !url.is_empty() {
-                speak_remote_tts(&clean, voice, &url);
-                return;
-            }
-        }
-    }
-    // 2. Try local Silero TTS (voice server)
+    if clean.is_empty() { return; }
+    // Local Silero TTS via voice server
     speak_silero_local(&clean, silero_speaker_for(voice));
 }
 
@@ -7764,94 +7669,18 @@ fn speak_tts(text: &str, voice: &str) {
 fn speak_tts_sync(text: &str, voice: &str) {
     let clean = clean_text_for_tts(text);
     if clean.is_empty() { return; }
-    // 1. Try remote TTS server (PC with NVIDIA)
-    let data_dir = hanni_data_dir();
-    let db_path = data_dir.join("hanni.db");
-    if let Ok(conn) = rusqlite::Connection::open(&db_path) {
-        if let Ok(url) = conn.query_row(
-            "SELECT value FROM app_settings WHERE key='tts_server_url'",
-            [],
-            |row| row.get::<_, String>(0),
-        ) {
-            if !url.is_empty() {
-                if speak_remote_tts_sync(&clean, voice, &url) { return; }
-                eprintln!("[TTS] Remote server failed, falling back to Silero local");
-            }
-        }
-    }
-    // 2. Try local Silero TTS (voice server)
+    // Local Silero TTS via voice server
     if speak_silero_local_sync(&clean, silero_speaker_for(voice)) { return; }
-    // 3. Fallback to edge-tts
-    eprintln!("[TTS] Silero local failed, falling back to edge-tts");
-    if speak_edge_tts_sync(&clean, voice) { return; }
-    // 4. Fallback to macOS say
-    eprintln!("[TTS] edge-tts failed, falling back to macOS say");
+    // Fallback to macOS say
+    eprintln!("[TTS] Silero local failed, falling back to macOS say");
     let _ = std::process::Command::new("say")
         .args(["-r", "210", &clean])
         .status();
 }
 
-fn speak_edge_tts_sync(text: &str, voice: &str) -> bool {
-    let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
-    let rate = adaptive_tts_rate(text);
-    let candidates = ["edge-tts", "/opt/homebrew/bin/edge-tts", "/usr/local/bin/edge-tts"];
-    let mut success = false;
-    for cmd in &candidates {
-        let status = std::process::Command::new(cmd)
-            .args(["--voice", voice, "--rate", &rate, "--text", text, "--write-media", &tmp])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        if let Ok(s) = status {
-            if s.success() { success = true; break; }
-        }
-    }
-    if !success {
-        if let Some(python) = find_python() {
-            let status = std::process::Command::new(&python)
-                .args(["-m", "edge_tts", "--voice", voice, "--rate", &rate, "--text", text, "--write-media", &tmp])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if let Ok(s) = status { success = s.success(); }
-        }
-    }
-    if success {
-        let _ = std::process::Command::new("afplay").arg(&tmp).status();
-        let _ = std::fs::remove_file(&tmp);
-    }
-    success
-}
-
-fn speak_remote_tts_sync(text: &str, voice: &str, server_url: &str) -> bool {
-    let tmp = format!("/tmp/hanni_tts_call_{}.mp3", std::process::id());
-    let url = format!("{}/tts", server_url.trim_end_matches('/'));
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let resp = match client.post(&url)
-        .json(&serde_json::json!({"text": text, "voice": voice}))
-        .send() {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
-    if !resp.status().is_success() { return false; }
-    let bytes = match resp.bytes() {
-        Ok(b) => b,
-        Err(_) => return false,
-    };
-    if std::fs::write(&tmp, &bytes).is_err() { return false; }
-    let _ = std::process::Command::new("afplay").arg(&tmp).status();
-    let _ = std::fs::remove_file(&tmp);
-    true
-}
-
 #[tauri::command]
 async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), String> {
-    let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
+    let v = voice.unwrap_or_else(|| "xenia".into());
     tokio::task::spawn_blocking(move || {
         speak_tts_sync(&text, &v);
     }).await.map_err(|e| format!("TTS join error: {}", e))?;
@@ -7861,7 +7690,7 @@ async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), 
 /// Speak a single sentence synchronously — for streaming TTS in call mode
 #[tauri::command]
 async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Result<(), String> {
-    let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
+    let v = voice.unwrap_or_else(|| "xenia".into());
     let clean = clean_text_for_tts(&sentence);
     if clean.is_empty() { return Ok(()); }
     tokio::task::spawn_blocking(move || {
@@ -7871,31 +7700,14 @@ async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Res
 }
 
 #[tauri::command]
-async fn speak_text(text: String, voice: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let v = voice.unwrap_or_else(|| "ru-RU-SvetlanaNeural".into());
+async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
+    let v = voice.unwrap_or_else(|| "xenia".into());
     let clean = clean_text_for_tts(&text);
-    // Check for remote TTS server
-    let remote_url = {
-        let conn = db.conn();
-        conn.query_row("SELECT value FROM app_settings WHERE key='tts_server_url'", [], |row| row.get::<_, String>(0)).ok()
-    };
-    if let Some(url) = remote_url {
-        if !url.is_empty() {
-            let url2 = url.clone();
-            tokio::task::spawn_blocking(move || speak_remote_tts(&clean, &v, &url2));
-            return Ok(());
-        }
-    }
-    if v.contains("Neural") {
-        let v2 = v.clone();
-        let c2 = clean.clone();
-        tokio::task::spawn_blocking(move || speak_edge_tts(&c2, &v2));
-    } else {
-        std::process::Command::new("say")
-            .args(["-v", &v, "-r", "210", &clean])
-            .spawn()
-            .map_err(|e| format!("TTS error: {}", e))?;
-    }
+    if clean.is_empty() { return Ok(()); }
+    let speaker = silero_speaker_for(&v).to_string();
+    tokio::task::spawn_blocking(move || {
+        speak_silero_local(&clean, &speaker);
+    });
     Ok(())
 }
 
@@ -7918,66 +7730,7 @@ async fn get_tts_voices() -> Result<serde_json::Value, String> {
             "name": name, "gender": gender, "lang": "ru-RU", "engine": "silero"
         }));
     }
-    // Add macOS voices (always available)
-    // Detect installed macOS voices
-    if let Ok(output) = std::process::Command::new("say").arg("-v").arg("?").output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
-            if parts.is_empty() { continue; }
-            let name = parts[0].trim();
-            if line.contains("ru_RU") || line.contains("kk_KZ") {
-                let lang = if line.contains("kk_KZ") { "kk-KZ" } else { "ru-RU" };
-                voices.push(serde_json::json!({"name": name, "gender": "—", "lang": lang, "engine": "macos"}));
-            }
-        }
-    }
-    // Try edge-tts (may not be in PATH for .app bundles)
-    let edge_tts_paths = [
-        "edge-tts",
-        "/opt/homebrew/bin/edge-tts",
-        "/usr/local/bin/edge-tts",
-    ];
-    let mut output_opt = None;
-    for path in &edge_tts_paths {
-        if let Ok(output) = std::process::Command::new(path)
-            .arg("--list-voices")
-            .output()
-        {
-            if output.status.success() {
-                output_opt = Some(output);
-                break;
-            }
-        }
-    }
-    // Also try via python3 -m edge_tts
-    if output_opt.is_none() {
-        if let Ok(output) = std::process::Command::new("python3")
-            .args(&["-m", "edge_tts", "--list-voices"])
-            .output()
-        {
-            if output.status.success() {
-                output_opt = Some(output);
-            }
-        }
-    }
-    if let Some(output) = output_opt {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 && parts[0].contains("Neural") {
-                let name = parts[0];
-                let gender = parts[1];
-                let lang = name.split('-').take(2).collect::<Vec<_>>().join("-");
-                voices.push(serde_json::json!({
-                    "name": name,
-                    "gender": gender,
-                    "lang": lang,
-                    "engine": "edge-tts"
-                }));
-            }
-        }
-    }
+    // Only local voices — no cloud services
     Ok(serde_json::json!(voices))
 }
 

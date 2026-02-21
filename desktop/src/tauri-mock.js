@@ -236,10 +236,11 @@ const MOCK_DATA = {
 
   // ── TTS & Voice ──
   get_tts_voices: () => [
-    { name: 'ru-RU-SvetlanaNeural', gender: 'Female', lang: 'ru-RU', engine: 'edge-tts' },
-    { name: 'ru-RU-DmitryNeural', gender: 'Male', lang: 'ru-RU', engine: 'edge-tts' },
-    { name: 'en-US-JennyNeural', gender: 'Female', lang: 'en-US', engine: 'edge-tts' },
-    { name: 'Milena', gender: '—', lang: 'ru-RU', engine: 'macos' },
+    { name: 'xenia', gender: 'Female', lang: 'ru-RU', engine: 'silero' },
+    { name: 'kseniya', gender: 'Female', lang: 'ru-RU', engine: 'silero' },
+    { name: 'baya', gender: 'Female', lang: 'ru-RU', engine: 'silero' },
+    { name: 'aidar', gender: 'Male', lang: 'ru-RU', engine: 'silero' },
+    { name: 'eugene', gender: 'Male', lang: 'ru-RU', engine: 'silero' },
   ],
 
   // ── Goals ──
