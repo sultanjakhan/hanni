@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-Hanni Voice Server — Silero VAD + MLX Whisper STT.
+Hanni Voice Server — Silero VAD + MLX Whisper STT + Silero TTS.
 
-Two modes:
+Modes:
   1. Call mode: GET /listen (SSE stream, continuous VAD + transcription)
   2. Single transcription: POST /transcribe (one utterance)
+  3. TTS: POST /tts (local Silero TTS, no cloud)
 
-Stack: Silero VAD (ONNX) + MLX Whisper large-v3 + edge-tts
+Stack: Silero VAD (ONNX) + MLX Whisper large-v3 + Silero TTS v5 (all local, open-source)
 """
 
 import json
 import threading
 import queue
+import io
 import numpy as np
 import sounddevice as sd
 import torch
@@ -103,6 +105,57 @@ def silero_speech_prob(audio_int16: np.ndarray) -> float:
     tensor = torch.from_numpy(audio_float)
     with torch.no_grad():
         return vad_model(tensor, SAMPLE_RATE).item()
+
+
+# ── Silero TTS (lazy load) ──
+TTS_SAMPLE_RATE = 48000
+TTS_DEFAULT_SPEAKER = "xenia"
+TTS_SPEAKERS = ["aidar", "baya", "kseniya", "xenia", "eugene"]
+
+_tts_model = None
+_tts_lock = threading.Lock()
+
+def ensure_tts():
+    global _tts_model
+    if _tts_model is not None:
+        return
+    with _tts_lock:
+        if _tts_model is not None:
+            return
+        logger.info("Loading Silero TTS v5...")
+        torch.set_num_threads(4)
+        model, _ = torch.hub.load(
+            repo_or_dir='snakers4/silero-models',
+            model='silero_tts',
+            language='ru',
+            speaker='v5_ru',
+        )
+        model.to('cpu')
+        _tts_model = model
+        logger.info(f"Silero TTS loaded (speakers: {', '.join(TTS_SPEAKERS)})")
+
+def synthesize_speech(text: str, speaker: str = TTS_DEFAULT_SPEAKER) -> bytes:
+    """Generate WAV bytes from text using Silero TTS."""
+    ensure_tts()
+    if speaker not in TTS_SPEAKERS:
+        speaker = TTS_DEFAULT_SPEAKER
+    audio = _tts_model.apply_tts(
+        text=text,
+        speaker=speaker,
+        sample_rate=TTS_SAMPLE_RATE,
+        put_accent=True,
+        put_yo=True,
+    )
+    # Convert torch tensor to WAV bytes
+    import wave
+    buf = io.BytesIO()
+    pcm = (audio.numpy() * 32767).astype(np.int16)
+    with wave.open(buf, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(TTS_SAMPLE_RATE)
+        wf.writeframes(pcm.tobytes())
+    return buf.getvalue()
 
 
 # ── Single transcription (HTTP mode) ──
@@ -246,9 +299,19 @@ class VoiceHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._cors()
 
+    def _binary(self, data, content_type="audio/wav", status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         if self.path == "/health":
-            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero"})
+            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5"})
+        elif self.path == "/tts/voices":
+            self._json({"voices": TTS_SPEAKERS, "default": TTS_DEFAULT_SPEAKER})
         elif self.path == "/listen":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -316,6 +379,22 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 try: call_mode_results.get_nowait()
                 except queue.Empty: break
             self._json({"status": "stopped"})
+        elif self.path == "/tts":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length)) if length else {}
+                text = body.get("text", "").strip()
+                speaker = body.get("speaker", TTS_DEFAULT_SPEAKER)
+                if not text:
+                    self._json({"error": "no text"}, 400)
+                    return
+                logger.info(f"[TTS] Generating: '{text[:50]}...' speaker={speaker}")
+                wav_bytes = synthesize_speech(text, speaker)
+                logger.info(f"[TTS] Done, {len(wav_bytes)} bytes")
+                self._binary(wav_bytes)
+            except Exception as e:
+                logger.error(f"[TTS] Error: {e}")
+                self._json({"error": str(e)}, 500)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -324,9 +403,10 @@ def main():
     # Whisper loads lazily on first transcription to avoid GPU memory contention with LLM
     server = ThreadedHTTPServer(("127.0.0.1", PORT), VoiceHandler)
     logger.info(f"Hanni Voice Server on http://127.0.0.1:{PORT}")
-    logger.info(f"Whisper: {WHISPER_MODEL}")
+    logger.info(f"STT: MLX Whisper ({WHISPER_MODEL})")
     logger.info(f"VAD: Silero VAD (ONNX, threshold={VAD_THRESHOLD})")
-    logger.info(f"Stack: Silero VAD + MLX Whisper (open-source)")
+    logger.info(f"TTS: Silero TTS v5 (speakers: {', '.join(TTS_SPEAKERS)})")
+    logger.info(f"Stack: 100% local open-source")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

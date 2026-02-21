@@ -7672,9 +7672,76 @@ fn clean_text_for_tts(text: &str) -> String {
     result.trim().to_string()
 }
 
+/// Try local Silero TTS via voice server (non-blocking)
+fn speak_silero_local(text: &str, speaker: &str) {
+    let tmp = format!("/tmp/hanni_tts_{}.wav", std::process::id());
+    let url = format!("{}/tts", VOICE_SERVER_URL);
+    let text_owned = text.to_string();
+    let speaker_owned = speaker.to_string();
+    let tmp2 = tmp.clone();
+    std::thread::spawn(move || {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build();
+        if let Ok(client) = client {
+            let resp = client.post(&url)
+                .json(&serde_json::json!({"text": text_owned, "speaker": speaker_owned}))
+                .send();
+            if let Ok(resp) = resp {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes() {
+                        if std::fs::write(&tmp2, &bytes).is_ok() {
+                            let _ = std::process::Command::new("afplay").arg(&tmp2).status();
+                            let _ = std::fs::remove_file(&tmp2);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Try local Silero TTS via voice server (blocking)
+fn speak_silero_local_sync(text: &str, speaker: &str) -> bool {
+    let tmp = format!("/tmp/hanni_tts_call_{}.wav", std::process::id());
+    let url = format!("{}/tts", VOICE_SERVER_URL);
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let resp = client.post(&url)
+        .json(&serde_json::json!({"text": text, "speaker": speaker}))
+        .send();
+    if let Ok(resp) = resp {
+        if resp.status().is_success() {
+            if let Ok(bytes) = resp.bytes() {
+                if std::fs::write(&tmp, &bytes).is_ok() {
+                    let _ = std::process::Command::new("afplay").arg(&tmp).status();
+                    let _ = std::fs::remove_file(&tmp);
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Map voice name to Silero speaker (default: xenia)
+fn silero_speaker_for(voice: &str) -> &str {
+    match voice {
+        v if v.contains("Dmitry") || v.contains("Male") || v.contains("aidar") => "aidar",
+        v if v.contains("eugene") => "eugene",
+        v if v.contains("baya") => "baya",
+        v if v.contains("kseniya") => "kseniya",
+        _ => "xenia",
+    }
+}
+
 fn speak_tts(text: &str, voice: &str) {
     let clean = clean_text_for_tts(text);
-    // Check for remote TTS server setting
+    // 1. Try remote TTS server (PC with NVIDIA)
     let data_dir = hanni_data_dir();
     let db_path = data_dir.join("hanni.db");
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
@@ -7689,13 +7756,8 @@ fn speak_tts(text: &str, voice: &str) {
             }
         }
     }
-    if voice.contains("Neural") {
-        speak_edge_tts(&clean, voice);
-    } else {
-        let _ = std::process::Command::new("say")
-            .args(["-v", voice, "-r", "210", &clean])
-            .spawn();
-    }
+    // 2. Try local Silero TTS (voice server)
+    speak_silero_local(&clean, silero_speaker_for(voice));
 }
 
 /// Synchronous TTS — blocks until audio finishes playing
@@ -7713,13 +7775,16 @@ fn speak_tts_sync(text: &str, voice: &str) {
         ) {
             if !url.is_empty() {
                 if speak_remote_tts_sync(&clean, voice, &url) { return; }
-                eprintln!("[TTS] Remote server failed, falling back to edge-tts");
+                eprintln!("[TTS] Remote server failed, falling back to Silero local");
             }
         }
     }
-    // 2. Try edge-tts (Neural voices)
+    // 2. Try local Silero TTS (voice server)
+    if speak_silero_local_sync(&clean, silero_speaker_for(voice)) { return; }
+    // 3. Fallback to edge-tts
+    eprintln!("[TTS] Silero local failed, falling back to edge-tts");
     if speak_edge_tts_sync(&clean, voice) { return; }
-    // 3. Fallback to macOS say
+    // 4. Fallback to macOS say
     eprintln!("[TTS] edge-tts failed, falling back to macOS say");
     let _ = std::process::Command::new("say")
         .args(["-r", "210", &clean])
@@ -7844,7 +7909,16 @@ async fn stop_speaking() -> Result<(), String> {
 #[tauri::command]
 async fn get_tts_voices() -> Result<serde_json::Value, String> {
     let mut voices: Vec<serde_json::Value> = Vec::new();
-    // Add macOS voices first (always available)
+    // Add local Silero TTS voices first (best option: fast, offline, open-source)
+    for (name, gender) in &[
+        ("xenia", "Female"), ("kseniya", "Female"), ("baya", "Female"),
+        ("aidar", "Male"), ("eugene", "Male"),
+    ] {
+        voices.push(serde_json::json!({
+            "name": name, "gender": gender, "lang": "ru-RU", "engine": "silero"
+        }));
+    }
+    // Add macOS voices (always available)
     // Detect installed macOS voices
     if let Ok(output) = std::process::Command::new("say").arg("-v").arg("?").output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
