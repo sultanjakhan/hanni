@@ -5563,6 +5563,11 @@ function splitIntoSentences(text) {
 async function speakAndListen(text) {
   if (!callModeActive) return;
 
+  // Pause voice server mic to prevent echo (TTS audio picked up by mic)
+  if (voiceServerAvailable) {
+    fetch(`${VOICE_SERVER}/listen/pause`, { method: 'POST' }).catch(() => {});
+  }
+
   // Set phase to speaking (both UI and Rust-side for barge-in detection)
   callOverlay.setAttribute('data-phase', 'speaking');
   callPhaseText.textContent = PHASE_LABELS.speaking;
@@ -5600,12 +5605,16 @@ async function speakAndListen(text) {
         bargedIn = true;
         clearInterval(bargeInterval);
         await invoke('stop_speaking').catch(() => {});
+        // Resume voice server mic after barge-in
+        if (voiceServerAvailable) {
+          fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }).catch(() => {});
+        }
         if (callModeActive) {
           await invoke('call_mode_resume_listening').catch(() => {});
         }
       }
     } catch (_) {}
-  }, 150); // Faster polling for quicker barge-in response
+  }, 150);
 
   // Speak each sentence sequentially, checking barge-in between them
   for (const sentence of sentences) {
@@ -5630,8 +5639,15 @@ async function speakAndListen(text) {
 
   clearInterval(bargeInterval);
 
+  // Resume voice server mic after TTS finishes
+  if (voiceServerAvailable) {
+    fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }).catch(() => {});
+  }
+
   // If not barged in, resume listening
   if (!bargedIn && callModeActive) {
+    callOverlay.setAttribute('data-phase', 'listening');
+    callPhaseText.textContent = PHASE_LABELS.listening;
     await invoke('call_mode_resume_listening').catch(() => {});
   }
 }

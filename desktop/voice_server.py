@@ -82,6 +82,7 @@ print("[voice] Silero VAD loaded")
 # ── Globals ──
 recording_active = threading.Event()
 call_mode_active = threading.Event()
+call_mode_paused = threading.Event()  # set = paused (TTS speaking, don't listen)
 call_mode_results = queue.Queue()
 current_result = {"text": "", "error": ""}
 result_ready = threading.Event()
@@ -176,6 +177,20 @@ def record_and_transcribe(continuous=False):
                 break
             if not continuous and not recording_active.is_set():
                 break
+
+            # If paused (TTS speaking), drain mic but don't process
+            if continuous and call_mode_paused.is_set():
+                try:
+                    stream.read(chunk_size)  # drain audio to prevent buffer overflow
+                except Exception:
+                    break
+                # Reset VAD state after pause ends (speaker audio corrupts it)
+                if speech_detected:
+                    speech_detected = False
+                    speech_frames = []
+                    silence_count = 0
+                    vad_model.reset_states()
+                continue
 
             try:
                 data, overflowed = stream.read(chunk_size)
@@ -328,8 +343,17 @@ class VoiceHandler(BaseHTTPRequestHandler):
             force_stop.set()
             self._send_json({"status": "stopped"})
 
+        elif self.path == "/listen/pause":
+            call_mode_paused.set()
+            self._send_json({"status": "paused"})
+
+        elif self.path == "/listen/resume":
+            call_mode_paused.clear()
+            self._send_json({"status": "resumed"})
+
         elif self.path == "/listen/stop":
             call_mode_active.clear()
+            call_mode_paused.clear()
             force_stop.set()
             while not call_mode_results.empty():
                 try:
