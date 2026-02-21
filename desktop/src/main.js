@@ -5239,35 +5239,6 @@ async function toggleCallMode() {
 }
 
 async function startCallMode() {
-  // Check whisper model first
-  try {
-    const hasModel = await invoke('check_whisper_model');
-    if (!hasModel) {
-      if (confirm('Модель Whisper не найдена (~1.5GB). Скачать для голосового ввода?')) {
-        addMsg('bot', 'Скачиваю модель Whisper... Это может занять несколько минут.');
-        const unlisten = await listen('whisper-download-progress', (event) => {
-          const msgs = chat.querySelectorAll('.msg.bot');
-          const last = msgs[msgs.length - 1];
-          if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
-        });
-        try {
-          await invoke('download_whisper_model');
-          addMsg('bot', 'Whisper загружен! Можно использовать голос.');
-        } catch (e) {
-          addMsg('bot', 'Ошибка загрузки Whisper: ' + e);
-          unlisten();
-          return;
-        }
-        unlisten();
-      } else {
-        return;
-      }
-    }
-  } catch (e) {
-    addMsg('bot', 'Ошибка Whisper: ' + e);
-    return;
-  }
-
   callModeActive = true;
   callBtn.classList.add('active');
   callOverlay.classList.remove('hidden');
@@ -5292,6 +5263,7 @@ async function startCallMode() {
 
   if (voiceServerAvailable) {
     // Use Python voice server for call mode (SSE stream)
+    // Python voice server has its own MLX Whisper — no Rust model needed
     try {
       const eventSource = new EventSource(`${VOICE_SERVER}/listen`);
       window._callEventSource = eventSource;
@@ -5311,7 +5283,6 @@ async function startCallMode() {
             return;
           }
           if (data.text) {
-            // Dispatch same event as Rust call mode for unified handling
             const customEvent = new CustomEvent('voice-server-transcript', { detail: data.text });
             window.dispatchEvent(customEvent);
           }
@@ -5329,7 +5300,37 @@ async function startCallMode() {
       await endCallMode();
     }
   } else {
-    // Fallback: Rust call mode
+    // Fallback: Rust call mode (needs Rust Whisper ggml model)
+    try {
+      const hasModel = await invoke('check_whisper_model');
+      if (!hasModel) {
+        if (confirm('Модель Whisper не найдена (~1.5GB). Скачать для голосового ввода?')) {
+          addMsg('bot', 'Скачиваю модель Whisper...');
+          const unlisten = await listen('whisper-download-progress', (event) => {
+            const msgs = chat.querySelectorAll('.msg.bot');
+            const last = msgs[msgs.length - 1];
+            if (last) last.textContent = `Скачиваю Whisper... ${event.payload}%`;
+          });
+          try {
+            await invoke('download_whisper_model');
+            addMsg('bot', 'Whisper загружен!');
+          } catch (e) {
+            addMsg('bot', 'Ошибка загрузки Whisper: ' + e);
+            unlisten();
+            await endCallMode();
+            return;
+          }
+          unlisten();
+        } else {
+          await endCallMode();
+          return;
+        }
+      }
+    } catch (e) {
+      addMsg('bot', 'Ошибка Whisper: ' + e);
+      await endCallMode();
+      return;
+    }
     try {
       await invoke('start_call_mode');
     } catch (e) {
@@ -5563,15 +5564,17 @@ function splitIntoSentences(text) {
 async function speakAndListen(text) {
   if (!callModeActive) return;
 
+  const useVoiceServer = !!window._callEventSource;
+
   // Pause voice server mic to prevent echo (TTS audio picked up by mic)
-  if (voiceServerAvailable) {
-    fetch(`${VOICE_SERVER}/listen/pause`, { method: 'POST' }).catch(() => {});
+  if (useVoiceServer) {
+    try { await fetch(`${VOICE_SERVER}/listen/pause`, { method: 'POST' }); } catch (_) {}
   }
 
-  // Set phase to speaking (both UI and Rust-side for barge-in detection)
+  // Set phase to speaking
   callOverlay.setAttribute('data-phase', 'speaking');
   callPhaseText.textContent = PHASE_LABELS.speaking;
-  await invoke('call_mode_set_speaking').catch(() => {});
+  if (!useVoiceServer) await invoke('call_mode_set_speaking').catch(() => {});
 
   // Get voice
   let voice = 'ru-RU-SvetlanaNeural';
@@ -5586,8 +5589,14 @@ async function speakAndListen(text) {
     .replace(/<think>[\s\S]*?<\/think>/g, '')
     .trim();
   if (!ttsText) {
-    if (callModeActive) {
+    if (useVoiceServer) {
+      try { await fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }); } catch (_) {}
+    } else {
       await invoke('call_mode_resume_listening').catch(() => {});
+    }
+    if (callModeActive) {
+      callOverlay.setAttribute('data-phase', 'listening');
+      callPhaseText.textContent = PHASE_LABELS.listening;
     }
     return;
   }
@@ -5595,35 +5604,35 @@ async function speakAndListen(text) {
   // Split into sentences for streaming TTS
   const sentences = splitIntoSentences(ttsText);
 
-  // Start barge-in polling
+  // Barge-in polling only for Rust call mode (Rust audio loop detects speech during TTS)
+  // Voice server mode: mic is paused during TTS, so no barge-in detection possible
   let bargedIn = false;
-  const bargeInterval = setInterval(async () => {
-    if (!callModeActive) { clearInterval(bargeInterval); return; }
-    try {
-      const b = await invoke('call_mode_check_bargein');
-      if (b) {
-        bargedIn = true;
-        clearInterval(bargeInterval);
-        await invoke('stop_speaking').catch(() => {});
-        // Resume voice server mic after barge-in
-        if (voiceServerAvailable) {
-          fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }).catch(() => {});
+  let bargeInterval;
+  if (!useVoiceServer) {
+    bargeInterval = setInterval(async () => {
+      if (!callModeActive) { clearInterval(bargeInterval); return; }
+      try {
+        const b = await invoke('call_mode_check_bargein');
+        if (b) {
+          bargedIn = true;
+          clearInterval(bargeInterval);
+          await invoke('stop_speaking').catch(() => {});
+          if (callModeActive) {
+            await invoke('call_mode_resume_listening').catch(() => {});
+          }
         }
-        if (callModeActive) {
-          await invoke('call_mode_resume_listening').catch(() => {});
-        }
-      }
-    } catch (_) {}
-  }, 150);
+      } catch (_) {}
+    }, 150);
+  }
 
-  // Speak each sentence sequentially, checking barge-in between them
+  // Speak each sentence sequentially
   for (const sentence of sentences) {
     if (bargedIn || !callModeActive) break;
     try {
       await invoke('speak_sentence_blocking', { sentence, voice });
     } catch (_) {}
-    // Check barge-in right after each sentence finishes
-    if (!bargedIn && callModeActive) {
+    // Check barge-in between sentences (Rust mode only)
+    if (!useVoiceServer && !bargedIn && callModeActive) {
       try {
         const b = await invoke('call_mode_check_bargein');
         if (b) {
@@ -5637,18 +5646,18 @@ async function speakAndListen(text) {
     }
   }
 
-  clearInterval(bargeInterval);
+  if (bargeInterval) clearInterval(bargeInterval);
 
   // Resume voice server mic after TTS finishes
-  if (voiceServerAvailable) {
-    fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }).catch(() => {});
+  if (useVoiceServer) {
+    try { await fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }); } catch (_) {}
   }
 
-  // If not barged in, resume listening
+  // Resume listening
   if (!bargedIn && callModeActive) {
     callOverlay.setAttribute('data-phase', 'listening');
     callPhaseText.textContent = PHASE_LABELS.listening;
-    await invoke('call_mode_resume_listening').catch(() => {});
+    if (!useVoiceServer) await invoke('call_mode_resume_listening').catch(() => {});
   }
 }
 
