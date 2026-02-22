@@ -732,6 +732,12 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             INSERT INTO facts_fts(rowid, category, key, value) VALUES (new.id, new.category, new.key, new.value);
         END;
 
+        -- v0.17.0: Vector embeddings for semantic memory search (sqlite-vec)
+        CREATE VIRTUAL TABLE IF NOT EXISTS vec_facts USING vec0(
+            fact_id integer primary key,
+            embedding float[384]
+        );
+
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             started_at TEXT NOT NULL,
@@ -1289,9 +1295,89 @@ fn migrate_events_source(conn: &rusqlite::Connection) {
     }
 }
 
-fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, limit: usize) -> String {
+// ── Semantic memory helpers (sqlite-vec + fastembed) ──
+
+async fn embed_texts(client: &reqwest::Client, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let resp = client
+        .post(&format!("{}/embed", VOICE_SERVER_URL))
+        .json(&serde_json::json!({ "texts": texts }))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| format!("Embed request failed: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Embed server returned {}", resp.status()));
+    }
+    #[derive(Deserialize)]
+    struct EmbedResponse {
+        embeddings: Vec<Vec<f32>>,
+    }
+    let body: EmbedResponse = resp.json().await
+        .map_err(|e| format!("Embed parse error: {}", e))?;
+    Ok(body.embeddings)
+}
+
+fn store_fact_embedding(conn: &rusqlite::Connection, fact_id: i64, embedding: &[f32]) {
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            embedding.as_ptr() as *const u8,
+            embedding.len() * std::mem::size_of::<f32>(),
+        )
+    };
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO vec_facts(fact_id, embedding) VALUES (?1, ?2)",
+        rusqlite::params![fact_id, bytes],
+    );
+}
+
+fn search_similar_facts(conn: &rusqlite::Connection, query_embedding: &[f32], limit: usize) -> Vec<(i64, f64)> {
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            query_embedding.as_ptr() as *const u8,
+            query_embedding.len() * std::mem::size_of::<f32>(),
+        )
+    };
+    let mut results = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT fact_id, distance FROM vec_facts WHERE embedding MATCH ?1 ORDER BY distance LIMIT ?2"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![bytes, limit as i64], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+        }) {
+            for row in rows.flatten() {
+                results.push(row);
+            }
+        }
+    }
+    results
+}
+
+fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, limit: usize, semantic_hits: Option<&[(i64, f64)]>) -> String {
     let mut lines = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
+
+    // 0. Semantic search tier — pre-computed vector similarity hits
+    if let Some(hits) = semantic_hits {
+        for &(fact_id, _distance) in hits {
+            if let Ok(row) = conn.query_row(
+                "SELECT id, category, key, value FROM facts WHERE id=?1",
+                rusqlite::params![fact_id],
+                |row| Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            ) {
+                if seen_ids.insert(row.0) {
+                    lines.push(format!("[{}] {}={}", row.1, row.2, row.3));
+                }
+            }
+        }
+    }
 
     // 1. Always include core user/preferences facts (top 20)
     if let Ok(mut stmt) = conn.prepare(
@@ -3287,9 +3373,9 @@ struct ChatModeConfig {
     include_tools: bool,
 }
 
-const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 200, max_tokens: 100, temperature: 0.6, include_tools: true };
+const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 500, max_tokens: 300, temperature: 0.6, include_tools: true };
 const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 80, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
-const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 3, history_limit: 4, max_msg_chars: 200, max_tokens: 150, temperature: 0.7, include_tools: false };
+const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 15, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.7, include_tools: false };
 
 async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
@@ -3362,19 +3448,81 @@ After calling tools, briefly confirm what you did."#,
 
     let mut chat_messages = vec![ChatMessage::text("system", &system_content)];
 
-    // Inject memory context from SQLite
+    // Inject memory context: synthesized profile + relevant facts
+    // Step 1: embed user message BEFORE acquiring DB lock (async call)
+    let mem_user_msg_owned = messages.iter().rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+        .unwrap_or("")
+        .to_string();
+    let query_embedding: Option<Vec<f32>> = if !mem_user_msg_owned.is_empty() {
+        embed_texts(client, &[mem_user_msg_owned.clone()]).await
+            .ok()
+            .and_then(|mut e| if e.is_empty() { None } else { Some(e.remove(0)) })
+    } else {
+        None
+    };
+    // Step 2: acquire DB lock and do sync lookups
     {
-        let mem_user_msg = messages.iter().rev()
-            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-            .and_then(|m| m.get("content").and_then(|c| c.as_str()))
-            .unwrap_or("");
-        let ctx = {
-            let db = app.state::<HanniDb>();
-            let conn = db.conn();
-            build_memory_context_from_db(&conn, mem_user_msg, mode.memory_limit)
-        };
-        if !ctx.is_empty() {
-            chat_messages.push(ChatMessage::text("system", &format!("[Your memories]\n{}", ctx)));
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+
+        // 0. Semantic search hits from pre-computed embedding
+        let semantic_hits: Option<Vec<(i64, f64)>> = query_embedding.as_ref().map(|emb| {
+            let hits = search_similar_facts(&conn, emb, 15);
+            if hits.is_empty() { return Vec::new(); }
+            hits
+        }).filter(|h| !h.is_empty());
+
+        // 1. Synthesized user profile (compact, natural language)
+        let profile: Option<String> = conn.query_row(
+            "SELECT value FROM app_settings WHERE key='user_profile'",
+            [], |row| row.get(0),
+        ).ok();
+
+        // 2. Relevant facts (semantic + FTS + recency)
+        let facts_ctx = build_memory_context_from_db(&conn, &mem_user_msg_owned, mode.memory_limit, semantic_hits.as_deref());
+
+        let mut memory_block = String::new();
+        if let Some(ref p) = profile {
+            memory_block.push_str("[About the user]\n");
+            memory_block.push_str(p);
+        }
+        if !facts_ctx.is_empty() {
+            if !memory_block.is_empty() { memory_block.push_str("\n\n"); }
+            memory_block.push_str("[Relevant details]\n");
+            memory_block.push_str(&facts_ctx);
+        }
+        if !memory_block.is_empty() {
+            chat_messages.push(ChatMessage::text("system", &memory_block));
+        }
+    }
+
+    // Inject recent conversation summaries for cross-chat context
+    // Only useful at the start of a conversation (few messages so far)
+    if messages.len() <= 4 && !call_mode {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        let mut summaries = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT summary, started_at FROM conversations
+             WHERE summary IS NOT NULL AND summary != ''
+             ORDER BY started_at DESC LIMIT 5"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                for row in rows.flatten() {
+                    // Parse date for display: "2026-02-22T15:30:00+06:00" → "2026-02-22"
+                    let date = row.1.get(..10).unwrap_or(&row.1);
+                    summaries.push(format!("- {}: {}", date, row.0));
+                }
+            }
+        }
+        if !summaries.is_empty() {
+            summaries.reverse(); // chronological order
+            chat_messages.push(ChatMessage::text("system",
+                &format!("[Recent conversations]\n{}", summaries.join("\n"))));
         }
     }
 
@@ -3384,7 +3532,9 @@ After calling tools, briefly confirm what you did."#,
     let max_msg_chars = mode.max_msg_chars;
     for msg_val in trimmed.iter() {
         if let Ok(mut cm) = serde_json::from_value::<ChatMessage>((*msg_val).clone()) {
-            if max_msg_chars < usize::MAX {
+            // Don't truncate tool results — model needs full context to summarize
+            let is_tool = cm.role == "tool";
+            if max_msg_chars < usize::MAX && !is_tool {
                 if let Some(ref c) = cm.content {
                     if c.len() > max_msg_chars {
                         cm.content = Some(format!("{}...", &c[..c.floor_char_boundary(max_msg_chars)]));
@@ -3953,6 +4103,11 @@ fn memory_forget(
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
     let conn = db.conn();
+    // Clean up vector embedding before deleting the fact
+    let _ = conn.execute(
+        "DELETE FROM vec_facts WHERE fact_id IN (SELECT id FROM facts WHERE category=?1 AND key=?2)",
+        rusqlite::params![category, key],
+    );
     let deleted = conn.execute(
         "DELETE FROM facts WHERE category=?1 AND key=?2",
         rusqlite::params![category, key],
@@ -4262,27 +4417,313 @@ async fn process_conversation_end(
     }
 
     if let Ok(result) = serde_json::from_str::<ExtractionResult>(json_str) {
-        let db = app.state::<HanniDb>();
-        let conn = db.conn();
         let now = chrono::Local::now().to_rfc3339();
 
-        // Update conversation summary
-        if let Some(summary) = &result.summary {
-            let _ = conn.execute(
-                "UPDATE conversations SET summary=?1, ended_at=?2 WHERE id=?3",
-                rusqlite::params![summary, now, conversation_id],
-            );
+        // Update conversation summary (scoped DB access)
+        {
+            let db = app.state::<HanniDb>();
+            let conn = db.conn();
+            if let Some(summary) = &result.summary {
+                let _ = conn.execute(
+                    "UPDATE conversations SET summary=?1, ended_at=?2 WHERE id=?3",
+                    rusqlite::params![summary, now, conversation_id],
+                );
+            }
+        } // conn dropped here
+
+        if result.facts.is_empty() {
+            return Ok(());
         }
 
-        // Insert extracted facts
-        for fact in &result.facts {
-            let _ = conn.execute(
-                "INSERT INTO facts (category, key, value, source, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, 'auto', ?4, ?4)
-                 ON CONFLICT(category, key) DO UPDATE SET value=?3, updated_at=?4",
-                rusqlite::params![fact.category, fact.key, fact.value, now],
-            );
+        // ── Mem0-style dedup pipeline ──
+        // 1. Embed extracted facts (async — no DB lock held)
+        let fact_texts: Vec<String> = result.facts.iter()
+            .map(|f| format!("[{}] {}: {}", f.category, f.key, f.value))
+            .collect();
+        let embeddings = embed_texts(client, &fact_texts).await.ok();
+
+        // 2. Find similar existing facts for each extracted fact (scoped DB access)
+        struct DedupCandidate {
+            index: usize,
+            similar: Vec<(i64, String, String, String, String, f64)>, // id, cat, key, val, text, distance
         }
+        let (dedup_batch, no_similar) = {
+            let db = app.state::<HanniDb>();
+            let conn = db.conn();
+            let mut dedup_batch: Vec<DedupCandidate> = Vec::new();
+            let mut no_similar: Vec<usize> = Vec::new();
+
+            if let Some(ref embs) = embeddings {
+                for (i, fact) in result.facts.iter().enumerate() {
+                    if let Some(emb) = embs.get(i) {
+                        let hits = search_similar_facts(&conn, emb, 5);
+                        let similar: Vec<(i64, String, String, String, String, f64)> = hits.iter()
+                            .filter(|(_, dist)| *dist < 0.35)
+                            .filter_map(|(fid, dist)| {
+                                conn.query_row(
+                                    "SELECT id, category, key, value FROM facts WHERE id=?1",
+                                    rusqlite::params![fid],
+                                    |row| Ok((
+                                        row.get::<_, i64>(0)?,
+                                        row.get::<_, String>(1)?,
+                                        row.get::<_, String>(2)?,
+                                        row.get::<_, String>(3)?,
+                                    ))
+                                ).ok().map(|(id, cat, k, v)| {
+                                    let text = format!("[{}] {}={}", cat, k, v);
+                                    (id, cat, k, v, text, *dist)
+                                })
+                            })
+                            .collect();
+
+                        if similar.is_empty() {
+                            no_similar.push(i);
+                        } else {
+                            let exact_match = similar.iter().any(|(_, cat, k, _, _, _)| {
+                                cat == &fact.category && k == &fact.key
+                            });
+                            if exact_match {
+                                no_similar.push(i);
+                            } else {
+                                dedup_batch.push(DedupCandidate { index: i, similar });
+                            }
+                        }
+                    } else {
+                        no_similar.push(i);
+                    }
+                }
+            } else {
+                no_similar = (0..result.facts.len()).collect();
+            }
+            (dedup_batch, no_similar)
+        }; // conn dropped here
+
+        // 3. Direct insert for facts with no similar matches (scoped DB access)
+        {
+            let db = app.state::<HanniDb>();
+            let conn = db.conn();
+            for &idx in &no_similar {
+                let fact = &result.facts[idx];
+                let inserted = conn.execute(
+                    "INSERT INTO facts (category, key, value, source, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, 'auto', ?4, ?4)
+                     ON CONFLICT(category, key) DO UPDATE SET value=?3, updated_at=?4",
+                    rusqlite::params![fact.category, fact.key, fact.value, now],
+                );
+                if inserted.is_ok() {
+                    if let Some(ref embs) = embeddings {
+                        if let Some(emb) = embs.get(idx) {
+                            if let Ok(fid) = conn.query_row(
+                                "SELECT id FROM facts WHERE category=?1 AND key=?2",
+                                rusqlite::params![fact.category, fact.key],
+                                |row| row.get::<_, i64>(0),
+                            ) {
+                                store_fact_embedding(&conn, fid, emb);
+                            }
+                        }
+                    }
+                }
+            }
+        } // conn dropped here
+
+        // 4. Batch LLM dedup call for facts with similar matches (async — no DB lock)
+        if !dedup_batch.is_empty() {
+            let mut prompt_parts = String::from(
+                "Review these new facts against existing memory. For each new fact, decide:\n\
+                 - ADD: genuinely new information, insert as-is\n\
+                 - UPDATE #N: same topic as existing fact #N, merge the values\n\
+                 - NOOP: already known, skip\n\n\
+                 New facts:\n"
+            );
+            for (batch_idx, cand) in dedup_batch.iter().enumerate() {
+                let fact = &result.facts[cand.index];
+                prompt_parts.push_str(&format!(
+                    "{}. [{}] {}: {}\n",
+                    batch_idx + 1, fact.category, fact.key, fact.value
+                ));
+            }
+            prompt_parts.push_str("\nExisting similar facts:\n");
+            for (batch_idx, cand) in dedup_batch.iter().enumerate() {
+                let sim_str: Vec<String> = cand.similar.iter()
+                    .map(|(id, _, _, _, text, dist)| {
+                        format!("{{id: {}, {} (similarity: {:.0}%)}}", id, text, (1.0 - dist) * 100.0)
+                    })
+                    .collect();
+                prompt_parts.push_str(&format!(
+                    "For #{}: {}\n",
+                    batch_idx + 1,
+                    sim_str.join(", ")
+                ));
+            }
+            prompt_parts.push_str(
+                "\nReturn ONLY a JSON array, no other text:\n\
+                 [{\"index\":1,\"decision\":\"UPDATE\",\"target_id\":5,\"value\":\"merged value\"}, ...]\n\
+                 Decisions: ADD (insert new), UPDATE (update target_id with value), NOOP (skip)\n\
+                 /no_think"
+            );
+
+            let dedup_request = ChatRequest {
+                model: MODEL.into(),
+                messages: vec![
+                    ChatMessage::text("system", "You deduplicate memory facts. Return only valid JSON array."),
+                    ChatMessage::text("user", &prompt_parts),
+                ],
+                max_tokens: 400,
+                stream: false,
+                temperature: 0.2,
+                repetition_penalty: None,
+                chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+                tools: None,
+            };
+
+            // Async LLM call — no DB lock held
+            if let Ok(resp) = client.post(MLX_URL).json(&dedup_request).send().await {
+                if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
+                    let raw_dedup = parsed.choices.first()
+                        .map(|c| c.message.content.clone())
+                        .unwrap_or_default();
+
+                    let re = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+                    let clean = re.replace_all(&raw_dedup, "").trim().to_string();
+                    let json_arr = if let Some(start) = clean.find('[') {
+                        if let Some(end) = clean.rfind(']') {
+                            &clean[start..=end]
+                        } else { &clean }
+                    } else { &clean };
+
+                    #[derive(Deserialize)]
+                    struct DedupDecision {
+                        index: usize,
+                        decision: String,
+                        #[serde(default)]
+                        target_id: Option<i64>,
+                        #[serde(default)]
+                        value: Option<String>,
+                    }
+
+                    if let Ok(decisions) = serde_json::from_str::<Vec<DedupDecision>>(json_arr) {
+                        // Execute decisions (scoped DB access)
+                        let db = app.state::<HanniDb>();
+                        let conn = db.conn();
+                        for dec in &decisions {
+                            let batch_idx = dec.index.saturating_sub(1);
+                            if batch_idx >= dedup_batch.len() { continue; }
+                            let fact_idx = dedup_batch[batch_idx].index;
+                            let fact = &result.facts[fact_idx];
+
+                            match dec.decision.to_uppercase().as_str() {
+                                "ADD" => {
+                                    let _ = conn.execute(
+                                        "INSERT INTO facts (category, key, value, source, created_at, updated_at)
+                                         VALUES (?1, ?2, ?3, 'auto', ?4, ?4)
+                                         ON CONFLICT(category, key) DO UPDATE SET value=?3, updated_at=?4",
+                                        rusqlite::params![fact.category, fact.key, fact.value, now],
+                                    );
+                                    if let Some(ref embs) = embeddings {
+                                        if let Some(emb) = embs.get(fact_idx) {
+                                            if let Ok(fid) = conn.query_row(
+                                                "SELECT id FROM facts WHERE category=?1 AND key=?2",
+                                                rusqlite::params![fact.category, fact.key],
+                                                |row| row.get::<_, i64>(0),
+                                            ) {
+                                                store_fact_embedding(&conn, fid, emb);
+                                            }
+                                        }
+                                    }
+                                }
+                                "UPDATE" => {
+                                    if let Some(tid) = dec.target_id {
+                                        let merged_value = dec.value.as_deref().unwrap_or(&fact.value);
+                                        let _ = conn.execute(
+                                            "UPDATE facts SET value=?1, updated_at=?2 WHERE id=?3",
+                                            rusqlite::params![merged_value, now, tid],
+                                        );
+                                        if let Some(ref embs) = embeddings {
+                                            if let Some(emb) = embs.get(fact_idx) {
+                                                store_fact_embedding(&conn, tid, emb);
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {} // NOOP or unknown — skip
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Trigger profile re-synthesis if new facts were extracted
+        let app2 = app.clone();
+        tokio::spawn(async move {
+            let _ = synthesize_user_profile(&app2).await;
+        });
+    }
+
+    Ok(())
+}
+
+/// Synthesize a natural-language user profile from all stored facts.
+/// Stores result in app_settings as 'user_profile'.
+async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
+    let facts_text = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+
+        // Collect all facts
+        let mut facts = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT category, key, value FROM facts ORDER BY category, updated_at DESC"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            }) {
+                for row in rows.flatten() {
+                    facts.push(format!("[{}] {} = {}", row.0, row.1, row.2));
+                }
+            }
+        }
+
+        if facts.is_empty() { return Ok(()); }
+        facts.join("\n")
+    };
+
+    let client = &app.state::<HttpClient>().0;
+    let request = ChatRequest {
+        model: MODEL.into(),
+        messages: vec![
+            ChatMessage::text("system",
+                "You synthesize user facts into a concise profile paragraph. Write in Russian. \
+                 Return ONLY the profile text — no JSON, no markup, no headers. \
+                 Write as if describing a friend: natural, warm, 3-5 sentences."),
+            ChatMessage::text("user", &format!(
+                "Собери эти факты в один связный абзац — профиль пользователя:\n\n{}\n/no_think", facts_text)),
+        ],
+        max_tokens: 400,
+        stream: false,
+        temperature: 0.4,
+        repetition_penalty: Some(1.1),
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+        tools: None,
+    };
+
+    let response = client.post(MLX_URL).json(&request).send().await
+        .map_err(|e| format!("Profile synthesis error: {}", e))?;
+    let parsed: NonStreamResponse = response.json().await
+        .map_err(|e| format!("Profile parse error: {}", e))?;
+
+    let profile = parsed.choices.first()
+        .map(|c| c.message.content.trim().to_string())
+        .unwrap_or_default();
+
+    if !profile.is_empty() {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        let _ = conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('user_profile', ?1) \
+             ON CONFLICT(key) DO UPDATE SET value=?1",
+            rusqlite::params![profile],
+        );
     }
 
     Ok(())
@@ -5451,6 +5892,7 @@ fn get_all_memories(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Re
 #[tauri::command]
 fn delete_memory(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
+    let _ = conn.execute("DELETE FROM vec_facts WHERE fact_id=?1", rusqlite::params![id]);
     conn.execute("DELETE FROM facts WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -7949,6 +8391,14 @@ pub fn run() {
     // Must run BEFORE init_db to avoid creating an empty DB over old data
     migrate_old_data_dir();
 
+    // Register sqlite-vec extension BEFORE opening any connection
+    unsafe {
+        use rusqlite::ffi::sqlite3_auto_extension;
+        sqlite3_auto_extension(Some(std::mem::transmute(
+            sqlite_vec::sqlite3_vec_init as *const ()
+        )));
+    }
+
     // Initialize SQLite database
     let db_path = hanni_db_path();
     if let Some(parent) = db_path.parent() {
@@ -8285,6 +8735,74 @@ pub fn run() {
             let api_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 spawn_api_server(api_handle).await;
+            });
+
+            // Backfill: embed existing facts that don't have vector embeddings yet
+            let backfill_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Wait for voice server to be ready (embed endpoint)
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                let client = &backfill_handle.state::<HttpClient>().0;
+
+                // Check if embed endpoint is available
+                let health = client.get(&format!("{}/health", VOICE_SERVER_URL))
+                    .timeout(std::time::Duration::from_secs(3))
+                    .send().await;
+                if health.is_err() {
+                    eprintln!("[backfill] Voice server not available, skipping embedding backfill");
+                    return;
+                }
+
+                // Get facts without embeddings
+                let facts: Vec<(i64, String)> = {
+                    let db = backfill_handle.state::<HanniDb>();
+                    let conn = db.conn();
+                    let mut result = Vec::new();
+                    if let Ok(mut stmt) = conn.prepare(
+                        "SELECT f.id, '[' || f.category || '] ' || f.key || ': ' || f.value
+                         FROM facts f
+                         WHERE f.id NOT IN (SELECT fact_id FROM vec_facts)
+                         ORDER BY f.id"
+                    ) {
+                        if let Ok(rows) = stmt.query_map([], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        }) {
+                            for row in rows.flatten() {
+                                result.push(row);
+                            }
+                        }
+                    }
+                    result
+                };
+
+                if facts.is_empty() {
+                    eprintln!("[backfill] All facts already have embeddings");
+                    return;
+                }
+                eprintln!("[backfill] Embedding {} facts...", facts.len());
+
+                // Process in batches of 32
+                for chunk in facts.chunks(32) {
+                    let texts: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
+                    match embed_texts(client, &texts).await {
+                        Ok(embeddings) => {
+                            let db = backfill_handle.state::<HanniDb>();
+                            let conn = db.conn();
+                            for (i, (fact_id, _)) in chunk.iter().enumerate() {
+                                if let Some(emb) = embeddings.get(i) {
+                                    store_fact_embedding(&conn, *fact_id, emb);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[backfill] Embed batch failed: {}, will retry on next startup", e);
+                            return;
+                        }
+                    }
+                    // Small delay between batches to avoid overloading
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                eprintln!("[backfill] Embedding backfill complete");
             });
 
             // Global shortcut: Cmd+Shift+H to toggle Call Mode
@@ -8706,7 +9224,7 @@ pub fn run() {
                         let db = proactive_handle.state::<HanniDb>();
                         let conn = db.conn();
                         (
-                            build_memory_context_from_db(&conn, "", 15),
+                            build_memory_context_from_db(&conn, "", 15, None),
                             get_recent_chat_snippet(&conn, 6),
                             get_user_name_from_memory(&conn),
                             get_todays_proactive_messages(&conn),

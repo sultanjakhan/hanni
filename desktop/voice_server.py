@@ -30,7 +30,7 @@ MIN_SPEECH_MS = 400             # catch shorter utterances (was 500)
 VAD_THRESHOLD = 0.6
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 MAX_TTS_TEXT_LENGTH = 2000      # prevent DoS via huge TTS requests
-MAX_REQUEST_BODY = 10 * 1024    # 10KB max for any POST body
+MAX_REQUEST_BODY = 64 * 1024    # 64KB max for any POST body (embed can send batches)
 ALLOWED_ORIGIN = "tauri://localhost"  # only Tauri frontend
 
 # ── Whisper hallucination filter ──
@@ -377,7 +377,7 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5+v3_en"})
+            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5+v3_en", "embed": "paraphrase-multilingual-MiniLM-L12-v2"})
         elif self.path == "/tts/voices":
             self._json({
                 "voices": TTS_ALL_SPEAKERS,
@@ -467,6 +467,26 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 try: _state.call_results.get_nowait()
                 except queue.Empty: break
             self._json({"status": "stopped"})
+        elif self.path == "/embed":
+            try:
+                raw = self._read_body()
+                if raw is None:
+                    self._json({"error": f"Request too large (max {MAX_REQUEST_BODY} bytes)"}, 413)
+                    return
+                body = json.loads(raw) if raw else {}
+                texts = body.get("texts", [])
+                if not texts or not isinstance(texts, list):
+                    self._json({"error": "texts must be a non-empty array"}, 400)
+                    return
+                if len(texts) > 64:
+                    self._json({"error": "max 64 texts per request"}, 400)
+                    return
+                model = ensure_embed()
+                embeddings = list(model.embed(texts))
+                self._json({"embeddings": [e.tolist() for e in embeddings]})
+            except Exception as e:
+                logger.error(f"[Embed] Error: {e}")
+                self._json({"error": str(e)}, 500)
         elif self.path == "/tts":
             try:
                 raw = self._read_body()
@@ -490,6 +510,22 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 self._json({"error": str(e)}, 500)
         else:
             self._json({"error": "not found"}, 404)
+
+
+# ── Embedding model (lazy load, fastembed ONNX) ──
+_embed_model = None
+_embed_lock = threading.Lock()
+
+def ensure_embed():
+    global _embed_model
+    if _embed_model is None:
+        with _embed_lock:
+            if _embed_model is None:
+                from fastembed import TextEmbedding
+                logger.info("Loading embedding model (paraphrase-multilingual-MiniLM-L12-v2)...")
+                _embed_model = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+                logger.info("Embedding model loaded (384-dim, ONNX)")
+    return _embed_model
 
 
 def main():

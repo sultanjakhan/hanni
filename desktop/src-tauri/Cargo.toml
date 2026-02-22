@@ -1,6 +1,6 @@
 [package]
 name = "hanni"
-version = "0.16.6"
+version = "0.17.0"
 description = "Hanni — personal AI assistant"
 authors = ["sultanjakhan"]
 edition = "2021"
@@ -39,3 +39,5 @@ uuid = { version = "1", features = ["v4"] }
 voice_activity_detector = "0.2"
 tauri-plugin-global-shortcut = "2"
 tempfile = "3"
+sqlite-vec = "0.1"
+zerocopy = { version = "0.7", features = ["derive"] }
