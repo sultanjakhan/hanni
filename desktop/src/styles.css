@@ -3487,6 +3487,10 @@ body.dragover::after {
 .call-end-btn:active {
   transform: scale(0.95);
 }
+.call-end-btn:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 3px;
+}
 
 /* Responsive for small windows */
 @media (max-height: 600px) {

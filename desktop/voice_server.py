@@ -124,33 +124,42 @@ TTS_ALL_SPEAKERS = TTS_RU_SPEAKERS + TTS_EN_SPEAKERS
 _tts_models = {}  # "ru" -> model, "en" -> model
 _tts_lock = threading.Lock()
 
+_tts_load_failed = {}  # lang -> True if load failed (prevents infinite retry)
+
 def _load_tts_model(lang: str):
     """Load Silero TTS model for language (ru or en)."""
     if lang in _tts_models:
         return
+    if lang in _tts_load_failed:
+        raise RuntimeError(f"TTS model [{lang}] failed to load previously")
     with _tts_lock:
         if lang in _tts_models:
             return
-        torch.set_num_threads(4)
-        if lang == "en":
-            logger.info("Loading Silero TTS v3 (English)...")
-            model, _ = torch.hub.load(
-                repo_or_dir='snakers4/silero-models',
-                model='silero_tts',
-                language='en',
-                speaker='v3_en',
-            )
-        else:
-            logger.info("Loading Silero TTS v5 (Russian)...")
-            model, _ = torch.hub.load(
-                repo_or_dir='snakers4/silero-models',
-                model='silero_tts',
-                language='ru',
-                speaker='v5_ru',
-            )
-        model.to('cpu')
-        _tts_models[lang] = model
-        logger.info(f"Silero TTS [{lang}] loaded")
+        try:
+            torch.set_num_threads(4)
+            if lang == "en":
+                logger.info("Loading Silero TTS v3 (English)...")
+                model, _ = torch.hub.load(
+                    repo_or_dir='snakers4/silero-models',
+                    model='silero_tts',
+                    language='en',
+                    speaker='v3_en',
+                )
+            else:
+                logger.info("Loading Silero TTS v5 (Russian)...")
+                model, _ = torch.hub.load(
+                    repo_or_dir='snakers4/silero-models',
+                    model='silero_tts',
+                    language='ru',
+                    speaker='v5_ru',
+                )
+            model.to('cpu')
+            _tts_models[lang] = model
+            logger.info(f"Silero TTS [{lang}] loaded")
+        except Exception as e:
+            _tts_load_failed[lang] = True
+            logger.error(f"TTS model [{lang}] load failed: {e}")
+            raise
 
 def _speaker_lang(speaker: str) -> str:
     """Determine language from speaker name."""
@@ -197,6 +206,7 @@ class VoiceState:
         self.transcribe_result = {"text": "", "error": ""}
         self.transcribe_ready = threading.Event()
         self.force_stop = threading.Event()
+        self.resume_time = 0.0  # timestamp of last resume — ignore VAD for 500ms after
 
 _state = VoiceState()
 
@@ -254,6 +264,9 @@ def record_and_transcribe(continuous=False):
                 break
 
             prob = silero_speech_prob(data.flatten())
+            # Echo suppression: ignore VAD for 500ms after resume (TTS echo decay)
+            if continuous and _state.resume_time > 0 and (time.time() - _state.resume_time) < 0.5:
+                continue
             if prob > VAD_THRESHOLD:
                 speech_frames.append(data.copy())
                 silence_count = 0
@@ -406,6 +419,10 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 finally:
                     _state.call_active.clear()
                     _state.force_stop.set()
+                    # Flush stale results to prevent leaking into next session
+                    while not _state.call_results.empty():
+                        try: _state.call_results.get_nowait()
+                        except queue.Empty: break
             finally:
                 with VoiceHandler._listen_lock:
                     VoiceHandler._listen_active = False
@@ -439,6 +456,7 @@ class VoiceHandler(BaseHTTPRequestHandler):
             _state.call_paused.set()
             self._json({"status": "paused"})
         elif self.path == "/listen/resume":
+            _state.resume_time = time.time()
             _state.call_paused.clear()
             self._json({"status": "resumed"})
         elif self.path == "/listen/stop":

@@ -5279,10 +5279,13 @@ async function startCallMode() {
   callStartTime = Date.now();
   if (callDurationEl) callDurationEl.textContent = '0:00';
   callDurationInterval = setInterval(() => {
-    const sec = Math.floor((Date.now() - callStartTime) / 1000);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    if (callDurationEl) callDurationEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+    const total = Math.floor((Date.now() - callStartTime) / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (callDurationEl) callDurationEl.textContent = h > 0
+      ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+      : `${m}:${s.toString().padStart(2, '0')}`;
   }, 1000);
 
   // Start a fresh chat for this call
@@ -5345,8 +5348,10 @@ async function startCallMode() {
           addMsg('bot', 'Голосовой сервер недоступен — переключаюсь на Rust режим');
           // Fallback to Rust call mode
           (async () => {
+            if (!callModeActive) return;  // abort if call already ended
             try {
               const hasModel = await invoke('check_whisper_model');
+              if (!callModeActive) return;
               if (hasModel) {
                 await invoke('start_call_mode');
               } else {
@@ -5354,6 +5359,7 @@ async function startCallMode() {
                 await endCallMode();
               }
             } catch (e) {
+              if (!callModeActive) return;
               addMsg('bot', 'Ошибка запуска Rust режима: ' + e);
               await endCallMode();
             }
@@ -5500,6 +5506,14 @@ function ensureWaveObserver() {
   callWaveObserver.observe(callOverlay, { attributes: true, attributeFilter: ['data-phase'] });
 }
 
+// Limit transcript DOM to last 40 elements to prevent memory growth on long calls
+const MAX_TRANSCRIPT_CHILDREN = 40;
+function trimTranscript() {
+  while (callTranscriptArea.children.length > MAX_TRANSCRIPT_CHILDREN) {
+    callTranscriptArea.removeChild(callTranscriptArea.firstChild);
+  }
+}
+
 // Not-heard feedback
 listen('call-not-heard', (event) => {
   if (!callModeActive || !callStatusHint) return;
@@ -5553,6 +5567,7 @@ async function handleCallTranscript(userText, sttMs = 0) {
   userBubble.className = 'call-transcript-user';
   userBubble.textContent = userText;
   callTranscriptArea.appendChild(userBubble);
+  trimTranscript();
   callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
 
   // Also add to actual chat history (voice)
@@ -5670,6 +5685,7 @@ async function handleCallTranscript(userText, sttMs = 0) {
       callTiming.className = 'call-timing';
       callTiming.textContent = parts.join(' · ');
       callTranscriptArea.appendChild(callTiming);
+      trimTranscript();
       callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
     }
   }
@@ -5783,7 +5799,7 @@ async function speakAndListen(text) {
           }
         }
       } catch (_) {}
-    }, 150);
+    }, 250);
   }
 
   // Speak each sentence sequentially
