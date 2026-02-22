@@ -3296,6 +3296,14 @@ body.dragover::after {
   opacity: 1;
 }
 
+#call-overlay[data-phase="processing"] .call-waveform {
+  opacity: 0.5;
+}
+
+#call-overlay[data-phase="speaking"] .call-waveform {
+  opacity: 0.7;
+}
+
 .call-wave-bar {
   width: 3px;
   height: 4px;
@@ -3306,6 +3314,8 @@ body.dragover::after {
 }
 
 #call-overlay[data-phase="recording"] .call-wave-bar { background: var(--color-green); }
+#call-overlay[data-phase="processing"] .call-wave-bar { background: var(--color-yellow); }
+#call-overlay[data-phase="speaking"] .call-wave-bar { background: var(--color-purple); }
 
 /* Phase text */
 .call-phase-text {
@@ -3315,6 +3325,14 @@ body.dragover::after {
   text-align: center;
   letter-spacing: 0.3px;
   transition: color 0.3s ease;
+}
+
+/* Call duration */
+.call-duration {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
 }
 
 /* Status hint (e.g. "Не расслышала...") */

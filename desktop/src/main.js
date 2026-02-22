@@ -5232,6 +5232,8 @@ function renderHealth(el, today, habits) {
 // ── Call Mode ──
 
 let callModeActive = false;
+let callDurationInterval = null;
+let callStartTime = 0;
 
 const callBtn = document.getElementById('call-btn');
 const callOverlay = document.getElementById('call-overlay');
@@ -5240,6 +5242,7 @@ const callTranscriptArea = document.getElementById('call-transcript-area');
 const callEndBtn = document.getElementById('call-end-btn');
 const callWaveform = document.getElementById('call-waveform');
 const callStatusHint = document.getElementById('call-status-hint');
+const callDurationEl = document.getElementById('call-duration');
 const callWaveBars = callWaveform ? callWaveform.querySelectorAll('.call-wave-bar') : [];
 
 const PHASE_LABELS = {
@@ -5266,6 +5269,16 @@ async function startCallMode() {
   callPhaseText.textContent = PHASE_LABELS.listening;
   callTranscriptArea.innerHTML = '';
   if (callStatusHint) callStatusHint.textContent = '';
+
+  // Start call duration timer
+  callStartTime = Date.now();
+  if (callDurationEl) callDurationEl.textContent = '0:00';
+  callDurationInterval = setInterval(() => {
+    const sec = Math.floor((Date.now() - callStartTime) / 1000);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (callDurationEl) callDurationEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  }, 1000);
 
   // Start a fresh chat for this call
   await autoSaveConversation();
@@ -5303,16 +5316,37 @@ async function startCallMode() {
             return;
           }
           if (data.text) {
-            const customEvent = new CustomEvent('voice-server-transcript', { detail: data.text });
+            const customEvent = new CustomEvent('voice-server-transcript', {
+              detail: { text: data.text, sttMs: data.stt_ms || 0 }
+            });
             window.dispatchEvent(customEvent);
           }
         } catch (_) {}
       };
 
+      let sseRetryCount = 0;
       eventSource.onerror = () => {
-        if (callModeActive) {
-          addMsg('bot', 'Соединение с голосовым сервером потеряно');
-          endCallMode();
+        if (!callModeActive) return;
+        sseRetryCount++;
+        if (sseRetryCount >= 3) {
+          eventSource.close();
+          window._callEventSource = null;
+          addMsg('bot', 'Голосовой сервер недоступен — переключаюсь на Rust режим');
+          // Fallback to Rust call mode
+          (async () => {
+            try {
+              const hasModel = await invoke('check_whisper_model');
+              if (hasModel) {
+                await invoke('start_call_mode');
+              } else {
+                addMsg('bot', 'Rust Whisper модель не установлена');
+                await endCallMode();
+              }
+            } catch (e) {
+              addMsg('bot', 'Ошибка запуска Rust режима: ' + e);
+              await endCallMode();
+            }
+          })();
         }
       };
     } catch (e) {
@@ -5365,6 +5399,9 @@ async function endCallMode() {
   callBtn.classList.remove('active');
   callOverlay.classList.add('hidden');
 
+  // Stop call duration timer
+  if (callDurationInterval) { clearInterval(callDurationInterval); callDurationInterval = null; }
+
   // Reset waveform
   for (const bar of callWaveBars) bar.style.height = '4px';
   if (callStatusHint) callStatusHint.textContent = '';
@@ -5411,6 +5448,31 @@ listen('call-audio-level', (event) => {
   }
 });
 
+// Ambient waveform animation for processing/speaking phases (no real audio level)
+let ambientWaveFrame = null;
+function animateAmbientWave() {
+  if (!callModeActive || !callWaveBars.length) { ambientWaveFrame = null; return; }
+  const phase = callOverlay.getAttribute('data-phase');
+  if (phase !== 'processing' && phase !== 'speaking') { ambientWaveFrame = null; return; }
+  const t = Date.now() / 1000;
+  const amplitude = phase === 'speaking' ? 16 : 10;
+  const speed = phase === 'speaking' ? 3 : 2;
+  const barCount = callWaveBars.length;
+  for (let i = 0; i < barCount; i++) {
+    const h = Math.max(4, amplitude * (0.5 + 0.5 * Math.sin(t * speed + i * 0.8)) + Math.random() * 3);
+    callWaveBars[i].style.height = h + 'px';
+  }
+  ambientWaveFrame = requestAnimationFrame(animateAmbientWave);
+}
+
+// Start ambient wave when phase changes to processing/speaking
+new MutationObserver(() => {
+  const phase = callOverlay.getAttribute('data-phase');
+  if ((phase === 'processing' || phase === 'speaking') && !ambientWaveFrame) {
+    animateAmbientWave();
+  }
+}).observe(callOverlay, { attributes: true, attributeFilter: ['data-phase'] });
+
 // Not-heard feedback
 listen('call-not-heard', (event) => {
   if (!callModeActive || !callStatusHint) return;
@@ -5441,16 +5503,17 @@ listen('call-error', async (event) => {
 // Handle transcripts from Python voice server
 window.addEventListener('voice-server-transcript', (event) => {
   if (!callModeActive || !event.detail) return;
-  handleCallTranscript(event.detail);
+  const { text, sttMs } = event.detail;
+  handleCallTranscript(text, sttMs || 0);
 });
 
 // Listen for transcripts from Rust call mode
 listen('call-transcript', async (event) => {
   if (!callModeActive || !event.payload) return;
-  handleCallTranscript(event.payload);
+  handleCallTranscript(event.payload, 0);
 });
 
-async function handleCallTranscript(userText) {
+async function handleCallTranscript(userText, sttMs = 0) {
   if (!callModeActive || !userText) return;
 
   // Show user bubble in overlay
@@ -5553,6 +5616,8 @@ async function handleCallTranscript(userText) {
 
   if (!callModeActive) return;
 
+  const llmMs = performance.now() - t0;
+
   // Show bot reply + timing in overlay
   if (lastReply) {
     const displayText = lastReply
@@ -5565,11 +5630,13 @@ async function handleCallTranscript(userText) {
       botBubble.textContent = displayText;
       callTranscriptArea.appendChild(botBubble);
 
-      // Show timing in call overlay
-      const callTotal = ((performance.now() - t0) / 1000).toFixed(1);
+      // Show latency breakdown in call overlay
+      const parts = [];
+      if (sttMs > 0) parts.push(`STT ${(sttMs / 1000).toFixed(1)}s`);
+      parts.push(`LLM ${(llmMs / 1000).toFixed(1)}s`);
       const callTiming = document.createElement('div');
       callTiming.className = 'call-timing';
-      callTiming.textContent = `${callTotal}s`;
+      callTiming.textContent = parts.join(' · ');
       callTranscriptArea.appendChild(callTiming);
       callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
     }
@@ -5601,7 +5668,14 @@ async function handleCallTranscript(userText) {
 
   // Speak the reply sentence-by-sentence, then resume listening
   if (lastReply && callModeActive) {
+    const ttsT0 = performance.now();
     await speakAndListen(lastReply);
+    // Update timing with TTS duration
+    const ttsMs = performance.now() - ttsT0;
+    const timingEl = callTranscriptArea.querySelector('.call-timing:last-of-type');
+    if (timingEl && ttsMs > 500) {
+      timingEl.textContent += ` · TTS ${(ttsMs / 1000).toFixed(1)}s`;
+    }
   } else if (callModeActive) {
     await invoke('call_mode_resume_listening').catch(() => {});
   }
@@ -5628,6 +5702,7 @@ async function speakAndListen(text) {
   // Set phase to speaking
   callOverlay.setAttribute('data-phase', 'speaking');
   callPhaseText.textContent = PHASE_LABELS.speaking;
+  if (callStatusHint) callStatusHint.textContent = 'Можешь перебить';
   if (!useVoiceServer) await invoke('call_mode_set_speaking').catch(() => {});
 
   // Get voice
@@ -5708,6 +5783,7 @@ async function speakAndListen(text) {
   }
 
   // Resume listening
+  if (callStatusHint) callStatusHint.textContent = '';
   if (!bargedIn && callModeActive) {
     callOverlay.setAttribute('data-phase', 'listening');
     callPhaseText.textContent = PHASE_LABELS.listening;

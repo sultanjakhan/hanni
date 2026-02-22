@@ -11,6 +11,7 @@ Stack: Silero VAD (ONNX) + MLX Whisper large-v3 + Silero TTS v5 (all local, open
 """
 
 import json
+import time
 import threading
 import queue
 import io
@@ -24,10 +25,11 @@ from loguru import logger
 PORT = 8237
 SAMPLE_RATE = 16000
 VAD_CHUNK_SAMPLES = 512
-SILENCE_TIMEOUT_MS = 800
-MIN_SPEECH_MS = 500
+SILENCE_TIMEOUT_MS = 500       # faster response (was 800)
+MIN_SPEECH_MS = 400             # catch shorter utterances (was 500)
 VAD_THRESHOLD = 0.6
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+MAX_TTS_TEXT_LENGTH = 2000      # prevent DoS via huge TTS requests
 
 # ── Whisper hallucination filter ──
 HALLUCINATIONS = {
@@ -272,12 +274,14 @@ def record_and_transcribe(continuous=False):
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
         duration = len(audio_float32) / SAMPLE_RATE
         logger.info(f"Transcribing {duration:.1f}s...")
+        stt_t0 = time.time()
         text = transcribe_audio(audio_float32)
-        logger.info(f"Result: '{text}'")
+        stt_ms = int((time.time() - stt_t0) * 1000)
+        logger.info(f"Result: '{text}' (STT {stt_ms}ms)")
 
         if continuous:
             if text:
-                call_mode_results.put({"text": text})
+                call_mode_results.put({"text": text, "stt_ms": stt_ms})
             if not call_mode_active.is_set():
                 break
             continue
@@ -415,7 +419,9 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 if not text:
                     self._json({"error": "no text"}, 400)
                     return
-                logger.info(f"[TTS] Generating: '{text[:50]}...' speaker={speaker}")
+                if len(text) > MAX_TTS_TEXT_LENGTH:
+                    text = text[:MAX_TTS_TEXT_LENGTH]
+                logger.info(f"[TTS] speaker={speaker} len={len(text)}")
                 wav_bytes = synthesize_speech(text, speaker)
                 logger.info(f"[TTS] Done, {len(wav_bytes)} bytes")
                 self._binary(wav_bytes)
@@ -427,13 +433,27 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    # Whisper loads lazily on first transcription to avoid GPU memory contention with LLM
     server = ThreadedHTTPServer(("127.0.0.1", PORT), VoiceHandler)
     logger.info(f"Hanni Voice Server on http://127.0.0.1:{PORT}")
     logger.info(f"STT: MLX Whisper ({WHISPER_MODEL})")
     logger.info(f"VAD: Silero VAD (ONNX, threshold={VAD_THRESHOLD})")
     logger.info(f"TTS: Silero v5 RU ({', '.join(TTS_RU_SPEAKERS)}) + v3 EN ({len(TTS_EN_SPEAKERS)} voices)")
     logger.info(f"Stack: 100% local open-source")
+
+    # Preload models in background for zero cold-start latency
+    def _preload():
+        try:
+            ensure_whisper()
+            logger.info("Whisper preloaded in background")
+        except Exception as e:
+            logger.warning(f"Whisper preload failed: {e}")
+        try:
+            ensure_tts("xenia")
+            logger.info("TTS (RU) preloaded in background")
+        except Exception as e:
+            logger.warning(f"TTS preload failed: {e}")
+    threading.Thread(target=_preload, daemon=True).start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
