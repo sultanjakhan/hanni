@@ -5403,7 +5403,7 @@ async function endCallMode() {
   if (callDurationInterval) { clearInterval(callDurationInterval); callDurationInterval = null; }
 
   // Reset waveform
-  for (const bar of callWaveBars) bar.style.height = '4px';
+  for (const bar of callWaveBars) bar.style.height = '6px';
   if (callStatusHint) callStatusHint.textContent = '';
 
   // Close voice server SSE if active
@@ -5443,7 +5443,7 @@ listen('call-audio-level', (event) => {
     const dist = Math.abs(i - center);
     const scale = Math.max(0, 1 - dist * 0.15);
     const jitter = 0.7 + Math.random() * 0.6;
-    const h = Math.max(4, (level / 100) * 28 * scale * jitter);
+    const h = Math.max(6, (level / 100) * 34 * scale * jitter);
     callWaveBars[i].style.height = h + 'px';
   }
 });
@@ -5455,11 +5455,11 @@ function animateAmbientWave() {
   const phase = callOverlay.getAttribute('data-phase');
   if (phase !== 'processing' && phase !== 'speaking') { ambientWaveFrame = null; return; }
   const t = Date.now() / 1000;
-  const amplitude = phase === 'speaking' ? 16 : 10;
+  const amplitude = phase === 'speaking' ? 20 : 12;
   const speed = phase === 'speaking' ? 3 : 2;
   const barCount = callWaveBars.length;
   for (let i = 0; i < barCount; i++) {
-    const h = Math.max(4, amplitude * (0.5 + 0.5 * Math.sin(t * speed + i * 0.8)) + Math.random() * 3);
+    const h = Math.max(6, amplitude * (0.5 + 0.5 * Math.sin(t * speed + i * 0.8)) + Math.random() * 4);
     callWaveBars[i].style.height = h + 'px';
   }
   ambientWaveFrame = requestAnimationFrame(animateAmbientWave);
@@ -5485,6 +5485,11 @@ listen('call-not-heard', (event) => {
 // Barge-in visual feedback
 listen('call-barge-in', () => {
   if (!callModeActive) return;
+  // Flash the overlay border
+  callOverlay.classList.remove('barged-in');
+  void callOverlay.offsetWidth;
+  callOverlay.classList.add('barged-in');
+  setTimeout(() => callOverlay.classList.remove('barged-in'), 600);
   if (callStatusHint) {
     callStatusHint.textContent = 'Перебили — слушаю!';
     callStatusHint.classList.remove('flash');
