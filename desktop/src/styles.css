@@ -3206,6 +3206,17 @@ body.dragover::after {
   to { opacity: 1; }
 }
 
+/* Barge-in flash on entire overlay */
+#call-overlay.barged-in {
+  animation: bargeInFlash 0.5s ease-out;
+}
+
+@keyframes bargeInFlash {
+  0% { box-shadow: inset 0 0 0 0 rgba(79,151,104,0.0); }
+  30% { box-shadow: inset 0 0 80px 0 rgba(79,151,104,0.15); }
+  100% { box-shadow: inset 0 0 0 0 rgba(79,151,104,0.0); }
+}
+
 .call-overlay-content {
   display: flex;
   flex-direction: column;
@@ -3229,11 +3240,11 @@ body.dragover::after {
   inset: 0;
   border-radius: 50%;
   border: 2px solid var(--accent-blue);
-  opacity: 0.3;
-  animation: call-pulse 2.5s ease-out infinite;
+  opacity: 0.4;
+  animation: call-pulse 1.8s ease-out infinite;
 }
 
-.call-pulse-ring-2 { animation-delay: 0.8s; }
+.call-pulse-ring-2 { animation-delay: 0.6s; }
 
 .call-pulse-core {
   position: absolute;
@@ -3242,26 +3253,26 @@ body.dragover::after {
   background: var(--accent-blue);
   opacity: 0.7;
   transition: background 0.4s ease, box-shadow 0.4s ease;
-  animation: call-core-pulse 2.5s ease-in-out infinite;
+  animation: call-core-pulse 2s ease-in-out infinite;
 }
 
 /* Phase-specific styles */
-#call-overlay[data-phase="listening"] .call-pulse-ring { border-color: var(--accent-blue); }
+#call-overlay[data-phase="listening"] .call-pulse-ring { border-color: var(--accent-blue); animation-duration: 1.8s; }
 #call-overlay[data-phase="listening"] .call-pulse-core { background: var(--accent-blue); box-shadow: 0 0 40px rgba(68,122,203,0.3); }
 
-#call-overlay[data-phase="recording"] .call-pulse-ring { border-color: var(--color-green); animation-duration: 1s; }
-#call-overlay[data-phase="recording"] .call-pulse-core { background: var(--color-green); box-shadow: 0 0 60px rgba(68,203,100,0.4); animation-duration: 0.6s; }
-#call-overlay[data-phase="recording"] .call-pulse-container { transform: scale(1.1); }
+#call-overlay[data-phase="recording"] .call-pulse-ring { border-color: var(--color-green); animation-duration: 0.7s; opacity: 0.5; }
+#call-overlay[data-phase="recording"] .call-pulse-core { background: var(--color-green); box-shadow: 0 0 80px rgba(79,151,104,0.5); animation-duration: 0.5s; }
+#call-overlay[data-phase="recording"] .call-pulse-container { transform: scale(1.12); animation: recordingJitter 0.1s ease-in-out infinite; }
 
 #call-overlay[data-phase="processing"] .call-pulse-ring { border-color: var(--color-yellow); animation: call-spin 2s linear infinite; }
-#call-overlay[data-phase="processing"] .call-pulse-core { background: var(--color-yellow); box-shadow: 0 0 40px rgba(203,180,68,0.3); }
+#call-overlay[data-phase="processing"] .call-pulse-core { background: var(--color-yellow); box-shadow: 0 0 40px rgba(203,180,68,0.3); animation: call-processing-core 2s ease-in-out infinite; }
 
-#call-overlay[data-phase="speaking"] .call-pulse-ring { border-color: var(--color-purple); animation: call-pulse 1.8s ease-out infinite; }
+#call-overlay[data-phase="speaking"] .call-pulse-ring { border-color: var(--color-purple); animation: call-pulse 1.6s ease-out infinite; }
 #call-overlay[data-phase="speaking"] .call-pulse-core { background: var(--color-purple); box-shadow: 0 0 50px rgba(160,68,203,0.35); animation: call-speak-pulse 1.2s ease-in-out infinite; }
 
 @keyframes call-pulse {
-  0% { transform: scale(1); opacity: 0.3; }
-  100% { transform: scale(2); opacity: 0; }
+  0% { transform: scale(1); opacity: 0.4; }
+  100% { transform: scale(2.2); opacity: 0; }
 }
 
 @keyframes call-core-pulse {
@@ -3274,10 +3285,21 @@ body.dragover::after {
   50% { transform: scale(1.15); opacity: 1; }
 }
 
+@keyframes call-processing-core {
+  0% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.06); opacity: 0.85; }
+  100% { transform: scale(1); opacity: 0.6; }
+}
+
 @keyframes call-spin {
   0% { transform: rotate(0deg); opacity: 0.4; }
   50% { opacity: 0.2; }
   100% { transform: rotate(360deg); opacity: 0.4; }
+}
+
+@keyframes recordingJitter {
+  0%, 100% { transform: scale(1.12); }
+  50% { transform: scale(1.12) translateY(-1px); }
 }
 
 /* Waveform visualizer */
@@ -3285,8 +3307,8 @@ body.dragover::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  height: 32px;
+  gap: 4px;
+  height: 40px;
   opacity: 0;
   transition: opacity 0.3s ease;
 }
@@ -3305,9 +3327,9 @@ body.dragover::after {
 }
 
 .call-wave-bar {
-  width: 3px;
-  height: 4px;
-  min-height: 4px;
+  width: 4px;
+  height: 6px;
+  min-height: 6px;
   border-radius: 2px;
   background: var(--accent-blue);
   transition: height 0.08s ease-out, background 0.3s ease;
@@ -3317,50 +3339,59 @@ body.dragover::after {
 #call-overlay[data-phase="processing"] .call-wave-bar { background: var(--color-yellow); }
 #call-overlay[data-phase="speaking"] .call-wave-bar { background: var(--color-purple); }
 
-/* Phase text */
+/* Phase text — color matches phase */
 .call-phase-text {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text-primary);
   text-align: center;
   letter-spacing: 0.3px;
   transition: color 0.3s ease;
 }
 
+#call-overlay[data-phase="listening"] .call-phase-text { color: var(--accent-blue); }
+#call-overlay[data-phase="recording"] .call-phase-text { color: var(--color-green); }
+#call-overlay[data-phase="processing"] .call-phase-text { color: var(--color-yellow); }
+#call-overlay[data-phase="speaking"] .call-phase-text { color: var(--color-purple); }
+
 /* Call duration */
 .call-duration {
-  font-size: 12px;
-  color: var(--text-faint);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
 }
 
-/* Status hint (e.g. "Не расслышала...") */
+/* Status hint (e.g. "Не расслышала...", "Можешь перебить") */
 .call-status-hint {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--accent-blue);
+  background: rgba(68,122,203,0.12);
+  padding: 4px 14px;
+  border-radius: 8px;
   text-align: center;
   min-height: 18px;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s ease, background 0.3s ease, color 0.3s ease;
 }
 
-.call-status-hint:empty { opacity: 0; }
+.call-status-hint:empty { opacity: 0; padding: 0; }
 .call-status-hint.flash { animation: hintFlash 2s ease-out forwards; }
 
 @keyframes hintFlash {
-  0% { opacity: 1; color: var(--color-yellow); }
+  0% { opacity: 1; color: var(--color-yellow); background: rgba(203,180,68,0.15); }
   70% { opacity: 1; }
-  100% { opacity: 0; }
+  100% { opacity: 0; background: transparent; }
 }
 
 /* Transcript area */
 .call-transcript-area {
   width: 100%;
-  max-height: 220px;
+  max-height: 300px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   scrollbar-width: thin;
   scrollbar-color: var(--border-default) transparent;
 }
@@ -3375,7 +3406,8 @@ body.dragover::after {
   padding: 8px 14px;
   border-radius: 16px 16px 4px 16px;
   font-size: 14px;
-  max-width: 85%;
+  max-width: 90%;
+  word-wrap: break-word;
   animation: bubbleIn 0.2s ease-out;
 }
 
@@ -3386,15 +3418,16 @@ body.dragover::after {
   padding: 8px 14px;
   border-radius: 16px 16px 16px 4px;
   font-size: 14px;
-  max-width: 85%;
+  max-width: 90%;
+  word-wrap: break-word;
   border: 1px solid var(--border-subtle);
   animation: bubbleIn 0.2s ease-out;
 }
 
 .call-timing {
   align-self: flex-start;
-  font-size: 10px;
-  color: var(--text-faint);
+  font-size: 11px;
+  color: var(--text-muted);
   margin-top: 2px;
   margin-bottom: 4px;
   padding-left: 4px;
@@ -3402,21 +3435,25 @@ body.dragover::after {
 
 .call-action-result {
   align-self: center;
-  font-size: 12px;
-  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 14px;
   border-radius: 8px;
+  border: 1px solid;
   margin: 4px 0;
   animation: bubbleIn 0.2s ease-out;
 }
 
 .call-action-result.success {
-  background: rgba(46, 160, 67, 0.15);
-  color: #3fb950;
+  background: rgba(79,151,104,0.15);
+  color: #5ECB6F;
+  border-color: rgba(79,151,104,0.3);
 }
 
 .call-action-result.error {
-  background: rgba(248, 81, 73, 0.15);
-  color: #f85149;
+  background: rgba(190,82,75,0.15);
+  color: #FF6B6B;
+  border-color: rgba(190,82,75,0.3);
 }
 
 @keyframes bubbleIn {
@@ -3426,8 +3463,8 @@ body.dragover::after {
 
 /* End call button */
 .call-end-btn {
-  width: 60px;
-  height: 60px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   border: none;
   background: var(--color-red);
@@ -3438,17 +3475,26 @@ body.dragover::after {
   justify-content: center;
   margin-top: 12px;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 20px rgba(220, 50, 50, 0.3);
+  box-shadow: 0 4px 24px rgba(220, 50, 50, 0.35);
 }
 
 .call-end-btn:hover {
   background: #e33;
   transform: scale(1.08);
-  box-shadow: 0 6px 28px rgba(220, 50, 50, 0.45);
+  box-shadow: 0 6px 32px rgba(220, 50, 50, 0.5);
 }
 
 .call-end-btn:active {
   transform: scale(0.95);
+}
+
+/* Responsive for small windows */
+@media (max-height: 600px) {
+  .call-overlay-content { padding: 24px 20px; gap: 14px; }
+  .call-pulse-container { width: 100px; height: 100px; }
+  .call-pulse-core { inset: 22px; }
+  .call-transcript-area { max-height: 180px; }
+  .call-end-btn { width: 60px; height: 60px; }
 }
 
 /* ── Proactive interval slider ── */
