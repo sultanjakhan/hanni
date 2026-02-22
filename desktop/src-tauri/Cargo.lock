@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "hanni"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "axum",
  "chrono",
@@ -1757,6 +1757,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "tower",
  "uuid",

@@ -2435,15 +2435,31 @@ fn update_blocklist(apps: Option<Vec<String>>, sites: Option<Vec<String>>) -> Re
 
 #[tauri::command]
 async fn run_shell(command: String) -> Result<String, String> {
-    // Safety: limit command length and block dangerous patterns
-    if command.len() > 1000 {
-        return Err("Command too long (max 1000 chars)".into());
+    // Whitelist approach: only allow known safe read-only commands
+    let allowed_prefixes = [
+        "date", "whoami", "pwd", "uname", "sw_vers", "uptime", "df -h",
+        "ls ", "ls\n", "cat /etc", "which ", "echo ",
+        "defaults read", "system_profiler", "sysctl ",
+        "brew list", "brew info", "pip list", "python3 --version",
+        "diskutil list", "networksetup -listallhardwareports",
+        "pmset -g", "ioreg ",
+    ];
+    let cmd_trimmed = command.trim();
+    let is_allowed = allowed_prefixes.iter().any(|p| cmd_trimmed.starts_with(p))
+        || allowed_prefixes.iter().any(|p| cmd_trimmed == p.trim());
+
+    if !is_allowed {
+        return Err(format!("Command not allowed. Only safe read-only commands are permitted."));
     }
-    let dangerous = ["rm -rf /", "mkfs", "dd if=", "> /dev/", ":(){ :|:& };:"];
-    for d in &dangerous {
-        if command.contains(d) {
-            return Err(format!("Blocked dangerous command pattern: {}", d));
-        }
+
+    if command.len() > 500 {
+        return Err("Command too long (max 500 chars)".into());
+    }
+
+    // Block shell metacharacters that could escape the whitelist
+    let dangerous_chars = [';', '|', '&', '`', '$', '(', ')', '{', '}', '<', '>'];
+    if command.chars().any(|c| dangerous_chars.contains(&c)) {
+        return Err("Shell metacharacters not allowed".into());
     }
 
     let output = std::process::Command::new("sh")
@@ -2468,6 +2484,10 @@ async fn run_shell(command: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn open_url(url: String) -> Result<String, String> {
+    // Only allow http:// and https:// to prevent file://, javascript:, etc.
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Only http:// and https:// URLs allowed".into());
+    }
     std::process::Command::new("open")
         .arg(&url)
         .spawn()
@@ -3040,6 +3060,10 @@ fn start_mlx_server() -> Option<Child> {
 
 const VOICE_SERVER_URL: &str = "http://127.0.0.1:8237";
 
+fn escape_plist_xml(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
 fn ensure_voice_server_launchagent() {
     let python = match find_python() {
         Some(p) => p,
@@ -3055,9 +3079,14 @@ fn ensure_voice_server_launchagent() {
     }
 
     let log_path = hanni_data_dir().join("voice_server.log");
-    let plist_path = dirs::home_dir().unwrap().join("Library/LaunchAgents/com.hanni.voice-server.plist");
-    let script_str = script.to_string_lossy();
-    let log_str = log_path.to_string_lossy();
+    let plist_path = match dirs::home_dir() {
+        Some(h) => h.join("Library/LaunchAgents/com.hanni.voice-server.plist"),
+        None => { eprintln!("[voice] Cannot determine home dir"); return; }
+    };
+    // XML-escape all interpolated paths to prevent plist injection
+    let python_esc = escape_plist_xml(&python);
+    let script_esc = escape_plist_xml(&script.to_string_lossy());
+    let log_esc = escape_plist_xml(&log_path.to_string_lossy());
 
     let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -3067,19 +3096,19 @@ fn ensure_voice_server_launchagent() {
 	<string>com.hanni.voice-server</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>{python}</string>
-		<string>{script}</string>
+		<string>{}</string>
+		<string>{}</string>
 	</array>
 	<key>KeepAlive</key>
 	<true/>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>{log}</string>
+	<string>{}</string>
 	<key>StandardOutPath</key>
-	<string>{log}</string>
+	<string>{}</string>
 </dict>
-</plist>"#, python = python, script = script_str, log = log_str);
+</plist>"#, python_esc, script_esc, log_esc, log_esc);
 
     // Check if plist already exists with same content
     let needs_update = match std::fs::read_to_string(&plist_path) {
@@ -7630,12 +7659,18 @@ fn speak_silero_core(text: &str, speaker: &str) -> Result<Vec<u8>, String> {
     Err(last_err)
 }
 
-/// Play WAV bytes via afplay
+/// Play WAV bytes via afplay (secure temp file — auto-cleanup, unique name, 0600 perms)
 fn play_wav_blocking(bytes: &[u8]) -> Result<(), String> {
-    let tmp = format!("/tmp/hanni_tts_{}.wav", std::process::id());
-    std::fs::write(&tmp, bytes).map_err(|e| format!("Write temp: {}", e))?;
-    let _ = std::process::Command::new("afplay").arg(&tmp).status();
-    let _ = std::fs::remove_file(&tmp);
+    use std::io::Write;
+    let mut tmp = tempfile::Builder::new()
+        .prefix("hanni_tts_")
+        .suffix(".wav")
+        .tempfile()
+        .map_err(|e| format!("Temp file: {}", e))?;
+    tmp.write_all(bytes).map_err(|e| format!("Write temp: {}", e))?;
+    let path = tmp.path().to_string_lossy().to_string();
+    let _ = std::process::Command::new("afplay").arg(&path).status();
+    // tmp auto-deleted on drop
     Ok(())
 }
 
