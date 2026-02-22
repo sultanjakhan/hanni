@@ -3382,6 +3382,25 @@ body.dragover::after {
   padding-left: 4px;
 }
 
+.call-action-result {
+  align-self: center;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  margin: 4px 0;
+  animation: bubbleIn 0.2s ease-out;
+}
+
+.call-action-result.success {
+  background: rgba(46, 160, 67, 0.15);
+  color: #3fb950;
+}
+
+.call-action-result.error {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
 @keyframes bubbleIn {
   from { opacity: 0; transform: translateY(8px) scale(0.95); }
   to { opacity: 1; transform: translateY(0) scale(1); }

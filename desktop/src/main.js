@@ -5506,6 +5506,14 @@ async function handleCallTranscript(userText) {
         actionDiv.textContent = actionResult;
         chat.appendChild(actionDiv);
         scrollDown();
+        // Show action result in call overlay
+        if (callModeActive) {
+          const callAction = document.createElement('div');
+          callAction.className = `call-action-result ${success ? 'success' : 'error'}`;
+          callAction.textContent = `${success ? '\u2713' : '\u2717'} ${actionResult}`;
+          callTranscriptArea.appendChild(callAction);
+          callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
+        }
         history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: String(actionResult) });
       }
       continue;
@@ -5530,6 +5538,14 @@ async function handleCallTranscript(userText) {
       actionDiv.textContent = actionResult;
       chat.appendChild(actionDiv);
       scrollDown();
+      // Show action result in call overlay
+      if (callModeActive) {
+        const callAction = document.createElement('div');
+        callAction.className = `call-action-result ${success ? 'success' : 'error'}`;
+        callAction.textContent = `${success ? '\u2713' : '\u2717'} ${actionResult}`;
+        callTranscriptArea.appendChild(callAction);
+        callTranscriptArea.scrollTop = callTranscriptArea.scrollHeight;
+      }
       results.push(actionResult);
     }
     history.push({ role: 'user', content: `[Action result: ${results.join('; ')}]` });

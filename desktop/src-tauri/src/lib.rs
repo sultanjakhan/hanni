@@ -3302,7 +3302,7 @@ After calling tools, briefly confirm what you did."#,
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
-            build_memory_context_from_db(&conn, mem_user_msg, if use_full { 80 } else if call_mode { 15 } else { 5 })
+            build_memory_context_from_db(&conn, mem_user_msg, if use_full { 80 } else if call_mode { 10 } else { 3 })
         };
         if !ctx.is_empty() {
             chat_messages.push(ChatMessage::text("system", &format!("[Your memories]\n{}", ctx)));
@@ -3313,9 +3313,17 @@ After calling tools, briefly confirm what you did."#,
     let history_limit = if call_mode { 6 } else if use_full { messages.len() } else { 4 };
     let skip = messages.len().saturating_sub(history_limit);
     let trimmed: Vec<_> = messages.iter().skip(skip).collect();
+    // Truncate long messages in lite/call mode to keep prompt small
+    let max_msg_chars = if use_full { usize::MAX } else { 200 };
     for msg_val in trimmed.iter() {
-        // Deserialize history message to ChatMessage (handles both old tuple and new object format)
-        if let Ok(cm) = serde_json::from_value::<ChatMessage>((*msg_val).clone()) {
+        if let Ok(mut cm) = serde_json::from_value::<ChatMessage>((*msg_val).clone()) {
+            if max_msg_chars < usize::MAX {
+                if let Some(ref c) = cm.content {
+                    if c.len() > max_msg_chars {
+                        cm.content = Some(format!("{}...", &c[..c.floor_char_boundary(max_msg_chars)]));
+                    }
+                }
+            }
             chat_messages.push(cm);
         }
     }
@@ -3327,7 +3335,7 @@ After calling tools, briefly confirm what you did."#,
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: if call_mode { 100 } else if use_full { 1024 } else { 256 },
+        max_tokens: if call_mode { 100 } else if use_full { 1024 } else { 150 },
         stream: true,
         temperature: if call_mode { 0.6 } else { 0.7 },
         repetition_penalty: Some(1.2),
