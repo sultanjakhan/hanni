@@ -30,6 +30,8 @@ MIN_SPEECH_MS = 400             # catch shorter utterances (was 500)
 VAD_THRESHOLD = 0.6
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 MAX_TTS_TEXT_LENGTH = 2000      # prevent DoS via huge TTS requests
+MAX_REQUEST_BODY = 10 * 1024    # 10KB max for any POST body
+ALLOWED_ORIGIN = "tauri://localhost"  # only Tauri frontend
 
 # ── Whisper hallucination filter ──
 HALLUCINATIONS = {
@@ -303,21 +305,31 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 class VoiceHandler(BaseHTTPRequestHandler):
+    _listen_lock = threading.Lock()
+    _listen_active = False
+
     def log_message(self, format, *args):
         pass
+
+    def _origin(self):
+        """Return allowed CORS origin — accept tauri:// and localhost."""
+        origin = self.headers.get("Origin", "")
+        if origin.startswith("tauri://") or origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
+            return origin
+        return ALLOWED_ORIGIN
 
     def _json(self, data, status=200):
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._origin())
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _cors(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._origin())
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
@@ -328,10 +340,17 @@ class VoiceHandler(BaseHTTPRequestHandler):
     def _binary(self, data, content_type="audio/wav", status=200):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._origin())
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _read_body(self):
+        """Read POST body with size limit."""
+        length = int(self.headers.get("Content-Length", 0))
+        if length > MAX_REQUEST_BODY:
+            return None  # caller should return 413
+        return self.rfile.read(length) if length > 0 else b"{}"
 
     def do_GET(self):
         if self.path == "/health":
@@ -344,32 +363,42 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 "default": TTS_DEFAULT_SPEAKER,
             })
         elif self.path == "/listen":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            call_mode_active.set()
-            call_mode_paused.clear()
-            force_stop.clear()
-            t = threading.Thread(target=record_and_transcribe, args=(True,), daemon=True)
-            t.start()
+            # Prevent concurrent SSE sessions (mic can't be shared)
+            with VoiceHandler._listen_lock:
+                if VoiceHandler._listen_active:
+                    self._json({"error": "Call mode already active"}, 409)
+                    return
+                VoiceHandler._listen_active = True
             try:
-                self.wfile.write(b"data: {\"phase\": \"listening\"}\n\n")
-                self.wfile.flush()
-                while call_mode_active.is_set():
-                    try:
-                        result = call_mode_results.get(timeout=0.5)
-                        self.wfile.write(f"data: {json.dumps(result)}\n\n".encode())
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(b": keepalive\n\n")
-                        self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Access-Control-Allow-Origin", self._origin())
+                self.end_headers()
+                call_mode_active.set()
+                call_mode_paused.clear()
+                force_stop.clear()
+                t = threading.Thread(target=record_and_transcribe, args=(True,), daemon=True)
+                t.start()
+                try:
+                    self.wfile.write(b"data: {\"phase\": \"listening\"}\n\n")
+                    self.wfile.flush()
+                    while call_mode_active.is_set():
+                        try:
+                            result = call_mode_results.get(timeout=0.5)
+                            self.wfile.write(f"data: {json.dumps(result)}\n\n".encode())
+                            self.wfile.flush()
+                        except queue.Empty:
+                            self.wfile.write(b": keepalive\n\n")
+                            self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                finally:
+                    call_mode_active.clear()
+                    force_stop.set()
             finally:
-                call_mode_active.clear()
-                force_stop.set()
+                with VoiceHandler._listen_lock:
+                    VoiceHandler._listen_active = False
         else:
             self._json({"error": "not found"}, 404)
 
@@ -412,8 +441,11 @@ class VoiceHandler(BaseHTTPRequestHandler):
             self._json({"status": "stopped"})
         elif self.path == "/tts":
             try:
-                length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length)) if length else {}
+                raw = self._read_body()
+                if raw is None:
+                    self._json({"error": f"Request too large (max {MAX_REQUEST_BODY} bytes)"}, 413)
+                    return
+                body = json.loads(raw) if raw else {}
                 text = body.get("text", "").strip()
                 speaker = body.get("speaker", TTS_DEFAULT_SPEAKER)
                 if not text:
