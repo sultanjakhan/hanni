@@ -7658,6 +7658,9 @@ fn speak_silero_local_sync(text: &str, speaker: &str) -> bool {
 /// Map voice name to Silero speaker (default: xenia)
 fn silero_speaker_for(voice: &str) -> &str {
     match voice {
+        // English voices — pass through directly
+        v if v.starts_with("en_") => v,
+        // Russian voices
         v if v.contains("Dmitry") || v.contains("Male") || v.contains("aidar") => "aidar",
         v if v.contains("eugene") => "eugene",
         v if v.contains("baya") => "baya",
@@ -7729,16 +7732,26 @@ async fn stop_speaking() -> Result<(), String> {
 #[tauri::command]
 async fn get_tts_voices() -> Result<serde_json::Value, String> {
     let mut voices: Vec<serde_json::Value> = Vec::new();
-    // Add local Silero TTS voices first (best option: fast, offline, open-source)
+    // Russian voices (Silero v5 — best quality)
     for (name, gender) in &[
         ("xenia", "Female"), ("kseniya", "Female"), ("baya", "Female"),
         ("aidar", "Male"), ("eugene", "Male"),
     ] {
         voices.push(serde_json::json!({
-            "name": name, "gender": gender, "lang": "ru-RU", "engine": "silero"
+            "name": name, "gender": gender, "lang": "ru-RU", "engine": "silero_v5"
         }));
     }
-    // Only local voices — no cloud services
+    // English voices (Silero v3 — local, open-source)
+    for (name, gender) in &[
+        ("en_0", "Female"), ("en_21", "Female"), ("en_45", "Female"),
+        ("en_56", "Female"), ("en_99", "Female"),
+        ("en_1", "Male"), ("en_7", "Male"), ("en_30", "Male"),
+        ("en_72", "Male"), ("en_100", "Male"),
+    ] {
+        voices.push(serde_json::json!({
+            "name": name, "gender": gender, "lang": "en-US", "engine": "silero_v3"
+        }));
+    }
     Ok(serde_json::json!(voices))
 }
 

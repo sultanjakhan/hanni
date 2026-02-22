@@ -236,11 +236,16 @@ const MOCK_DATA = {
 
   // ── TTS & Voice ──
   get_tts_voices: () => [
-    { name: 'xenia', gender: 'Female', lang: 'ru-RU', engine: 'silero' },
-    { name: 'kseniya', gender: 'Female', lang: 'ru-RU', engine: 'silero' },
-    { name: 'baya', gender: 'Female', lang: 'ru-RU', engine: 'silero' },
-    { name: 'aidar', gender: 'Male', lang: 'ru-RU', engine: 'silero' },
-    { name: 'eugene', gender: 'Male', lang: 'ru-RU', engine: 'silero' },
+    { name: 'xenia', gender: 'Female', lang: 'ru-RU', engine: 'silero_v5' },
+    { name: 'kseniya', gender: 'Female', lang: 'ru-RU', engine: 'silero_v5' },
+    { name: 'baya', gender: 'Female', lang: 'ru-RU', engine: 'silero_v5' },
+    { name: 'aidar', gender: 'Male', lang: 'ru-RU', engine: 'silero_v5' },
+    { name: 'eugene', gender: 'Male', lang: 'ru-RU', engine: 'silero_v5' },
+    { name: 'en_0', gender: 'Female', lang: 'en-US', engine: 'silero_v3' },
+    { name: 'en_21', gender: 'Female', lang: 'en-US', engine: 'silero_v3' },
+    { name: 'en_45', gender: 'Female', lang: 'en-US', engine: 'silero_v3' },
+    { name: 'en_1', gender: 'Male', lang: 'en-US', engine: 'silero_v3' },
+    { name: 'en_7', gender: 'Male', lang: 'en-US', engine: 'silero_v3' },
   ],
 
   // ── Goals ──

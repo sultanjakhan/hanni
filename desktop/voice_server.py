@@ -107,45 +107,67 @@ def silero_speech_prob(audio_int16: np.ndarray) -> float:
         return vad_model(tensor, SAMPLE_RATE).item()
 
 
-# ── Silero TTS (lazy load) ──
+# ── Silero TTS (lazy load, multi-language) ──
 TTS_SAMPLE_RATE = 48000
 TTS_DEFAULT_SPEAKER = "xenia"
-TTS_SPEAKERS = ["aidar", "baya", "kseniya", "xenia", "eugene"]
+TTS_RU_SPEAKERS = ["aidar", "baya", "kseniya", "xenia", "eugene"]
+TTS_EN_SPEAKERS = ["en_0", "en_21", "en_45", "en_56", "en_99",   # female (clear, natural)
+                   "en_1", "en_7", "en_30", "en_72", "en_100"]    # male (clear, natural)
+TTS_ALL_SPEAKERS = TTS_RU_SPEAKERS + TTS_EN_SPEAKERS
 
-_tts_model = None
+_tts_models = {}  # "ru" -> model, "en" -> model
 _tts_lock = threading.Lock()
 
-def ensure_tts():
-    global _tts_model
-    if _tts_model is not None:
+def _load_tts_model(lang: str):
+    """Load Silero TTS model for language (ru or en)."""
+    if lang in _tts_models:
         return
     with _tts_lock:
-        if _tts_model is not None:
+        if lang in _tts_models:
             return
-        logger.info("Loading Silero TTS v5...")
         torch.set_num_threads(4)
-        model, _ = torch.hub.load(
-            repo_or_dir='snakers4/silero-models',
-            model='silero_tts',
-            language='ru',
-            speaker='v5_ru',
-        )
+        if lang == "en":
+            logger.info("Loading Silero TTS v3 (English)...")
+            model, _ = torch.hub.load(
+                repo_or_dir='snakers4/silero-models',
+                model='silero_tts',
+                language='en',
+                speaker='v3_en',
+            )
+        else:
+            logger.info("Loading Silero TTS v5 (Russian)...")
+            model, _ = torch.hub.load(
+                repo_or_dir='snakers4/silero-models',
+                model='silero_tts',
+                language='ru',
+                speaker='v5_ru',
+            )
         model.to('cpu')
-        _tts_model = model
-        logger.info(f"Silero TTS loaded (speakers: {', '.join(TTS_SPEAKERS)})")
+        _tts_models[lang] = model
+        logger.info(f"Silero TTS [{lang}] loaded")
+
+def _speaker_lang(speaker: str) -> str:
+    """Determine language from speaker name."""
+    return "en" if speaker.startswith("en_") else "ru"
+
+def ensure_tts(speaker: str = TTS_DEFAULT_SPEAKER):
+    lang = _speaker_lang(speaker)
+    _load_tts_model(lang)
 
 def synthesize_speech(text: str, speaker: str = TTS_DEFAULT_SPEAKER) -> bytes:
     """Generate WAV bytes from text using Silero TTS."""
-    ensure_tts()
-    if speaker not in TTS_SPEAKERS:
+    if speaker not in TTS_ALL_SPEAKERS:
         speaker = TTS_DEFAULT_SPEAKER
-    audio = _tts_model.apply_tts(
-        text=text,
-        speaker=speaker,
-        sample_rate=TTS_SAMPLE_RATE,
-        put_accent=True,
-        put_yo=True,
-    )
+    lang = _speaker_lang(speaker)
+    _load_tts_model(lang)
+    model = _tts_models[lang]
+
+    kwargs = dict(text=text, speaker=speaker, sample_rate=TTS_SAMPLE_RATE)
+    if lang == "ru":
+        kwargs["put_accent"] = True
+        kwargs["put_yo"] = True
+    audio = model.apply_tts(**kwargs)
+
     # Convert torch tensor to WAV bytes
     import wave
     buf = io.BytesIO()
@@ -309,9 +331,14 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5"})
+            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5+v3_en"})
         elif self.path == "/tts/voices":
-            self._json({"voices": TTS_SPEAKERS, "default": TTS_DEFAULT_SPEAKER})
+            self._json({
+                "voices": TTS_ALL_SPEAKERS,
+                "ru": TTS_RU_SPEAKERS,
+                "en": TTS_EN_SPEAKERS,
+                "default": TTS_DEFAULT_SPEAKER,
+            })
         elif self.path == "/listen":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -405,7 +432,7 @@ def main():
     logger.info(f"Hanni Voice Server on http://127.0.0.1:{PORT}")
     logger.info(f"STT: MLX Whisper ({WHISPER_MODEL})")
     logger.info(f"VAD: Silero VAD (ONNX, threshold={VAD_THRESHOLD})")
-    logger.info(f"TTS: Silero TTS v5 (speakers: {', '.join(TTS_SPEAKERS)})")
+    logger.info(f"TTS: Silero v5 RU ({', '.join(TTS_RU_SPEAKERS)}) + v3 EN ({len(TTS_EN_SPEAKERS)} voices)")
     logger.info(f"Stack: 100% local open-source")
     try:
         server.serve_forever()
