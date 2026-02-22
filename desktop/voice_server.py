@@ -54,9 +54,11 @@ def is_hallucination(text: str) -> bool:
     t = text.strip().lower()
     if len(t) < 2:
         return True
-    for h in HALLUCINATIONS:
-        if h in t:
-            return True
+    # Exact match: filter only if the entire text is a hallucination phrase
+    # (prevents false positives on "спасибо за просмотр презентации")
+    if t in HALLUCINATIONS:
+        return True
+    # Repetition ratio check for garbled output
     if len(t) > 20:
         unique_chars = len(set(t))
         ratio = len(t) / max(unique_chars, 1)
@@ -234,7 +236,10 @@ def record_and_transcribe(continuous=False):
             if continuous and _state.call_paused.is_set():
                 try:
                     stream.read(chunk_size)
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Stream read error during pause: {e}")
+                    _state.call_results.put({"error": f"Microphone lost: {e}"})
+                    _state.call_active.clear()
                     break
                 if speech_detected:
                     speech_detected = False

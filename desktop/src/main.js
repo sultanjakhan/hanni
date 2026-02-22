@@ -5265,6 +5265,7 @@ async function toggleCallMode() {
 async function startCallMode() {
   if (callInitializing) return;  // prevent double-init
   callInitializing = true;
+  try {
   callModeActive = true;
   callBtn.classList.add('active');
   callOverlay.classList.remove('hidden');
@@ -5403,7 +5404,9 @@ async function startCallMode() {
       await endCallMode();
     }
   }
-  callInitializing = false;
+  } finally {
+    callInitializing = false;
+  }
 }
 
 async function endCallMode() {
@@ -5425,7 +5428,9 @@ async function endCallMode() {
   if (window._callEventSource) {
     window._callEventSource.close();
     window._callEventSource = null;
-    fetch(`${VOICE_SERVER}/listen/stop`, { method: 'POST' }).catch(() => {});
+    try { await fetch(`${VOICE_SERVER}/listen/stop`, { method: 'POST' }); } catch (_) {}
+    // Cooldown: let Python server release _listen_lock before allowing restart
+    await new Promise(r => setTimeout(r, 150));
   }
 
   // Re-enable input
@@ -5782,27 +5787,29 @@ async function speakAndListen(text) {
   }
 
   // Speak each sentence sequentially
-  for (const sentence of sentences) {
-    if (bargedIn || !callModeActive) break;
-    try {
-      await invoke('speak_sentence_blocking', { sentence, voice });
-    } catch (_) {}
-    // Check barge-in between sentences (Rust mode only)
-    if (!useVoiceServer && !bargedIn && callModeActive) {
+  try {
+    for (const sentence of sentences) {
+      if (bargedIn || !callModeActive) break;
       try {
-        const b = await invoke('call_mode_check_bargein');
-        if (b) {
-          bargedIn = true;
-          await invoke('stop_speaking').catch(() => {});
-          if (callModeActive) {
-            await invoke('call_mode_resume_listening').catch(() => {});
-          }
-        }
+        await invoke('speak_sentence_blocking', { sentence, voice });
       } catch (_) {}
+      // Check barge-in between sentences (Rust mode only)
+      if (!useVoiceServer && !bargedIn && callModeActive) {
+        try {
+          const b = await invoke('call_mode_check_bargein');
+          if (b) {
+            bargedIn = true;
+            await invoke('stop_speaking').catch(() => {});
+            if (callModeActive) {
+              await invoke('call_mode_resume_listening').catch(() => {});
+            }
+          }
+        } catch (_) {}
+      }
     }
+  } finally {
+    if (bargeInterval) clearInterval(bargeInterval);
   }
-
-  if (bargeInterval) clearInterval(bargeInterval);
 
   // Resume voice server mic after TTS finishes
   if (useVoiceServer) {

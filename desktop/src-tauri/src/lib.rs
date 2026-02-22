@@ -1666,15 +1666,15 @@ const WHISPER_HALLUCINATIONS: &[&str] = &[
 fn is_whisper_hallucination(text: &str) -> bool {
     let normalized = text.trim().to_lowercase();
     if normalized.is_empty() || normalized.len() < 2 { return true; }
-    // Check exact matches and substring matches
+    // Exact match only — prevents false positives on legit phrases containing hallucination substrings
     for h in WHISPER_HALLUCINATIONS {
-        if normalized.contains(h) { return true; }
+        if normalized == *h { return true; }
     }
-    // Detect repetitive text (compression ratio > 2.4 = likely looping hallucination)
+    // Detect repetitive text (compression ratio > 4.0 = likely looping hallucination)
     if normalized.len() > 20 {
         let unique_chars: std::collections::HashSet<char> = normalized.chars().collect();
         let ratio = normalized.len() as f32 / unique_chars.len().max(1) as f32;
-        if ratio > 4.0 { return true; } // very repetitive
+        if ratio > 4.0 { return true; }
     }
     false
 }
@@ -2035,6 +2035,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
         // Adaptive noise floor tracking
         let mut noise_floor: f32 = 0.003;
         let noise_alpha: f32 = 0.01; // Slow adaptation
+        let mut last_audio_time = std::time::Instant::now();
 
         loop {
             std::thread::sleep(std::time::Duration::from_millis(16));
@@ -2057,8 +2058,19 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                     buf.drain(..half);
                 }
                 if !buf.is_empty() {
+                    last_audio_time = std::time::Instant::now();
                     process_buf.extend(buf.drain(..));
                 }
+            }
+
+            // Detect mic disconnect: no audio data for 5 seconds
+            if last_audio_time.elapsed() > std::time::Duration::from_secs(5) {
+                eprintln!("Call mode: no audio for 5s — mic likely disconnected");
+                let _ = app.emit("call-error", "Микрофон отключён");
+                let _ = app.emit("call-phase-changed", "idle");
+                let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                cs.active = false;
+                break;
             }
 
             // Process in 512-sample chunks
@@ -2103,6 +2115,8 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                             cs.silence_frames += 1;
                             if cs.silence_frames >= 15 {
                                 cs.phase = "processing".into();
+                                cs.transcription_gen += 1;
+                                let gen = cs.transcription_gen;
                                 let samples = std::mem::take(&mut cs.audio_buffer);
                                 cs.speech_frames = 0;
                                 cs.silence_frames = 0;
@@ -2114,18 +2128,25 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                     match transcribe_samples(&samples) {
                                         Ok(text) => {
                                             let trimmed = text.trim().to_string();
+                                            let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
+                                            if cs2.transcription_gen != gen { return; } // stale
                                             if !trimmed.is_empty() {
-                                                { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).last_recording = samples; }
+                                                cs2.last_recording = samples;
+                                                drop(cs2);
                                                 let _ = app2.emit("call-transcript", trimmed);
                                             } else {
-                                                { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).phase = "listening".into(); }
+                                                cs2.phase = "listening".into();
+                                                drop(cs2);
                                                 let _ = app2.emit("call-not-heard", "empty");
                                                 let _ = app2.emit("call-phase-changed", "listening");
                                             }
                                         }
                                         Err(e) => {
                                             eprintln!("Call transcription error: {}", e);
-                                            { call_state2.0.lock().unwrap_or_else(|e| e.into_inner()).phase = "listening".into(); }
+                                            let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
+                                            if cs2.transcription_gen != gen { return; }
+                                            cs2.phase = "listening".into();
+                                            drop(cs2);
                                             let _ = app2.emit("call-not-heard", format!("error: {}", e));
                                             let _ = app2.emit("call-phase-changed", "listening");
                                         }
@@ -2170,6 +2191,8 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                             if cs.silence_frames >= 15 {
                                 // ~640ms silence — done recording (faster turn-taking)
                                 cs.phase = "processing".into();
+                                cs.transcription_gen += 1;
+                                let gen = cs.transcription_gen;
                                 let samples = std::mem::take(&mut cs.audio_buffer);
                                 cs.speech_frames = 0;
                                 cs.silence_frames = 0;
@@ -2183,26 +2206,24 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                                     match transcribe_samples(&samples) {
                                         Ok(text) => {
                                             let trimmed = text.trim().to_string();
+                                            let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
+                                            if cs2.transcription_gen != gen { return; } // stale
                                             if !trimmed.is_empty() {
-                                                {
-                                                let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
-                                                    cs2.last_recording = samples;
-                                                }
+                                                cs2.last_recording = samples;
+                                                drop(cs2);
                                                 let _ = app2.emit("call-transcript", trimmed);
                                             } else {
-                                                {
-                                                let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
-                                                    cs2.phase = "listening".into();
-                                                }
+                                                cs2.phase = "listening".into();
+                                                drop(cs2);
                                                 let _ = app2.emit("call-phase-changed", "listening");
                                             }
                                         }
                                         Err(e) => {
                                             eprintln!("Call transcription error: {}", e);
-                                            {
-                                                let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
-                                                cs2.phase = "listening".into();
-                                            }
+                                            let mut cs2 = call_state2.0.lock().unwrap_or_else(|e| e.into_inner());
+                                            if cs2.transcription_gen != gen { return; }
+                                            cs2.phase = "listening".into();
+                                            drop(cs2);
                                             let _ = app2.emit("call-phase-changed", "listening");
                                         }
                                     }
@@ -2264,6 +2285,7 @@ struct CallModeState {
     silence_frames: u32,
     barge_in: bool,
     last_recording: Vec<f32>, // last recorded audio for voice notes
+    transcription_gen: u64,   // incremented on each processing transition, stale results discarded
 }
 
 struct CallMode(std::sync::Mutex<CallModeState>);
@@ -7998,6 +8020,7 @@ pub fn run() {
         silence_frames: 0,
         barge_in: false,
         last_recording: Vec::new(),
+        transcription_gen: 0,
     })));
 
     tauri::Builder::default()
