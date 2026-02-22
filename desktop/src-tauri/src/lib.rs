@@ -2055,6 +2055,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 if buf.len() > 32000 {
                     // ~2s at 16kHz — too far behind, drop oldest half to recover
                     let half = buf.len() / 2;
+                    eprintln!("Call: audio buffer overrun ({} samples), dropping {}", buf.len(), half);
                     buf.drain(..half);
                 }
                 if !buf.is_empty() {
@@ -2160,7 +2161,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 }
 
                 let prob = if let Some(ref mut vad) = vad_opt {
-                    vad.predict(chunk.clone())
+                    vad.predict(chunk.iter().copied())
                 } else {
                     (rms * 50.0).min(1.0)
                 };
@@ -7594,32 +7595,28 @@ async fn proactive_llm_call(
     }
 }
 
-fn tts_regex(key: &str) -> &'static regex::Regex {
-    use std::sync::OnceLock;
-    use std::collections::HashMap;
-    static CACHE: OnceLock<HashMap<&'static str, regex::Regex>> = OnceLock::new();
-    let map = CACHE.get_or_init(|| {
-        let mut m = HashMap::new();
-        m.insert("action", regex::Regex::new(r"(?s)```action.*?```").unwrap());
-        m.insert("think", regex::Regex::new(r"(?s)<think>.*?</think>").unwrap());
-        m.insert("url", regex::Regex::new(r"https?://\S+").unwrap());
-        m.insert("parens", regex::Regex::new(r"\([^)]*\)").unwrap());
-        m.insert("brackets", regex::Regex::new(r"\[[^\]]*\]").unwrap());
-        m
-    });
-    &map[key]
-}
-
 fn clean_text_for_tts(text: &str) -> String {
-    let mut s = tts_regex("action").replace_all(text, "").to_string();
-    s = tts_regex("think").replace_all(&s, "").to_string();
-    s = tts_regex("url").replace_all(&s, "").to_string();
+    use std::sync::OnceLock;
+    static RE_ACTION: OnceLock<regex::Regex> = OnceLock::new();
+    static RE_THINK: OnceLock<regex::Regex> = OnceLock::new();
+    static RE_URL: OnceLock<regex::Regex> = OnceLock::new();
+    static RE_PARENS: OnceLock<regex::Regex> = OnceLock::new();
+    static RE_BRACKETS: OnceLock<regex::Regex> = OnceLock::new();
+    let re_action = RE_ACTION.get_or_init(|| regex::Regex::new(r"(?s)```action.*?```").unwrap());
+    let re_think = RE_THINK.get_or_init(|| regex::Regex::new(r"(?s)<think>.*?</think>").unwrap());
+    let re_url = RE_URL.get_or_init(|| regex::Regex::new(r"https?://\S+").unwrap());
+    let re_parens = RE_PARENS.get_or_init(|| regex::Regex::new(r"\([^)]*\)").unwrap());
+    let re_brackets = RE_BRACKETS.get_or_init(|| regex::Regex::new(r"\[[^\]]*\]").unwrap());
+
+    let mut s = re_action.replace_all(text, "").to_string();
+    s = re_think.replace_all(&s, "").to_string();
+    s = re_url.replace_all(&s, "").to_string();
     // Remove markdown formatting
     s = s.replace('"', "'");
     s = s.replace("```", "").replace('`', "").replace("**", "").replace('*', "");
     s = s.replace("###", "").replace("##", "").replace('#', "");
-    s = tts_regex("parens").replace_all(&s, "").to_string();
-    s = tts_regex("brackets").replace_all(&s, "").to_string();
+    s = re_parens.replace_all(&s, "").to_string();
+    s = re_brackets.replace_all(&s, "").to_string();
     // Remove emojis and misc symbols (Unicode ranges)
     s = s.chars().filter(|c| {
         let cp = *c as u32;
@@ -7758,9 +7755,12 @@ fn speak_tts(text: &str, voice: &str) {
     speak_silero_local(&clean, silero_speaker_for(voice));
 }
 
+const MAX_TTS_TEXT_LEN: usize = 2000;
+
 /// Synchronous TTS — blocks until audio finishes playing
 fn speak_tts_sync(text: &str, voice: &str) {
-    let clean = clean_text_for_tts(text);
+    let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..MAX_TTS_TEXT_LEN] } else { text };
+    let clean = clean_text_for_tts(truncated);
     if clean.is_empty() { return; }
     // Local Silero TTS via voice server
     if speak_silero_local_sync(&clean, silero_speaker_for(voice)) { return; }
@@ -7794,7 +7794,8 @@ async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Res
 #[tauri::command]
 async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "xenia".into());
-    let clean = clean_text_for_tts(&text);
+    let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..MAX_TTS_TEXT_LEN] } else { &text };
+    let clean = clean_text_for_tts(truncated);
     if clean.is_empty() { return Ok(()); }
     let speaker = silero_speaker_for(&v).to_string();
     tokio::task::spawn_blocking(move || {
