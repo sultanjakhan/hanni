@@ -978,7 +978,8 @@ async function loadChatSettings() {
       </div>`;
 
     // ── Memory panel ──
-    _chatSettingsRenderMemory(el, memories);
+    _csMemRenderList(memories);
+    _chatSettingsSetupMemory(memories);
 
     // ── Tab switching ──
     document.querySelectorAll('.chat-settings-tab').forEach(tab => {
@@ -1105,8 +1106,8 @@ async function loadChatSettings() {
   }
 }
 
-// Helper: render memory list inside chat settings
-function _chatSettingsRenderMemory(parentEl, memories) {
+// Helper: render memory items (just the list — no listener re-registration)
+function _csMemRenderList(memories) {
   const list = document.getElementById('cs-mem-list');
   if (!list) return;
   const countEl = document.getElementById('cs-mem-count');
@@ -1120,58 +1121,71 @@ function _chatSettingsRenderMemory(parentEl, memories) {
       <button class="memory-item-btn" data-csdel="${m.id}" title="Удалить">&times;</button>
     </div>
   </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Ничего не найдено</div>';
+}
 
+// Setup memory panel: event delegation + search + add (called ONCE)
+function _chatSettingsSetupMemory(memories) {
+  // Reload helper
   const reloadMem = async () => {
     const q = document.getElementById('cs-mem-search')?.value || null;
     const updated = await invoke('get_all_memories', { search: q }).catch(() => []);
-    _chatSettingsRenderMemory(parentEl, updated);
+    _csMemRenderList(updated);
   };
 
-  list.querySelectorAll('[data-csdel]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.csdel) }).catch(()=>{}); reloadMem(); }
+  // Event delegation on the list container (handles delete + edit for all items)
+  const list = document.getElementById('cs-mem-list');
+  if (list) {
+    list.addEventListener('click', async (e) => {
+      const delBtn = e.target.closest('[data-csdel]');
+      if (delBtn) {
+        if (confirm('Удалить?')) {
+          await invoke('delete_memory', { id: parseInt(delBtn.dataset.csdel) }).catch(() => {});
+          reloadMem();
+        }
+        return;
+      }
+      const editBtn = e.target.closest('[data-csedit]');
+      if (editBtn) {
+        const id = parseInt(editBtn.dataset.csedit);
+        // Fetch current value from DB to avoid stale data
+        const allMem = await invoke('get_all_memories', { search: null }).catch(() => []);
+        const m = allMem.find(x => x.id === id);
+        if (!m) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `<div class="modal modal-compact">
+          <div class="modal-title">Редактировать факт</div>
+          <div class="form-group"><label class="form-label">Категория</label>
+            <select class="form-select memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          </div>
+          <div class="form-group"><label class="form-label">Ключ</label>
+            <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
+          </div>
+          <div class="form-group"><label class="form-label">Значение</label>
+            <textarea class="form-input memory-edit-val" placeholder="Значение" rows="3" style="resize:vertical;">${escapeHtml(m.value)}</textarea>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-secondary mem-cancel">Отмена</button>
+            <button class="btn-primary mem-save">Сохранить</button>
+          </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.mem-cancel').onclick = () => overlay.remove();
+        overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+        overlay.querySelector('.mem-save').onclick = async () => {
+          const cat = overlay.querySelector('.memory-edit-cat').value;
+          const key = overlay.querySelector('.memory-edit-key').value.trim();
+          const val = overlay.querySelector('.memory-edit-val').value.trim();
+          if (!key || !val) return;
+          try { await invoke('update_memory', { id, category: cat, key, value: val }); } catch (err) { console.error(err); }
+          overlay.remove();
+          reloadMem();
+        };
+      }
     });
-  });
+  }
 
-  list.querySelectorAll('[data-csedit]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = parseInt(btn.dataset.csedit);
-      const m = memories.find(x => x.id === id);
-      if (!m) return;
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.innerHTML = `<div class="modal modal-compact">
-        <div class="modal-title">Редактировать факт</div>
-        <div class="form-group"><label class="form-label">Категория</label>
-          <select class="form-select memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
-        </div>
-        <div class="form-group"><label class="form-label">Ключ</label>
-          <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
-        </div>
-        <div class="form-group"><label class="form-label">Значение</label>
-          <textarea class="form-input memory-edit-val" placeholder="Значение" rows="3" style="resize:vertical;">${escapeHtml(m.value)}</textarea>
-        </div>
-        <div class="modal-actions">
-          <button class="btn-secondary mem-cancel">Отмена</button>
-          <button class="btn-primary mem-save">Сохранить</button>
-        </div>
-      </div>`;
-      document.body.appendChild(overlay);
-      overlay.querySelector('.mem-cancel').onclick = () => overlay.remove();
-      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-      overlay.querySelector('.mem-save').onclick = async () => {
-        const cat = overlay.querySelector('.memory-edit-cat').value;
-        const key = overlay.querySelector('.memory-edit-key').value.trim();
-        const val = overlay.querySelector('.memory-edit-val').value.trim();
-        if (!key || !val) return;
-        try { await invoke('update_memory', { id, category: cat, key, value: val }); } catch (err) { console.error(err); }
-        overlay.remove();
-        reloadMem();
-      };
-    });
-  });
-
-  // Add button
+  // Add button (once)
   document.getElementById('cs-mem-add-btn')?.addEventListener('click', () => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1205,14 +1219,14 @@ function _chatSettingsRenderMemory(parentEl, memories) {
     };
   });
 
-  // Search debounce
+  // Search (once, with debounce)
   let searchTimeout;
-  document.getElementById('cs-mem-search')?.addEventListener('input', async (e) => {
+  document.getElementById('cs-mem-search')?.addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(async () => {
       const q = e.target.value;
       const results = await invoke('get_all_memories', { search: q || null }).catch(() => []);
-      _chatSettingsRenderMemory(parentEl, results);
+      _csMemRenderList(results);
     }, 300);
   });
 }
