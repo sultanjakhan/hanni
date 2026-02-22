@@ -5273,7 +5273,8 @@ async function startCallMode() {
   callTranscriptArea.innerHTML = '';
   if (callStatusHint) callStatusHint.textContent = '';
 
-  // Start call duration timer
+  // Start wave observer + call duration timer
+  ensureWaveObserver();
   callStartTime = Date.now();
   if (callDurationEl) callDurationEl.textContent = '0:00';
   callDurationInterval = setInterval(() => {
@@ -5411,8 +5412,10 @@ async function endCallMode() {
   callBtn.classList.remove('active');
   callOverlay.classList.add('hidden');
 
-  // Stop call duration timer
+  // Stop call duration timer + wave observer
   if (callDurationInterval) { clearInterval(callDurationInterval); callDurationInterval = null; }
+  if (callWaveObserver) { callWaveObserver.disconnect(); callWaveObserver = null; }
+  if (ambientWaveFrame) { cancelAnimationFrame(ambientWaveFrame); ambientWaveFrame = null; }
 
   // Reset waveform
   for (const bar of callWaveBars) bar.style.height = '6px';
@@ -5480,12 +5483,17 @@ function animateAmbientWave() {
 }
 
 // Start ambient wave when phase changes to processing/speaking
-new MutationObserver(() => {
-  const phase = callOverlay.getAttribute('data-phase');
-  if ((phase === 'processing' || phase === 'speaking') && !ambientWaveFrame) {
-    animateAmbientWave();
-  }
-}).observe(callOverlay, { attributes: true, attributeFilter: ['data-phase'] });
+let callWaveObserver = null;
+function ensureWaveObserver() {
+  if (callWaveObserver) return;
+  callWaveObserver = new MutationObserver(() => {
+    const phase = callOverlay.getAttribute('data-phase');
+    if ((phase === 'processing' || phase === 'speaking') && !ambientWaveFrame) {
+      animateAmbientWave();
+    }
+  });
+  callWaveObserver.observe(callOverlay, { attributes: true, attributeFilter: ['data-phase'] });
+}
 
 // Not-heard feedback
 listen('call-not-heard', (event) => {

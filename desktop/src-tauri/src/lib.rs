@@ -1544,7 +1544,7 @@ struct WhisperState {
     capture_running: bool,
 }
 
-struct AudioRecording(std::sync::Mutex<WhisperState>);
+struct AudioRecording(std::sync::Mutex<WhisperState>, std::sync::Condvar);
 
 fn whisper_model_path() -> PathBuf {
     let turbo = hanni_data_dir().join("models/ggml-large-v3-turbo.bin");
@@ -1620,11 +1620,11 @@ async fn stop_recording(state: tauri::State<'_, Arc<AudioRecording>>) -> Result<
     let samples = {
         let mut ws = state.0.lock().unwrap_or_else(|e| e.into_inner());
         ws.recording = false;
+        state.1.notify_all(); // wake capture thread immediately
         if ws.audio_buffer.is_empty() {
             return Err("No audio recorded".into());
         }
-        let s = ws.audio_buffer.clone();
-        ws.audio_buffer.clear();
+        let s = std::mem::take(&mut ws.audio_buffer);
         s
     };
 
@@ -1764,19 +1764,28 @@ fn downmix_resample_into(data: &[f32], channels: usize, ratio: f64, buf: &mut Ve
         buf.extend_from_slice(data);
         return;
     }
-    let mono: Vec<f32> = if channels > 1 {
-        data.chunks(channels).map(|ch| ch.iter().sum::<f32>() / channels as f32).collect()
-    } else {
-        data.to_vec()
-    };
-    if ratio > 1.0 {
+    if channels == 1 {
+        // Mono, just resample (skip intermediate Vec)
         let mut pos = 0.0_f64;
-        while (pos as usize) < mono.len() {
-            buf.push(mono[pos as usize]);
+        while (pos as usize) < data.len() {
+            buf.push(data[pos as usize]);
             pos += ratio;
         }
+    } else if ratio <= 1.0 {
+        // Multi-channel, no resampling needed — downmix directly into buf
+        for ch in data.chunks(channels) {
+            buf.push(ch.iter().sum::<f32>() / channels as f32);
+        }
     } else {
-        buf.extend_from_slice(&mono);
+        // Multi-channel + resampling — downmix + resample in one pass
+        let mono_len = data.len() / channels;
+        let mut pos = 0.0_f64;
+        while (pos as usize) < mono_len {
+            let i = pos as usize * channels;
+            let sample: f32 = data[i..i + channels].iter().sum::<f32>() / channels as f32;
+            buf.push(sample);
+            pos += ratio;
+        }
     }
 }
 
@@ -1819,13 +1828,11 @@ fn start_audio_capture(recording_state: Arc<AudioRecording>) {
                     }
                     return;
                 }
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    {
-                let ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                        if !ws.recording {
-                            break;
-                        }
+                // Wait for stop signal via condvar instead of polling
+                {
+                    let mut ws = recording_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                    while ws.recording {
+                        ws = recording_state.1.wait(ws).unwrap_or_else(|e| e.into_inner());
                     }
                 }
                 {
@@ -2038,12 +2045,17 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 if !cs.active { break; }
             }
 
-            // Drain audio from ring buffer
+            // Drain audio from ring buffer (with high-water mark to prevent unbounded growth)
             {
                 let mut buf = match chunk_buf.lock() {
                     Ok(b) => b,
                     Err(_) => continue,
                 };
+                if buf.len() > 32000 {
+                    // ~2s at 16kHz — too far behind, drop oldest half to recover
+                    let half = buf.len() / 2;
+                    buf.drain(..half);
+                }
                 if !buf.is_empty() {
                     process_buf.extend(buf.drain(..));
                 }
@@ -2086,22 +2098,16 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                             cs.audio_buffer.clear();
                         }
                         "recording" => {
-                            // Count as silence and check threshold
-                            let should_process = {
-                                let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
-                                cs.silence_frames += 1;
-                                cs.silence_frames >= 15
-                            };
-                            if should_process {
-                                // Transition to processing — same logic as VAD silence path
-                                let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                            // Count silence + check threshold in a single lock
+                            let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+                            cs.silence_frames += 1;
+                            if cs.silence_frames >= 15 {
                                 cs.phase = "processing".into();
-                                let samples = cs.audio_buffer.clone();
-                                cs.audio_buffer.clear();
+                                let samples = std::mem::take(&mut cs.audio_buffer);
                                 cs.speech_frames = 0;
                                 cs.silence_frames = 0;
-                                let _ = app.emit("call-phase-changed", "processing");
                                 drop(cs);
+                                let _ = app.emit("call-phase-changed", "processing");
                                 let call_state2 = call_state.clone();
                                 let app2 = app.clone();
                                 std::thread::spawn(move || {
@@ -2164,8 +2170,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                             if cs.silence_frames >= 15 {
                                 // ~640ms silence — done recording (faster turn-taking)
                                 cs.phase = "processing".into();
-                                let samples = cs.audio_buffer.clone();
-                                cs.audio_buffer.clear();
+                                let samples = std::mem::take(&mut cs.audio_buffer);
                                 cs.speech_frames = 0;
                                 cs.silence_frames = 0;
                                 let _ = app.emit("call-phase-changed", "processing");
@@ -7972,7 +7977,7 @@ pub fn run() {
         recording: false,
         audio_buffer: Vec::new(),
         capture_running: false,
-    })));
+    }), std::sync::Condvar::new()));
 
     // Focus mode state
     let focus_monitor_flag = Arc::new(AtomicBool::new(false));
