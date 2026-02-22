@@ -184,14 +184,19 @@ def synthesize_speech(text: str, speaker: str = TTS_DEFAULT_SPEAKER) -> bytes:
     return buf.getvalue()
 
 
-# ── Single transcription (HTTP mode) ──
-recording_active = threading.Event()
-call_mode_active = threading.Event()
-call_mode_paused = threading.Event()
-call_mode_results = queue.Queue()
-current_result = {"text": "", "error": ""}
-result_ready = threading.Event()
-force_stop = threading.Event()
+# ── Voice state (all mutable session state in one place) ──
+class VoiceState:
+    """Encapsulates all mutable voice session state instead of module-level globals."""
+    def __init__(self):
+        self.recording_active = threading.Event()
+        self.call_active = threading.Event()
+        self.call_paused = threading.Event()
+        self.call_results = queue.Queue()
+        self.transcribe_result = {"text": "", "error": ""}
+        self.transcribe_ready = threading.Event()
+        self.force_stop = threading.Event()
+
+_state = VoiceState()
 
 def record_and_transcribe(continuous=False):
     ensure_whisper()
@@ -206,10 +211,10 @@ def record_and_transcribe(continuous=False):
         err = f"Microphone error: {e}"
         logger.error(err)
         if continuous:
-            call_mode_results.put({"error": err})
+            _state.call_results.put({"error": err})
         else:
-            current_result["error"] = err
-            result_ready.set()
+            _state.transcribe_result["error"] = err
+            _state.transcribe_ready.set()
         return
 
     logger.info("Recording started (Silero VAD)")
@@ -221,12 +226,12 @@ def record_and_transcribe(continuous=False):
         has_speech = False
         vad_model.reset_states()
 
-        while not force_stop.is_set():
-            if continuous and not call_mode_active.is_set():
+        while not _state.force_stop.is_set():
+            if continuous and not _state.call_active.is_set():
                 break
-            if not continuous and not recording_active.is_set():
+            if not continuous and not _state.recording_active.is_set():
                 break
-            if continuous and call_mode_paused.is_set():
+            if continuous and _state.call_paused.is_set():
                 try:
                     stream.read(chunk_size)
                 except Exception:
@@ -259,16 +264,16 @@ def record_and_transcribe(continuous=False):
                         logger.info("End of utterance")
                         break
 
-        if force_stop.is_set():
-            force_stop.clear()
+        if _state.force_stop.is_set():
+            _state.force_stop.clear()
             break
 
         if not has_speech or len(speech_frames) < min_speech_chunks:
-            if continuous and call_mode_active.is_set():
+            if continuous and _state.call_active.is_set():
                 continue
             if not continuous:
-                current_result["text"] = ""
-                result_ready.set()
+                _state.transcribe_result["text"] = ""
+                _state.transcribe_ready.set()
                 break
             break
 
@@ -283,13 +288,13 @@ def record_and_transcribe(continuous=False):
 
         if continuous:
             if text:
-                call_mode_results.put({"text": text, "stt_ms": stt_ms})
-            if not call_mode_active.is_set():
+                _state.call_results.put({"text": text, "stt_ms": stt_ms})
+            if not _state.call_active.is_set():
                 break
             continue
         else:
-            current_result["text"] = text
-            result_ready.set()
+            _state.transcribe_result["text"] = text
+            _state.transcribe_ready.set()
             break
 
     stream.stop()
@@ -375,17 +380,17 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Access-Control-Allow-Origin", self._origin())
                 self.end_headers()
-                call_mode_active.set()
-                call_mode_paused.clear()
-                force_stop.clear()
+                _state.call_active.set()
+                _state.call_paused.clear()
+                _state.force_stop.clear()
                 t = threading.Thread(target=record_and_transcribe, args=(True,), daemon=True)
                 t.start()
                 try:
                     self.wfile.write(b"data: {\"phase\": \"listening\"}\n\n")
                     self.wfile.flush()
-                    while call_mode_active.is_set():
+                    while _state.call_active.is_set():
                         try:
-                            result = call_mode_results.get(timeout=0.5)
+                            result = _state.call_results.get(timeout=0.5)
                             self.wfile.write(f"data: {json.dumps(result)}\n\n".encode())
                             self.wfile.flush()
                         except queue.Empty:
@@ -394,8 +399,8 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:
-                    call_mode_active.clear()
-                    force_stop.set()
+                    _state.call_active.clear()
+                    _state.force_stop.set()
             finally:
                 with VoiceHandler._listen_lock:
                     VoiceHandler._listen_active = False
@@ -404,39 +409,39 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/transcribe":
-            recording_active.set()
-            force_stop.clear()
-            result_ready.clear()
-            current_result["text"] = ""
-            current_result["error"] = ""
+            _state.recording_active.set()
+            _state.force_stop.clear()
+            _state.transcribe_ready.clear()
+            _state.transcribe_result["text"] = ""
+            _state.transcribe_result["error"] = ""
             t = threading.Thread(target=record_and_transcribe, args=(False,), daemon=True)
             t.start()
-            result_ready.wait(timeout=60)
-            recording_active.clear()
-            if current_result["error"]:
-                self._json({"error": current_result["error"]}, 500)
+            _state.transcribe_ready.wait(timeout=60)
+            _state.recording_active.clear()
+            if _state.transcribe_result["error"]:
+                self._json({"error": _state.transcribe_result["error"]}, 500)
             else:
-                self._json({"text": current_result["text"]})
+                self._json({"text": _state.transcribe_result["text"]})
         elif self.path == "/stop":
-            recording_active.clear()
-            force_stop.set()
+            _state.recording_active.clear()
+            _state.force_stop.set()
             self._json({"status": "stopped"})
         elif self.path == "/finish":
             # Stop recording but let transcription happen (for press-and-hold)
-            recording_active.clear()
+            _state.recording_active.clear()
             self._json({"status": "finishing"})
         elif self.path == "/listen/pause":
-            call_mode_paused.set()
+            _state.call_paused.set()
             self._json({"status": "paused"})
         elif self.path == "/listen/resume":
-            call_mode_paused.clear()
+            _state.call_paused.clear()
             self._json({"status": "resumed"})
         elif self.path == "/listen/stop":
-            call_mode_active.clear()
-            call_mode_paused.clear()
-            force_stop.set()
-            while not call_mode_results.empty():
-                try: call_mode_results.get_nowait()
+            _state.call_active.clear()
+            _state.call_paused.clear()
+            _state.force_stop.set()
+            while not _state.call_results.empty():
+                try: _state.call_results.get_nowait()
                 except queue.Empty: break
             self._json({"status": "stopped"})
         elif self.path == "/tts":

@@ -5232,6 +5232,7 @@ function renderHealth(el, today, habits) {
 // ── Call Mode ──
 
 let callModeActive = false;
+let callInitializing = false;  // guard: prevent race between init and end
 let callDurationInterval = null;
 let callStartTime = 0;
 
@@ -5262,6 +5263,8 @@ async function toggleCallMode() {
 }
 
 async function startCallMode() {
+  if (callInitializing) return;  // prevent double-init
+  callInitializing = true;
   callModeActive = true;
   callBtn.classList.add('active');
   callOverlay.classList.remove('hidden');
@@ -5298,11 +5301,17 @@ async function startCallMode() {
     // Use Python voice server for call mode (SSE stream)
     // Python voice server has its own MLX Whisper — no Rust model needed
     try {
+      // Close any stale EventSource from a previous session
+      if (window._callEventSource) {
+        window._callEventSource.close();
+        window._callEventSource = null;
+      }
+
       const eventSource = new EventSource(`${VOICE_SERVER}/listen`);
       window._callEventSource = eventSource;
 
       eventSource.onmessage = (event) => {
-        if (!callModeActive) { eventSource.close(); return; }
+        if (!callModeActive) { eventSource.close(); window._callEventSource = null; return; }
         try {
           const data = JSON.parse(event.data);
           if (data.error) {
@@ -5326,7 +5335,7 @@ async function startCallMode() {
 
       let sseRetryCount = 0;
       eventSource.onerror = () => {
-        if (!callModeActive) return;
+        if (!callModeActive) { eventSource.close(); window._callEventSource = null; return; }
         sseRetryCount++;
         if (sseRetryCount >= 3) {
           eventSource.close();
@@ -5350,6 +5359,7 @@ async function startCallMode() {
         }
       };
     } catch (e) {
+      window._callEventSource = null;
       addMsg('bot', 'Ошибка голосового сервера: ' + e);
       await endCallMode();
     }
@@ -5392,10 +5402,12 @@ async function startCallMode() {
       await endCallMode();
     }
   }
+  callInitializing = false;
 }
 
 async function endCallMode() {
   callModeActive = false;
+  callInitializing = false;
   callBtn.classList.remove('active');
   callOverlay.classList.add('hidden');
 
@@ -5420,7 +5432,9 @@ async function endCallMode() {
 
   try {
     await invoke('stop_call_mode');
-  } catch (_) {}
+  } catch (e) {
+    console.error('[call] stop_call_mode failed:', e);
+  }
 
   input.focus();
 }

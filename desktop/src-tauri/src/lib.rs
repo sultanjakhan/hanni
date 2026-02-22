@@ -2057,9 +2057,11 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                 let energy: f32 = chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32;
                 let rms = energy.sqrt();
 
+                // Read phase once per chunk (minimize lock scope)
+                let current_phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
+
                 // Adaptive noise floor: update during silence
-                let phase_for_noise = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
-                if phase_for_noise == "listening" && rms < noise_floor * 3.0 {
+                if current_phase == "listening" && rms < noise_floor * 3.0 {
                     noise_floor = noise_floor * (1.0 - noise_alpha) + rms * noise_alpha;
                     noise_floor = noise_floor.max(0.001); // Minimum floor
                 }
@@ -2077,8 +2079,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
 
                 if rms < noise_gate {
                     // Below noise floor — treat as definite silence
-                    let phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
-                    match phase.as_str() {
+                    match current_phase.as_str() {
                         "listening" => {
                             let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                             cs.speech_frames = 0;
@@ -2137,10 +2138,7 @@ fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
                     (rms * 50.0).min(1.0)
                 };
 
-                // Read phase fresh for each chunk
-                let phase = call_state.0.lock().unwrap_or_else(|e| e.into_inner()).phase.clone();
-
-                match phase.as_str() {
+                match current_phase.as_str() {
                     "listening" => {
                         let mut cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
                         if prob > 0.5 {
@@ -3252,6 +3250,19 @@ async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Optio
     serde_json::to_string(&result).map_err(|e| format!("Serialize error: {}", e))
 }
 
+struct ChatModeConfig {
+    memory_limit: usize,
+    history_limit: usize,
+    max_msg_chars: usize,
+    max_tokens: u32,
+    temperature: f32,
+    include_tools: bool,
+}
+
+const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 200, max_tokens: 100, temperature: 0.6, include_tools: true };
+const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 80, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
+const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 3, history_limit: 4, max_msg_chars: 200, max_tokens: 150, temperature: 0.7, include_tools: false };
+
 async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
 
@@ -3294,6 +3305,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("");
     let use_full = needs_full_prompt(last_user_msg);
+    let mode = if call_mode { &CHAT_CALL } else if use_full { &CHAT_FULL } else { &CHAT_LITE };
 
     let system_content = if call_mode {
         format!(r#"{date_ctx}
@@ -3331,19 +3343,17 @@ After calling tools, briefly confirm what you did."#,
         let ctx = {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
-            build_memory_context_from_db(&conn, mem_user_msg, if use_full { 80 } else if call_mode { 10 } else { 3 })
+            build_memory_context_from_db(&conn, mem_user_msg, mode.memory_limit)
         };
         if !ctx.is_empty() {
             chat_messages.push(ChatMessage::text("system", &format!("[Your memories]\n{}", ctx)));
         }
     }
 
-    // Limit history: call mode=6 (speed), full=all, lite=4
-    let history_limit = if call_mode { 6 } else if use_full { messages.len() } else { 4 };
+    let history_limit = if mode.history_limit == usize::MAX { messages.len() } else { mode.history_limit };
     let skip = messages.len().saturating_sub(history_limit);
     let trimmed: Vec<_> = messages.iter().skip(skip).collect();
-    // Truncate long messages in lite/call mode to keep prompt small
-    let max_msg_chars = if use_full { usize::MAX } else { 200 };
+    let max_msg_chars = mode.max_msg_chars;
     for msg_val in trimmed.iter() {
         if let Ok(mut cm) = serde_json::from_value::<ChatMessage>((*msg_val).clone()) {
             if max_msg_chars < usize::MAX {
@@ -3357,16 +3367,16 @@ After calling tools, briefly confirm what you did."#,
         }
     }
 
-    let tools_param = if use_full || call_mode {
+    let tools_param = if mode.include_tools {
         Some(select_relevant_tools(last_user_msg))
     } else { None };
 
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: if call_mode { 100 } else if use_full { 1024 } else { 150 },
+        max_tokens: mode.max_tokens,
         stream: true,
-        temperature: if call_mode { 0.6 } else { 0.7 },
+        temperature: mode.temperature,
         repetition_penalty: Some(1.2),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
         tools: tools_param,
@@ -7557,26 +7567,32 @@ async fn proactive_llm_call(
     }
 }
 
+fn tts_regex(key: &str) -> &'static regex::Regex {
+    use std::sync::OnceLock;
+    use std::collections::HashMap;
+    static CACHE: OnceLock<HashMap<&'static str, regex::Regex>> = OnceLock::new();
+    let map = CACHE.get_or_init(|| {
+        let mut m = HashMap::new();
+        m.insert("action", regex::Regex::new(r"(?s)```action.*?```").unwrap());
+        m.insert("think", regex::Regex::new(r"(?s)<think>.*?</think>").unwrap());
+        m.insert("url", regex::Regex::new(r"https?://\S+").unwrap());
+        m.insert("parens", regex::Regex::new(r"\([^)]*\)").unwrap());
+        m.insert("brackets", regex::Regex::new(r"\[[^\]]*\]").unwrap());
+        m
+    });
+    &map[key]
+}
+
 fn clean_text_for_tts(text: &str) -> String {
-    // Remove action blocks first
-    let re_action = regex::Regex::new(r"(?s)```action.*?```").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
-    let mut s = re_action.replace_all(text, "").to_string();
-    // Remove think blocks
-    let re_think = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
-    s = re_think.replace_all(&s, "").to_string();
-    // Remove URLs
-    let re_url = regex::Regex::new(r"https?://\S+").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
-    s = re_url.replace_all(&s, "").to_string();
+    let mut s = tts_regex("action").replace_all(text, "").to_string();
+    s = tts_regex("think").replace_all(&s, "").to_string();
+    s = tts_regex("url").replace_all(&s, "").to_string();
     // Remove markdown formatting
     s = s.replace('"', "'");
     s = s.replace("```", "").replace('`', "").replace("**", "").replace('*', "");
     s = s.replace("###", "").replace("##", "").replace('#', "");
-    // Remove parenthetical asides: (text here)
-    let re_parens = regex::Regex::new(r"\([^)]*\)").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
-    s = re_parens.replace_all(&s, "").to_string();
-    // Remove square brackets: [text here]
-    let re_brackets = regex::Regex::new(r"\[[^\]]*\]").unwrap_or_else(|_| regex::Regex::new("$^").unwrap());
-    s = re_brackets.replace_all(&s, "").to_string();
+    s = tts_regex("parens").replace_all(&s, "").to_string();
+    s = tts_regex("brackets").replace_all(&s, "").to_string();
     // Remove emojis and misc symbols (Unicode ranges)
     s = s.chars().filter(|c| {
         let cp = *c as u32;
@@ -7741,10 +7757,9 @@ async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), 
 #[tauri::command]
 async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "xenia".into());
-    let clean = clean_text_for_tts(&sentence);
-    if clean.is_empty() { return Ok(()); }
+    // speak_tts_sync already calls clean_text_for_tts internally
     tokio::task::spawn_blocking(move || {
-        speak_tts_sync(&clean, &v);
+        speak_tts_sync(&sentence, &v);
     }).await.map_err(|e| format!("TTS join error: {}", e))?;
     Ok(())
 }
