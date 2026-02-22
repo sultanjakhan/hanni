@@ -7599,60 +7599,64 @@ fn clean_text_for_tts(text: &str) -> String {
     result.trim().to_string()
 }
 
-/// Try local Silero TTS via voice server (non-blocking)
-fn speak_silero_local(text: &str, speaker: &str) {
-    let tmp = format!("/tmp/hanni_tts_{}.wav", std::process::id());
+/// Try local Silero TTS via voice server (core logic with retry)
+fn speak_silero_core(text: &str, speaker: &str) -> Result<Vec<u8>, String> {
     let url = format!("{}/tts", VOICE_SERVER_URL);
-    let text_owned = text.to_string();
-    let speaker_owned = speaker.to_string();
-    let tmp2 = tmp.clone();
-    std::thread::spawn(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build();
-        if let Ok(client) = client {
-            let resp = client.post(&url)
-                .json(&serde_json::json!({"text": text_owned, "speaker": speaker_owned}))
-                .send();
-            if let Ok(resp) = resp {
-                if resp.status().is_success() {
-                    if let Ok(bytes) = resp.bytes() {
-                        if std::fs::write(&tmp2, &bytes).is_ok() {
-                            let _ = std::process::Command::new("afplay").arg(&tmp2).status();
-                            let _ = std::fs::remove_file(&tmp2);
-                        }
-                    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let mut last_err = String::new();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(500 * (1 << attempt)));
+            eprintln!("[TTS] Retry #{}", attempt);
+        }
+        match client.post(&url)
+            .json(&serde_json::json!({"text": text, "speaker": speaker}))
+            .send()
+        {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.bytes() {
+                    Ok(bytes) => return Ok(bytes.to_vec()),
+                    Err(e) => last_err = format!("Read bytes: {}", e),
                 }
             }
+            Ok(resp) => last_err = format!("Server error: {}", resp.status()),
+            Err(e) => last_err = format!("Network: {}", e),
+        }
+    }
+    Err(last_err)
+}
+
+/// Play WAV bytes via afplay
+fn play_wav_blocking(bytes: &[u8]) -> Result<(), String> {
+    let tmp = format!("/tmp/hanni_tts_{}.wav", std::process::id());
+    std::fs::write(&tmp, bytes).map_err(|e| format!("Write temp: {}", e))?;
+    let _ = std::process::Command::new("afplay").arg(&tmp).status();
+    let _ = std::fs::remove_file(&tmp);
+    Ok(())
+}
+
+/// Try local Silero TTS via voice server (non-blocking)
+fn speak_silero_local(text: &str, speaker: &str) {
+    let text_owned = text.to_string();
+    let speaker_owned = speaker.to_string();
+    std::thread::spawn(move || {
+        match speak_silero_core(&text_owned, &speaker_owned) {
+            Ok(bytes) => { let _ = play_wav_blocking(&bytes); }
+            Err(e) => eprintln!("[TTS] Non-blocking failed: {}", e),
         }
     });
 }
 
 /// Try local Silero TTS via voice server (blocking)
 fn speak_silero_local_sync(text: &str, speaker: &str) -> bool {
-    let tmp = format!("/tmp/hanni_tts_call_{}.wav", std::process::id());
-    let url = format!("{}/tts", VOICE_SERVER_URL);
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let resp = client.post(&url)
-        .json(&serde_json::json!({"text": text, "speaker": speaker}))
-        .send();
-    if let Ok(resp) = resp {
-        if resp.status().is_success() {
-            if let Ok(bytes) = resp.bytes() {
-                if std::fs::write(&tmp, &bytes).is_ok() {
-                    let _ = std::process::Command::new("afplay").arg(&tmp).status();
-                    let _ = std::fs::remove_file(&tmp);
-                    return true;
-                }
-            }
-        }
+    match speak_silero_core(text, speaker) {
+        Ok(bytes) => play_wav_blocking(&bytes).is_ok(),
+        Err(e) => { eprintln!("[TTS] Sync failed: {}", e); false }
     }
-    false
 }
 
 /// Map voice name to Silero speaker (default: xenia)
@@ -7892,8 +7896,25 @@ pub fn run() {
     let mlx_cleanup = mlx_process.clone();
 
     // Install voice server as LaunchAgent (mic permission stays with Python's stable signature)
+    // After ensuring the server is running, warm up TTS cache
     std::thread::spawn(|| {
         ensure_voice_server_launchagent();
+        // Wait for voice server to be ready, then warm up TTS
+        for _ in 0..10 {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let ok = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(2))
+                .build().ok()
+                .and_then(|c| c.get(&format!("{}/health", VOICE_SERVER_URL)).send().ok())
+                .map(|r| r.status().is_success())
+                .unwrap_or(false);
+            if ok {
+                eprintln!("[voice] Server ready, warming up TTS...");
+                let _ = speak_silero_core("тест", "xenia");
+                eprintln!("[voice] TTS warmup done");
+                break;
+            }
+        }
     });
 
     // Audio recording state (capture starts lazily on first recording)
