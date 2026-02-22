@@ -125,7 +125,7 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Memory', 'Blocklist', 'Integrations', 'About'] },
+  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Blocklist', 'Integrations', 'About'] },
 };
 
 const TAB_DESCRIPTIONS = {
@@ -823,10 +823,12 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, thinkVal, memories] = await Promise.all([
       invoke('get_proactive_settings'),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
+      invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
+      invoke('get_all_memories', { search: null }).catch(() => []),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -843,10 +845,24 @@ async function loadChatSettings() {
 
     el.innerHTML = `
       <div class="chat-settings-tabs">
-        <button class="chat-settings-tab active" data-panel="general">Основные</button>
-        <button class="chat-settings-tab" data-panel="styles">Стили сообщений</button>
+        <button class="chat-settings-tab active" data-panel="memory">Память</button>
+        <button class="chat-settings-tab" data-panel="general">Основные</button>
+        <button class="chat-settings-tab" data-panel="voice">Голос</button>
+        <button class="chat-settings-tab" data-panel="styles">Стили</button>
       </div>
-      <div class="chat-settings-panel active" id="cs-panel-general">
+
+      <div class="chat-settings-panel active" id="cs-panel-memory">
+        <div class="memory-header">
+          <div class="memory-search-box" style="flex:1;">
+            <input class="form-input" id="cs-mem-search" placeholder="Поиск по памяти..." autocomplete="off">
+          </div>
+          <button class="btn-primary" id="cs-mem-add-btn">+ Добавить</button>
+        </div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;" id="cs-mem-count">${memories.length} фактов</div>
+        <div class="memory-browser" id="cs-mem-list"></div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-general">
         <div class="settings-section">
           <div class="settings-section-title">Автономный режим</div>
           <div class="settings-row">
@@ -876,52 +892,67 @@ async function loadChatSettings() {
           </div>
         </div>
         <div class="settings-section">
-          <div class="settings-section-title">Голос</div>
-        <div class="settings-row">
-          <span class="settings-label">Включён</span>
-          <label class="toggle">
-            <input type="checkbox" id="chat-voice-enabled" ${proactive.voice_enabled ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label">Голос TTS</span>
-          <select class="form-select" id="chat-voice-name" style="width:260px">
-            ${sortedLangs.map(lang => `
-              <optgroup label="${lang}">
-                ${(voicesByLang[lang] || []).map(v =>
-                  `<option value="${v.name}" ${proactive.voice_name === v.name ? 'selected' : ''}>${v.name} (${v.gender})</option>`
-                ).join('')}
-              </optgroup>
-            `).join('')}
-          </select>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label"></span>
-          <button class="settings-btn" id="chat-test-voice">Прослушать</button>
+          <div class="settings-section-title">Модель</div>
+          <div class="settings-row">
+            <span class="settings-label">Thinking mode</span>
+            <span class="settings-hint">Глубокое размышление (медленнее)</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-thinking-toggle" ${thinkVal === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
       </div>
-      <div class="settings-section">
-        <div class="settings-section-title">TTS Сервер (PC)</div>
-        <div class="settings-row">
-          <span class="settings-label">URL сервера</span>
-          <input class="form-input" id="chat-tts-server-url" placeholder="http://192.168.x.x:8236" value="${ttsServerUrl || ''}" style="width:220px">
+
+      <div class="chat-settings-panel" id="cs-panel-voice">
+        <div class="settings-section">
+          <div class="settings-section-title">Озвучка</div>
+          <div class="settings-row">
+            <span class="settings-label">Включена</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-voice-enabled" ${proactive.voice_enabled ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Голос</span>
+            <select class="form-select" id="chat-voice-name" style="width:260px">
+              ${sortedLangs.map(lang => `
+                <optgroup label="${lang}">
+                  ${(voicesByLang[lang] || []).map(v =>
+                    `<option value="${v.name}" ${proactive.voice_name === v.name ? 'selected' : ''}>${v.name} (${v.gender})</option>`
+                  ).join('')}
+                </optgroup>
+              `).join('')}
+            </select>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label"></span>
+            <button class="settings-btn" id="chat-test-voice">Прослушать</button>
+          </div>
         </div>
-        <div class="settings-row">
-          <span class="settings-label">Статус</span>
-          <span class="settings-value" id="chat-tts-server-status">—</span>
-        </div>
-        <div class="settings-row">
-          <span class="settings-label"></span>
-          <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
+        <div class="settings-section">
+          <div class="settings-section-title">TTS Сервер (PC)</div>
+          <div class="settings-row">
+            <span class="settings-label">URL сервера</span>
+            <input class="form-input" id="chat-tts-server-url" placeholder="http://192.168.x.x:8236" value="${ttsServerUrl || ''}" style="width:220px">
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Статус</span>
+            <span class="settings-value" id="chat-tts-server-status">—</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label"></span>
+            <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
+          </div>
         </div>
       </div>
-      </div>
+
       <div class="chat-settings-panel" id="cs-panel-styles">
         <div class="settings-section">
           <div class="settings-section-title">Стили проактивных сообщений</div>
           <div class="proactive-styles-section">
-            <div class="proactive-styles-desc">Выберите, какие стили сообщений Hanni может использовать в автономном режиме. Отключённые стили не будут включены в промпт.</div>
+            <div class="proactive-styles-desc">Какие стили Hanni может использовать в автономном режиме.</div>
             <div class="proactive-styles-actions">
               <button class="btn-small" id="proactive-select-all">Все</button>
               <button class="btn-small" id="proactive-select-none">Снять все</button>
@@ -946,7 +977,10 @@ async function loadChatSettings() {
         </div>
       </div>`;
 
-    // Sub-tab switching
+    // ── Memory panel ──
+    _chatSettingsRenderMemory(el, memories);
+
+    // ── Tab switching ──
     document.querySelectorAll('.chat-settings-tab').forEach(tab => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.chat-settings-tab').forEach(t => t.classList.remove('active'));
@@ -956,7 +990,7 @@ async function loadChatSettings() {
       });
     });
 
-    // Save handlers
+    // ── Save handlers ──
     const getEnabledStyles = () => {
       const checks = document.querySelectorAll('#proactive-styles-grid input[data-style]');
       return Array.from(checks).filter(c => c.checked).map(c => c.dataset.style);
@@ -985,6 +1019,11 @@ async function loadChatSettings() {
     document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-quiet-start')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-quiet-end')?.addEventListener('change', saveChatSettings);
+
+    // Thinking mode toggle
+    document.getElementById('chat-thinking-toggle')?.addEventListener('change', (e) => {
+      invoke('set_app_setting', { key: 'enable_thinking', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
+    });
 
     // Interval slider <-> number sync
     const slider = document.getElementById('chat-proactive-slider');
@@ -1064,6 +1103,118 @@ async function loadChatSettings() {
   } catch (e) {
     el.innerHTML = `<div style="color:var(--color-red);font-size:14px;">Ошибка: ${e}</div>`;
   }
+}
+
+// Helper: render memory list inside chat settings
+function _chatSettingsRenderMemory(parentEl, memories) {
+  const list = document.getElementById('cs-mem-list');
+  if (!list) return;
+  const countEl = document.getElementById('cs-mem-count');
+  if (countEl) countEl.textContent = `${memories.length} фактов`;
+  list.innerHTML = memories.map(m => `<div class="memory-item" data-mem-id="${m.id}">
+    <span class="memory-item-category memory-cat-${m.category || 'other'}">${escapeHtml(m.category)}</span>
+    <span class="memory-item-key">${escapeHtml(m.key)}</span>
+    <span class="memory-item-value">${escapeHtml(m.value)}</span>
+    <div class="memory-item-actions">
+      <button class="memory-item-btn memory-edit-btn" data-csedit="${m.id}" title="Редактировать">&#9998;</button>
+      <button class="memory-item-btn" data-csdel="${m.id}" title="Удалить">&times;</button>
+    </div>
+  </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Ничего не найдено</div>';
+
+  const reloadMem = async () => {
+    const q = document.getElementById('cs-mem-search')?.value || null;
+    const updated = await invoke('get_all_memories', { search: q }).catch(() => []);
+    _chatSettingsRenderMemory(parentEl, updated);
+  };
+
+  list.querySelectorAll('[data-csdel]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.csdel) }).catch(()=>{}); reloadMem(); }
+    });
+  });
+
+  list.querySelectorAll('[data-csedit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.csedit);
+      const m = memories.find(x => x.id === id);
+      if (!m) return;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal modal-compact">
+        <div class="modal-title">Редактировать факт</div>
+        <div class="form-group"><label class="form-label">Категория</label>
+          <select class="form-select memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label class="form-label">Ключ</label>
+          <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
+        </div>
+        <div class="form-group"><label class="form-label">Значение</label>
+          <textarea class="form-input memory-edit-val" placeholder="Значение" rows="3" style="resize:vertical;">${escapeHtml(m.value)}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary mem-cancel">Отмена</button>
+          <button class="btn-primary mem-save">Сохранить</button>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('.mem-cancel').onclick = () => overlay.remove();
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      overlay.querySelector('.mem-save').onclick = async () => {
+        const cat = overlay.querySelector('.memory-edit-cat').value;
+        const key = overlay.querySelector('.memory-edit-key').value.trim();
+        const val = overlay.querySelector('.memory-edit-val').value.trim();
+        if (!key || !val) return;
+        try { await invoke('update_memory', { id, category: cat, key, value: val }); } catch (err) { console.error(err); }
+        overlay.remove();
+        reloadMem();
+      };
+    });
+  });
+
+  // Add button
+  document.getElementById('cs-mem-add-btn')?.addEventListener('click', () => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal modal-compact">
+      <div class="modal-title">Новый факт</div>
+      <div class="form-group"><label class="form-label">Категория</label>
+        <select class="form-select memory-add-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label class="form-label">Ключ</label>
+        <input class="form-input memory-add-key" placeholder="напр. имя, привычка" autocomplete="off">
+      </div>
+      <div class="form-group"><label class="form-label">Значение</label>
+        <input class="form-input memory-add-val" placeholder="Значение факта" autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary mem-cancel">Отмена</button>
+        <button class="btn-primary mem-save">Добавить</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mem-cancel').onclick = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('.mem-save').onclick = async () => {
+      const cat = overlay.querySelector('.memory-add-cat').value;
+      const key = overlay.querySelector('.memory-add-key').value.trim();
+      const val = overlay.querySelector('.memory-add-val').value.trim();
+      if (!key || !val) return;
+      try { await invoke('memory_remember', { category: cat, key, value: val }); } catch (err) { console.error(err); }
+      overlay.remove();
+      reloadMem();
+    };
+  });
+
+  // Search debounce
+  let searchTimeout;
+  document.getElementById('cs-mem-search')?.addEventListener('input', async (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      const q = e.target.value;
+      const results = await invoke('get_all_memories', { search: q || null }).catch(() => []);
+      _chatSettingsRenderMemory(parentEl, results);
+    }, 300);
+  });
 }
 
 // ── Chat helpers ──
@@ -3044,12 +3195,11 @@ async function loadIntegrations(force) {
 async function loadSettings(subTab) {
   const settingsContent = document.getElementById('settings-content');
   if (!settingsContent) return;
-  if (subTab === 'Memory') { loadMemoryInSettings(settingsContent); return; }
   if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
   if (subTab === 'Integrations') { loadIntegrations(); return; }
   if (subTab === 'About') { loadAbout(settingsContent); return; }
-  // Default to Memory
-  loadMemoryInSettings(settingsContent);
+  // Default to Blocklist
+  loadBlocklist(settingsContent);
 }
 
 // ── Blocklist (Settings sub-tab) ──
