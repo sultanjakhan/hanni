@@ -1825,7 +1825,7 @@ async function send() {
           }
         });
       }
-      if (history.length >= 4) {
+      if (history.length >= 2) {
         await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });
       }
       loadConversationsList();
@@ -5707,7 +5707,7 @@ async function handleCallTranscript(userText, sttMs = 0) {
           }
         });
       }
-      if (history.length >= 4) {
+      if (history.length >= 2) {
         await invoke('process_conversation_end', { messages: history, conversationId: currentConversationId });
       }
       loadConversationsList();
