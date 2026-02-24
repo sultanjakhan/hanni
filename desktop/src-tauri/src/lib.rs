@@ -9105,7 +9105,7 @@ async fn proactive_llm_call(
         ],
         max_tokens: 300,
         stream: false,
-        temperature: 0.85,
+        temperature: 0.65,
         repetition_penalty: Some(1.2),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
