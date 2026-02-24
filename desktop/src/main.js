@@ -1310,7 +1310,7 @@ function _chatSettingsSetupMemory(memories) {
       const delBtn = e.target.closest('[data-csdel]');
       if (delBtn) {
         if (confirm('Удалить?')) {
-          await invoke('delete_memory', { id: parseInt(delBtn.dataset.csdel) }).catch(() => {});
+          await invoke('delete_memory', { id: parseInt(delBtn.dataset.csdel) }).catch(e => console.error('delete_memory error:', e));
           reloadMem();
         }
         return;
@@ -3165,7 +3165,7 @@ async function loadAllFacts(el) {
     // Delete handlers
     el.querySelectorAll('[data-mdel]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mdel) }).catch(()=>{}); loadAllFacts(el); }
+        if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mdel) }).catch(e => console.error('delete_memory error:', e)); loadAllFacts(el); }
       });
     });
 
@@ -3265,7 +3265,7 @@ function renderMemoryList(memories, el) {
 
   list.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.del) }).catch(()=>{}); loadMemoryInSettings(el); }
+      if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.del) }).catch(e => console.error('delete_memory error:', e)); loadMemoryInSettings(el); }
     });
   });
 
