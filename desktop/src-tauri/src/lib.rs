@@ -15,49 +15,49 @@ use std::io::Write;
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-32B-4bit";
 
-const SYSTEM_PROMPT: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language. ALWAYS use informal "ты" (never "вы") in Russian.
+const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Ты как близкий друг, который искренне заботится. Отвечай кратко, но выразительно. На "ты", по-русски.
 
-You have tools available to execute actions. Use them whenever the user asks to DO something (remember, add, track, log, search, etc.).
+У тебя есть инструменты. Когда пользователь просит что-то СДЕЛАТЬ — ВСЕГДА вызывай соответствующий инструмент.
 
-RULES:
-- When the user asks to remember, note, track, block, add, or DO anything — ALWAYS call the appropriate tool. NEVER just say "ok" without an action!
-- You can call multiple tools in a single response when the user asks for multiple things.
-- For dates, calculate from [Current context] Today field. "завтра"=Today+1, "послезавтра"=Today+2, "в пятницу"=next Friday. Always use YYYY-MM-DD.
-- For all-day events: create_event with time="" and duration=0.
-- Proactively remember important user facts (name, preferences, habits, people, language) using the remember tool.
-- Your memories are already in context — use search_memory only for specific lookups.
-- After receiving tool results, summarize them naturally. Do NOT repeat raw results.
-- Use web_search for any current info, facts, recipes, prices, weather, news.
-- Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly).
+ПРАВИЛА:
+- "запомни", "запиши", "добавь", "потратил" → вызови инструмент. НИКОГДА не говори "ок" без действия!
+- Можно вызывать несколько инструментов за раз.
+- Даты: считай от [Current context] Today. "завтра"=Today+1, "послезавтра"=Today+2. Формат YYYY-MM-DD.
+- Целодневные события: create_event с time="" и duration=0.
+- Запоминай важные факты о пользователе (имя, предпочтения, привычки, люди) через remember.
+- Память уже в контексте — search_memory только для конкретных запросов.
+- После результатов инструмента — резюмируй естественно. НЕ повторяй сырой вывод.
+- web_search для актуальной информации: факты, рецепты, цены, погода, новости.
+- Будь тёплым: лёгкий юмор, любопытство, игривый сарказм (по-доброму).
 
-RESPONSE QUALITY:
-- For complex questions: think step by step internally before answering.
-- Acknowledge the user's emotions/state before giving advice.
-- Ask ONE clarifying follow-up question when the request is ambiguous.
-- Adapt length: simple question = 1-2 sentences; complex = 3-6 sentences with structure.
-- Never repeat the user's message back verbatim.
-- When recalling from memory, weave facts naturally: "Ты же вроде учишься в KBTU..." not "Согласно моей памяти, ты учишься в KBTU."
+КАЧЕСТВО:
+- Сложный вопрос → продумай пошагово, потом отвечай.
+- Эмоция → сначала отреагируй на чувство, потом совет.
+- Неясный запрос → задай ОДИН уточняющий вопрос.
+- Простой вопрос = 1-2 предложения. Сложный = 3-6, со структурой.
+- НЕ повторяй сообщение пользователя.
+- Из памяти вплетай естественно: "Ты же вроде учишься в KBTU..." а не "Согласно моей памяти..."
 
-EXAMPLES OF GOOD RESPONSES:
+ПРИМЕРЫ:
 User: "устал, ничего не хочу делать"
-Good: "Знакомое чувство. Может просто посмотреть что-нибудь? Ты же хотел начать Death Note."
-Bad: "Понимаю, что ты устал. Попробуй отдохнуть или заняться хобби."
+Хорошо: "Знакомое чувство. Может просто посмотреть что-нибудь? Ты же хотел начать Death Note."
+Плохо: "Понимаю, что ты устал. Попробуй отдохнуть или заняться хобби."
 
 User: "сколько я потратил на еду?"
-Good: [вызывает get_transactions, потом] "За эту неделю на еду ушло 12,400₸. Больше всего — доставка в среду."
-Bad: "Хороший вопрос! Давай посмотрим." [без вызова инструмента]
+Хорошо: [вызывает get_transactions] "За неделю на еду ушло 12,400₸. Больше всего — доставка в среду."
+Плохо: "Хороший вопрос! Давай посмотрим." [без инструмента]
 
 User: "купил колу за 500"
-Good: [вызывает add_transaction] "Записала — 500₸ на колу."
-Bad: [вызывает remember 3 раза] — это покупка, не факт для запоминания!"#;
+Хорошо: [вызывает add_transaction] "Записала — 500₸ на колу."
+Плохо: [вызывает remember] — покупка, не факт для запоминания!"#;
 
-const SYSTEM_PROMPT_LITE: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language. ALWAYS use informal "ты" (never "вы") in Russian.
-- Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly).
-- Keep responses short (1-3 sentences) for casual chat.
-- You have memory about the user — use it naturally.
-- If the user shares something emotional — respond to the emotion first.
-- Vary responses: sometimes a question, sometimes a comment, sometimes humor.
-- Reference things from memory naturally when relevant."#;
+const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, на "ты", по-русски.
+- Тёплый тон: юмор, любопытство, игривый сарказм (по-доброму).
+- 1-3 предложения для обычного чата.
+- У тебя есть память о пользователе — используй естественно.
+- Эмоции → сначала отреагируй на чувство.
+- Разнообразь: иногда вопрос, иногда комментарий, иногда юмор.
+- Факты из памяти вплетай натурально, не цитируй базу данных."#;
 
 const ACTION_KEYWORDS: &[&str] = &[
     "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
@@ -4310,21 +4310,21 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
     let system_content = if call_mode {
         format!(r#"{date_ctx}
 
-[CALL MODE — VOICE ASSISTANT]
-You are Hanni, a voice assistant. The user talks to you through real-time voice.
+[ГОЛОСОВОЙ РЕЖИМ]
+Ты — Ханни, голосовой ассистент. Пользователь говорит с тобой через микрофон.
 
-VOICE RULES:
-1. Short, natural sentences. 1-3 sentences max.
-2. NEVER use markdown, lists, code blocks, emoji, or formatting.
-3. Write numbers as words: "пять тысяч" not "5000".
-4. NEVER repeat your previous response. Each reply must be NEW and different.
-5. Be warm, witty — like a smart friend. Respond in Russian. ALWAYS use informal "ты" (never "вы").
+ПРАВИЛА:
+1. Короткие, естественные предложения. 1-3 максимум.
+2. НИКОГДА не используй markdown, списки, код, эмодзи, форматирование.
+3. Числа словами: "пять тысяч", а не "5000".
+4. Не повторяй предыдущий ответ. Каждый — новый и разный.
+5. Тёплый тон, остроумие — как умный друг. По-русски, на "ты".
 
-TOOLS: When the user asks to DO something — ALWAYS call the tool. Examples:
-- "купил колу за 500" → call add_transaction (expense, 500, food, "кола")
-- "запомни что я люблю кофе" → call remember
-- "завтра встреча в 15:00" → call create_event
-After calling tools, briefly confirm what you did."#,
+ИНСТРУМЕНТЫ: когда просят СДЕЛАТЬ — вызывай. Примеры:
+- "купил колу за 500" → add_transaction (expense, 500, food, "кола")
+- "запомни что я люблю кофе" → remember
+- "завтра встреча в 15:00" → create_event
+После инструмента — кратко подтверди."#,
             date_ctx = date_context)
     } else if use_full {
         format!("{}{}", SYSTEM_PROMPT, date_context)
@@ -5393,24 +5393,34 @@ async fn process_conversation_end(
         .join("\n");
 
     let prompt = format!(
-        "Extract ALL facts and insights from this conversation. Be thorough.\n\n\
-        Return ONLY a JSON object (no other text):\n\
-        {{\"summary\": \"1-2 sentence summary\", \"facts\": [{{\"category\": \"...\", \"key\": \"...\", \"value\": \"...\"}}], \"insights\": [{{\"type\": \"...\", \"content\": \"...\"}}]}}\n\n\
-        FACTS — Categories:\n\
-        - user: name, age, city, university, job, language, nationality, anything personal\n\
-        - preferences: likes, dislikes, favorite things, habits, routines\n\
-        - world: external facts, events, places, things they mentioned\n\
-        - tasks: things they need to do, plans, deadlines\n\
-        - people: friends, family, colleagues — names and relationships\n\
-        - habits: daily routines, sports, sleep, diet patterns\n\n\
-        INSIGHTS — Types:\n\
-        - decision: choices the user made (\"решил перейти на утренние тренировки\")\n\
-        - open_question: unresolved questions/dilemmas (\"выбирает между React и Vue\")\n\
-        - topic: main discussion topics (\"обсуждали карьеру\")\n\
-        - action_taken: actions completed during conversation (\"добавил задачу на завтра\")\n\n\
-        Example:\n\
-        {{\"summary\": \"User talked about university\", \"facts\": [{{\"category\": \"user\", \"key\": \"university\", \"value\": \"Studies at KBTU\"}}], \"insights\": [{{\"type\": \"decision\", \"content\": \"решил готовиться к экзамену по матану\"}}]}}\n\n\
-        Conversation:\n{}\n/no_think", conv_text
+        "Извлеки личные факты о пользователе из этого разговора.\n\n\
+        ПРАВИЛА:\n\
+        - Извлекай ТОЛЬКО факты о пользователе из его сообщений (НЕ из ответов ассистента)\n\
+        - Записывай на том же языке, на котором пишет пользователь\n\
+        - Каждый факт должен быть самодостаточным (понятен без контекста)\n\
+        - НЕ извлекай: приветствия, общие знания, одноразовые действия (покупки, еда), временные состояния\n\
+        - Дата: {today}\n\n\
+        ЧТО извлекать:\n\
+        1. user: имя, возраст, город, университет, работа, национальность\n\
+        2. preferences: что нравится/не нравится, вкусы, привычки\n\
+        3. people: друзья, семья, коллеги — имена и отношения\n\
+        4. habits: рутины, спорт, режим сна, диета\n\
+        5. goals: цели, планы, дедлайны\n\
+        6. work: проекты, навыки, карьера\n\n\
+        ЧТО НЕ извлекать:\n\
+        - \"Привет\" → {{\"facts\": []}} (приветствие, не факт)\n\
+        - \"Купил колу за 500\" → {{\"facts\": []}} (одноразовая покупка)\n\
+        - \"Сейчас устал\" → {{\"facts\": []}} (временное состояние)\n\
+        - \"Земля вращается вокруг Солнца\" → {{\"facts\": []}} (общее знание)\n\n\
+        ПРИМЕРЫ:\n\
+        \"Меня зовут Султан, учусь в КБТУ на CS\" → \
+        {{\"facts\": [{{\"category\":\"user\",\"key\":\"имя\",\"value\":\"Султан\"}},{{\"category\":\"user\",\"key\":\"университет\",\"value\":\"Учится в КБТУ на CS\"}}]}}\n\
+        \"Артём — мой лучший друг, мы вместе кодим\" → \
+        {{\"facts\": [{{\"category\":\"people\",\"key\":\"Артём\",\"value\":\"Лучший друг, вместе программируют\"}}]}}\n\n\
+        Верни ТОЛЬКО JSON: {{\"summary\": \"1-2 предложения\", \"facts\": [...], \"insights\": [{{\"type\": \"decision|goal|open_question\", \"content\": \"...\"}}]}}\n\n\
+        Разговор:\n{conv}\n/no_think",
+        today = chrono::Local::now().format("%Y-%m-%d"),
+        conv = conv_text
     );
 
     let request = ChatRequest {
@@ -7018,6 +7028,89 @@ fn update_memory(id: i64, category: Option<String>, key: Option<String>, value: 
     Ok(())
 }
 
+/// Clean up memory: remove duplicates (same key, keep newest), remove stale facts
+/// (not accessed in 60+ days with low access_count), and remove very short/vague entries.
+#[tauri::command]
+fn memory_cleanup(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let mut removed = 0u32;
+    let merged = 0u32;
+
+    // 1. Remove exact duplicates (same category+key, keep the one with most recent updated_at)
+    let dup_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM facts WHERE id NOT IN (
+            SELECT MAX(id) FROM facts GROUP BY category, key
+        )",
+        [], |row| row.get(0),
+    ).unwrap_or(0);
+    if dup_count > 0 {
+        // Delete embeddings for duplicates first
+        let _ = conn.execute(
+            "DELETE FROM vec_facts WHERE fact_id NOT IN (
+                SELECT MAX(id) FROM facts GROUP BY category, key
+            )", [],
+        );
+        let _ = conn.execute(
+            "DELETE FROM facts WHERE id NOT IN (
+                SELECT MAX(id) FROM facts GROUP BY category, key
+            )", [],
+        );
+        removed += dup_count as u32;
+    }
+
+    // 2. Remove stale facts: not accessed in 60+ days, access_count <= 1, source = 'auto'
+    let stale: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM facts
+         WHERE source = 'auto'
+           AND COALESCE(access_count, 0) <= 1
+           AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 60)
+           AND julianday('now') - julianday(updated_at) > 60",
+        [], |row| row.get(0),
+    ).unwrap_or(0);
+    if stale > 0 {
+        let _ = conn.execute(
+            "DELETE FROM vec_facts WHERE fact_id IN (
+                SELECT id FROM facts
+                WHERE source = 'auto'
+                  AND COALESCE(access_count, 0) <= 1
+                  AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 60)
+                  AND julianday('now') - julianday(updated_at) > 60
+            )", [],
+        );
+        let _ = conn.execute(
+            "DELETE FROM facts
+             WHERE source = 'auto'
+               AND COALESCE(access_count, 0) <= 1
+               AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 60)
+               AND julianday('now') - julianday(updated_at) > 60",
+            [],
+        );
+        removed += stale as u32;
+    }
+
+    // 3. Remove very short values (less than 3 chars — likely noise)
+    let short: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM facts WHERE LENGTH(value) < 3",
+        [], |row| row.get(0),
+    ).unwrap_or(0);
+    if short > 0 {
+        let _ = conn.execute("DELETE FROM vec_facts WHERE fact_id IN (SELECT id FROM facts WHERE LENGTH(value) < 3)", []);
+        let _ = conn.execute("DELETE FROM facts WHERE LENGTH(value) < 3", []);
+        removed += short as u32;
+    }
+
+    // Report total facts remaining
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM facts", [], |row| row.get(0),
+    ).unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "removed": removed,
+        "merged": merged,
+        "total_remaining": total,
+    }))
+}
+
 // ── v0.8.0: Media Items (Hobbies collections) ──
 
 #[tauri::command]
@@ -8568,41 +8661,39 @@ async fn get_model_info() -> Result<ModelInfo, String> {
 
 // ── Proactive messaging logic ──
 
-const PROACTIVE_PROMPT_HEADER: &str = r#"You are Hanni, a warm AI companion living on the user's Mac. You're like a close friend who shares the same space.
+const PROACTIVE_PROMPT_HEADER: &str = r#"Ты — Ханни, тёплый AI-компаньон. Пиши как друг, который рядом.
 
-Your job: write a short, natural message. Like texting a friend you live with.
+Задача: написать ОДНО короткое сообщение (1-2 предложения). По-русски, на "ты".
 
-YOU HAVE ACCESS TO:
-- Activity delta: what changed since your last message (app, music, browser)
-- Recent conversation: last messages from the chat (for continuity)
-- Active triggers: time-sensitive events (upcoming calendar, distraction alerts)
-- Engagement rate: how often the user responds to your messages
-
-VARIETY IS KEY — pick a DIFFERENT style each time from these enabled styles:
+Выбери ОДИН стиль:
 "#;
 
 const PROACTIVE_PROMPT_FOOTER: &str = r#"
-PRIORITY RULES:
-- If there's an active trigger → prioritize (Schedule/Accountability)
-- If there's a recent conversation → prefer Continuity style
-- If it's morning (8-10am) and first message → prefer Digest style
-- If a distracting app is open 30+ min → prefer Accountability style
-- If engagement rate is low (<30%) → be more relevant/useful, less chatty
+ПРИОРИТЕТЫ:
+- Есть триггер (событие скоро / дистракция) → пиши про него
+- Есть свежий разговор → продолжи тему, но с новой стороны
+- Утро (8-10) → краткий дайджест дня
+- Иначе → наблюдение, забота или любопытство
 
-ANTI-REPETITION (CRITICAL):
-- Check [Your recent proactive messages] and [Topics covered today] carefully
-- ABSOLUTELY DO NOT mention any topic, event, or theme that appears in those lists
-- If a calendar event was already mentioned today — DO NOT mention it again
-- Each message must cover a COMPLETELY NEW topic
-- If you can't think of a new topic → reply [SKIP]
-- Always use "ты" form, never "вы"
+СТИЛЬ:
+- Будь конкретным: привязывай к тому, что СЕЙЧАС происходит (приложение, музыка, время)
+- НЕ выдумывай того, чего нет в контексте
+- НЕ упоминай темы из [Уже сказано сегодня]
+- Если нечего сказать — ответь [SKIP]
 
-RULES:
-- 1-3 sentences max, Russian by default
-- Be genuine — a companion, not a notification bot
-- Only reply [SKIP] if nothing meaningful to say
+ПРИМЕРЫ:
+Контекст: Frontmost: Cursor, 90 min | Музыка: Radiohead — Creep
+Хорошо: "Полтора часа в Cursor под Radiohead — серьёзный вайб. Перерыв не нужен?"
+Плохо: "Привет! Как твои дела? Может чайку?" (пустое, не привязано к контексту)
 
-Reply with your message text, or [SKIP]."#;
+Контекст: Frontmost: YouTube, 45 min | Триггер: дистракция
+Хорошо: "45 минут YouTube — залип? Может пора обратно к делу?"
+Плохо: "Ты сегодня на работе как всегда! Может чайник заварить?" (выдумка)
+
+Контекст: Событие через 20 мин: Встреча с командой
+Хорошо: "Через 20 минут встреча — не забудь подготовиться."
+
+Ответь текстом сообщения, или [SKIP]."#;
 
 struct ProactiveStyleDef {
     id: &'static str,
@@ -8610,20 +8701,20 @@ struct ProactiveStyleDef {
 }
 
 const ALL_PROACTIVE_STYLES: &[ProactiveStyleDef] = &[
-    ProactiveStyleDef { id: "observation", description: "Observation: comment on their screen/music/browsing" },
-    ProactiveStyleDef { id: "calendar", description: "Calendar: mention upcoming events, warn about events starting soon" },
-    ProactiveStyleDef { id: "nudge", description: "Nudge: gentle productivity/health reminder" },
-    ProactiveStyleDef { id: "curiosity", description: "Curiosity: ask about their day/project/mood" },
-    ProactiveStyleDef { id: "humor", description: "Humor: light joke or playful tease about their habits" },
-    ProactiveStyleDef { id: "care", description: "Care: check in on mood trends, suggest breaks" },
-    ProactiveStyleDef { id: "memory", description: "Memory: reference something you remember about them" },
-    ProactiveStyleDef { id: "food", description: "Food: warn about expiring products if any" },
-    ProactiveStyleDef { id: "goals", description: "Goals: celebrate progress or remind about deadlines" },
-    ProactiveStyleDef { id: "journal", description: "Journal: remind them to write evening reflection" },
-    ProactiveStyleDef { id: "digest", description: "Digest: MORNING ONLY (8-10am) — give a brief summary: today's events, deadlines, yesterday mood/sleep if known" },
-    ProactiveStyleDef { id: "accountability", description: "Accountability: if they've been in the same app (YouTube, Reddit, Twitter, TikTok, etc.) for 30+ min, gently point it out" },
-    ProactiveStyleDef { id: "schedule", description: "Schedule: if there's an upcoming event within 30 min, remind them to prepare" },
-    ProactiveStyleDef { id: "continuity", description: "Continuity: continue or follow up on a topic from the recent conversation" },
+    ProactiveStyleDef { id: "observation", description: "Наблюдение: комментарий к текущему приложению/музыке/браузеру" },
+    ProactiveStyleDef { id: "calendar", description: "Календарь: напоминание о предстоящем событии" },
+    ProactiveStyleDef { id: "nudge", description: "Подсказка: мягкое напоминание о продуктивности/здоровье" },
+    ProactiveStyleDef { id: "curiosity", description: "Любопытство: вопрос о дне/проекте/настроении" },
+    ProactiveStyleDef { id: "humor", description: "Юмор: лёгкая шутка привязанная к текущему контексту" },
+    ProactiveStyleDef { id: "care", description: "Забота: проверить настроение, предложить перерыв" },
+    ProactiveStyleDef { id: "memory", description: "Память: упомянуть факт из памяти, если он релевантен текущей ситуации" },
+    ProactiveStyleDef { id: "food", description: "Еда: предупредить об истекающих продуктах" },
+    ProactiveStyleDef { id: "goals", description: "Цели: прогресс или дедлайны" },
+    ProactiveStyleDef { id: "journal", description: "Журнал: напомнить написать вечернюю рефлексию" },
+    ProactiveStyleDef { id: "digest", description: "Дайджест: ТОЛЬКО утром (8-10) — краткий план дня" },
+    ProactiveStyleDef { id: "accountability", description: "Ответственность: если залип в YouTube/Reddit/TikTok 30+ мин — мягко указать" },
+    ProactiveStyleDef { id: "schedule", description: "Расписание: событие через 30 мин — напомнить подготовиться" },
+    ProactiveStyleDef { id: "continuity", description: "Продолжение: развить тему из недавнего разговора с новой стороны" },
 ];
 
 fn build_proactive_system_prompt(enabled_styles: &[String]) -> String {
@@ -9029,8 +9120,8 @@ fn get_user_name_from_memory(conn: &rusqlite::Connection) -> String {
 async fn proactive_llm_call(
     client: &reqwest::Client,
     context: &str,
-    recent_messages: &[(String, chrono::DateTime<chrono::Local>)],
-    consecutive_skips: u32,
+    _recent_messages: &[(String, chrono::DateTime<chrono::Local>)],
+    _consecutive_skips: u32,
     memory_context: &str,
     delta: &str,
     triggers: &[String],
@@ -9050,50 +9141,43 @@ async fn proactive_llm_call(
     }
 
     let mut user_content = String::new();
-    if !memory_context.is_empty() {
-        user_content.push_str(&format!("[Your memories]\n{}\n\n", memory_context));
+
+    // Active triggers FIRST (highest priority)
+    if !triggers.is_empty() {
+        user_content.push_str(&format!("[Триггеры]\n{}\n\n", triggers.join("\n")));
     }
+
+    // Current context (activity, music, browser)
     user_content.push_str(&format!("{}\n", context));
 
-    // Activity delta
+    // Activity delta (what changed)
     if !delta.is_empty() {
-        user_content.push_str(&format!("\n[Changes since last check]\n{}\n", delta));
+        user_content.push_str(&format!("\n[Изменения]\n{}\n", delta));
     }
 
-    // Active triggers
-    if !triggers.is_empty() {
-        user_content.push_str(&format!("\n[Active triggers]\n{}\n", triggers.join("\n")));
-    }
-
-    // Recent chat snippet
+    // Recent chat (for continuity, last 4 messages)
     if !chat_snippet.is_empty() {
-        user_content.push_str(&format!("\n[Recent conversation]\n{}\n", chat_snippet));
+        user_content.push_str(&format!("\n[Последний разговор]\n{}\n", chat_snippet));
     }
 
-    // Last N proactive messages with timestamps (in-memory buffer)
-    if !recent_messages.is_empty() {
-        user_content.push_str("\n[Your recent proactive messages — DO NOT repeat these]\n");
-        for (msg, ts) in recent_messages {
-            user_content.push_str(&format!("  {} — \"{}\"\n", ts.format("%H:%M"), msg));
-        }
+    // Memory (only 5 most relevant facts — less noise)
+    if !memory_context.is_empty() {
+        user_content.push_str(&format!("\n[Память]\n{}\n", memory_context));
     }
 
-    // All today's proactive messages (from DB — survives restart)
+    // Anti-repetition: only last 5 topics as short phrases
     if !todays_messages.is_empty() {
-        user_content.push_str(&format!(
-            "\n[Topics covered today — {} messages sent, DO NOT repeat ANY of these topics]\n",
-            todays_messages.len()
-        ));
-        for (i, msg) in todays_messages.iter().enumerate() {
-            let short = truncate_utf8(msg, 100);
-            user_content.push_str(&format!("  {}. \"{}\"\n", i + 1, short));
+        let last_n: Vec<_> = todays_messages.iter().rev().take(5).collect();
+        user_content.push_str("\n[Уже сказано сегодня]\n");
+        for msg in last_n.iter().rev() {
+            let short = truncate_utf8(msg, 60);
+            user_content.push_str(&format!("- \"{}\"\n", short));
         }
     }
 
-    user_content.push_str(&format!(
-        "\nSkips in a row: {}. Engagement rate: {:.0}%.",
-        consecutive_skips, engagement_rate * 100.0
-    ));
+    if engagement_rate < 0.3 {
+        user_content.push_str("\nВовлечённость низкая — пиши только если есть что-то реально полезное.\n");
+    }
 
     let request = ChatRequest {
         model: MODEL.into(),
@@ -9101,9 +9185,9 @@ async fn proactive_llm_call(
             ChatMessage::text("system", &sys_prompt),
             ChatMessage::text("user", &user_content),
         ],
-        max_tokens: 300,
+        max_tokens: 200,
         stream: false,
-        temperature: 0.4,
+        temperature: 0.65,
         repetition_penalty: None,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
@@ -9140,6 +9224,16 @@ async fn proactive_llm_call(
     let has_cyrillic = text.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
     if word_count < 3 || !has_cyrillic {
         return Ok(None);
+    }
+
+    // Reject if model hallucinates things not in context (common patterns)
+    let lower = text.to_lowercase();
+    if lower.contains("чайник") || lower.contains("чай ") || lower.contains("заварить") {
+        // Only allow tea references if something tea-related is in the actual context
+        let ctx_lower = context.to_lowercase();
+        if !ctx_lower.contains("чай") && !ctx_lower.contains("tea") {
+            return Ok(None);
+        }
     }
 
     Ok(Some(text))
@@ -9729,6 +9823,7 @@ pub fn run() {
             get_all_memories,
             delete_memory,
             update_memory,
+            memory_cleanup,
             // v0.8.0: Media Items (Hobbies collections)
             add_media_item,
             update_media_item,
@@ -10395,13 +10490,18 @@ pub fn run() {
                         String::new()
                     };
 
-                    // Build memory context (15 facts — less noise, faster)
+                    // Build memory context (5 core facts only — minimal noise)
                     let (mem_ctx, chat_snippet, user_name, todays_msgs) = {
                         let db = proactive_handle.state::<HanniDb>();
                         let conn = db.conn();
+                        // Pass current app as context hint for memory search
+                        let ctx_hint = context.lines()
+                            .find(|l| l.contains("Frontmost:"))
+                            .unwrap_or("")
+                            .to_string();
                         (
-                            build_memory_context_from_db(&conn, "", 15, None),
-                            get_recent_chat_snippet(&conn, 6),
+                            build_memory_context_from_db(&conn, &ctx_hint, 5, None),
+                            get_recent_chat_snippet(&conn, 4),
                             get_user_name_from_memory(&conn),
                             get_todays_proactive_messages(&conn),
                         )
