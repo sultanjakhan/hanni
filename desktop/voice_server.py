@@ -82,7 +82,7 @@ def ensure_whisper():
         logger.info(f"Loading Whisper model: {WHISPER_MODEL}")
         mlx_whisper.transcribe(
             np.zeros(SAMPLE_RATE, dtype=np.float32),
-            path_or_hf_repo=WHISPER_MODEL, language="ru",
+            path_or_hf_repo=WHISPER_MODEL,
         )
         _whisper_loaded = True
         logger.info("Whisper loaded (large-v3 full)")
@@ -94,7 +94,6 @@ def transcribe_audio(audio_float32: np.ndarray) -> str:
     result = mlx_whisper.transcribe(
         audio_float32,
         path_or_hf_repo=WHISPER_MODEL,
-        language="ru",
         temperature=(0.0,),
         condition_on_previous_text=False,
         no_speech_threshold=0.6,
@@ -207,6 +206,10 @@ class VoiceState:
         self.transcribe_ready = threading.Event()
         self.force_stop = threading.Event()
         self.resume_time = 0.0  # timestamp of last resume — ignore VAD for 500ms after
+        # v0.18.0: Wake word detection state
+        self.wakeword_active = threading.Event()
+        self.wakeword_keyword = "ханни"
+        self.wakeword_events = queue.Queue()
 
 _state = VoiceState()
 
@@ -320,6 +323,87 @@ def record_and_transcribe(continuous=False):
     logger.info("Recording stopped")
 
 
+# ── Wake Word Detection (VAD → short Whisper → keyword match) ──
+
+def wakeword_loop():
+    """Background: VAD detects speech → short Whisper transcription → keyword match."""
+    ensure_whisper()
+    chunk_size = VAD_CHUNK_SAMPLES
+    silence_end = 10       # ~320ms silence → end of wake phrase
+    min_chunks = 5         # ~160ms minimum speech
+    max_chunks = int(3.0 * SAMPLE_RATE / chunk_size)  # 3s max
+
+    try:
+        stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype='int16', blocksize=chunk_size)
+        stream.start()
+    except Exception as e:
+        logger.error(f"[WakeWord] Mic error: {e}")
+        _state.wakeword_active.clear()
+        return
+
+    logger.info(f"[WakeWord] Listening for '{_state.wakeword_keyword}'...")
+
+    while _state.wakeword_active.is_set():
+        # Pause if call or recording is active (mic conflict)
+        if _state.call_active.is_set() or _state.recording_active.is_set():
+            try:
+                stream.read(chunk_size)
+            except Exception:
+                break
+            time.sleep(0.05)
+            continue
+
+        speech_frames = []
+        silence_count = 0
+        speech_detected = False
+        vad_model.reset_states()
+
+        while _state.wakeword_active.is_set():
+            if _state.call_active.is_set() or _state.recording_active.is_set():
+                break
+            try:
+                data, _ = stream.read(chunk_size)
+            except Exception:
+                break
+
+            prob = silero_speech_prob(data.flatten())
+
+            if prob > VAD_THRESHOLD:
+                speech_frames.append(data.copy())
+                silence_count = 0
+                if not speech_detected:
+                    speech_detected = True
+                if len(speech_frames) >= max_chunks:
+                    break
+            else:
+                if speech_detected:
+                    speech_frames.append(data.copy())
+                    silence_count += 1
+                    if silence_count >= silence_end:
+                        break
+
+        if not speech_detected or len(speech_frames) < min_chunks:
+            continue
+        if not _state.wakeword_active.is_set():
+            break
+
+        audio_int16 = np.concatenate(speech_frames, axis=0).flatten()
+        audio_float32 = audio_int16.astype(np.float32) / 32768.0
+        duration = len(audio_float32) / SAMPLE_RATE
+
+        if duration > 3.0 or duration < 0.3:
+            continue
+
+        text = transcribe_audio(audio_float32)
+        if text and _state.wakeword_keyword.lower() in text.lower():
+            logger.info(f"[WakeWord] DETECTED in '{text}'")
+            _state.wakeword_events.put({"detected": True, "text": text})
+
+    stream.stop()
+    stream.close()
+    logger.info("[WakeWord] Stopped")
+
+
 # ── HTTP + SSE Server (threaded so /listen SSE doesn't block /listen/pause etc.) ──
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -377,7 +461,7 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5+v3_en", "embed": "paraphrase-multilingual-MiniLM-L12-v2"})
+            self._json({"status": "ok", "model": WHISPER_MODEL, "vad": "silero", "tts": "silero_v5+v3_en", "embed": "paraphrase-multilingual-MiniLM-L12-v2", "wakeword": _state.wakeword_active.is_set()})
         elif self.path == "/tts/voices":
             self._json({
                 "voices": TTS_ALL_SPEAKERS,
@@ -426,6 +510,24 @@ class VoiceHandler(BaseHTTPRequestHandler):
             finally:
                 with VoiceHandler._listen_lock:
                     VoiceHandler._listen_active = False
+        elif self.path == "/wakeword/events":
+            # SSE stream for wake word detection events
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", self._origin())
+            self.end_headers()
+            try:
+                while _state.wakeword_active.is_set():
+                    try:
+                        event = _state.wakeword_events.get(timeout=1.0)
+                        self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         else:
             self._json({"error": "not found"}, 404)
 
@@ -487,6 +589,36 @@ class VoiceHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.error(f"[Embed] Error: {e}")
                 self._json({"error": str(e)}, 500)
+        elif self.path == "/rerank":
+            try:
+                raw = self._read_body()
+                if raw is None:
+                    self._json({"error": f"Request too large (max {MAX_REQUEST_BODY} bytes)"}, 413)
+                    return
+                body = json.loads(raw) if raw else {}
+                query = body.get("query", "")
+                passages = body.get("passages", [])
+                top_k = body.get("top_k", 30)
+                if not query or not passages:
+                    self._json({"error": "query and passages required"}, 400)
+                    return
+                ranker = ensure_reranker()
+                if ranker is None:
+                    self._json({"error": "flashrank not installed"}, 501)
+                    return
+                from flashrank import RerankRequest
+                rerank_req = RerankRequest(query=query, passages=[
+                    {"id": p.get("id", i), "text": p.get("text", "")}
+                    for i, p in enumerate(passages)
+                ])
+                results = ranker.rerank(rerank_req)
+                self._json({"results": [
+                    {"id": r["id"], "text": r["text"], "score": float(r["score"])}
+                    for r in results[:top_k]
+                ]})
+            except Exception as e:
+                logger.error(f"[Rerank] Error: {e}")
+                self._json({"error": str(e)}, 500)
         elif self.path == "/tts":
             try:
                 raw = self._read_body()
@@ -508,6 +640,67 @@ class VoiceHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.error(f"[TTS] Error: {e}")
                 self._json({"error": str(e)}, 500)
+        elif self.path == "/wakeword/start":
+            raw = self._read_body()
+            body = json.loads(raw) if raw else {}
+            keyword = body.get("keyword", "ханни").strip().lower()
+            if _state.wakeword_active.is_set():
+                self._json({"status": "already_active"})
+                return
+            _state.wakeword_keyword = keyword
+            _state.wakeword_active.set()
+            while not _state.wakeword_events.empty():
+                try: _state.wakeword_events.get_nowait()
+                except queue.Empty: break
+            threading.Thread(target=wakeword_loop, daemon=True).start()
+            self._json({"status": "started", "keyword": keyword})
+        elif self.path == "/wakeword/stop":
+            _state.wakeword_active.clear()
+            while not _state.wakeword_events.empty():
+                try: _state.wakeword_events.get_nowait()
+                except queue.Empty: break
+            self._json({"status": "stopped"})
+        elif self.path == "/tts/clone":
+            try:
+                raw = self._read_body()
+                if raw is None:
+                    self._json({"error": "Request too large"}, 413)
+                    return
+                body = json.loads(raw) if raw else {}
+                text = body.get("text", "").strip()
+                server_url = body.get("server_url", "").rstrip("/")
+                ref_audio_b64 = body.get("reference_audio", "")
+                ref_audio_path = body.get("reference_audio_path", "")
+                if not text or not server_url:
+                    self._json({"error": "text and server_url required"}, 400)
+                    return
+                if len(text) > MAX_TTS_TEXT_LENGTH:
+                    text = text[:MAX_TTS_TEXT_LENGTH]
+                # Read reference audio from file path if provided
+                import base64
+                if ref_audio_path and not ref_audio_b64:
+                    import os
+                    if not os.path.exists(ref_audio_path):
+                        self._json({"error": f"Reference audio not found: {ref_audio_path}"}, 400)
+                        return
+                    with open(ref_audio_path, "rb") as f:
+                        ref_audio_b64 = base64.b64encode(f.read()).decode()
+                logger.info(f"[TTS/Clone] Proxying to {server_url}, text_len={len(text)}, ref_len={len(ref_audio_b64)}")
+                import urllib.request
+                payload = json.dumps({"text": text, "reference_audio": ref_audio_b64}).encode()
+                req = urllib.request.Request(
+                    f"{server_url}/tts",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    wav_bytes = resp.read()
+                logger.info(f"[TTS/Clone] Done, {len(wav_bytes)} bytes")
+                self._binary(wav_bytes)
+            except Exception as e:
+                logger.error(f"[TTS/Clone] Error: {e}")
+                self._json({"error": str(e)}, 500)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -526,6 +719,26 @@ def ensure_embed():
                 _embed_model = TextEmbedding("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
                 logger.info("Embedding model loaded (384-dim, ONNX)")
     return _embed_model
+
+
+# ── Reranker model (lazy load, flashrank ONNX) ──
+_reranker = None
+_reranker_lock = threading.Lock()
+
+def ensure_reranker():
+    global _reranker
+    if _reranker is None:
+        with _reranker_lock:
+            if _reranker is None:
+                try:
+                    from flashrank import Ranker
+                    logger.info("Loading reranker model (ms-marco-MultiBERT-L-12)...")
+                    _reranker = Ranker(model_name="ms-marco-MultiBERT-L-12")
+                    logger.info("Reranker model loaded (ONNX, multilingual)")
+                except ImportError:
+                    logger.warning("flashrank not installed — reranking disabled")
+                    return None
+    return _reranker
 
 
 def main():

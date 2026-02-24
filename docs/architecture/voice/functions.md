@@ -25,14 +25,15 @@
 | ID | Функция | Тип | Entry | Файл:строки | LOC | Cmplx | Subfuncs | Phase 3 |
 |----|---------|-----|-------|-------------|-----|-------|----------|---------|
 | I1 | Remote TTS сервер (PC) | external | pc/tts_server.py | tts_server.py:L1-120 | 120 | Medium | 5 | ✅ |
+| I2 | Rerank endpoint (FlashRank) | endpoint | POST /rerank, ensure_reranker() | voice_server.py:L490-583 | 50 | Medium | — | ✅ |
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Total functions | 11 |
+| Total functions | 12 |
 | Simple | 0 |
-| Medium | 7 |
+| Medium | 8 |
 | Complex | 4 |
 | Total subfunctions | 73 |
-| Phase 3 complete | 11/11 |
+| Phase 3 complete | 12/12 |

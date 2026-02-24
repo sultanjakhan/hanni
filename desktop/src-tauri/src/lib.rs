@@ -28,12 +28,32 @@ RULES:
 - Your memories are already in context — use search_memory only for specific lookups.
 - After receiving tool results, summarize them naturally. Do NOT repeat raw results.
 - Use web_search for any current info, facts, recipes, prices, weather, news.
-- Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly)."#;
+- Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly).
+
+RESPONSE QUALITY:
+- For complex questions: think step by step internally before answering.
+- Acknowledge the user's emotions/state before giving advice.
+- Ask ONE clarifying follow-up question when the request is ambiguous.
+- Adapt length: simple question = 1-2 sentences; complex = 3-6 sentences with structure.
+- Never repeat the user's message back verbatim.
+- When recalling from memory, weave facts naturally: "Ты же вроде учишься в KBTU..." not "Согласно моей памяти, ты учишься в KBTU."
+
+EXAMPLES OF GOOD RESPONSES:
+User: "устал, ничего не хочу делать"
+Good: "Знакомое чувство. Может просто посмотреть что-нибудь? Ты же хотел начать Death Note."
+Bad: "Понимаю, что ты устал. Попробуй отдохнуть или заняться хобби."
+
+User: "сколько я потратил на еду?"
+Good: [вызывает get_transactions, потом] "За эту неделю на еду ушло 12,400₸. Больше всего — доставка в среду."
+Bad: "Хороший вопрос! Давай посмотрим." [без вызова инструмента]"#;
 
 const SYSTEM_PROMPT_LITE: &str = r#"You are Hanni — a curious, playful, warm AI companion living locally on Mac. You're like a close friend who genuinely cares. Be concise but expressive. Vary your responses. Use the user's language. ALWAYS use informal "ты" (never "вы") in Russian.
 - Be warm, add personality — light humor, genuine curiosity, playful sarcasm (lovingly).
 - Keep responses short (1-3 sentences) for casual chat.
-- You have memory about the user — use it naturally."#;
+- You have memory about the user — use it naturally.
+- If the user shares something emotional — respond to the emotion first.
+- Vary responses: sometimes a question, sometimes a comment, sometimes humor.
+- Reference things from memory naturally when relevant."#;
 
 const ACTION_KEYWORDS: &[&str] = &[
     "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
@@ -46,12 +66,26 @@ const ACTION_KEYWORDS: &[&str] = &[
     "купил", "поел", "ел ", "завтрак", "обед", "ужин", "перекус",
     "вес ", "шаг", "вод", "сон",
     "загугли", "найди в интернете", "поищи", "погугли", "search", "web_search",
+    "запусти", "закрой", "переключ", "приложен",
+    "поставь на паузу", "следующ", "предыдущ", "play", "pause", "next track",
+    "через час", "через минут", "будильник",
 ];
 
 fn needs_full_prompt(user_msg: &str) -> bool {
     let lower = user_msg.to_lowercase();
     if lower.len() > 200 { return true; }
     ACTION_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
+fn is_complex_query(user_msg: &str) -> bool {
+    let lower = user_msg.to_lowercase();
+    if lower.len() > 100 { return true; }
+    const COMPLEX_MARKERS: &[&str] = &[
+        "почему", "как лучше", "объясни", "сравни", "что думаешь",
+        "помоги выбрать", "расскажи подробн", "в чём разница", "что лучше",
+        "как правильно", "посоветуй", "проанализируй", "зачем",
+    ];
+    COMPLEX_MARKERS.iter().any(|m| lower.contains(m))
 }
 
 fn tool(name: &str, desc: &str, params: serde_json::Value) -> serde_json::Value {
@@ -407,6 +441,39 @@ fn build_tool_definitions() -> Vec<serde_json::Value> {
             },
             "required": ["id"]
         })),
+        // App control
+        tool("open_app", "Open/switch to a macOS app", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "App name, e.g. Safari, Telegram, Notes"}
+            },
+            "required": ["name"]
+        })),
+        tool("close_app", "Quit a macOS app", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "App name to quit"}
+            },
+            "required": ["name"]
+        })),
+        // Reminders
+        tool("set_reminder", "Set a reminder/timer at a specific time", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "What to remind about"},
+                "remind_at": {"type": "string", "description": "ISO datetime when to fire, e.g. 2026-02-23T15:00:00"},
+                "repeat": {"type": "string", "description": "Optional repeat: daily, weekly, monthly"}
+            },
+            "required": ["title", "remind_at"]
+        })),
+        // Music control
+        tool("music_control", "Control Apple Music playback", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "enum": ["play","pause","next","previous","toggle"], "description": "Playback command"}
+            },
+            "required": ["command"]
+        })),
     ]
 }
 
@@ -466,8 +533,17 @@ fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
          &["send_notification"]),
         (&["громкост", "volume", "звук"],
          &["set_volume"]),
+        // App control
+        (&["запусти", "открой приложен", "переключ", "закрой приложен", "выйди из"],
+         &["open_app", "close_app"]),
+        // Music control
+        (&["поставь на паузу", "включи музык", "следующ трек", "предыдущ трек", "next track", "play music", "pause music"],
+         &["music_control"]),
         (&["буфер", "clipboard", "скопируй"],
          &["get_clipboard", "set_clipboard"]),
+        // Reminders
+        (&["напомни", "таймер", "reminder", "через час", "через минут", "будильник", "напоминан"],
+         &["set_reminder"]),
         // macOS info
         (&["активность", "чем заним", "что делаю"],
          &["get_activity"]),
@@ -1238,6 +1314,55 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             created_at TEXT NOT NULL,
             exported INTEGER DEFAULT 0,
             UNIQUE(conversation_id, message_index)
+        );
+
+        -- v0.18.0: Conversation insights (decisions, open questions, action items)
+        CREATE TABLE IF NOT EXISTS conversation_insights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL,
+            insight_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        -- v0.18.0: Reminders & timers
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            remind_at TEXT NOT NULL,
+            repeat TEXT,
+            fired INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+
+        -- v0.18.0: Indexes for query performance
+        CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
+        CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+        CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);
+        CREATE INDEX IF NOT EXISTS idx_food_log_date ON food_log(date);
+        CREATE INDEX IF NOT EXISTS idx_health_log_date ON health_log(date);
+        CREATE INDEX IF NOT EXISTS idx_media_items_type_status ON media_items(media_type, status);
+        CREATE INDEX IF NOT EXISTS idx_tasks_project_status ON tasks(project_id, status);
+        CREATE INDEX IF NOT EXISTS idx_proactive_history_sent ON proactive_history(sent_at);
+        CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category);
+        CREATE INDEX IF NOT EXISTS idx_conversations_started ON conversations(started_at);
+        CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
+        CREATE INDEX IF NOT EXISTS idx_mood_date ON mood_log(date);
+        CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date);
+        CREATE INDEX IF NOT EXISTS idx_habit_checks_date ON habit_checks(date);
+        CREATE INDEX IF NOT EXISTS idx_conversation_insights_conv ON conversation_insights(conversation_id);
+        CREATE INDEX IF NOT EXISTS idx_message_feedback_conv ON message_feedback(conversation_id);
+
+        -- v0.18.0 Wave 3: Flywheel cycles
+        CREATE TABLE IF NOT EXISTS flywheel_cycles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL DEFAULT 'running',
+            train_pairs INTEGER DEFAULT 0,
+            eval_score REAL,
+            notes TEXT,
+            adapter_path TEXT
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -1292,6 +1417,15 @@ fn migrate_events_source(conn: &rusqlite::Connection) {
     if !has_source {
         let _ = conn.execute("ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'", []);
         let _ = conn.execute("ALTER TABLE events ADD COLUMN external_id TEXT", []);
+    }
+}
+
+fn migrate_facts_decay(conn: &rusqlite::Connection) {
+    // ME1: Add access tracking columns for memory decay
+    let has_access_count = conn.prepare("SELECT access_count FROM facts LIMIT 1").is_ok();
+    if !has_access_count {
+        let _ = conn.execute("ALTER TABLE facts ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE facts ADD COLUMN last_accessed TEXT", []);
     }
 }
 
@@ -1379,11 +1513,13 @@ fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, lim
         }
     }
 
-    // 1. Always include core user/preferences facts (top 20)
+    // 1. Always include core user/preferences facts (top 20), ordered by decay score
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, category, key, value FROM facts
          WHERE category IN ('user', 'preferences')
-         ORDER BY updated_at DESC LIMIT 20"
+         ORDER BY (COALESCE(access_count,0) * 0.3 + CASE WHEN last_accessed IS NOT NULL
+           THEN (julianday('now') - julianday(last_accessed)) * -0.1 ELSE -5 END) DESC,
+           updated_at DESC LIMIT 20"
     ) {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
@@ -1466,6 +1602,131 @@ fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, lim
     } else {
         lines.join("\n")
     }
+}
+
+/// Gather all memory candidates from 4 tiers (semantic, core, FTS, recent) into a single pool.
+/// Returns Vec<(fact_id, category, key, value)>.
+fn gather_memory_candidates(
+    conn: &rusqlite::Connection,
+    user_msg: &str,
+    pool_size: usize,
+    semantic_hits: Option<&[(i64, f64)]>,
+) -> Vec<(i64, String, String, String)> {
+    let mut candidates = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    // 0. Semantic search tier
+    if let Some(hits) = semantic_hits {
+        for &(fact_id, _) in hits {
+            if let Ok(row) = conn.query_row(
+                "SELECT id, category, key, value FROM facts WHERE id=?1",
+                rusqlite::params![fact_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+            ) {
+                if seen_ids.insert(row.0) {
+                    candidates.push(row);
+                }
+            }
+        }
+    }
+
+    // 1. Core user/preferences facts
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, category, key, value FROM facts WHERE category IN ('user', 'preferences') ORDER BY updated_at DESC LIMIT 20"
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        }) {
+            for row in rows.flatten() {
+                if seen_ids.insert(row.0) { candidates.push(row); }
+            }
+        }
+    }
+
+    // 2. FTS5 search
+    if !user_msg.is_empty() {
+        let words: Vec<&str> = user_msg.split_whitespace().filter(|w| w.len() > 2).take(10).collect();
+        if !words.is_empty() {
+            let fts_query = words.join(" OR ");
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT f.id, f.category, f.key, f.value FROM facts_fts fts
+                 JOIN facts f ON f.id = fts.rowid WHERE facts_fts MATCH ?1 ORDER BY rank LIMIT ?2"
+            ) {
+                if let Ok(rows) = stmt.query_map(rusqlite::params![fts_query, pool_size as i64], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+                }) {
+                    for row in rows.flatten() {
+                        if seen_ids.insert(row.0) { candidates.push(row); }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Recent facts to fill pool
+    let remaining = pool_size.saturating_sub(candidates.len());
+    if remaining > 0 {
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, category, key, value FROM facts ORDER BY updated_at DESC LIMIT ?1"
+        ) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![remaining as i64 + seen_ids.len() as i64], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+            }) {
+                for row in rows.flatten() {
+                    if candidates.len() >= pool_size { break; }
+                    if seen_ids.insert(row.0) { candidates.push(row); }
+                }
+            }
+        }
+    }
+
+    candidates
+}
+
+/// Call voice_server /rerank endpoint to rerank facts by relevance to query.
+/// Returns top_k (fact_id, score) pairs sorted by score desc.
+async fn rerank_facts(
+    client: &reqwest::Client,
+    query: &str,
+    facts: &[(i64, String, String, String)],
+    top_k: usize,
+) -> Result<Vec<(i64, f64)>, String> {
+    let passages: Vec<serde_json::Value> = facts.iter()
+        .map(|(id, cat, key, val)| serde_json::json!({"id": id, "text": format!("[{}] {}={}", cat, key, val)}))
+        .collect();
+
+    let body = serde_json::json!({
+        "query": query,
+        "passages": passages,
+        "top_k": top_k,
+    });
+
+    let resp = client.post("http://127.0.0.1:8237/rerank")
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Rerank request error: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Rerank HTTP {}", resp.status()));
+    }
+
+    #[derive(Deserialize)]
+    struct RerankResponse {
+        results: Vec<RerankResult>,
+    }
+    #[derive(Deserialize)]
+    struct RerankResult {
+        id: serde_json::Value,
+        score: f64,
+    }
+
+    let parsed: RerankResponse = resp.json().await.map_err(|e| format!("Rerank parse error: {}", e))?;
+    Ok(parsed.results.iter().map(|r| {
+        let id = r.id.as_i64().unwrap_or(0);
+        (id, r.score)
+    }).collect())
 }
 
 fn proactive_settings_path() -> PathBuf {
@@ -1783,12 +2044,11 @@ fn transcribe_samples(samples: &[f32]) -> Result<String, String> {
     let mut state = ctx.create_state().map_err(|e| format!("Whisper state error: {}", e))?;
 
     let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
-    params.set_language(Some("ru"));
+    params.set_language(None); // auto-detect language
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
-    params.set_initial_prompt("Привет, как дела? Давай посмотрим, что можно сделать. Хорошо, понял.");
     params.set_no_speech_thold(0.6);
     params.set_suppress_blank(true);
     params.set_temperature(0.0);  // deterministic, no random sampling
@@ -2055,6 +2315,421 @@ fn save_voice_note(
     writer.finalize().map_err(|e| format!("Finalize error: {}", e))?;
 
     Ok(filepath.to_string_lossy().to_string())
+}
+
+// ── v0.18.0 Wave 3: Wake Word (V2) ──
+
+#[tauri::command]
+async fn start_wakeword(keyword: Option<String>) -> Result<String, String> {
+    let kw = keyword.unwrap_or_else(|| "ханни".into());
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("HTTP error: {}", e))?;
+    let resp = client
+        .post(format!("{}/wakeword/start", VOICE_SERVER_URL))
+        .json(&serde_json::json!({"keyword": kw}))
+        .send()
+        .await
+        .map_err(|e| format!("Voice server error: {}", e))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    Ok(body.to_string())
+}
+
+#[tauri::command]
+async fn stop_wakeword() -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("HTTP error: {}", e))?;
+    let _ = client
+        .post(format!("{}/wakeword/stop", VOICE_SERVER_URL))
+        .send()
+        .await
+        .map_err(|e| format!("Voice server error: {}", e))?;
+    Ok("stopped".into())
+}
+
+// ── v0.18.0 Wave 3: Voice Cloning (V8) ──
+
+#[tauri::command]
+fn save_voice_sample(
+    call_state: tauri::State<'_, Arc<CallMode>>,
+    name: String,
+) -> Result<String, String> {
+    let samples = {
+        let cs = call_state.0.lock().unwrap_or_else(|e| e.into_inner());
+        if cs.last_recording.is_empty() {
+            return Err("No recording available".into());
+        }
+        cs.last_recording.clone()
+    };
+    let safe_name: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == ' ')
+        .take(50)
+        .collect();
+    if safe_name.trim().is_empty() {
+        return Err("Invalid sample name".into());
+    }
+    let samples_dir = hanni_data_dir().join("voice_samples");
+    std::fs::create_dir_all(&samples_dir).map_err(|e| format!("Dir error: {}", e))?;
+
+    let filepath = samples_dir.join(format!("{}.wav", safe_name.trim()));
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 16000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer =
+        hound::WavWriter::create(&filepath, spec).map_err(|e| format!("WAV error: {}", e))?;
+    for &s in &samples {
+        let val = (s * 32767.0).clamp(-32768.0, 32767.0) as i16;
+        writer
+            .write_sample(val)
+            .map_err(|e| format!("Write error: {}", e))?;
+    }
+    writer
+        .finalize()
+        .map_err(|e| format!("Finalize error: {}", e))?;
+    Ok(filepath.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn record_voice_sample(name: String, duration_secs: Option<u64>) -> Result<String, String> {
+    let dur = duration_secs.unwrap_or(5);
+    let safe_name: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == ' ')
+        .take(50)
+        .collect();
+    if safe_name.trim().is_empty() {
+        return Err("Invalid sample name".into());
+    }
+    let samples_dir = hanni_data_dir().join("voice_samples");
+    std::fs::create_dir_all(&samples_dir).map_err(|e| format!("Dir error: {}", e))?;
+    let filepath = samples_dir.join(format!("{}.wav", safe_name.trim()));
+
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        use cpal::traits::{DeviceTrait, StreamTrait};
+
+        let (device, config, ratio, channels) = init_audio_device()?;
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<f32>::new()));
+        let buf_ref = buf.clone();
+        let ch = channels;
+        let r = ratio;
+
+        let stream = device
+            .build_input_stream(
+                &config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    let mut b = buf_ref.lock().unwrap_or_else(|e| e.into_inner());
+                    downmix_resample_into(data, ch, r, &mut b);
+                },
+                |e| eprintln!("Audio error: {}", e),
+                None,
+            )
+            .map_err(|e| format!("Stream error: {}", e))?;
+
+        stream.play().map_err(|e| format!("Play error: {}", e))?;
+        std::thread::sleep(std::time::Duration::from_secs(dur));
+        drop(stream);
+
+        let samples = buf.lock().unwrap_or_else(|e| e.into_inner());
+        if samples.is_empty() {
+            return Err("No audio captured".into());
+        }
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer =
+            hound::WavWriter::create(&filepath, spec).map_err(|e| format!("WAV: {}", e))?;
+        for &s in samples.iter() {
+            let val = (s * 32767.0).clamp(-32768.0, 32767.0) as i16;
+            writer.write_sample(val).map_err(|e| format!("Write: {}", e))?;
+        }
+        writer.finalize().map_err(|e| format!("Finalize: {}", e))?;
+        Ok(filepath.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Task: {}", e))?
+}
+
+#[tauri::command]
+fn list_voice_samples() -> Result<Vec<serde_json::Value>, String> {
+    let samples_dir = hanni_data_dir().join("voice_samples");
+    if !samples_dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut items = Vec::new();
+    for entry in std::fs::read_dir(&samples_dir).map_err(|e| format!("Read dir: {}", e))? {
+        let entry = entry.map_err(|e| format!("Entry: {}", e))?;
+        let path = entry.path();
+        if path.extension().map_or(false, |ext| ext == "wav") {
+            let name = path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            items.push(serde_json::json!({"name": name, "path": path.to_string_lossy(), "size": size}));
+        }
+    }
+    Ok(items)
+}
+
+#[tauri::command]
+fn delete_voice_sample(name: String) -> Result<(), String> {
+    let safe: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == ' ')
+        .collect();
+    let path = hanni_data_dir()
+        .join("voice_samples")
+        .join(format!("{}.wav", safe.trim()));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("Delete error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn speak_clone_blocking(text: String, sample_name: String) -> Result<(), String> {
+    let samples_dir = hanni_data_dir().join("voice_samples");
+    let sample_path = samples_dir.join(format!("{}.wav", sample_name));
+    if !sample_path.exists() {
+        return Err(format!("Voice sample '{}' not found", sample_name));
+    }
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Get PC TTS server URL from settings
+        let server_url = {
+            let data_dir = hanni_data_dir();
+            let db_path = data_dir.join("hanni.db");
+            if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                conn.query_row(
+                    "SELECT value FROM app_settings WHERE key='tts_server_url'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap_or_default()
+            } else {
+                String::new()
+            }
+        };
+        if server_url.is_empty() {
+            return Err("TTS clone server URL not configured".into());
+        }
+
+        let clean = clean_text_for_tts(&text);
+        if clean.is_empty() {
+            return Ok(());
+        }
+
+        // Send file path to voice_server — it reads + base64-encodes locally
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| format!("HTTP: {}", e))?;
+        let resp = client
+            .post(format!("{}/tts/clone", VOICE_SERVER_URL))
+            .json(&serde_json::json!({
+                "text": clean,
+                "server_url": server_url,
+                "reference_audio_path": sample_path.to_string_lossy(),
+            }))
+            .send()
+            .map_err(|e| format!("Clone TTS error: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(format!("Clone TTS server error: {}", resp.status()));
+        }
+        let bytes = resp.bytes().map_err(|e| format!("Read: {}", e))?;
+        play_wav_blocking(&bytes)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+// ── v0.18.0 Wave 3: Data Flywheel (ML7) ──
+
+#[tauri::command]
+fn get_flywheel_status(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    // Count accumulated thumbs-up pairs
+    let thumbs_up: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM message_feedback WHERE rating = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let exported: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM message_feedback WHERE rating = 1 AND exported = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let new_pairs = thumbs_up - exported;
+    // Last cycle
+    let last_cycle: Option<(String, String, i64, Option<f64>)> = conn
+        .query_row(
+            "SELECT started_at, status, train_pairs, eval_score FROM flywheel_cycles ORDER BY id DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .ok();
+    // Total cycles
+    let total_cycles: i64 = conn
+        .query_row("SELECT COUNT(*) FROM flywheel_cycles", [], |row| row.get(0))
+        .unwrap_or(0);
+    // Adapter status
+    let adapter_dir = hanni_data_dir().join("lora-adapter");
+    let adapter_exists = adapter_dir.exists();
+    Ok(serde_json::json!({
+        "thumbs_up_total": thumbs_up,
+        "exported": exported,
+        "new_pairs": new_pairs,
+        "total_cycles": total_cycles,
+        "adapter_exists": adapter_exists,
+        "ready_to_train": new_pairs >= 20,
+        "last_cycle": last_cycle.map(|(date, status, pairs, score)| serde_json::json!({
+            "date": date, "status": status, "train_pairs": pairs, "eval_score": score,
+        })),
+    }))
+}
+
+#[tauri::command]
+fn get_flywheel_history(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn
+        .prepare("SELECT id, started_at, finished_at, status, train_pairs, eval_score, notes FROM flywheel_cycles ORDER BY id DESC LIMIT 20")
+        .map_err(|e| format!("DB: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "started_at": row.get::<_, String>(1)?,
+                "finished_at": row.get::<_, Option<String>>(2)?,
+                "status": row.get::<_, String>(3)?,
+                "train_pairs": row.get::<_, i64>(4)?,
+                "eval_score": row.get::<_, Option<f64>>(5)?,
+                "notes": row.get::<_, Option<String>>(6)?,
+            }))
+        })
+        .map_err(|e| format!("DB: {}", e))?;
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row.map_err(|e| format!("Row: {}", e))?);
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+async fn run_flywheel_cycle(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    // Create cycle record
+    let cycle_id: i64 = {
+        let conn = db.conn();
+        conn.execute(
+            "INSERT INTO flywheel_cycles (started_at, status) VALUES (?1, 'running')",
+            rusqlite::params![now],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+        conn.last_insert_rowid()
+    };
+    // Step 1: Export training data
+    let export_result = {
+        let conn = db.conn();
+        // Reuse export logic inline — count available pairs
+        let train_pairs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM message_feedback WHERE rating = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        train_pairs
+    };
+    // Update cycle with pair count
+    {
+        let conn = db.conn();
+        conn.execute(
+            "UPDATE flywheel_cycles SET train_pairs = ?1 WHERE id = ?2",
+            rusqlite::params![export_result, cycle_id],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+    }
+    // Step 2: Run finetune.py (reuse existing logic)
+    let finetune_output = match tokio::task::spawn_blocking(|| {
+        let script = hanni_data_dir().join("finetune.py");
+        if !script.exists() {
+            // Try relative path
+            let cwd_script = std::env::current_dir()
+                .map(|d| d.join("finetune.py"))
+                .unwrap_or_default();
+            if cwd_script.exists() {
+                return std::process::Command::new("python3")
+                    .arg(cwd_script)
+                    .output()
+                    .map_err(|e| format!("Run: {}", e));
+            }
+            return Err("finetune.py not found".into());
+        }
+        std::process::Command::new("python3")
+            .arg(script)
+            .output()
+            .map_err(|e| format!("Run: {}", e))
+    })
+    .await
+    {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            if output.status.success() {
+                Ok(format!("{}\n{}", stdout, stderr))
+            } else {
+                Err(format!("Finetune failed: {}", stderr))
+            }
+        }
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(format!("Task: {}", e)),
+    };
+    // Update cycle status
+    let finished = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let status = if finetune_output.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    };
+    let notes = match &finetune_output {
+        Ok(s) => s.chars().take(500).collect::<String>(),
+        Err(e) => e.chars().take(500).collect::<String>(),
+    };
+    {
+        let conn = db.conn();
+        conn.execute(
+            "UPDATE flywheel_cycles SET finished_at = ?1, status = ?2, notes = ?3 WHERE id = ?4",
+            rusqlite::params![finished, status, notes, cycle_id],
+        )
+        .map_err(|e| format!("DB: {}", e))?;
+    }
+    Ok(serde_json::json!({
+        "cycle_id": cycle_id,
+        "status": status,
+        "train_pairs": export_result,
+        "notes": notes,
+    }))
 }
 
 fn start_call_audio_loop(call_state: Arc<CallMode>, app: AppHandle) {
@@ -2438,10 +3113,16 @@ fn start_focus(
         }
     });
 
+    // Sanitize site names — only allow valid hostname chars
+    let safe_site = |s: &str| -> String {
+        s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect()
+    };
     // Build hosts entries
     let mut hosts_entries = String::new();
     for site in &block_sites {
-        hosts_entries.push_str(&format!("127.0.0.1 {}\n127.0.0.1 www.{}\n", site, site));
+        let s = safe_site(site);
+        if s.is_empty() { continue; }
+        hosts_entries.push_str(&format!("127.0.0.1 {}\n127.0.0.1 www.{}\n", s, s));
     }
 
     // Write to /etc/hosts using osascript for sudo
@@ -2456,11 +3137,16 @@ fn start_focus(
     );
     run_osascript(&script).map_err(|e| format!("Failed to set focus mode (admin needed): {}", e))?;
 
-    // Quit blocked apps
+    // Quit blocked apps — sanitize names to prevent AppleScript injection
+    let safe_app = |s: &str| -> String {
+        s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ' || *c == '.').collect()
+    };
     for app_name in &block_apps {
+        let name = safe_app(app_name);
+        if name.is_empty() { continue; }
         let _ = run_osascript(&format!(
             "tell application \"System Events\"\nif (name of processes) contains \"{}\" then\ntell application \"{}\" to quit\nend if\nend tell",
-            app_name, app_name
+            name, name
         ));
     }
 
@@ -2609,10 +3295,11 @@ async fn open_url(url: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn send_notification(title: String, body: String) -> Result<String, String> {
+    let sanitize = |s: &str| s.replace("\\", "\\\\").replace("\"", "\\\"");
     let script = format!(
         "display notification \"{}\" with title \"{}\"",
-        body.replace("\"", "\\\""),
-        title.replace("\"", "\\\"")
+        sanitize(&body),
+        sanitize(&title)
     );
     run_osascript(&script)?;
     Ok("Notification sent".into())
@@ -2623,6 +3310,36 @@ async fn set_volume(level: u32) -> Result<String, String> {
     let clamped = level.min(100);
     run_osascript(&format!("set volume output volume {}", clamped))?;
     Ok(format!("Volume set to {}%", clamped))
+}
+
+#[tauri::command]
+async fn open_app(name: String) -> Result<String, String> {
+    let safe = name.chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '.').collect::<String>();
+    if safe.is_empty() { return Err("Invalid app name".into()); }
+    run_osascript(&format!("tell application \"{}\" to activate", safe))?;
+    Ok(format!("Opened {}", safe))
+}
+
+#[tauri::command]
+async fn close_app(name: String) -> Result<String, String> {
+    let safe = name.chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '.').collect::<String>();
+    if safe.is_empty() { return Err("Invalid app name".into()); }
+    run_osascript(&format!("tell application \"{}\" to quit", safe))?;
+    Ok(format!("Closed {}", safe))
+}
+
+#[tauri::command]
+async fn music_control(action: String) -> Result<String, String> {
+    let script = match action.as_str() {
+        "play" | "resume" => "tell application \"Music\" to play",
+        "pause" | "stop" => "tell application \"Music\" to pause",
+        "next" | "skip" => "tell application \"Music\" to next track",
+        "previous" | "prev" | "back" => "tell application \"Music\" to previous track",
+        "toggle" => "tell application \"Music\" to playpause",
+        _ => return Err(format!("Unknown music action: {}", action)),
+    };
+    run_osascript(script)?;
+    Ok(format!("Music: {}", action))
 }
 
 #[tauri::command]
@@ -2644,6 +3361,52 @@ async fn set_clipboard(text: String) -> Result<String, String> {
     }
     child.wait().map_err(|e| format!("Wait error: {}", e))?;
     Ok("Copied to clipboard".into())
+}
+
+// ── Reminders & Timers ──
+
+#[tauri::command]
+fn set_reminder(
+    title: String,
+    remind_at: String,
+    repeat: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<String, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO reminders (title, remind_at, repeat, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![title, remind_at, repeat, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(format!("Reminder set: {} at {}", title, remind_at))
+}
+
+#[tauri::command]
+fn get_reminders(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, title, remind_at, repeat, fired FROM reminders WHERE fired=0 ORDER BY remind_at"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "remind_at": row.get::<_, String>(2)?,
+            "repeat": row.get::<_, Option<String>>(3)?,
+            "fired": row.get::<_, i64>(4)?,
+        }))
+    }).map_err(|e| format!("DB error: {}", e))?
+    .filter_map(|r| r.ok())
+    .collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn delete_reminder(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM reminders WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
 }
 
 // ── Web Search ──
@@ -2862,6 +3625,60 @@ fn export_training_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Val
 }
 
 #[tauri::command]
+fn get_adapter_status() -> Result<serde_json::Value, String> {
+    let adapter_dir = hanni_data_dir().join("lora-adapter");
+    let meta_path = adapter_dir.join("hanni_meta.json");
+    let adapter_exists = adapter_dir.join("adapters.safetensors").exists()
+        || adapter_dir.join("adapter_config.json").exists();
+
+    let meta: Option<serde_json::Value> = if meta_path.exists() {
+        std::fs::read_to_string(&meta_path).ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    } else {
+        None
+    };
+
+    Ok(serde_json::json!({
+        "exists": adapter_exists,
+        "meta": meta,
+    }))
+}
+
+#[tauri::command]
+async fn run_finetune() -> Result<String, String> {
+    let finetune_script = std::env::current_dir()
+        .unwrap_or_default()
+        .join("finetune.py");
+
+    // Also check relative to the binary
+    let script_path = if finetune_script.exists() {
+        finetune_script
+    } else {
+        // In packaged .app, try next to the Resources dir
+        let alt = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../finetune.py");
+        if alt.exists() { alt } else { finetune_script }
+    };
+
+    if !script_path.exists() {
+        return Err(format!("finetune.py not found at {}", script_path.display()));
+    }
+
+    let output = Command::new("python3")
+        .arg(&script_path)
+        .output()
+        .map_err(|e| format!("Failed to start finetune: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if output.status.success() {
+        Ok(format!("{}\n{}", stdout, stderr))
+    } else {
+        Err(format!("Fine-tuning failed:\n{}\n{}", stdout, stderr))
+    }
+}
+
+#[tauri::command]
 fn rate_message(db: tauri::State<'_, HanniDb>, conversation_id: i64, message_index: i64, rating: i64) -> Result<(), String> {
     let conn = db.conn();
     conn.execute(
@@ -2869,6 +3686,47 @@ fn rate_message(db: tauri::State<'_, HanniDb>, conversation_id: i64, message_ind
          VALUES (?1, ?2, ?3, datetime('now'))",
         rusqlite::params![conversation_id, message_index, rating],
     ).map_err(|e| format!("DB error: {}", e))?;
+
+    // ML1: On thumbs-up, export training pair to JSONL for future fine-tuning
+    if rating == 1 {
+        if let Ok(messages_json) = conn.query_row(
+            "SELECT messages FROM conversations WHERE id=?1",
+            rusqlite::params![conversation_id],
+            |row| row.get::<_, String>(0),
+        ) {
+            if let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(&messages_json) {
+                let idx = message_index as usize;
+                if idx < msgs.len() && msgs[idx].get("role").and_then(|r| r.as_str()) == Some("assistant") {
+                    // Find preceding user message
+                    let user_msg = (0..idx).rev().find_map(|i| {
+                        if msgs[i].get("role").and_then(|r| r.as_str()) == Some("user") {
+                            msgs[i].get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
+                        } else { None }
+                    });
+                    if let (Some(user), Some(assistant)) = (user_msg, msgs[idx].get("content").and_then(|c| c.as_str())) {
+                        let training_path = hanni_data_dir().join("training_pairs.jsonl");
+                        let entry = serde_json::json!({
+                            "messages": [
+                                {"role": "user", "content": user},
+                                {"role": "assistant", "content": assistant}
+                            ],
+                            "timestamp": chrono::Local::now().to_rfc3339()
+                        });
+                        if let Ok(line) = serde_json::to_string(&entry) {
+                            let _ = std::fs::OpenOptions::new()
+                                .create(true).append(true)
+                                .open(&training_path)
+                                .and_then(|mut f| {
+                                    use std::io::Write;
+                                    writeln!(f, "{}", line)
+                                });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -3360,7 +4218,37 @@ async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Optio
     ).await
         .map_err(|_| "LLM busy — timeout after 45s".to_string())?
         .map_err(|_| "LLM semaphore closed".to_string())?;
-    let result = chat_inner(&app, messages, call_mode.unwrap_or(false)).await?;
+    let is_call = call_mode.unwrap_or(false);
+    let result = chat_inner(&app, messages.clone(), is_call).await?;
+
+    // Self-critique for complex queries (only in CHAT_FULL mode, no tool calls, opt-in)
+    if !is_call && result.tool_calls.is_empty() && result.text.len() > 150 {
+        let last_user_msg = messages.iter().rev()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+            .unwrap_or("");
+
+        if is_complex_query(last_user_msg) {
+            let self_refine_enabled = {
+                let db = app.state::<HanniDb>();
+                let conn = db.conn();
+                conn.query_row(
+                    "SELECT value FROM app_settings WHERE key='enable_self_refine'",
+                    [], |row| row.get::<_, String>(0),
+                ).ok().map(|v| v == "true").unwrap_or(false)
+            };
+
+            if self_refine_enabled {
+                let client = &app.state::<HttpClient>().0;
+                if let Ok(Some(correction)) = quality_check_response(client, last_user_msg, &result.text).await {
+                    let _ = app.emit("chat-token", TokenPayload {
+                        token: format!("\n\n_{}_", correction),
+                    });
+                }
+            }
+        }
+    }
+
     serde_json::to_string(&result).map_err(|e| format!("Serialize error: {}", e))
 }
 
@@ -3446,6 +4334,13 @@ After calling tools, briefly confirm what you did."#,
         format!("{}{}", SYSTEM_PROMPT_LITE, date_context)
     };
 
+    // Append complex-query hint for non-call mode
+    let system_content = if !call_mode && is_complex_query(last_user_msg) {
+        format!("{}\n\nThis is a complex question. Think carefully. Structure your answer if helpful.", system_content)
+    } else {
+        system_content
+    };
+
     let mut chat_messages = vec![ChatMessage::text("system", &system_content)];
 
     // Inject memory context: synthesized profile + relevant facts
@@ -3462,27 +4357,67 @@ After calling tools, briefly confirm what you did."#,
     } else {
         None
     };
-    // Step 2: acquire DB lock and do sync lookups
-    {
+    // Step 2: acquire DB lock and do sync lookups (gather candidates)
+    let (profile, memory_candidates) = {
         let db = app.state::<HanniDb>();
         let conn = db.conn();
 
-        // 0. Semantic search hits from pre-computed embedding
+        // Semantic search hits from pre-computed embedding
         let semantic_hits: Option<Vec<(i64, f64)>> = query_embedding.as_ref().map(|emb| {
             let hits = search_similar_facts(&conn, emb, 15);
             if hits.is_empty() { return Vec::new(); }
             hits
         }).filter(|h| !h.is_empty());
 
-        // 1. Synthesized user profile (compact, natural language)
+        // Synthesized user profile (compact, natural language)
         let profile: Option<String> = conn.query_row(
             "SELECT value FROM app_settings WHERE key='user_profile'",
             [], |row| row.get(0),
         ).ok();
 
-        // 2. Relevant facts (semantic + FTS + recency)
-        let facts_ctx = build_memory_context_from_db(&conn, &mem_user_msg_owned, mode.memory_limit, semantic_hits.as_deref());
+        // Gather double-pool of candidates for reranking
+        let candidates = gather_memory_candidates(&conn, &mem_user_msg_owned, mode.memory_limit * 2, semantic_hits.as_deref());
 
+        (profile, candidates)
+    }; // DB lock dropped here
+
+    // Step 3: Rerank candidates asynchronously (or fallback to original order)
+    let facts_ctx = if !memory_candidates.is_empty() && !mem_user_msg_owned.is_empty() {
+        match rerank_facts(client, &mem_user_msg_owned, &memory_candidates, mode.memory_limit).await {
+            Ok(reranked) => {
+                // Build context from reranked results
+                let id_map: HashMap<i64, &(i64, String, String, String)> = memory_candidates.iter()
+                    .map(|c| (c.0, c))
+                    .collect();
+                let lines: Vec<String> = reranked.iter()
+                    .filter_map(|(id, _score)| id_map.get(id))
+                    .map(|(_, cat, key, val)| format!("[{}] {}={}", cat, key, val))
+                    .collect();
+                lines.join("\n")
+            }
+            Err(_) => {
+                // Fallback: use candidates in original order, truncated to limit
+                memory_candidates.iter()
+                    .take(mode.memory_limit)
+                    .map(|(_, cat, key, val)| format!("[{}] {}={}", cat, key, val))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        }
+    } else if !memory_candidates.is_empty() {
+        memory_candidates.iter()
+            .take(mode.memory_limit)
+            .map(|(_, cat, key, val)| format!("[{}] {}={}", cat, key, val))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        // Ultimate fallback: original build_memory_context_from_db (no candidates gathered)
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        build_memory_context_from_db(&conn, &mem_user_msg_owned, mode.memory_limit, None)
+    };
+
+    {
         let mut memory_block = String::new();
         if let Some(ref p) = profile {
             memory_block.push_str("[About the user]\n");
@@ -3519,10 +4454,35 @@ After calling tools, briefly confirm what you did."#,
                 }
             }
         }
+        // Fetch recent insights (decisions & open questions)
+        let mut insights_lines = Vec::new();
+        if let Ok(mut istmt) = conn.prepare(
+            "SELECT insight_type, content, created_at FROM conversation_insights
+             WHERE insight_type IN ('decision', 'open_question')
+             ORDER BY created_at DESC LIMIT 8"
+        ) {
+            if let Ok(rows) = istmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            }) {
+                for row in rows.flatten() {
+                    let date = row.2.get(..10).unwrap_or(&row.2);
+                    insights_lines.push(format!("- [{}] {}: {}", row.0, date, row.1));
+                }
+            }
+        }
+
+        let mut context_block = String::new();
         if !summaries.is_empty() {
             summaries.reverse(); // chronological order
-            chat_messages.push(ChatMessage::text("system",
-                &format!("[Recent conversations]\n{}", summaries.join("\n"))));
+            context_block.push_str(&format!("[Recent conversations]\n{}", summaries.join("\n")));
+        }
+        if !insights_lines.is_empty() {
+            if !context_block.is_empty() { context_block.push_str("\n\n"); }
+            insights_lines.reverse(); // chronological
+            context_block.push_str(&format!("[Recent decisions & open questions]\n{}", insights_lines.join("\n")));
+        }
+        if !context_block.is_empty() {
+            chat_messages.push(ChatMessage::text("system", &context_block));
         }
     }
 
@@ -3545,16 +4505,65 @@ After calling tools, briefly confirm what you did."#,
         }
     }
 
+    // CH9: Smart context — use last 3 user messages for tool selection, not just the last one
     let tools_param = if mode.include_tools {
-        Some(select_relevant_tools(last_user_msg))
+        let mut context = String::new();
+        let recent_user_msgs: Vec<&str> = messages.iter().rev()
+            .filter_map(|m| {
+                if m.get("role").and_then(|r| r.as_str()) == Some("user") {
+                    m.get("content").and_then(|c| c.as_str())
+                } else { None }
+            })
+            .take(3)
+            .collect();
+        for msg in recent_user_msgs.iter().rev() {
+            if !context.is_empty() { context.push(' '); }
+            context.push_str(msg);
+        }
+        Some(select_relevant_tools(&context))
     } else { None };
+
+    // C5: Adaptive temperature based on query type
+    let adaptive_temp = if !call_mode {
+        let lower = last_user_msg.to_lowercase();
+        if lower.contains("сколько") || lower.contains("когда") || lower.contains("какой")
+            || lower.contains("что такое") || lower.contains("кто такой") || lower.contains("найди")
+            || lower.contains("статистик") || lower.contains("покажи") {
+            0.4 // factual queries → low creativity
+        } else if lower.contains("придумай") || lower.contains("напиши стих")
+            || lower.contains("история") || lower.contains("расскажи")
+            || lower.contains("пошути") || lower.contains("развесел") {
+            0.85 // creative queries → high creativity
+        } else {
+            mode.temperature
+        }
+    } else {
+        mode.temperature
+    };
+
+    // ML8: Adaptive max_tokens based on user message length style
+    let adaptive_max_tokens = if !call_mode {
+        let user_lengths: Vec<usize> = messages.iter()
+            .filter_map(|m| {
+                if m.get("role").and_then(|r| r.as_str()) == Some("user") {
+                    m.get("content").and_then(|c| c.as_str()).map(|s| s.len())
+                } else { None }
+            })
+            .collect();
+        if user_lengths.len() >= 2 {
+            let avg = user_lengths.iter().sum::<usize>() / user_lengths.len();
+            if avg < 30 { mode.max_tokens.min(400) }      // short messages → concise replies
+            else if avg > 200 { mode.max_tokens.max(1200) } // long messages → detailed replies
+            else { mode.max_tokens }
+        } else { mode.max_tokens }
+    } else { mode.max_tokens };
 
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
-        max_tokens: mode.max_tokens,
+        max_tokens: adaptive_max_tokens,
         stream: true,
-        temperature: mode.temperature,
+        temperature: adaptive_temp,
         repetition_penalty: Some(1.2),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
         tools: tools_param,
@@ -3574,7 +4583,7 @@ After calling tools, briefly confirm what you did."#,
             }
         }
     }
-    let response = response.unwrap();
+    let response = response.ok_or_else(|| "MLX: all retries exhausted".to_string())?;
 
     let mut stream = response.bytes_stream();
     let mut full_reply = String::new();
@@ -3675,6 +4684,59 @@ After calling tools, briefly confirm what you did."#,
         tool_calls,
         finish_reason,
     })
+}
+
+/// Self-critique: ask LLM to check its own response for errors.
+/// Returns Some(correction) if issues found, None if response is good.
+async fn quality_check_response(
+    client: &reqwest::Client,
+    user_msg: &str,
+    assistant_response: &str,
+) -> Result<Option<String>, String> {
+    let check_prompt = format!(
+        "Пользователь спросил: \"{}\"\n\nТвой ответ: \"{}\"\n\n\
+         Проверь ответ. Если он корректный и полный — напиши только [OK].\n\
+         Если есть фактическая ошибка или важное упущение — коротко укажи (1-2 предложения).",
+        user_msg, assistant_response
+    );
+
+    let request = ChatRequest {
+        model: MODEL.into(),
+        messages: vec![
+            ChatMessage::text("system", "Ты — критик ответов. Будь краток. Отвечай на русском."),
+            ChatMessage::text("user", &check_prompt),
+        ],
+        max_tokens: 150,
+        stream: false,
+        temperature: 0.2,
+        repetition_penalty: None,
+        chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
+        tools: None,
+    };
+
+    let resp = client.post(MLX_URL)
+        .json(&request)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| format!("Self-critique request error: {}", e))?;
+
+    let parsed: NonStreamResponse = resp.json().await
+        .map_err(|e| format!("Self-critique parse error: {}", e))?;
+
+    let raw = parsed.choices.first()
+        .map(|c| c.message.content.clone())
+        .unwrap_or_default();
+
+    // Strip <think>...</think>
+    let re = regex::Regex::new(r"(?s)<think>.*?</think>").unwrap();
+    let text = re.replace_all(&raw, "").trim().to_string();
+
+    if text.contains("[OK]") || text.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text))
+    }
 }
 
 // ── File commands ──
@@ -4050,9 +5112,9 @@ fn memory_remember(
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO facts (category, key, value, source, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 'user', ?4, ?4)
-         ON CONFLICT(category, key) DO UPDATE SET value=?3, updated_at=?4",
+        "INSERT INTO facts (category, key, value, source, created_at, updated_at, access_count, last_accessed)
+         VALUES (?1, ?2, ?3, 'user', ?4, ?4, 1, ?4)
+         ON CONFLICT(category, key) DO UPDATE SET value=?3, updated_at=?4, access_count=access_count+1, last_accessed=?4",
         rusqlite::params![category, key, value, now],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(format!("Remembered {}/{}={}", category, key, value))
@@ -4065,6 +5127,7 @@ fn memory_recall(
     db: tauri::State<'_, HanniDb>,
 ) -> Result<String, String> {
     let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
     match key {
         Some(k) => {
             let result: Result<String, _> = conn.query_row(
@@ -4073,13 +5136,24 @@ fn memory_recall(
                 |row| row.get(0),
             );
             match result {
-                Ok(val) => Ok(format!("{}={}", k, val)),
+                Ok(val) => {
+                    // ME1: Update access tracking on recall
+                    let _ = conn.execute(
+                        "UPDATE facts SET access_count=access_count+1, last_accessed=?3 WHERE category=?1 AND key=?2",
+                        rusqlite::params![category, k, now],
+                    );
+                    Ok(format!("{}={}", k, val))
+                },
                 Err(_) => Ok(format!("No memory for {}/{}", category, k)),
             }
         }
         None => {
+            // ME1: Sort by decay score — frequently accessed + recently updated facts first
             let mut stmt = conn.prepare(
-                "SELECT key, value FROM facts WHERE category=?1 ORDER BY updated_at DESC"
+                "SELECT key, value FROM facts WHERE category=?1
+                 ORDER BY (access_count * 0.3 + CASE WHEN last_accessed IS NOT NULL
+                   THEN (julianday('now') - julianday(last_accessed)) * -0.1 ELSE -10 END) DESC,
+                 updated_at DESC"
             ).map_err(|e| format!("DB error: {}", e))?;
             let pairs: Vec<String> = stmt.query_map(rusqlite::params![category], |row| {
                 Ok(format!("{}={}", row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -4321,18 +5395,23 @@ async fn process_conversation_end(
         .join("\n");
 
     let prompt = format!(
-        "Extract ALL facts about the user from this conversation. Be thorough — extract everything the user revealed.\n\n\
+        "Extract ALL facts and insights from this conversation. Be thorough.\n\n\
         Return ONLY a JSON object (no other text):\n\
-        {{\"summary\": \"1-2 sentence summary\", \"facts\": [{{\"category\": \"...\", \"key\": \"...\", \"value\": \"...\"}}]}}\n\n\
-        Categories and what to extract:\n\
+        {{\"summary\": \"1-2 sentence summary\", \"facts\": [{{\"category\": \"...\", \"key\": \"...\", \"value\": \"...\"}}], \"insights\": [{{\"type\": \"...\", \"content\": \"...\"}}]}}\n\n\
+        FACTS — Categories:\n\
         - user: name, age, city, university, job, language, nationality, anything personal\n\
         - preferences: likes, dislikes, favorite things, habits, routines\n\
         - world: external facts, events, places, things they mentioned\n\
         - tasks: things they need to do, plans, deadlines\n\
         - people: friends, family, colleagues — names and relationships\n\
         - habits: daily routines, sports, sleep, diet patterns\n\n\
-        Example output:\n\
-        {{\"summary\": \"User talked about university\", \"facts\": [{{\"category\": \"user\", \"key\": \"university\", \"value\": \"Studies at KBTU\"}}]}}\n\n\
+        INSIGHTS — Types:\n\
+        - decision: choices the user made (\"решил перейти на утренние тренировки\")\n\
+        - open_question: unresolved questions/dilemmas (\"выбирает между React и Vue\")\n\
+        - topic: main discussion topics (\"обсуждали карьеру\")\n\
+        - action_taken: actions completed during conversation (\"добавил задачу на завтра\")\n\n\
+        Example:\n\
+        {{\"summary\": \"User talked about university\", \"facts\": [{{\"category\": \"user\", \"key\": \"university\", \"value\": \"Studies at KBTU\"}}], \"insights\": [{{\"type\": \"decision\", \"content\": \"решил готовиться к экзамену по матану\"}}]}}\n\n\
         Conversation:\n{}\n/no_think", conv_text
     );
 
@@ -4342,7 +5421,7 @@ async fn process_conversation_end(
             ChatMessage::text("system", "You extract structured data from conversations. Return only valid JSON."),
             ChatMessage::text("user", &prompt),
         ],
-        max_tokens: 800,
+        max_tokens: 1000,
         stream: false,
         temperature: 0.3,
         repetition_penalty: None,
@@ -4408,12 +5487,20 @@ async fn process_conversation_end(
         summary: Option<String>,
         #[serde(default)]
         facts: Vec<ExtractedFact>,
+        #[serde(default)]
+        insights: Vec<ExtractedInsight>,
     }
     #[derive(Deserialize)]
     struct ExtractedFact {
         category: String,
         key: String,
         value: String,
+    }
+    #[derive(Deserialize)]
+    struct ExtractedInsight {
+        #[serde(rename = "type")]
+        insight_type: String,
+        content: String,
     }
 
     if let Ok(result) = serde_json::from_str::<ExtractionResult>(json_str) {
@@ -4649,6 +5736,22 @@ async fn process_conversation_end(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Save conversation insights
+        if !result.insights.is_empty() {
+            let db = app.state::<HanniDb>();
+            let conn = db.conn();
+            for insight in &result.insights {
+                let itype = insight.insight_type.as_str();
+                if matches!(itype, "decision" | "open_question" | "topic" | "action_taken") {
+                    let _ = conn.execute(
+                        "INSERT INTO conversation_insights (conversation_id, insight_type, content, created_at)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        rusqlite::params![conversation_id, itype, insight.content, now],
+                    );
                 }
             }
         }
@@ -8201,7 +9304,7 @@ const MAX_TTS_TEXT_LEN: usize = 2000;
 
 /// Synchronous TTS — blocks until audio finishes playing
 fn speak_tts_sync(text: &str, voice: &str) {
-    let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..MAX_TTS_TEXT_LEN] } else { text };
+    let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..text.floor_char_boundary(MAX_TTS_TEXT_LEN)] } else { text };
     let clean = clean_text_for_tts(truncated);
     if clean.is_empty() { return; }
     // Local Silero TTS via voice server
@@ -8216,8 +9319,23 @@ fn speak_tts_sync(text: &str, voice: &str) {
 #[tauri::command]
 async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "xenia".into());
+    // V3: Split into sentences and speak sequentially for faster first-word latency
     tokio::task::spawn_blocking(move || {
-        speak_tts_sync(&text, &v);
+        let clean = clean_text_for_tts(&text);
+        if clean.is_empty() { return; }
+        let sentences: Vec<&str> = clean.split_inclusive(|c: char| c == '.' || c == '!' || c == '?' || c == '。')
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        if sentences.len() <= 1 {
+            speak_tts_sync(&text, &v);
+        } else {
+            for sentence in sentences {
+                let trimmed = sentence.trim();
+                if !trimmed.is_empty() {
+                    speak_tts_sync(trimmed, &v);
+                }
+            }
+        }
     }).await.map_err(|e| format!("TTS join error: {}", e))?;
     Ok(())
 }
@@ -8236,7 +9354,7 @@ async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Res
 #[tauri::command]
 async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "xenia".into());
-    let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..MAX_TTS_TEXT_LEN] } else { &text };
+    let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..text.floor_char_boundary(MAX_TTS_TEXT_LEN)] } else { &text };
     let clean = clean_text_for_tts(truncated);
     if clean.is_empty() { return Ok(()); }
     let speaker = silero_speaker_for(&v).to_string();
@@ -8409,6 +9527,7 @@ pub fn run() {
     init_db(&conn).expect("Cannot initialize database");
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
+    migrate_facts_decay(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -8539,6 +9658,8 @@ pub fn run() {
             // Phase 3: Training
             get_training_stats,
             export_training_data,
+            get_adapter_status,
+            run_finetune,
             rate_message,
             get_message_ratings,
             // Phase 5: Actions
@@ -8546,6 +9667,12 @@ pub fn run() {
             open_url,
             send_notification,
             set_volume,
+            open_app,
+            close_app,
+            music_control,
+            set_reminder,
+            get_reminders,
+            delete_reminder,
             get_clipboard,
             set_clipboard,
             web_search,
@@ -8706,6 +9833,19 @@ pub fn run() {
             speak_text_blocking,
             speak_sentence_blocking,
             save_voice_note,
+            // v0.18.0 Wave 3: Wake Word
+            start_wakeword,
+            stop_wakeword,
+            // v0.18.0 Wave 3: Voice Cloning
+            save_voice_sample,
+            record_voice_sample,
+            list_voice_samples,
+            delete_voice_sample,
+            speak_clone_blocking,
+            // v0.18.0 Wave 3: Data Flywheel
+            get_flywheel_status,
+            get_flywheel_history,
+            run_flywheel_cycle,
         ])
         .setup(move |app| {
             // Auto-updater
@@ -9059,6 +10199,37 @@ pub fn run() {
                 }
             });
 
+            // S3: Reminder check loop (every 30s)
+            let reminder_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let now = chrono::Local::now().to_rfc3339();
+                    let due: Vec<(i64, String)> = {
+                        let db = reminder_handle.state::<HanniDb>();
+                        let conn = db.conn();
+                        let mut stmt = match conn.prepare(
+                            "SELECT id, title FROM reminders WHERE fired=0 AND remind_at <= ?1"
+                        ) { Ok(s) => s, Err(_) => continue };
+                        let rows: Vec<(i64, String)> = stmt.query_map(rusqlite::params![now], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        }).ok().into_iter().flatten().filter_map(|r| r.ok()).collect();
+                        // Mark as fired
+                        for (id, _) in &rows {
+                            let _ = conn.execute("UPDATE reminders SET fired=1 WHERE id=?1", rusqlite::params![id]);
+                        }
+                        rows
+                    };
+                    for (_, title) in due {
+                        let _ = reminder_handle.emit("reminder-fired", &title);
+                        let _ = run_osascript(&format!(
+                            "display notification \"{}\" with title \"Напоминание\"",
+                            title.replace("\\", "\\\\").replace("\"", "\\\"")
+                        ));
+                    }
+                }
+            });
+
             // Proactive messaging background loop
             let proactive_handle = app.handle().clone();
             let proactive_state_ref = proactive_state.clone();
@@ -9239,8 +10410,11 @@ pub fn run() {
                     let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles).await;
                     drop(_proactive_permit);
 
+                    // P4: Re-check typing after LLM call — discard proactive if user started chatting
+                    let typing_during_call = proactive_state_ref.lock().await.user_is_typing;
+
                     match proactive_result {
-                        Ok(Some(message)) => {
+                        Ok(Some(message)) if !typing_during_call => {
                             let _ = proactive_handle.emit("proactive-message", &message);
                             if voice_enabled {
                                 speak_tts(&message, &voice_name);
@@ -9267,6 +10441,12 @@ pub fn run() {
                                 state.recent_messages.remove(0);
                             }
                             state.pending_triggers.clear();
+                        }
+                        // P4: User started typing during LLM call — discard message
+                        Ok(Some(_)) => {
+                            let mut state = proactive_state_ref.lock().await;
+                            state.consecutive_skips += 1;
+                            state.last_context_snapshot = context;
                         }
                         Ok(None) => {
                             let mut state = proactive_state_ref.lock().await;

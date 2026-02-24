@@ -7,7 +7,8 @@
 | B1 | Типы протокола чата | internal | ChatMessage, ChatRequest, Delta, etc. | lib.rs:L1052-1093 | 42 | Simple | — | — |
 | B2 | Стриминг чата с LLM | endpoint | chat() | lib.rs:L2695-2883 | 189 | Complex | 8 | ✅ |
 | B3 | CRUD разговоров | endpoint | save/update/get/delete/search_conversation | lib.rs:L3375-3497 | 123 | Medium | 6 | ✅ |
-| B4 | Извлечение фактов из разговора | endpoint | process_conversation_end() | lib.rs:L3499-3611 | 113 | Complex | 7 | ✅ |
+| B4 | Извлечение фактов + insights из разговора | endpoint | process_conversation_end() | lib.rs:L4695-4889 | ~195 | Complex | 7 | ✅ |
+| B5 | Самокритика ответов (Self-Refine) | async | quality_check_response() | lib.rs:L3998-4055 | 58 | Medium | — | ✅ |
 
 ## Frontend
 
@@ -24,9 +25,9 @@
 
 | Metric | Value |
 |--------|-------|
-| Total functions | 10 |
+| Total functions | 11 |
 | Simple | 1 |
-| Medium | 5 |
+| Medium | 6 |
 | Complex | 4 |
 | Total subfunctions | 56 |
-| Phase 3 completed | 9/9 (all Medium+Complex) |
+| Phase 3 completed | 10/10 (all Medium+Complex) |

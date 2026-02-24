@@ -9,11 +9,14 @@
 | B3 | Nightly LoRA fine-tuning                    | scheduled | `nightly_train.sh`           | scripts/:L1-217            | 217 | Complex    | 9        | ✅      |
 | B4 | LaunchAgent for nightly training            | config    | `com.hanni.nightly-train.plist` | scripts/                | ~30 | Simple     | —        | —       |
 | B5 | CI/CD Release pipeline                      | workflow  | `release.yml`                | .github/workflows/:L1-65   | 65  | Medium     | 5        | ✅      |
+| B6 | QLoRA fine-tuning скрипт                    | script    | `finetune.py`                | desktop/finetune.py          | 95  | Medium     | 3        | ✅      |
+| B7 | Статус LoRA адаптера                        | endpoint  | `get_adapter_status()`       | lib.rs:L3026-3042            | 17  | Simple     | —        | —       |
+| B8 | Запуск fine-tuning из UI                    | endpoint  | `run_finetune()`             | lib.rs:L3043-3083            | 41  | Medium     | —        | ✅      |
 
 ## Summary
 
-- **Total functions**: 5
-- **Simple**: 1 (B4)
-- **Medium**: 1 (B5)
+- **Total functions**: 8
+- **Simple**: 2 (B4, B7)
+- **Medium**: 4 (B5, B6, B8)
 - **Complex**: 3 (B1, B2, B3)
-- **Total subfunctions**: 29
+- **Total subfunctions**: 32
