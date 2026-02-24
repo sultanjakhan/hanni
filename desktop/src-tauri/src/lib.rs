@@ -9093,7 +9093,7 @@ async fn proactive_llm_call(
     }
 
     user_content.push_str(&format!(
-        "\nSkips in a row: {}. Engagement rate: {:.0}%.\n/no_think",
+        "\nSkips in a row: {}. Engagement rate: {:.0}%.",
         consecutive_skips, engagement_rate * 100.0
     ));
 
@@ -9105,8 +9105,8 @@ async fn proactive_llm_call(
         ],
         max_tokens: 300,
         stream: false,
-        temperature: 0.65,
-        repetition_penalty: Some(1.2),
+        temperature: 0.4,
+        repetition_penalty: None,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
     };
@@ -9134,10 +9134,17 @@ async fn proactive_llm_call(
     let text = re.replace_all(&raw, "").trim().to_string();
 
     if text.contains("[SKIP]") || text.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(text))
+        return Ok(None);
     }
+
+    // Validate output: reject gibberish (too short, no Cyrillic, or single-word answers)
+    let word_count = text.split_whitespace().count();
+    let has_cyrillic = text.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
+    if word_count < 3 || !has_cyrillic {
+        return Ok(None);
+    }
+
+    Ok(Some(text))
 }
 
 fn clean_text_for_tts(text: &str) -> String {

@@ -4,6 +4,19 @@
 const now = new Date().toISOString();
 const today = now.slice(0, 10);
 
+// Stateful memory store (for testing edit/delete)
+let mockMemories = [
+  { id: 1, category: 'user', key: 'name', value: 'Султан', source: 'conversation', created_at: now, updated_at: now },
+  { id: 2, category: 'user', key: 'university', value: 'Учится в КБТУ', source: 'conversation', created_at: now, updated_at: now },
+  { id: 3, category: 'preferences', key: 'language', value: 'Русский', source: 'conversation', created_at: now, updated_at: now },
+  { id: 4, category: 'people', key: 'artem', value: 'Близкий друг, программист', source: 'conversation', created_at: now, updated_at: now },
+  { id: 5, category: 'habits', key: 'morning', value: 'Встаёт в 7:00, делает зарядку', source: 'conversation', created_at: now, updated_at: now },
+  { id: 6, category: 'health', key: 'sport', value: 'Бегает по утрам, ходит в зал', source: 'conversation', created_at: now, updated_at: now },
+  { id: 7, category: 'work', key: 'project', value: 'Разрабатывает AI ассистента Hanni', source: 'conversation', created_at: now, updated_at: now },
+  { id: 8, category: 'observation', key: 'music_taste', value: 'Слушает Radiohead, Kendrick Lamar', source: 'conversation', created_at: now, updated_at: now },
+];
+let mockMemNextId = 9;
+
 const MOCK_DATA = {
   // ── Conversations ──
   get_conversations: () => [
@@ -215,14 +228,37 @@ const MOCK_DATA = {
   ],
   get_contact_blocks: () => [],
 
-  // ── Memory ──
-  get_all_memories: () => [
-    { id: 1, category: 'user', key: 'name', value: 'Султан', source: 'conversation', created_at: now, updated_at: now },
-    { id: 2, category: 'user', key: 'university', value: 'Учится в КБТУ', source: 'conversation', created_at: now, updated_at: now },
-    { id: 3, category: 'preferences', key: 'language', value: 'Русский', source: 'conversation', created_at: now, updated_at: now },
-    { id: 4, category: 'people', key: 'artem', value: 'Близкий друг, программист', source: 'conversation', created_at: now, updated_at: now },
-    { id: 5, category: 'habits', key: 'morning', value: 'Встаёт в 7:00, делает зарядку', source: 'conversation', created_at: now, updated_at: now },
-  ],
+  // ── Memory (stateful) ──
+  get_all_memories: ({ search }) => {
+    if (search) {
+      const q = search.toLowerCase();
+      return mockMemories.filter(m => m.key.toLowerCase().includes(q) || m.value.toLowerCase().includes(q) || m.category.toLowerCase().includes(q));
+    }
+    return [...mockMemories];
+  },
+  delete_memory: ({ id }) => {
+    const before = mockMemories.length;
+    mockMemories = mockMemories.filter(m => m.id !== id);
+    console.log(`[MOCK] delete_memory id=${id}: ${before} → ${mockMemories.length}`);
+    return null;
+  },
+  update_memory: ({ id, category, key, value }) => {
+    const m = mockMemories.find(x => x.id === id);
+    if (m) {
+      if (category !== undefined) m.category = category;
+      if (key !== undefined) m.key = key;
+      if (value !== undefined) m.value = value;
+      m.updated_at = new Date().toISOString();
+      console.log(`[MOCK] update_memory id=${id}:`, m);
+    }
+    return null;
+  },
+  memory_remember: ({ category, key, value }) => {
+    const m = { id: mockMemNextId++, category, key, value, source: 'manual', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    mockMemories.push(m);
+    console.log(`[MOCK] memory_remember:`, m);
+    return null;
+  },
   memory_search: () => [],
 
   // ── Blocklist ──
