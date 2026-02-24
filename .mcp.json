@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hanni": {
+      "command": "python3",
+      "args": ["/Users/sultanbekjakhanov/hanni/desktop/hanni-mcp/server.py"],
+      "env": {}
+    }
+  }
+}

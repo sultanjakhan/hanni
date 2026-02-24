@@ -335,24 +335,92 @@ const MOCK_DATA = {
 // Event listeners storage
 const listeners = {};
 
-// ── Chat mock with streaming simulation ──
-function mockChat(args) {
-  const response = 'Привет! Я Ханни, твой AI ассистент. Чем могу помочь?';
-  const words = response.split(' ');
-  return new Promise((resolve) => {
-    let i = 0;
-    const interval = setInterval(() => {
-      if (i < words.length) {
-        const token = (i === 0 ? '' : ' ') + words[i];
-        (listeners['chat-token'] || []).forEach(h => h({ payload: { token } }));
-        i++;
-      } else {
-        clearInterval(interval);
-        (listeners['chat-done'] || []).forEach(h => h({ payload: null }));
-        resolve(JSON.stringify({ text: response, finish_reason: 'stop', tool_calls: [] }));
+// ── Chat via real MLX server (streaming SSE) ──
+const MLX_URL = 'http://127.0.0.1:8234/v1/chat/completions';
+const MLX_MODEL = 'mlx-community/Qwen3-32B-4bit';
+
+const MOCK_SYSTEM_PROMPT = `Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, на "ты", по-русски.
+- Тёплый тон: юмор, любопытство, игривый сарказм (по-доброму).
+- 1-3 предложения для обычного чата.
+- У тебя есть память о пользователе — используй естественно.
+- Эмоции → сначала отреагируй на чувство.
+
+[Memory]
+[user] имя=Султан
+[user] университет=КБТУ, CS
+[work] проект=AI ассистент Hanni
+[preferences] музыка=Radiohead, Kendrick Lamar`;
+
+async function mockChat(args) {
+  const messages = args?.messages || [];
+  const llmMessages = [
+    { role: 'system', content: MOCK_SYSTEM_PROMPT },
+    ...messages.map(m => {
+      if (Array.isArray(m)) return { role: m[0], content: m[1] };
+      return { role: m.role, content: m.content || '' };
+    }).filter(m => m.role === 'user' || m.role === 'assistant'),
+  ];
+
+  try {
+    const resp = await fetch(MLX_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MLX_MODEL,
+        messages: llmMessages,
+        max_tokens: 300,
+        temperature: 0.7,
+        stream: true,
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`MLX error: ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            // Strip <think>...</think> tags from stream
+            const clean = delta.replace(/<\/?think>/g, '');
+            if (clean) {
+              fullText += clean;
+              (listeners['chat-token'] || []).forEach(h => h({ payload: { token: clean } }));
+            }
+          }
+        } catch (_) {}
       }
-    }, 80);
-  });
+    }
+
+    // Strip any remaining think tags from full text
+    fullText = fullText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+    (listeners['chat-done'] || []).forEach(h => h({ payload: null }));
+    return JSON.stringify({ text: fullText, finish_reason: 'stop', tool_calls: [] });
+  } catch (err) {
+    console.error('[MOCK] MLX chat error:', err);
+    // Fallback to static response
+    const fallback = 'Извини, MLX сервер недоступен. Проверь, запущен ли он на порту 8234.';
+    (listeners['chat-token'] || []).forEach(h => h({ payload: { token: fallback } }));
+    (listeners['chat-done'] || []).forEach(h => h({ payload: null }));
+    return JSON.stringify({ text: fallback, finish_reason: 'stop', tool_calls: [] });
+  }
 }
 
 // Default handler for any unregistered command

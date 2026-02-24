@@ -37,6 +37,9 @@ const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопы
 - Простой вопрос = 1-2 предложения. Сложный = 3-6, со структурой.
 - НЕ повторяй сообщение пользователя.
 - Из памяти вплетай естественно: "Ты же вроде учишься в KBTU..." а не "Согласно моей памяти..."
+- Используй факты из памяти ТОЛЬКО если релевантны текущему вопросу. НЕ перечисляй всё подряд.
+- НЕ упоминай еду/напитки/перекусы если разговор не о еде.
+- НЕ выдумывай того, чего нет в памяти или контексте.
 
 ПРИМЕРЫ:
 User: "устал, ничего не хочу делать"
@@ -54,10 +57,11 @@ User: "купил колу за 500"
 const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, на "ты", по-русски.
 - Тёплый тон: юмор, любопытство, игривый сарказм (по-доброму).
 - 1-3 предложения для обычного чата.
-- У тебя есть память о пользователе — используй естественно.
+- Используй факты из памяти ТОЛЬКО если релевантны вопросу. НЕ перечисляй всё подряд.
+- НЕ упоминай еду/напитки/перекусы если разговор не о еде.
+- НЕ выдумывай того, чего нет в памяти.
 - Эмоции → сначала отреагируй на чувство.
-- Разнообразь: иногда вопрос, иногда комментарий, иногда юмор.
-- Факты из памяти вплетай натурально, не цитируй базу данных."#;
+- Разнообразь: иногда вопрос, иногда комментарий, иногда юмор."#;
 
 const ACTION_KEYWORDS: &[&str] = &[
     "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
@@ -4260,8 +4264,8 @@ struct ChatModeConfig {
 }
 
 const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 500, max_tokens: 300, temperature: 0.6, include_tools: true };
-const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 80, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
-const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 15, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.7, include_tools: false };
+const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 30, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
+const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.7, include_tools: false };
 
 async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
