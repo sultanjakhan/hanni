@@ -1680,10 +1680,12 @@ async function executeAction(actionJson) {
 
     switch (actionType) {
       case 'add_purchase':
-        result = await invoke('tracker_add_purchase', {
+        result = await invoke('add_transaction', {
+          transactionType: 'expense',
           amount: action.amount,
           category: action.category || 'other',
-          description: action.description || ''
+          description: action.description || '',
+          currency: 'KZT'
         });
         break;
       case 'add_time':
