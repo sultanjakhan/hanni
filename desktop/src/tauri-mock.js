@@ -14,14 +14,29 @@ const MOCK_DATA = {
   get_conversation: () => ({ id: 1, messages: [['user','Привет!'],['assistant','Привет! Как у тебя дела сегодня? 😊']] }),
   save_conversation: () => 1,
   update_conversation: () => null,
+  delete_conversation: () => null,
   search_conversations: () => [],
   process_conversation_end: () => null,
 
   // ── Model & Settings ──
   get_model_info: () => ({ model_name: 'mlx-community/Qwen3-32B-4bit', server_url: 'http://127.0.0.1:8234/v1/chat/completions', server_online: true }),
   get_training_stats: () => ({ conversations: 47, total_messages: 312 }),
+  get_app_version: () => '0.18.0',
   get_app_setting: ({ key }) => {
-    const settings = { apple_calendar_enabled: 'true', google_calendar_ics_url: '', calendar_autosync: 'false', tts_server_url: '', voice_enabled: 'false', voice_name: 'ru-RU-SvetlanaNeural' };
+    const settings = {
+      apple_calendar_enabled: 'true',
+      google_calendar_ics_url: '',
+      calendar_autosync: 'false',
+      tts_server_url: '',
+      voice_enabled: 'false',
+      voice_name: 'ru-RU-SvetlanaNeural',
+      enable_thinking: 'false',
+      enable_self_refine: 'false',
+      voice_clone_enabled: 'false',
+      voice_clone_sample: '',
+      wakeword_enabled: 'false',
+      wakeword_keyword: '',
+    };
     return settings[key] || '';
   },
   set_app_setting: () => null,
@@ -30,6 +45,17 @@ const MOCK_DATA = {
   check_update: () => null,
   check_whisper_model: () => true,
   export_training_data: () => ({ train_count: 40, valid_count: 7 }),
+
+  // ── v0.18.0: Ratings, Flywheel, Adapter ──
+  get_message_ratings: () => ({}),
+  rate_message: () => null,
+  report_user_chat_activity: () => null,
+  report_proactive_engagement: () => null,
+  get_adapter_status: () => ({ exists: false }),
+  get_flywheel_status: () => ({ thumbs_up_total: 12, new_pairs: 5, total_cycles: 0, ready_to_train: false }),
+  get_flywheel_history: () => [],
+  list_voice_samples: () => [],
+  read_file: () => '',
 
   // ── Dashboard ──
   get_dashboard_data: () => ({
@@ -270,8 +296,34 @@ const MOCK_DATA = {
   get_view_configs: () => [],
 };
 
+// Event listeners storage
+const listeners = {};
+
+// ── Chat mock with streaming simulation ──
+function mockChat(args) {
+  const response = 'Привет! Я Ханни, твой AI ассистент. Чем могу помочь?';
+  const words = response.split(' ');
+  return new Promise((resolve) => {
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i < words.length) {
+        const token = (i === 0 ? '' : ' ') + words[i];
+        (listeners['chat-token'] || []).forEach(h => h({ payload: { token } }));
+        i++;
+      } else {
+        clearInterval(interval);
+        (listeners['chat-done'] || []).forEach(h => h({ payload: null }));
+        resolve(JSON.stringify({ text: response, finish_reason: 'stop', tool_calls: [] }));
+      }
+    }, 80);
+  });
+}
+
 // Default handler for any unregistered command
 function mockInvoke(cmd, args) {
+  // Chat with streaming simulation
+  if (cmd === 'chat') return mockChat(args);
+
   if (MOCK_DATA[cmd]) {
     const result = MOCK_DATA[cmd](args || {});
     return Promise.resolve(result);
@@ -280,15 +332,18 @@ function mockInvoke(cmd, args) {
   if (cmd.startsWith('set_') || cmd.startsWith('save_') || cmd.startsWith('update_') || cmd.startsWith('delete_') ||
       cmd.startsWith('toggle_') || cmd.startsWith('add_') || cmd.startsWith('create_') || cmd.startsWith('log_') ||
       cmd.startsWith('remove_') || cmd.startsWith('start_') || cmd.startsWith('stop_') || cmd.startsWith('speak_') ||
-      cmd.startsWith('download_') || cmd === 'chat' || cmd === 'memory_remember' || cmd === 'memory_forget') {
+      cmd.startsWith('download_') || cmd === 'memory_remember' || cmd === 'memory_forget' ||
+      cmd.startsWith('report_') || cmd.startsWith('rate_') || cmd.startsWith('record_') ||
+      cmd.startsWith('run_') || cmd.startsWith('call_') || cmd.startsWith('send_') ||
+      cmd === 'open_url' || cmd === 'open_app' || cmd === 'close_app' ||
+      cmd === 'music_control' || cmd === 'web_search' || cmd === 'run_shell' ||
+      cmd === 'set_clipboard' || cmd === 'get_clipboard' || cmd === 'set_reminder' || cmd === 'set_volume') {
     return Promise.resolve(null);
   }
   console.warn('[MOCK] Unhandled invoke:', cmd, args);
   return Promise.resolve(null);
 }
 
-// Event listeners storage
-const listeners = {};
 function mockListen(event, handler) {
   if (!listeners[event]) listeners[event] = [];
   listeners[event].push(handler);
@@ -297,10 +352,24 @@ function mockListen(event, handler) {
   });
 }
 
+// ── Global emit helper for Playwright testing ──
+// Usage: window.__MOCK_EMIT__('chat-token', ' Hello')
+//        window.__MOCK_EMIT__('proactive-message', { text: 'Как дела?' })
+window.__MOCK_EMIT__ = (event, payload) => {
+  (listeners[event] || []).forEach(h => h({ payload }));
+};
+
 // Install mock
 window.__TAURI__ = {
   core: { invoke: mockInvoke },
   event: { listen: mockListen },
+  window: {
+    getCurrentWindow: () => ({
+      unminimize: () => Promise.resolve(),
+      show: () => Promise.resolve(),
+      setFocus: () => Promise.resolve(),
+    }),
+  },
 };
 
 console.log('[MOCK] Tauri mock loaded — all tabs should render with fake data');
