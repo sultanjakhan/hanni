@@ -1348,7 +1348,7 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_conversations_started ON conversations(started_at);
         CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
         CREATE INDEX IF NOT EXISTS idx_mood_date ON mood_log(date);
-        CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date);
+        CREATE INDEX IF NOT EXISTS idx_activities_started ON activities(started_at);
         CREATE INDEX IF NOT EXISTS idx_habit_checks_date ON habit_checks(date);
         CREATE INDEX IF NOT EXISTS idx_conversation_insights_conv ON conversation_insights(conversation_id);
         CREATE INDEX IF NOT EXISTS idx_message_feedback_conv ON message_feedback(conversation_id);
