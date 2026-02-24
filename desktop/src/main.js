@@ -1,6 +1,35 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+// ── Markdown rendering setup ──
+const markedInstance = new marked.Marked({
+  breaks: true,
+  gfm: true,
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  },
+});
+markedInstance.use({
+  renderer: {
+    code({ text, lang }) {
+      const highlighted = lang && hljs.getLanguage(lang)
+        ? hljs.highlight(text, { language: lang }).value
+        : hljs.highlightAuto(text).value;
+      const langLabel = lang || 'code';
+      return `<div class="code-block"><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent)">Копировать</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
+    },
+    link({ href, text }) {
+      return `<a href="#" onclick="event.preventDefault();window.__TAURI__.core.invoke('open_url',{url:'${href.replace(/'/g, "\\'")}'});return false;">${text}</a>`;
+    },
+  },
+});
+function renderMarkdown(text) {
+  return markedInstance.parse(text);
+}
+
 const chat = document.getElementById('chat');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
@@ -125,7 +154,7 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Blocklist', 'Integrations', 'About'] },
+  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Blocklist', 'Integrations', 'Training', 'About'] },
 };
 
 const TAB_DESCRIPTIONS = {
@@ -215,12 +244,26 @@ listen('proactive-message', async (event) => {
   const histIdx = history.length;
   history.push({ role: 'assistant', content: text });
   scrollDown();
+
+  // P1: Execute any action blocks from proactive messages
+  const proactiveActions = parseAndExecuteActions(text);
+  if (proactiveActions.length > 0) {
+    for (const actionJson of proactiveActions) {
+      const { success, result: actionResult } = await executeAction(actionJson);
+      const actionDiv = document.createElement('div');
+      actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
+      actionDiv.textContent = actionResult;
+      chat.appendChild(actionDiv);
+    }
+    history.push({ role: 'user', content: `[Action result: ${proactiveActions.map(() => 'ok').join('; ')}]` });
+  }
+
   await autoSaveConversation();
 
   // Add feedback buttons
   if (wrapper && currentConversationId) {
     wrapper.dataset.historyIdx = histIdx;
-    addFeedbackButtons(wrapper, currentConversationId, histIdx);
+    addFeedbackButtons(wrapper, currentConversationId, histIdx, text);
   }
 
   // Desktop notification if window not focused
@@ -237,6 +280,16 @@ input.addEventListener('input', () => {
   typingTimeout = setTimeout(() => {
     invoke('set_user_typing', { typing: false }).catch(() => {});
   }, 5000);
+});
+
+// ── Reminder notifications ──
+listen('reminder-fired', (event) => {
+  const title = event.payload;
+  addMsg('bot', `⏰ Напоминание: ${title}`);
+  scrollDown();
+  if (!document.hasFocus()) {
+    new Notification('Напоминание', { body: title });
+  }
 });
 
 // ── Voice recording ──
@@ -467,11 +520,12 @@ async function loadConversation(id) {
         chat.appendChild(div);
       } else if (role === 'user' || role === 'assistant') {
         addMsg(role === 'assistant' ? 'bot' : role, content);
+        const lastWrapper = chat.querySelector('.msg-wrapper:last-of-type');
+        if (lastWrapper) lastWrapper.dataset.historyIdx = String(i);
         // Add feedback buttons to bot messages
         if (role === 'assistant') {
-          const wrapper = chat.querySelector('.msg-wrapper:last-of-type');
-          if (wrapper) {
-            const { thumbUp, thumbDown } = addFeedbackButtons(wrapper, id, i);
+          if (lastWrapper) {
+            const { thumbUp, thumbDown } = addFeedbackButtons(lastWrapper, id, i, content);
             if (ratingsMap[i] === 1) thumbUp.classList.add('active');
             if (ratingsMap[i] === -1) thumbDown.classList.add('active');
           }
@@ -823,12 +877,18 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, thinkVal, memories] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, thinkVal, selfRefineVal, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples] = await Promise.all([
       invoke('get_proactive_settings'),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
       invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
+      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
       invoke('get_all_memories', { search: null }).catch(() => []),
+      invoke('get_app_setting', { key: 'wakeword_enabled' }).catch(() => null),
+      invoke('get_app_setting', { key: 'wakeword_keyword' }).catch(() => null),
+      invoke('get_app_setting', { key: 'voice_clone_enabled' }).catch(() => null),
+      invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null),
+      invoke('list_voice_samples').catch(() => []),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -901,6 +961,14 @@ async function loadChatSettings() {
               <span class="toggle-slider"></span>
             </label>
           </div>
+          <div class="settings-row">
+            <span class="settings-label">Самопроверка</span>
+            <span class="settings-hint">Авто-критика сложных ответов</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -944,6 +1012,45 @@ async function loadChatSettings() {
           <div class="settings-row">
             <span class="settings-label"></span>
             <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Wake Word</div>
+          <div class="settings-row">
+            <span class="settings-label">Активация голосом</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-wakeword-enabled" ${wakeWordEnabled === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Ключевое слово</span>
+            <input class="form-input" id="chat-wakeword-keyword" value="${wakeWordKeyword || 'ханни'}" style="width:180px" placeholder="ханни">
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Статус</span>
+            <span class="settings-value" id="chat-wakeword-status">${wakeWordEnabled === 'true' ? 'Слушаю...' : 'Выключен'}</span>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Клонирование голоса (PC)</div>
+          <div class="settings-row">
+            <span class="settings-label">Использовать клон</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-voice-clone-enabled" ${voiceCloneEnabled === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Образец голоса</span>
+            <select class="form-select" id="chat-voice-clone-sample" style="width:220px">
+              <option value="">— нет —</option>
+              ${voiceSamples.map(s => `<option value="${s.name}" ${voiceCloneSample === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label"></span>
+            <button class="settings-btn" id="chat-record-voice-sample">Записать образец</button>
           </div>
         </div>
       </div>
@@ -1026,6 +1133,11 @@ async function loadChatSettings() {
       invoke('set_app_setting', { key: 'enable_thinking', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
     });
 
+    // Self-refine toggle
+    document.getElementById('chat-self-refine-toggle')?.addEventListener('change', (e) => {
+      invoke('set_app_setting', { key: 'enable_self_refine', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
+    });
+
     // Interval slider <-> number sync
     const slider = document.getElementById('chat-proactive-slider');
     const numInput = document.getElementById('chat-proactive-number');
@@ -1101,6 +1213,65 @@ async function loadChatSettings() {
         if (s) s.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
       } catch { const s = document.getElementById('chat-tts-server-status'); if (s) s.textContent = 'Недоступен'; }
     }
+
+    // ── Wake Word handlers ──
+    document.getElementById('chat-wakeword-enabled')?.addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+      const keyword = document.getElementById('chat-wakeword-keyword')?.value.trim() || 'ханни';
+      await invoke('set_app_setting', { key: 'wakeword_enabled', value: String(enabled) });
+      await invoke('set_app_setting', { key: 'wakeword_keyword', value: keyword });
+      const statusEl = document.getElementById('chat-wakeword-status');
+      if (enabled) {
+        try {
+          await fetch(`${VOICE_SERVER}/wakeword/start`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ keyword }),
+          });
+          if (statusEl) statusEl.textContent = 'Слушаю...';
+          startWakeWordSSE(keyword);
+        } catch (err) {
+          if (statusEl) statusEl.textContent = 'Ошибка: ' + String(err).substring(0, 40);
+        }
+      } else {
+        try { await fetch(`${VOICE_SERVER}/wakeword/stop`, { method: 'POST' }); } catch (_) {}
+        stopWakeWordSSE();
+        if (statusEl) statusEl.textContent = 'Выключен';
+      }
+    });
+
+    // ── Voice Clone handlers ──
+    document.getElementById('chat-voice-clone-enabled')?.addEventListener('change', async (e) => {
+      await invoke('set_app_setting', { key: 'voice_clone_enabled', value: String(e.target.checked) });
+    });
+    document.getElementById('chat-voice-clone-sample')?.addEventListener('change', async (e) => {
+      await invoke('set_app_setting', { key: 'voice_clone_sample', value: e.target.value });
+    });
+    document.getElementById('chat-record-voice-sample')?.addEventListener('click', async () => {
+      const btn = document.getElementById('chat-record-voice-sample');
+      if (!btn) return;
+      const name = prompt('Имя для образца голоса:', 'my_voice');
+      if (!name) return;
+      btn.textContent = 'Записываю (5 сек)...';
+      btn.disabled = true;
+      try {
+        // Record directly via cpal for 5 seconds → save as WAV
+        const path = await invoke('record_voice_sample', { name, durationSecs: 5 });
+        btn.textContent = 'Сохранено!';
+        // Refresh sample list
+        const samples = await invoke('list_voice_samples').catch(() => []);
+        const sel = document.getElementById('chat-voice-clone-sample');
+        if (sel) {
+          sel.innerHTML = '<option value="">— нет —</option>' +
+            samples.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+          sel.value = name;
+        }
+        await invoke('set_app_setting', { key: 'voice_clone_sample', value: name });
+      } catch (err) {
+        btn.textContent = 'Ошибка: ' + String(err).substring(0, 30);
+      }
+      setTimeout(() => { btn.textContent = 'Записать образец'; btn.disabled = false; }, 3000);
+    });
+
   } catch (e) {
     el.innerHTML = `<div style="color:var(--color-red);font-size:14px;">Ошибка: ${e}</div>`;
   }
@@ -1252,8 +1423,8 @@ function addMsg(role, text, isVoice = false) {
     const wrapper = document.createElement('div');
     wrapper.className = 'msg-wrapper';
     const div = document.createElement('div');
-    div.className = 'msg bot';
-    div.textContent = text;
+    div.className = 'msg bot markdown-body';
+    div.innerHTML = renderMarkdown(text);
     wrapper.appendChild(div);
     const ttsBtn = document.createElement('button');
     ttsBtn.className = 'tts-btn';
@@ -1265,6 +1436,8 @@ function addMsg(role, text, isVoice = false) {
     scrollDown();
     return div;
   }
+  const wrapper = document.createElement('div');
+  wrapper.className = 'msg-wrapper user-wrapper';
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   if (isVoice && role === 'user') {
@@ -1276,14 +1449,79 @@ function addMsg(role, text, isVoice = false) {
   } else {
     div.textContent = text;
   }
-  chat.appendChild(div);
+  wrapper.appendChild(div);
+
+  // CH4: Edit button for user messages
+  if (role === 'user') {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'feedback-btn edit-msg-btn';
+    editBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+    editBtn.title = 'Редактировать';
+    editBtn.addEventListener('click', () => {
+      const input = document.getElementById('input');
+      input.value = text;
+      input.focus();
+      // Find this wrapper's history index and remove everything after it
+      const allWrappers = [...chat.querySelectorAll('.msg-wrapper, .msg.user, .action-result, .memory-toast')];
+      const idx = allWrappers.indexOf(wrapper);
+      if (idx >= 0) {
+        for (let i = allWrappers.length - 1; i > idx; i--) allWrappers[i].remove();
+      }
+      wrapper.remove();
+      // Find and truncate history to this user message
+      const wrapperIdx = parseInt(wrapper.dataset.historyIdx || '-1', 10);
+      if (wrapperIdx >= 0) {
+        history.length = wrapperIdx;
+      } else {
+        // Fallback: remove from the last user message matching this text
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].role === 'user' && history[i].content === text) {
+            history.length = i;
+            break;
+          }
+        }
+      }
+    });
+    wrapper.appendChild(editBtn);
+  }
+
+  chat.appendChild(wrapper);
   scrollDown();
   return div;
 }
 
-function addFeedbackButtons(wrapper, conversationId, messageIndex) {
+function addFeedbackButtons(wrapper, conversationId, messageIndex, botText) {
   const actions = document.createElement('div');
   actions.className = 'msg-actions';
+
+  // Copy button
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'feedback-btn copy-btn';
+  copyBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
+  copyBtn.title = 'Копировать';
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(botText || '');
+    copyBtn.classList.add('copied');
+    copyBtn.title = 'Скопировано!';
+    setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.title = 'Копировать'; }, 1500);
+  });
+
+  // Regenerate button
+  const regenBtn = document.createElement('button');
+  regenBtn.className = 'feedback-btn regen-btn';
+  regenBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+  regenBtn.title = 'Перегенерировать';
+  regenBtn.addEventListener('click', async () => {
+    if (busy) return;
+    // Remove last bot message from history and re-send
+    while (history.length > 0 && history[history.length - 1].role === 'assistant') {
+      history.pop();
+    }
+    // Remove wrapper from DOM
+    wrapper.remove();
+    // Re-send
+    send();
+  });
 
   const thumbUp = document.createElement('button');
   thumbUp.className = 'feedback-btn thumb-up';
@@ -1297,7 +1535,6 @@ function addFeedbackButtons(wrapper, conversationId, messageIndex) {
 
   const handleClick = async (btn, rating) => {
     const isActive = btn.classList.contains('active');
-    // Remove active from both
     thumbUp.classList.remove('active');
     thumbDown.classList.remove('active');
     if (!isActive) {
@@ -1308,7 +1545,6 @@ function addFeedbackButtons(wrapper, conversationId, messageIndex) {
         console.error('Rate error:', e);
       }
     } else {
-      // Toggled off — rate as 0 to clear
       try {
         await invoke('rate_message', { conversationId, messageIndex, rating: 0 });
       } catch (e) {
@@ -1320,6 +1556,8 @@ function addFeedbackButtons(wrapper, conversationId, messageIndex) {
   thumbUp.addEventListener('click', () => handleClick(thumbUp, 1));
   thumbDown.addEventListener('click', () => handleClick(thumbDown, -1));
 
+  actions.appendChild(copyBtn);
+  actions.appendChild(regenBtn);
   actions.appendChild(thumbUp);
   actions.appendChild(thumbDown);
   wrapper.appendChild(actions);
@@ -1398,6 +1636,29 @@ async function executeAction(actionJson) {
       actionType = 'log_mood';
     }
 
+    // S5: Confirmation for dangerous actions
+    const DANGEROUS_ACTIONS = ['run_shell', 'close_app', 'quit_app'];
+    if (DANGEROUS_ACTIONS.includes(actionType)) {
+      const desc = actionType === 'run_shell' ? `Команда: ${action.command || action.cmd || '?'}`
+        : `Закрыть: ${action.name || action.app || '?'}`;
+      const confirmed = await new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-overlay';
+        overlay.innerHTML = `<div class="confirm-modal">
+          <div class="confirm-title">Подтверждение действия</div>
+          <div class="confirm-desc">${desc}</div>
+          <div class="confirm-buttons">
+            <button class="confirm-cancel">Отмена</button>
+            <button class="confirm-ok">Выполнить</button>
+          </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.confirm-cancel').onclick = () => { overlay.remove(); resolve(false); };
+        overlay.querySelector('.confirm-ok').onclick = () => { overlay.remove(); resolve(true); };
+      });
+      if (!confirmed) return { success: false, result: 'Действие отменено пользователем' };
+    }
+
     switch (actionType) {
       case 'add_purchase':
         result = await invoke('tracker_add_purchase', {
@@ -1454,6 +1715,13 @@ async function executeAction(actionJson) {
           key: action.key || '',
           value: action.value || ''
         });
+        // ME2: Show memory notification
+        { const tag = document.createElement('div');
+          tag.className = 'memory-toast';
+          tag.textContent = `Запомнила: ${action.key || action.value || ''}`;
+          chat.appendChild(tag);
+          setTimeout(() => tag.classList.add('fade-out'), 3000);
+          setTimeout(() => tag.remove(), 3500); }
         break;
       case 'recall':
         result = await invoke('memory_recall', {
@@ -1649,6 +1917,29 @@ async function executeAction(actionJson) {
           status: action.status || null,
         });
         break;
+      // Reminders
+      case 'set_reminder':
+      case 'remind':
+      case 'set_timer':
+        result = await invoke('set_reminder', {
+          title: action.title || action.text || '',
+          remindAt: action.remind_at || action.time || '',
+          repeat: action.repeat || null,
+        });
+        break;
+      // App & Music control
+      case 'open_app':
+      case 'launch_app':
+        result = await invoke('open_app', { name: action.name || action.app || '' });
+        break;
+      case 'close_app':
+      case 'quit_app':
+        result = await invoke('close_app', { name: action.name || action.app || '' });
+        break;
+      case 'music':
+      case 'music_control':
+        result = await invoke('music_control', { action: action.command || action.action_type || 'toggle' });
+        break;
       default:
         console.warn('Unknown action:', actionType, action);
         result = 'Unknown action: ' + actionType;
@@ -1709,13 +2000,19 @@ async function streamChat(botDiv, t0, callMode = false) {
   let toolCalls = [];
   let finishReason = null;
 
+  let scrollRAF = null;
+  const scrollDownThrottled = () => {
+    if (!scrollRAF) {
+      scrollRAF = requestAnimationFrame(() => { scrollDown(); scrollRAF = null; });
+    }
+  };
   const unlisten = await listen('chat-token', (event) => {
     if (!firstToken) firstToken = performance.now() - t0;
     tokens++;
     const token = event.payload.token;
     fullReply += token;
     botDiv.insertBefore(document.createTextNode(token), cursor);
-    scrollDown();
+    scrollDownThrottled();
   });
 
   const unlistenDone = await listen('chat-done', () => {});
@@ -1755,6 +2052,12 @@ async function streamChat(botDiv, t0, callMode = false) {
   unlistenDone();
   cursor.remove();
 
+  // Re-render as Markdown after streaming completes
+  if (fullReply) {
+    botDiv.classList.add('markdown-body');
+    botDiv.innerHTML = renderMarkdown(fullReply);
+  }
+
   return { fullReply, tokens, firstToken, toolCalls, finishReason };
 }
 
@@ -1786,15 +2089,18 @@ async function toggleTTS(btn, text) {
       const ps = await invoke('get_proactive_settings');
       voice = ps.voice_name || 'xenia';
     } catch (_) {}
-    await invoke('speak_text', { text, voice });
-    const wordCount = text.split(/\s+/).length;
-    const durationMs = Math.max(2000, wordCount * 300);
-    setTimeout(() => {
-      btn.classList.remove('speaking');
-      btn.innerHTML = '&#9654;';
-      isSpeaking = false;
-      document.getElementById('stop-tts')?.classList.add('hidden');
-    }, durationMs);
+    // V8: Check if voice clone is enabled
+    const cloneEnabled = await invoke('get_app_setting', { key: 'voice_clone_enabled' }).catch(() => null);
+    const cloneSample = await invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null);
+    if (cloneEnabled === 'true' && cloneSample) {
+      await invoke('speak_clone_blocking', { text, sampleName: cloneSample });
+    } else {
+      await invoke('speak_text_blocking', { text, voice });
+    }
+    btn.classList.remove('speaking');
+    btn.innerHTML = '&#9654;';
+    isSpeaking = false;
+    document.getElementById('stop-tts')?.classList.add('hidden');
   } catch (_) {
     btn.classList.remove('speaking');
     btn.innerHTML = '&#9654;';
@@ -1851,6 +2157,9 @@ async function send() {
   }
 
   history.push({ role: 'user', content: userContent });
+  // Set history index on user wrapper for edit support
+  { const lastUserWrapper = chat.querySelector('.user-wrapper:last-of-type');
+    if (lastUserWrapper) lastUserWrapper.dataset.historyIdx = String(history.length - 1); }
 
   const MAX_ITERATIONS = 5;
   const t0 = performance.now();
@@ -1986,7 +2295,7 @@ async function send() {
           if (w.querySelector('.feedback-btn')) return;
           const idx = parseInt(w.dataset.historyIdx, 10);
           if (!isNaN(idx) && getRole(history[idx]) === 'assistant') {
-            addFeedbackButtons(w, currentConversationId, idx);
+            addFeedbackButtons(w, currentConversationId, idx, history[idx]?.content || '');
           }
         });
       }
@@ -3211,6 +3520,7 @@ async function loadSettings(subTab) {
   if (!settingsContent) return;
   if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
   if (subTab === 'Integrations') { loadIntegrations(); return; }
+  if (subTab === 'Training') { loadTraining(settingsContent); return; }
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   // Default to Blocklist
   loadBlocklist(settingsContent);
@@ -3257,10 +3567,143 @@ async function loadBlocklist(el) {
 }
 
 // ── About (Settings sub-tab) ──
+// ML6: Training / Fine-tuning UI
+async function loadTraining(el) {
+  try {
+    const [stats, adapter, flywheel, history] = await Promise.all([
+      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_adapter_status').catch(() => ({ exists: false, meta: null })),
+      invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
+      invoke('get_flywheel_history').catch(() => []),
+    ]);
+    const pairsPath = '~/Library/Application Support/Hanni/training_pairs.jsonl';
+    el.innerHTML = `
+      <div class="settings-section">
+        <div class="settings-section-title">Данные для обучения</div>
+        <div class="settings-row"><span class="settings-label">Диалогов (4+ сообщений)</span><span class="settings-value">${stats.conversations}</span></div>
+        <div class="settings-row"><span class="settings-label">Всего сообщений</span><span class="settings-value">${stats.total_messages}</span></div>
+        <div class="settings-row"><span class="settings-label">Thumbs-up пар</span><span class="settings-value" id="train-pairs-count">...</span></div>
+        <div class="settings-row"><span class="settings-label">Период</span><span class="settings-value">${stats.earliest ? stats.earliest.substring(0,10) + ' — ' + stats.latest.substring(0,10) : '—'}</span></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Экспорт</div>
+        <div class="settings-row"><span class="settings-label">JSONL</span><button class="settings-btn" id="train-export-btn">Экспорт данных</button></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Fine-tuning (LoRA)</div>
+        <div class="settings-row"><span class="settings-label">Адаптер</span><span class="settings-value">${adapter.exists ? 'Есть' + (adapter.meta?.trained_at ? ' (' + adapter.meta.trained_at.substring(0,10) + ')' : '') : 'Нет'}</span></div>
+        <div class="settings-row"><span class="settings-label">Обучить модель</span><button class="settings-btn btn-primary" id="train-finetune-btn">Запустить</button></div>
+        <div id="train-progress" class="hidden" style="margin-top:8px;">
+          <div class="train-progress-bar"><div class="train-progress-fill" id="train-fill"></div></div>
+          <div id="train-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Data Flywheel</div>
+        <div class="settings-row"><span class="settings-label">Всего thumbs-up</span><span class="settings-value">${flywheel.thumbs_up_total}</span></div>
+        <div class="settings-row"><span class="settings-label">Новых (не экспортировано)</span><span class="settings-value" style="${flywheel.new_pairs >= 20 ? 'color:var(--accent)' : ''}">${flywheel.new_pairs}</span></div>
+        <div class="settings-row"><span class="settings-label">Циклов обучения</span><span class="settings-value">${flywheel.total_cycles}</span></div>
+        <div class="settings-row"><span class="settings-label">Последний цикл</span><span class="settings-value">${flywheel.last_cycle ? flywheel.last_cycle.date.substring(0,10) + ' — ' + flywheel.last_cycle.status : '—'}</span></div>
+        <div class="settings-row">
+          <span class="settings-label">Полный цикл</span>
+          <button class="settings-btn ${flywheel.ready_to_train ? 'btn-primary' : ''}" id="flywheel-run-btn" ${flywheel.ready_to_train ? '' : 'title="Нужно минимум 20 новых пар"'}>
+            ${flywheel.ready_to_train ? 'Запустить цикл' : 'Мало данных (' + flywheel.new_pairs + '/20)'}
+          </button>
+        </div>
+        <div id="flywheel-progress" class="hidden" style="margin-top:8px;">
+          <div class="train-progress-bar"><div class="train-progress-fill" id="flywheel-fill"></div></div>
+          <div id="flywheel-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
+        </div>
+        ${history.length > 0 ? `
+        <div style="margin-top:12px;">
+          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">История циклов:</div>
+          ${history.slice(0, 5).map(c => `
+            <div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border-color);">
+              #${c.id} ${(c.started_at || '').substring(0,16)} — ${c.status} (${c.train_pairs} пар)${c.eval_score != null ? ' score:' + c.eval_score.toFixed(2) : ''}
+            </div>
+          `).join('')}
+        </div>` : ''}
+      </div>`;
+    // Count training pairs from JSONL file
+    try {
+      const content = await invoke('read_file', { path: pairsPath }).catch(() => '');
+      const count = content ? content.trim().split('\\n').filter(l => l.trim()).length : 0;
+      const el2 = document.getElementById('train-pairs-count');
+      if (el2) el2.textContent = String(count);
+    } catch (_) {
+      const el2 = document.getElementById('train-pairs-count');
+      if (el2) el2.textContent = '0';
+    }
+    document.getElementById('train-export-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
+      try { const r = await invoke('export_training_data'); btn.textContent = r.train_count + ' train + ' + r.valid_count + ' valid'; }
+      catch (err) { btn.textContent = String(err).substring(0, 30); }
+      setTimeout(() => { btn.textContent = 'Экспорт данных'; btn.disabled = false; }, 4000);
+    });
+    document.getElementById('train-finetune-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true;
+      const progress = document.getElementById('train-progress');
+      const fill = document.getElementById('train-fill');
+      const status = document.getElementById('train-status');
+      progress?.classList.remove('hidden');
+      btn.textContent = 'Экспорт...';
+      if (status) status.textContent = 'Экспортируем данные...';
+      if (fill) fill.style.width = '10%';
+      try {
+        await invoke('export_training_data');
+        btn.textContent = 'Обучение...';
+        if (status) status.textContent = 'Запускаем fine-tuning (это может занять 10-30 минут)...';
+        if (fill) fill.style.width = '30%';
+        const r = await invoke('run_finetune');
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Готово!';
+        btn.textContent = 'Готово!';
+      } catch (err) {
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
+        btn.textContent = 'Ошибка';
+      }
+      setTimeout(() => { btn.textContent = 'Запустить'; btn.disabled = false; }, 5000);
+    });
+    // Flywheel cycle button
+    document.getElementById('flywheel-run-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true;
+      const progress = document.getElementById('flywheel-progress');
+      const fill = document.getElementById('flywheel-fill');
+      const status = document.getElementById('flywheel-status');
+      progress?.classList.remove('hidden');
+      btn.textContent = 'Экспорт...';
+      if (status) status.textContent = 'Шаг 1/3: Экспорт данных...';
+      if (fill) fill.style.width = '15%';
+      try {
+        await invoke('export_training_data');
+        btn.textContent = 'Обучение...';
+        if (status) status.textContent = 'Шаг 2/3: Fine-tuning (может занять 10-30 минут)...';
+        if (fill) fill.style.width = '40%';
+        const r = await invoke('run_flywheel_cycle');
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = `Цикл #${r.cycle_id} завершён: ${r.status} (${r.train_pairs} пар)`;
+        btn.textContent = 'Готово!';
+      } catch (err) {
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
+        btn.textContent = 'Ошибка';
+      }
+      setTimeout(() => { btn.textContent = 'Запустить цикл'; btn.disabled = false; }, 5000);
+    });
+  } catch (e) { el.innerHTML = '<div style="color:var(--text-muted);">Ошибка: ' + e + '</div>'; }
+}
+
 async function loadAbout(el) {
   try {
-    const info = await invoke('get_model_info').catch(() => ({}));
-    const trainingStats = await invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 }));
+    const [info, trainingStats, adapterStatus] = await Promise.all([
+      invoke('get_model_info').catch(() => ({})),
+      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_adapter_status').catch(() => ({ exists: false, meta: null })),
+    ]);
+    const adapterInfo = adapterStatus.exists
+      ? `Есть${adapterStatus.meta?.trained_at ? ` (${adapterStatus.meta.trained_at.substring(0,10)})` : ''}`
+      : 'Нет';
     el.innerHTML = `
       <div class="settings-section">
         <div class="settings-section-title">Hanni v${APP_VERSION}</div>
@@ -3279,6 +3722,11 @@ async function loadAbout(el) {
         <div class="settings-row"><span class="settings-label">Экспорт</span><button class="settings-btn" id="about-export-btn">Экспорт JSONL</button></div>
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">Fine-tuning (LoRA)</div>
+        <div class="settings-row"><span class="settings-label">Адаптер</span><span class="settings-value">${adapterInfo}</span></div>
+        <div class="settings-row"><span class="settings-label">Обучение</span><button class="settings-btn" id="about-finetune-btn">Запустить fine-tuning</button></div>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">HTTP API</div>
         <div class="settings-row"><span class="settings-label">Адрес</span><span class="settings-value">127.0.0.1:8235</span></div>
         <div class="settings-row"><span class="settings-label">Статус</span><span class="settings-value" id="about-api-status">Проверяю...</span></div>
@@ -3294,6 +3742,17 @@ async function loadAbout(el) {
       try { const r = await invoke('export_training_data'); btn.textContent = `${r.train_count} train + ${r.valid_count} valid`; }
       catch (err) { btn.textContent = String(err).substring(0, 30); }
       setTimeout(() => { btn.textContent = 'Экспорт JSONL'; btn.disabled = false; }, 4000);
+    });
+    document.getElementById('about-finetune-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Запуск...'; btn.disabled = true;
+      try {
+        // First export fresh data
+        await invoke('export_training_data');
+        btn.textContent = 'Обучение...';
+        const r = await invoke('run_finetune');
+        btn.textContent = 'Готово!';
+      } catch (err) { btn.textContent = String(err).substring(0, 40); }
+      setTimeout(() => { btn.textContent = 'Запустить fine-tuning'; btn.disabled = false; }, 5000);
     });
     // Thinking mode toggle
     const thinkToggle = document.getElementById('about-thinking-toggle');
@@ -5393,6 +5852,70 @@ function renderHealth(el, today, habits) {
   loadConversationsList();
 })();
 
+// ── Wake Word SSE Management ──
+
+let _wakeWordSSE = null;
+
+function startWakeWordSSE(keyword) {
+  stopWakeWordSSE();
+  if (!voiceServerAvailable) return;
+  try {
+    _wakeWordSSE = new EventSource(`${VOICE_SERVER}/wakeword/events`);
+    _wakeWordSSE.onmessage = async (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.detected && !callModeActive) {
+          console.log('[WakeWord] Detected! Starting call mode...');
+          // Stop wake word (call mode will use mic)
+          stopWakeWordSSE();
+          try { await fetch(`${VOICE_SERVER}/wakeword/stop`, { method: 'POST' }); } catch (_) {}
+          // Focus window and start call mode
+          try {
+            const { getCurrentWindow } = window.__TAURI__.window;
+            const win = getCurrentWindow();
+            await win.unminimize();
+            await win.show();
+            await win.setFocus();
+          } catch (_) {}
+          toggleCallMode();
+        }
+      } catch (_) {}
+    };
+    _wakeWordSSE.onerror = () => {
+      // SSE disconnected — will reconnect or stop
+      stopWakeWordSSE();
+    };
+  } catch (_) {}
+}
+
+function stopWakeWordSSE() {
+  if (_wakeWordSSE) {
+    _wakeWordSSE.close();
+    _wakeWordSSE = null;
+  }
+}
+
+// Auto-start wake word on load if enabled
+(async () => {
+  try {
+    const enabled = await invoke('get_app_setting', { key: 'wakeword_enabled' });
+    if (enabled === 'true' && voiceServerAvailable !== false) {
+      const keyword = await invoke('get_app_setting', { key: 'wakeword_keyword' }).catch(() => 'ханни');
+      // Wait for voice server to be ready
+      setTimeout(async () => {
+        if (!voiceServerAvailable) return;
+        try {
+          await fetch(`${VOICE_SERVER}/wakeword/start`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ keyword: keyword || 'ханни' }),
+          });
+          startWakeWordSSE(keyword || 'ханни');
+        } catch (_) {}
+      }, 8000); // Wait for voice server boot
+    }
+  } catch (_) {}
+})();
+
 // ── Call Mode ──
 
 let callModeActive = false;
@@ -5614,6 +6137,21 @@ async function endCallMode() {
     console.error('[call] stop_call_mode failed:', e);
   }
 
+  // Resume wake word if it was enabled
+  (async () => {
+    try {
+      const wkEnabled = await invoke('get_app_setting', { key: 'wakeword_enabled' });
+      if (wkEnabled === 'true') {
+        const wkKeyword = await invoke('get_app_setting', { key: 'wakeword_keyword' }).catch(() => 'ханни');
+        await fetch(`${VOICE_SERVER}/wakeword/start`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ keyword: wkKeyword || 'ханни' }),
+        });
+        startWakeWordSSE(wkKeyword || 'ханни');
+      }
+    } catch (_) {}
+  })();
+
   input.focus();
 }
 
@@ -5737,6 +6275,8 @@ async function handleCallTranscript(userText, sttMs = 0) {
   // Also add to actual chat history (voice)
   addMsg('user', userText, true);
   history.push({ role: 'user', content: userText });
+  { const lastUserWrapper = chat.querySelector('.user-wrapper:last-of-type');
+    if (lastUserWrapper) lastUserWrapper.dataset.historyIdx = String(history.length - 1); }
 
   // Update UI phase to "processing" while LLM thinks
   callOverlay.setAttribute('data-phase', 'processing');
@@ -5867,7 +6407,7 @@ async function handleCallTranscript(userText, sttMs = 0) {
           if (w.querySelector('.feedback-btn')) return;
           const idx = parseInt(w.dataset.historyIdx, 10);
           if (!isNaN(idx) && getRole(history[idx]) === 'assistant') {
-            addFeedbackButtons(w, currentConversationId, idx);
+            addFeedbackButtons(w, currentConversationId, idx, history[idx]?.content || '');
           }
         });
       }

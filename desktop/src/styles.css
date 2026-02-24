@@ -579,6 +579,100 @@ body {
 
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
+/* ── Markdown rendering in bot messages ── */
+.msg.bot.markdown-body {
+  line-height: 1.55;
+}
+.msg.bot.markdown-body p { margin: 0 0 8px; }
+.msg.bot.markdown-body p:last-child { margin-bottom: 0; }
+.msg.bot.markdown-body ul, .msg.bot.markdown-body ol { margin: 4px 0 8px 20px; padding: 0; }
+.msg.bot.markdown-body li { margin-bottom: 2px; }
+.msg.bot.markdown-body h1, .msg.bot.markdown-body h2, .msg.bot.markdown-body h3 {
+  margin: 12px 0 6px; font-weight: 600;
+}
+.msg.bot.markdown-body h1 { font-size: 1.2em; }
+.msg.bot.markdown-body h2 { font-size: 1.1em; }
+.msg.bot.markdown-body h3 { font-size: 1.05em; }
+.msg.bot.markdown-body code:not(.hljs) {
+  background: var(--bg-page);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.88em;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+.msg.bot.markdown-body blockquote {
+  border-left: 3px solid var(--accent-fill);
+  margin: 6px 0;
+  padding: 4px 12px;
+  color: var(--text-muted);
+}
+.msg.bot.markdown-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.92em;
+}
+.msg.bot.markdown-body th, .msg.bot.markdown-body td {
+  border: 1px solid var(--border-subtle);
+  padding: 4px 10px;
+  text-align: left;
+}
+.msg.bot.markdown-body th {
+  background: var(--bg-page);
+  font-weight: 600;
+}
+.msg.bot.markdown-body a {
+  color: var(--accent-fill);
+  text-decoration: none;
+}
+.msg.bot.markdown-body a:hover {
+  text-decoration: underline;
+}
+.msg.bot.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  margin: 10px 0;
+}
+/* Code blocks */
+.code-block {
+  margin: 8px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+.code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  background: rgba(255,255,255,0.04);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.code-copy-btn {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.code-copy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.code-block pre {
+  margin: 0;
+  padding: 10px 14px;
+  overflow-x: auto;
+  background: var(--bg-page);
+}
+.code-block code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .voice-indicator {
   font-size: 12px;
   opacity: 0.7;
@@ -768,6 +862,80 @@ body {
   background: var(--color-red-bg);
   color: var(--color-red);
   border: 1px solid var(--color-red-bg);
+}
+
+.memory-toast {
+  padding: 6px 12px;
+  border-radius: var(--radius-lg);
+  font-size: 12px;
+  background: var(--color-green-bg);
+  color: var(--accent-green);
+  align-self: flex-start;
+  transition: opacity 0.5s;
+}
+.memory-toast.fade-out { opacity: 0; }
+
+/* ── Training progress bar ── */
+.train-progress-bar {
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.train-progress-fill {
+  height: 100%;
+  background: var(--accent-blue);
+  border-radius: 3px;
+  width: 0;
+  transition: width 0.5s ease;
+}
+
+/* ── Confirmation modal ── */
+.confirm-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.confirm-modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  min-width: 320px;
+  max-width: 420px;
+}
+.confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+.confirm-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  font-family: 'SF Mono', monospace;
+  word-break: break-all;
+}
+.confirm-buttons {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.confirm-buttons button {
+  padding: 6px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  font-size: 13px;
+  cursor: pointer;
+}
+.confirm-cancel {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.confirm-ok {
+  background: var(--accent-red);
+  color: #fff;
+  border-color: var(--accent-red) !important;
 }
 
 /* ── Integrations page ── */
@@ -1197,9 +1365,19 @@ body {
   max-width: 85%;
 }
 
+.msg-wrapper.user-wrapper {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
 .msg-wrapper .msg {
   max-width: 100%;
 }
+
+.edit-msg-btn {
+  margin-top: 2px;
+}
+.edit-msg-btn:hover { color: var(--accent-blue); }
 
 .tts-btn {
   display: flex;
@@ -1288,6 +1466,15 @@ body {
   width: 14px;
   height: 14px;
   fill: currentColor;
+}
+
+.feedback-btn.copy-btn.copied {
+  color: var(--accent-green);
+  opacity: 1;
+}
+
+.feedback-btn.regen-btn:hover {
+  color: var(--accent-blue);
 }
 
 /* ── Drag & drop overlay ── */
