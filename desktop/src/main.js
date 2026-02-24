@@ -878,7 +878,7 @@ async function loadChatSettings() {
   el.innerHTML = skeletonPage();
   try {
     const [proactive, ttsVoices, ttsServerUrl, thinkVal, selfRefineVal, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples] = await Promise.all([
-      invoke('get_proactive_settings'),
+      invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
       invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
