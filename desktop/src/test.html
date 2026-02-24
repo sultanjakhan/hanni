@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hanni — UI Preview</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="hljs-theme.css">
+<script src="highlight.min.js"></script>
+<script src="marked.min.js"></script>
 <script src="tauri-mock.js"></script>
 <style>
   /* Browser preview adjustments */
@@ -54,6 +57,9 @@
         </div>
         <div id="chat-main">
           <div id="chat"></div>
+          <button id="scroll-bottom-btn" title="К последним сообщениям">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
         </div>
       </div>
       <div id="chat-settings-content" class="tab-content"></div>
@@ -65,8 +71,14 @@
           </button>
           <input id="file-input" type="file" style="display:none">
           <input id="input" type="text" placeholder="Напиши сообщение..." autocomplete="off">
-          <button id="record" title="Голосовой ввод">
+          <button id="stop-tts" class="hidden" title="Остановить озвучку">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
+          </button>
+          <button id="record" title="Удерживайте для записи">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 00-2.5 2.5v4a2.5 2.5 0 005 0v-4A2.5 2.5 0 008 1z" stroke="currentColor" stroke-width="1.5"/><path d="M4 7.5a4 4 0 008 0M8 13v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <button id="call-btn" title="Режим звонка">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M14.2 11.35l-2.45-.7a1.13 1.13 0 00-1.12.32l-1.08 1.08a8.63 8.63 0 01-4.6-4.6l1.08-1.08a1.13 1.13 0 00.32-1.12l-.7-2.45A1.13 1.13 0 004.56 2H2.88A1.13 1.13 0 001.76 3.2 12.24 12.24 0 0012.8 14.24a1.13 1.13 0 001.2-1.12v-1.68a1.13 1.13 0 00-.8-1.09z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <button id="send">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 13V3l11 5-11 5z" fill="currentColor"/></svg>
@@ -91,6 +103,28 @@
     <div id="view-money" class="view"><div id="money-content" class="tab-content"></div></div>
     <div id="view-people" class="view"><div id="people-content" class="tab-content"></div></div>
     <div id="view-settings" class="view"><div id="settings-content" class="tab-content"></div></div>
+  </div>
+</div>
+<!-- Call Mode Overlay -->
+<div id="call-overlay" class="hidden">
+  <div class="call-overlay-content">
+    <div class="call-pulse-container">
+      <div class="call-pulse-ring"></div>
+      <div class="call-pulse-ring call-pulse-ring-2"></div>
+      <div class="call-pulse-core"></div>
+    </div>
+    <div id="call-waveform" class="call-waveform">
+      <div class="call-wave-bar"></div><div class="call-wave-bar"></div><div class="call-wave-bar"></div>
+      <div class="call-wave-bar"></div><div class="call-wave-bar"></div><div class="call-wave-bar"></div>
+      <div class="call-wave-bar"></div><div class="call-wave-bar"></div><div class="call-wave-bar"></div>
+    </div>
+    <div id="call-phase-text" class="call-phase-text">Слушаю...</div>
+    <div id="call-duration" class="call-duration">0:00</div>
+    <div id="call-status-hint" class="call-status-hint"></div>
+    <div id="call-transcript-area" class="call-transcript-area"></div>
+    <button id="call-end-btn" class="call-end-btn" title="Завершить звонок">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 002.59 3.4z"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+    </button>
   </div>
 </div>
 <script type="module" src="main.js"></script>
