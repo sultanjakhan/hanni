@@ -556,6 +556,25 @@ function escapeHtml(text) {
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Custom confirm modal (replaces window.confirm which may not work in Tauri WebView)
+function confirmModal(msg = 'Удалить?') {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal modal-compact" style="max-width:320px;text-align:center;">
+      <div class="modal-title">${escapeHtml(msg)}</div>
+      <div class="modal-actions">
+        <button class="btn-secondary confirm-no">Отмена</button>
+        <button class="btn-primary confirm-yes" style="background:var(--danger, #ef4444)">Удалить</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.confirm-no').onclick = () => { overlay.remove(); resolve(false); };
+    overlay.querySelector('.confirm-yes').onclick = () => { overlay.remove(); resolve(true); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+  });
+}
+
 function skeletonSettings(rows = 3) {
   let html = '<div class="skeleton-card">';
   html += '<div class="skeleton skeleton-header"></div>';
@@ -1309,7 +1328,7 @@ function _chatSettingsSetupMemory(memories) {
     list.addEventListener('click', async (e) => {
       const delBtn = e.target.closest('[data-csdel]');
       if (delBtn) {
-        if (confirm('Удалить?')) {
+        if (await confirmModal()) {
           await invoke('delete_memory', { id: parseInt(delBtn.dataset.csdel) }).catch(e => console.error('delete_memory error:', e));
           reloadMem();
         }
@@ -3165,7 +3184,7 @@ async function loadAllFacts(el) {
     // Delete handlers
     el.querySelectorAll('[data-mdel]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.mdel) }).catch(e => console.error('delete_memory error:', e)); loadAllFacts(el); }
+        if (await confirmModal()) { await invoke('delete_memory', { id: parseInt(btn.dataset.mdel) }).catch(e => console.error('delete_memory error:', e)); loadAllFacts(el); }
       });
     });
 
@@ -3265,7 +3284,7 @@ function renderMemoryList(memories, el) {
 
   list.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (confirm('Удалить?')) { await invoke('delete_memory', { id: parseInt(btn.dataset.del) }).catch(e => console.error('delete_memory error:', e)); loadMemoryInSettings(el); }
+      if (await confirmModal()) { await invoke('delete_memory', { id: parseInt(btn.dataset.del) }).catch(e => console.error('delete_memory error:', e)); loadMemoryInSettings(el); }
     });
   });
 
