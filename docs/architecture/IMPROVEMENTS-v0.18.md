@@ -10,10 +10,10 @@
 
 | # | Улучшение | Effort | Статус |
 |---|-----------|--------|--------|
-| C1 | Адаптивный system prompt по user profile | S | ⬜ |
+| C1 | Адаптивный system prompt (имя из facts, русские заголовки) | S | ✅ |
 | C2 | Prompt versioning + A/B тестирование | M | ⬜ |
 | C3 | DB миграции как отдельная система | M | ⬜ |
-| C4 | Health monitor (MLX, voice_server, disk, DB) | S | ⬜ |
+| C4 | Health monitor (MLX, voice_server, DB integrity, stats) | S | ✅ |
 | C5 | Adaptive model params (temperature по типу запроса) | S | ✅ |
 
 ## M02: Chat (11 функций)
