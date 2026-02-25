@@ -2288,6 +2288,7 @@ async function send() {
   busy = true;
   sendBtn.disabled = true;
   input.value = '';
+  input.style.height = 'auto';
 
   // Report user chat activity for adaptive timing
   invoke('report_user_chat_activity').catch(() => {});
@@ -2505,6 +2506,11 @@ input.addEventListener('keydown', e => {
     e.preventDefault();
     send();
   }
+});
+// Auto-resize textarea as user types
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 150) + 'px';
 });
 
 // ── Home ──

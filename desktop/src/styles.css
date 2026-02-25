@@ -771,6 +771,10 @@ body {
   font-family: inherit;
   caret-color: var(--text-primary);
   min-width: 0;
+  resize: none;
+  overflow-y: hidden;
+  max-height: 150px;
+  line-height: 1.4;
 }
 
 #input::placeholder { color: var(--text-faint); }

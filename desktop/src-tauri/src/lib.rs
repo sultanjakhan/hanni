@@ -4518,12 +4518,12 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         let mut context_block = String::new();
         if !summaries.is_empty() {
             summaries.reverse(); // chronological order
-            context_block.push_str(&format!("[Recent conversations]\n{}", summaries.join("\n")));
+            context_block.push_str(&format!("[Недавние разговоры]\n{}", summaries.join("\n")));
         }
         if !insights_lines.is_empty() {
             if !context_block.is_empty() { context_block.push_str("\n\n"); }
             insights_lines.reverse(); // chronological
-            context_block.push_str(&format!("[Recent decisions & open questions]\n{}", insights_lines.join("\n")));
+            context_block.push_str(&format!("[Недавние решения и вопросы]\n{}", insights_lines.join("\n")));
         }
         if !context_block.is_empty() {
             chat_messages.push(ChatMessage::text("system", &context_block));
