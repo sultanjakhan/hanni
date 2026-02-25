@@ -39,11 +39,12 @@ const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопы
 - Неясный запрос → задай ОДИН уточняющий вопрос.
 - Простой вопрос = 1-2 предложения. Сложный = 3-6, со структурой.
 
-АНТИ-ГАЛЛЮЦИНАЦИИ (КРИТИЧНО):
-- НЕ выдумывай того, чего нет в памяти или контексте. Если не знаешь — скажи честно: "Не помню", "Не знаю", "Расскажи подробнее".
+СТРОГИЕ ЗАПРЕТЫ (нарушение = критическая ошибка):
+- ЗАПРЕЩЕНО выдумывать факты, события, привычки, предпочтения которых нет в памяти. Если не знаешь — скажи: "Не помню", "Не знаю", "Расскажи".
+- ЗАПРЕЩЕНО упоминать еду, напитки, чай, кофе, чайник, перекусы — если пользователь НЕ спрашивает о еде.
+- ЗАПРЕЩЕНО придумывать что пользователь делал, говорил или любит — если этого нет в [Релевантные факты].
 - Используй факты из памяти ТОЛЬКО если релевантны текущему вопросу. НЕ перечисляй всё подряд.
-- НЕ упоминай еду, напитки, чай, перекусы — если разговор НЕ о еде.
-- НЕ придумывай события, которых не было. НЕ приписывай пользователю слова, которые он не говорил.
+- На "привет" — ответь коротко и тепло. Без придуманных подробностей.
 - НЕ повторяй сообщение пользователя.
 
 ПРИМЕРЫ:
@@ -67,13 +68,17 @@ User: "найди рецепт плова"
 Хорошо: [вызывает web_search] "Нашёл классический рецепт: баранина, рис, морковь, зира..."
 Плохо: "Вот рецепт плова: ..." (без поиска — может быть неточно)"#;
 
-const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, на "ты", по-русски.
+const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, на "ты", по-русском.
 - 1-3 предложения. Тёплый тон: юмор, любопытство, лёгкий сарказм.
 - Разнообразь: иногда вопрос, иногда комментарий, иногда юмор. НЕ начинай каждый ответ одинаково.
 - Факты из памяти — ТОЛЬКО если релевантны. НЕ перечисляй всё подряд.
-- НЕ выдумывай. Не знаешь — скажи честно.
-- НЕ упоминай еду/напитки/чай если разговор НЕ о еде.
-- Эмоции → сначала отреагируй на чувство."#;
+- Эмоции → сначала отреагируй на чувство.
+
+СТРОГИЕ ЗАПРЕТЫ (нарушение = ошибка):
+- ЗАПРЕЩЕНО упоминать еду, напитки, чай, кофе, чайник, перекусы — если пользователь НЕ спрашивает о еде.
+- ЗАПРЕЩЕНО выдумывать факты. Не знаешь — скажи "не знаю" или "расскажи".
+- ЗАПРЕЩЕНО придумывать хобби, привычки или предпочтения которых нет в памяти.
+- На "привет/здарова/как дела" — ответь коротко и тепло. БЕЗ придуманных подробностей о жизни пользователя."#;
 
 const ACTION_KEYWORDS: &[&str] = &[
     "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
@@ -1592,11 +1597,12 @@ fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, lim
         }
     }
 
-    // 3. Fill remaining with most recent facts
+    // 3. Fill remaining with most recent facts (exclude observations)
     let remaining = limit.saturating_sub(lines.len());
     if remaining > 0 {
         if let Ok(mut stmt) = conn.prepare(
             "SELECT id, category, key, value FROM facts
+             WHERE category != 'observation'
              ORDER BY updated_at DESC LIMIT ?1"
         ) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![remaining as i64 + seen_ids.len() as i64], |row| {
@@ -1637,11 +1643,11 @@ fn gather_memory_candidates(
     let mut candidates = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
 
-    // 0. Semantic search tier
+    // 0. Semantic search tier (exclude observation facts — they pollute context)
     if let Some(hits) = semantic_hits {
         for &(fact_id, _) in hits {
             if let Ok(row) = conn.query_row(
-                "SELECT id, category, key, value FROM facts WHERE id=?1",
+                "SELECT id, category, key, value FROM facts WHERE id=?1 AND category != 'observation'",
                 rusqlite::params![fact_id],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
             ) {
@@ -1685,11 +1691,11 @@ fn gather_memory_candidates(
         }
     }
 
-    // 3. Recent facts to fill pool
+    // 3. Recent facts to fill pool (exclude observations)
     let remaining = pool_size.saturating_sub(candidates.len());
     if remaining > 0 {
         if let Ok(mut stmt) = conn.prepare(
-            "SELECT id, category, key, value FROM facts ORDER BY updated_at DESC LIMIT ?1"
+            "SELECT id, category, key, value FROM facts WHERE category != 'observation' ORDER BY updated_at DESC LIMIT ?1"
         ) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![remaining as i64 + seen_ids.len() as i64], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
@@ -10450,14 +10456,19 @@ pub fn run() {
                                     let db = learning_handle.state::<HanniDb>();
                                     let conn = db.conn();
                                     let now = chrono::Local::now().to_rfc3339();
-                                    for obs in observations.iter().take(5) {
+                                    for obs in observations.iter().take(3) {
                                         let key = format!("obs_{}", &now[..16]);
                                         let _ = conn.execute(
                                             "INSERT INTO facts (category, key, value, source, created_at, updated_at) VALUES ('observation', ?1, ?2, 'observation', ?3, ?3)",
                                             rusqlite::params![key, obs, now],
                                         );
                                     }
-                                    eprintln!("[learning] saved {} observations", observations.len().min(5));
+                                    // Keep max 10 observations — delete oldest if over limit
+                                    let _ = conn.execute(
+                                        "DELETE FROM facts WHERE category='observation' AND id NOT IN (SELECT id FROM facts WHERE category='observation' ORDER BY updated_at DESC LIMIT 10)",
+                                        [],
+                                    );
+                                    eprintln!("[learning] saved {} observations", observations.len().min(3));
                                 }
                             }
                         }
