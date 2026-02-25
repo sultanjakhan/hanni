@@ -642,7 +642,11 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 self._json({"error": str(e)}, 500)
         elif self.path == "/wakeword/start":
             raw = self._read_body()
-            body = json.loads(raw) if raw else {}
+            try:
+                body = json.loads(raw) if raw else {}
+            except (json.JSONDecodeError, ValueError):
+                self._json({"error": "Invalid JSON"}, 400)
+                return
             keyword = body.get("keyword", "ханни").strip().lower()
             if _state.wakeword_active.is_set():
                 self._json({"status": "already_active"})
