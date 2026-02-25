@@ -5972,6 +5972,8 @@ function stopWakeWordSSE() {
 
 let callModeActive = false;
 let callInitializing = false;  // guard: prevent race between init and end
+let callBusy = false;          // guard: prevent overlapping LLM calls in call mode
+let callPendingTranscript = null;  // queued transcript while callBusy
 let callDurationInterval = null;
 let callStartTime = 0;
 
@@ -6157,6 +6159,8 @@ async function startCallMode() {
 async function endCallMode() {
   callModeActive = false;
   callInitializing = false;
+  callBusy = false;
+  callPendingTranscript = null;
   callBtn.classList.remove('active');
   callOverlay.classList.add('hidden');
 
@@ -6316,6 +6320,19 @@ listen('call-transcript', async (event) => {
 async function handleCallTranscript(userText, sttMs = 0) {
   if (!callModeActive || !userText) return;
 
+  // Guard: if LLM is already processing, queue the latest transcript
+  if (callBusy) {
+    callPendingTranscript = { text: userText, sttMs };
+    return;
+  }
+  callBusy = true;
+
+  // Pause voice server mic during LLM processing to avoid new transcripts
+  const useVoiceServer = !!window._callEventSource;
+  if (useVoiceServer) {
+    try { await fetch(`${VOICE_SERVER}/listen/pause`, { method: 'POST' }); } catch (_) {}
+  }
+
   // Show user bubble in overlay
   const userBubble = document.createElement('div');
   userBubble.className = 'call-transcript-user';
@@ -6335,6 +6352,7 @@ async function handleCallTranscript(userText, sttMs = 0) {
   callPhaseText.textContent = PHASE_LABELS.processing;
 
   // Run LLM — same agentic loop as send()
+  try {
   const t0 = performance.now();
   let iteration = 0;
   const MAX_ITERATIONS = 5;
@@ -6481,7 +6499,21 @@ async function handleCallTranscript(userText, sttMs = 0) {
       timingEl.textContent += ` · TTS ${(ttsMs / 1000).toFixed(1)}s`;
     }
   } else if (callModeActive) {
+    // Resume voice server mic (was paused at start of handleCallTranscript)
+    if (useVoiceServer) {
+      try { await fetch(`${VOICE_SERVER}/listen/resume`, { method: 'POST' }); } catch (_) {}
+    }
     await invoke('call_mode_resume_listening').catch(() => {});
+  }
+
+  } finally {
+    callBusy = false;
+    // Process queued transcript (only keep the latest one)
+    if (callPendingTranscript && callModeActive) {
+      const pending = callPendingTranscript;
+      callPendingTranscript = null;
+      handleCallTranscript(pending.text, pending.sttMs);
+    }
   }
 }
 
