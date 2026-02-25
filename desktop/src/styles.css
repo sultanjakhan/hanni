@@ -864,6 +864,18 @@ body {
   border: 1px solid var(--color-red-bg);
 }
 
+.action-indicator {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+  animation: action-pulse 1.5s ease-in-out infinite;
+}
+@keyframes action-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .memory-toast {
   padding: 6px 12px;
   border-radius: var(--radius-lg);
