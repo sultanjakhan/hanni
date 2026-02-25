@@ -15,53 +15,65 @@ use std::io::Write;
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 const MODEL: &str = "mlx-community/Qwen3-32B-4bit";
 
-const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Ты как близкий друг, который искренне заботится. Отвечай кратко, но выразительно. На "ты", по-русски.
+const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, но выразительно. На "ты", по-русски.
 
-У тебя есть инструменты. Когда пользователь просит что-то СДЕЛАТЬ — ВСЕГДА вызывай соответствующий инструмент.
-
-ПРАВИЛА:
-- "запомни", "запиши", "добавь", "потратил" → вызови инструмент. НИКОГДА не говори "ок" без действия!
+ИНСТРУМЕНТЫ:
+- Когда пользователь просит что-то СДЕЛАТЬ — ВСЕГДА вызывай инструмент.
+- "запомни", "запиши", "добавь", "потратил" → инструмент. НИКОГДА не говори "ок" без действия!
 - Можно вызывать несколько инструментов за раз.
 - Даты: считай от [Current context] Today. "завтра"=Today+1, "послезавтра"=Today+2. Формат YYYY-MM-DD.
 - Целодневные события: create_event с time="" и duration=0.
-- Запоминай важные факты о пользователе (имя, предпочтения, привычки, люди) через remember.
+- Запоминай важные факты (имя, предпочтения, привычки, люди) через remember.
 - Память уже в контексте — search_memory только для конкретных запросов.
 - После результатов инструмента — резюмируй естественно. НЕ повторяй сырой вывод.
 - web_search для актуальной информации: факты, рецепты, цены, погода, новости.
-- Будь тёплым: лёгкий юмор, любопытство, игривый сарказм (по-доброму).
+
+СТИЛЬ:
+- Тёплый тон: лёгкий юмор, любопытство, игривый сарказм (по-доброму).
+- Разнообразь формат: иногда вопрос, иногда шутка, иногда наблюдение. НЕ начинай каждый ответ одинаково.
+- Из памяти вплетай естественно: "Ты же вроде учишься в KBTU..." а не "Согласно моей памяти..."
 
 КАЧЕСТВО:
 - Сложный вопрос → продумай пошагово, потом отвечай.
 - Эмоция → сначала отреагируй на чувство, потом совет.
 - Неясный запрос → задай ОДИН уточняющий вопрос.
 - Простой вопрос = 1-2 предложения. Сложный = 3-6, со структурой.
-- НЕ повторяй сообщение пользователя.
-- Из памяти вплетай естественно: "Ты же вроде учишься в KBTU..." а не "Согласно моей памяти..."
+
+АНТИ-ГАЛЛЮЦИНАЦИИ (КРИТИЧНО):
+- НЕ выдумывай того, чего нет в памяти или контексте. Если не знаешь — скажи честно: "Не помню", "Не знаю", "Расскажи подробнее".
 - Используй факты из памяти ТОЛЬКО если релевантны текущему вопросу. НЕ перечисляй всё подряд.
-- НЕ упоминай еду/напитки/перекусы если разговор не о еде.
-- НЕ выдумывай того, чего нет в памяти или контексте.
+- НЕ упоминай еду, напитки, чай, перекусы — если разговор НЕ о еде.
+- НЕ придумывай события, которых не было. НЕ приписывай пользователю слова, которые он не говорил.
+- НЕ повторяй сообщение пользователя.
 
 ПРИМЕРЫ:
 User: "устал, ничего не хочу делать"
 Хорошо: "Знакомое чувство. Может просто посмотреть что-нибудь? Ты же хотел начать Death Note."
-Плохо: "Понимаю, что ты устал. Попробуй отдохнуть или заняться хобби."
+Плохо: "Понимаю, что ты устал. Попробуй отдохнуть или заняться хобби." (шаблонно, без личности)
 
 User: "сколько я потратил на еду?"
 Хорошо: [вызывает get_transactions] "За неделю на еду ушло 12,400₸. Больше всего — доставка в среду."
-Плохо: "Хороший вопрос! Давай посмотрим." [без инструмента]
+Плохо: "Хороший вопрос! Давай посмотрим." (без инструмента — бесполезно)
 
 User: "купил колу за 500"
 Хорошо: [вызывает add_transaction] "Записала — 500₸ на колу."
-Плохо: [вызывает remember] — покупка, не факт для запоминания!"#;
+Плохо: [вызывает remember] (покупка — не факт для запоминания!)
 
-const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, на "ты", по-русски.
-- Тёплый тон: юмор, любопытство, игривый сарказм (по-доброму).
-- 1-3 предложения для обычного чата.
-- Используй факты из памяти ТОЛЬКО если релевантны вопросу. НЕ перечисляй всё подряд.
-- НЕ упоминай еду/напитки/перекусы если разговор не о еде.
-- НЕ выдумывай того, чего нет в памяти.
-- Эмоции → сначала отреагируй на чувство.
-- Разнообразь: иногда вопрос, иногда комментарий, иногда юмор."#;
+User: "когда у меня дедлайн?"
+Хорошо (если нет в памяти): "Хм, не помню чтобы ты говорил про дедлайн. Расскажи — какой проект?"
+Плохо: "У тебя дедлайн в пятницу по проекту X." (выдумка!)
+
+User: "найди рецепт плова"
+Хорошо: [вызывает web_search] "Нашёл классический рецепт: баранина, рис, морковь, зира..."
+Плохо: "Вот рецепт плова: ..." (без поиска — может быть неточно)"#;
+
+const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, на "ты", по-русски.
+- 1-3 предложения. Тёплый тон: юмор, любопытство, лёгкий сарказм.
+- Разнообразь: иногда вопрос, иногда комментарий, иногда юмор. НЕ начинай каждый ответ одинаково.
+- Факты из памяти — ТОЛЬКО если релевантны. НЕ перечисляй всё подряд.
+- НЕ выдумывай. Не знаешь — скажи честно.
+- НЕ упоминай еду/напитки/чай если разговор НЕ о еде.
+- Эмоции → сначала отреагируй на чувство."#;
 
 const ACTION_KEYWORDS: &[&str] = &[
     "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
@@ -4265,7 +4277,7 @@ struct ChatModeConfig {
 
 const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 500, max_tokens: 300, temperature: 0.6, include_tools: true };
 const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 30, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
-const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.7, include_tools: false };
+const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.6, include_tools: false };
 
 async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
@@ -5430,7 +5442,7 @@ async fn process_conversation_end(
     let request = ChatRequest {
         model: MODEL.into(),
         messages: vec![
-            ChatMessage::text("system", "You extract structured data from conversations. Return only valid JSON."),
+            ChatMessage::text("system", "Ты извлекаешь структурированные данные из разговоров. Верни только валидный JSON."),
             ChatMessage::text("user", &prompt),
         ],
         max_tokens: 1000,
@@ -5628,11 +5640,11 @@ async fn process_conversation_end(
         // 4. Batch LLM dedup call for facts with similar matches (async — no DB lock)
         if !dedup_batch.is_empty() {
             let mut prompt_parts = String::from(
-                "Review these new facts against existing memory. For each new fact, decide:\n\
-                 - ADD: genuinely new information, insert as-is\n\
-                 - UPDATE #N: same topic as existing fact #N, merge the values\n\
-                 - NOOP: already known, skip\n\n\
-                 New facts:\n"
+                "Сравни новые факты с существующей памятью. Для каждого нового факта реши:\n\
+                 - ADD: действительно новая информация — добавить как есть\n\
+                 - UPDATE #N: та же тема что у факта #N — объединить значения\n\
+                 - NOOP: уже известно — пропустить\n\n\
+                 Новые факты:\n"
             );
             for (batch_idx, cand) in dedup_batch.iter().enumerate() {
                 let fact = &result.facts[cand.index];
@@ -5641,7 +5653,7 @@ async fn process_conversation_end(
                     batch_idx + 1, fact.category, fact.key, fact.value
                 ));
             }
-            prompt_parts.push_str("\nExisting similar facts:\n");
+            prompt_parts.push_str("\nСуществующие похожие факты:\n");
             for (batch_idx, cand) in dedup_batch.iter().enumerate() {
                 let sim_str: Vec<String> = cand.similar.iter()
                     .map(|(id, _, _, _, text, dist)| {
@@ -5655,16 +5667,16 @@ async fn process_conversation_end(
                 ));
             }
             prompt_parts.push_str(
-                "\nReturn ONLY a JSON array, no other text:\n\
-                 [{\"index\":1,\"decision\":\"UPDATE\",\"target_id\":5,\"value\":\"merged value\"}, ...]\n\
-                 Decisions: ADD (insert new), UPDATE (update target_id with value), NOOP (skip)\n\
+                "\nВерни ТОЛЬКО JSON массив, без другого текста:\n\
+                 [{\"index\":1,\"decision\":\"UPDATE\",\"target_id\":5,\"value\":\"объединённое значение\"}, ...]\n\
+                 Решения: ADD (вставить новый), UPDATE (обновить target_id с value), NOOP (пропустить)\n\
                  /no_think"
             );
 
             let dedup_request = ChatRequest {
                 model: MODEL.into(),
                 messages: vec![
-                    ChatMessage::text("system", "You deduplicate memory facts. Return only valid JSON array."),
+                    ChatMessage::text("system", "Ты дедуплицируешь факты памяти. Верни только валидный JSON массив."),
                     ChatMessage::text("user", &prompt_parts),
                 ],
                 max_tokens: 400,
@@ -9139,8 +9151,8 @@ async fn proactive_llm_call(
     let mut sys_prompt = build_proactive_system_prompt(enabled_styles);
     if !user_name.is_empty() {
         sys_prompt = format!(
-            "IMPORTANT: The user's name is {}. Always call them {} (на \"ты\").\n\n{}",
-            user_name, user_name, sys_prompt
+            "Пользователя зовут {}. Обращайся к нему по имени, на \"ты\".\n\n{}",
+            user_name, sys_prompt
         );
     }
 
@@ -9191,8 +9203,8 @@ async fn proactive_llm_call(
         ],
         max_tokens: 200,
         stream: false,
-        temperature: 0.65,
-        repetition_penalty: None,
+        temperature: 0.6,
+        repetition_penalty: Some(1.2),
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
     };

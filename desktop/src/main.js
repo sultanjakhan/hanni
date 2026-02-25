@@ -154,7 +154,7 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Blocklist', 'Integrations', 'Training', 'About'] },
+  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Blocklist', 'Integrations', 'About'] },
 };
 
 const TAB_DESCRIPTIONS = {
@@ -896,7 +896,7 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, thinkVal, selfRefineVal, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, thinkVal, selfRefineVal, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainAdapter, trainFlywheel, trainHistory] = await Promise.all([
       invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
@@ -908,6 +908,10 @@ async function loadChatSettings() {
       invoke('get_app_setting', { key: 'voice_clone_enabled' }).catch(() => null),
       invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null),
       invoke('list_voice_samples').catch(() => []),
+      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_adapter_status').catch(() => ({ exists: false, meta: null })),
+      invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
+      invoke('get_flywheel_history').catch(() => []),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -928,6 +932,7 @@ async function loadChatSettings() {
         <button class="chat-settings-tab" data-panel="general">Основные</button>
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
+        <button class="chat-settings-tab" data-panel="training">Обучение</button>
       </div>
 
       <div class="chat-settings-panel active" id="cs-panel-memory">
@@ -1100,6 +1105,55 @@ async function loadChatSettings() {
               }).join('')}
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-training">
+        <div class="settings-section">
+          <div class="settings-section-title">Данные для обучения</div>
+          <div class="settings-row"><span class="settings-label">Диалогов (4+ сообщений)</span><span class="settings-value">${trainStats.conversations}</span></div>
+          <div class="settings-row"><span class="settings-label">Всего сообщений</span><span class="settings-value">${trainStats.total_messages}</span></div>
+          <div class="settings-row"><span class="settings-label">Thumbs-up пар</span><span class="settings-value" id="train-pairs-count">...</span></div>
+          <div class="settings-row"><span class="settings-label">Период</span><span class="settings-value">${trainStats.earliest ? trainStats.earliest.substring(0,10) + ' — ' + trainStats.latest.substring(0,10) : '—'}</span></div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Экспорт</div>
+          <div class="settings-row"><span class="settings-label">JSONL</span><button class="settings-btn" id="train-export-btn">Экспорт данных</button></div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Fine-tuning (LoRA)</div>
+          <div class="settings-row"><span class="settings-label">Адаптер</span><span class="settings-value">${trainAdapter.exists ? 'Есть' + (trainAdapter.meta?.trained_at ? ' (' + trainAdapter.meta.trained_at.substring(0,10) + ')' : '') : 'Нет'}</span></div>
+          <div class="settings-row"><span class="settings-label">Обучить модель</span><button class="settings-btn btn-primary" id="train-finetune-btn">Запустить</button></div>
+          <div id="train-progress" class="hidden" style="margin-top:8px;">
+            <div class="train-progress-bar"><div class="train-progress-fill" id="train-fill"></div></div>
+            <div id="train-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Data Flywheel</div>
+          <div class="settings-row"><span class="settings-label">Всего thumbs-up</span><span class="settings-value">${trainFlywheel.thumbs_up_total}</span></div>
+          <div class="settings-row"><span class="settings-label">Новых (не экспортировано)</span><span class="settings-value" style="${trainFlywheel.new_pairs >= 20 ? 'color:var(--accent)' : ''}">${trainFlywheel.new_pairs}</span></div>
+          <div class="settings-row"><span class="settings-label">Циклов обучения</span><span class="settings-value">${trainFlywheel.total_cycles}</span></div>
+          <div class="settings-row"><span class="settings-label">Последний цикл</span><span class="settings-value">${trainFlywheel.last_cycle ? trainFlywheel.last_cycle.date.substring(0,10) + ' — ' + trainFlywheel.last_cycle.status : '—'}</span></div>
+          <div class="settings-row">
+            <span class="settings-label">Полный цикл</span>
+            <button class="settings-btn ${trainFlywheel.ready_to_train ? 'btn-primary' : ''}" id="flywheel-run-btn" ${trainFlywheel.ready_to_train ? '' : 'title="Нужно минимум 20 новых пар"'}>
+              ${trainFlywheel.ready_to_train ? 'Запустить цикл' : 'Мало данных (' + trainFlywheel.new_pairs + '/20)'}
+            </button>
+          </div>
+          <div id="flywheel-progress" class="hidden" style="margin-top:8px;">
+            <div class="train-progress-bar"><div class="train-progress-fill" id="flywheel-fill"></div></div>
+            <div id="flywheel-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
+          </div>
+          ${trainHistory.length > 0 ? `
+          <div style="margin-top:12px;">
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">История циклов:</div>
+            ${trainHistory.slice(0, 5).map(c => `
+              <div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border-color);">
+                #${c.id} ${(c.started_at || '').substring(0,16)} — ${c.status} (${c.train_pairs} пар)${c.eval_score != null ? ' score:' + c.eval_score.toFixed(2) : ''}
+              </div>
+            `).join('')}
+          </div>` : ''}
         </div>
       </div>`;
 
@@ -1289,6 +1343,74 @@ async function loadChatSettings() {
         btn.textContent = 'Ошибка: ' + String(err).substring(0, 30);
       }
       setTimeout(() => { btn.textContent = 'Записать образец'; btn.disabled = false; }, 3000);
+    });
+
+    // ── Training panel handlers ──
+    try {
+      const pairsPath = '~/Library/Application Support/Hanni/training_pairs.jsonl';
+      const content = await invoke('read_file', { path: pairsPath }).catch(() => '');
+      const count = content ? content.trim().split('\\n').filter(l => l.trim()).length : 0;
+      const pairsEl = document.getElementById('train-pairs-count');
+      if (pairsEl) pairsEl.textContent = String(count);
+    } catch (_) {
+      const pairsEl = document.getElementById('train-pairs-count');
+      if (pairsEl) pairsEl.textContent = '0';
+    }
+    document.getElementById('train-export-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
+      try { const r = await invoke('export_training_data'); btn.textContent = r.train_count + ' train + ' + r.valid_count + ' valid'; }
+      catch (err) { btn.textContent = String(err).substring(0, 30); }
+      setTimeout(() => { btn.textContent = 'Экспорт данных'; btn.disabled = false; }, 4000);
+    });
+    document.getElementById('train-finetune-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true;
+      const progress = document.getElementById('train-progress');
+      const fill = document.getElementById('train-fill');
+      const status = document.getElementById('train-status');
+      progress?.classList.remove('hidden');
+      btn.textContent = 'Экспорт...';
+      if (status) status.textContent = 'Экспортируем данные...';
+      if (fill) fill.style.width = '10%';
+      try {
+        await invoke('export_training_data');
+        btn.textContent = 'Обучение...';
+        if (status) status.textContent = 'Запускаем fine-tuning (это может занять 10-30 минут)...';
+        if (fill) fill.style.width = '30%';
+        const r = await invoke('run_finetune');
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Готово!';
+        btn.textContent = 'Готово!';
+      } catch (err) {
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
+        btn.textContent = 'Ошибка';
+      }
+      setTimeout(() => { btn.textContent = 'Запустить'; btn.disabled = false; }, 5000);
+    });
+    document.getElementById('flywheel-run-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true;
+      const progress = document.getElementById('flywheel-progress');
+      const fill = document.getElementById('flywheel-fill');
+      const status = document.getElementById('flywheel-status');
+      progress?.classList.remove('hidden');
+      btn.textContent = 'Экспорт...';
+      if (status) status.textContent = 'Шаг 1/3: Экспорт данных...';
+      if (fill) fill.style.width = '15%';
+      try {
+        await invoke('export_training_data');
+        btn.textContent = 'Обучение...';
+        if (status) status.textContent = 'Шаг 2/3: Fine-tuning (может занять 10-30 минут)...';
+        if (fill) fill.style.width = '40%';
+        const r = await invoke('run_flywheel_cycle');
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = `Цикл #${r.cycle_id} завершён: ${r.status} (${r.train_pairs} пар)`;
+        btn.textContent = 'Готово!';
+      } catch (err) {
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
+        btn.textContent = 'Ошибка';
+      }
+      setTimeout(() => { btn.textContent = 'Запустить цикл'; btn.disabled = false; }, 5000);
     });
 
   } catch (e) {
@@ -3541,7 +3663,7 @@ async function loadSettings(subTab) {
   if (!settingsContent) return;
   if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
   if (subTab === 'Integrations') { loadIntegrations(); return; }
-  if (subTab === 'Training') { loadTraining(settingsContent); return; }
+  // Training moved to Chat > Настройки > Обучение
   if (subTab === 'About') { loadAbout(settingsContent); return; }
   // Default to Blocklist
   loadBlocklist(settingsContent);
@@ -3588,133 +3710,6 @@ async function loadBlocklist(el) {
 }
 
 // ── About (Settings sub-tab) ──
-// ML6: Training / Fine-tuning UI
-async function loadTraining(el) {
-  try {
-    const [stats, adapter, flywheel, history] = await Promise.all([
-      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
-      invoke('get_adapter_status').catch(() => ({ exists: false, meta: null })),
-      invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
-      invoke('get_flywheel_history').catch(() => []),
-    ]);
-    const pairsPath = '~/Library/Application Support/Hanni/training_pairs.jsonl';
-    el.innerHTML = `
-      <div class="settings-section">
-        <div class="settings-section-title">Данные для обучения</div>
-        <div class="settings-row"><span class="settings-label">Диалогов (4+ сообщений)</span><span class="settings-value">${stats.conversations}</span></div>
-        <div class="settings-row"><span class="settings-label">Всего сообщений</span><span class="settings-value">${stats.total_messages}</span></div>
-        <div class="settings-row"><span class="settings-label">Thumbs-up пар</span><span class="settings-value" id="train-pairs-count">...</span></div>
-        <div class="settings-row"><span class="settings-label">Период</span><span class="settings-value">${stats.earliest ? stats.earliest.substring(0,10) + ' — ' + stats.latest.substring(0,10) : '—'}</span></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Экспорт</div>
-        <div class="settings-row"><span class="settings-label">JSONL</span><button class="settings-btn" id="train-export-btn">Экспорт данных</button></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Fine-tuning (LoRA)</div>
-        <div class="settings-row"><span class="settings-label">Адаптер</span><span class="settings-value">${adapter.exists ? 'Есть' + (adapter.meta?.trained_at ? ' (' + adapter.meta.trained_at.substring(0,10) + ')' : '') : 'Нет'}</span></div>
-        <div class="settings-row"><span class="settings-label">Обучить модель</span><button class="settings-btn btn-primary" id="train-finetune-btn">Запустить</button></div>
-        <div id="train-progress" class="hidden" style="margin-top:8px;">
-          <div class="train-progress-bar"><div class="train-progress-fill" id="train-fill"></div></div>
-          <div id="train-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Data Flywheel</div>
-        <div class="settings-row"><span class="settings-label">Всего thumbs-up</span><span class="settings-value">${flywheel.thumbs_up_total}</span></div>
-        <div class="settings-row"><span class="settings-label">Новых (не экспортировано)</span><span class="settings-value" style="${flywheel.new_pairs >= 20 ? 'color:var(--accent)' : ''}">${flywheel.new_pairs}</span></div>
-        <div class="settings-row"><span class="settings-label">Циклов обучения</span><span class="settings-value">${flywheel.total_cycles}</span></div>
-        <div class="settings-row"><span class="settings-label">Последний цикл</span><span class="settings-value">${flywheel.last_cycle ? flywheel.last_cycle.date.substring(0,10) + ' — ' + flywheel.last_cycle.status : '—'}</span></div>
-        <div class="settings-row">
-          <span class="settings-label">Полный цикл</span>
-          <button class="settings-btn ${flywheel.ready_to_train ? 'btn-primary' : ''}" id="flywheel-run-btn" ${flywheel.ready_to_train ? '' : 'title="Нужно минимум 20 новых пар"'}>
-            ${flywheel.ready_to_train ? 'Запустить цикл' : 'Мало данных (' + flywheel.new_pairs + '/20)'}
-          </button>
-        </div>
-        <div id="flywheel-progress" class="hidden" style="margin-top:8px;">
-          <div class="train-progress-bar"><div class="train-progress-fill" id="flywheel-fill"></div></div>
-          <div id="flywheel-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
-        </div>
-        ${history.length > 0 ? `
-        <div style="margin-top:12px;">
-          <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">История циклов:</div>
-          ${history.slice(0, 5).map(c => `
-            <div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border-color);">
-              #${c.id} ${(c.started_at || '').substring(0,16)} — ${c.status} (${c.train_pairs} пар)${c.eval_score != null ? ' score:' + c.eval_score.toFixed(2) : ''}
-            </div>
-          `).join('')}
-        </div>` : ''}
-      </div>`;
-    // Count training pairs from JSONL file
-    try {
-      const content = await invoke('read_file', { path: pairsPath }).catch(() => '');
-      const count = content ? content.trim().split('\\n').filter(l => l.trim()).length : 0;
-      const el2 = document.getElementById('train-pairs-count');
-      if (el2) el2.textContent = String(count);
-    } catch (_) {
-      const el2 = document.getElementById('train-pairs-count');
-      if (el2) el2.textContent = '0';
-    }
-    document.getElementById('train-export-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
-      try { const r = await invoke('export_training_data'); btn.textContent = r.train_count + ' train + ' + r.valid_count + ' valid'; }
-      catch (err) { btn.textContent = String(err).substring(0, 30); }
-      setTimeout(() => { btn.textContent = 'Экспорт данных'; btn.disabled = false; }, 4000);
-    });
-    document.getElementById('train-finetune-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.disabled = true;
-      const progress = document.getElementById('train-progress');
-      const fill = document.getElementById('train-fill');
-      const status = document.getElementById('train-status');
-      progress?.classList.remove('hidden');
-      btn.textContent = 'Экспорт...';
-      if (status) status.textContent = 'Экспортируем данные...';
-      if (fill) fill.style.width = '10%';
-      try {
-        await invoke('export_training_data');
-        btn.textContent = 'Обучение...';
-        if (status) status.textContent = 'Запускаем fine-tuning (это может занять 10-30 минут)...';
-        if (fill) fill.style.width = '30%';
-        const r = await invoke('run_finetune');
-        if (fill) fill.style.width = '100%';
-        if (status) status.textContent = 'Готово!';
-        btn.textContent = 'Готово!';
-      } catch (err) {
-        if (fill) fill.style.width = '100%';
-        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
-        btn.textContent = 'Ошибка';
-      }
-      setTimeout(() => { btn.textContent = 'Запустить'; btn.disabled = false; }, 5000);
-    });
-    // Flywheel cycle button
-    document.getElementById('flywheel-run-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.disabled = true;
-      const progress = document.getElementById('flywheel-progress');
-      const fill = document.getElementById('flywheel-fill');
-      const status = document.getElementById('flywheel-status');
-      progress?.classList.remove('hidden');
-      btn.textContent = 'Экспорт...';
-      if (status) status.textContent = 'Шаг 1/3: Экспорт данных...';
-      if (fill) fill.style.width = '15%';
-      try {
-        await invoke('export_training_data');
-        btn.textContent = 'Обучение...';
-        if (status) status.textContent = 'Шаг 2/3: Fine-tuning (может занять 10-30 минут)...';
-        if (fill) fill.style.width = '40%';
-        const r = await invoke('run_flywheel_cycle');
-        if (fill) fill.style.width = '100%';
-        if (status) status.textContent = `Цикл #${r.cycle_id} завершён: ${r.status} (${r.train_pairs} пар)`;
-        btn.textContent = 'Готово!';
-      } catch (err) {
-        if (fill) fill.style.width = '100%';
-        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
-        btn.textContent = 'Ошибка';
-      }
-      setTimeout(() => { btn.textContent = 'Запустить цикл'; btn.disabled = false; }, 5000);
-    });
-  } catch (e) { el.innerHTML = '<div style="color:var(--text-muted);">Ошибка: ' + e + '</div>'; }
-}
-
 async function loadAbout(el) {
   try {
     const [info, trainingStats, adapterStatus] = await Promise.all([
