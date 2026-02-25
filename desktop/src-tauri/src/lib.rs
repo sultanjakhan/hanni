@@ -9597,9 +9597,12 @@ async fn speak_text_blocking(text: String, voice: Option<String>) -> Result<(), 
 #[tauri::command]
 async fn speak_sentence_blocking(sentence: String, voice: Option<String>) -> Result<(), String> {
     let v = voice.unwrap_or_else(|| "xenia".into());
-    // speak_tts_sync already calls clean_text_for_tts internally
+    // Truncate long sentences to prevent TTS timeout
+    let truncated = if sentence.len() > MAX_TTS_TEXT_LEN {
+        sentence[..sentence.floor_char_boundary(MAX_TTS_TEXT_LEN)].to_string()
+    } else { sentence };
     tokio::task::spawn_blocking(move || {
-        speak_tts_sync(&sentence, &v);
+        speak_tts_sync(&truncated, &v);
     }).await.map_err(|e| format!("TTS join error: {}", e))?;
     Ok(())
 }
@@ -9613,7 +9616,7 @@ async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
     let speaker = silero_speaker_for(&v).to_string();
     tokio::task::spawn_blocking(move || {
         speak_silero_local(&clean, &speaker);
-    });
+    }).await.map_err(|e| format!("TTS join error: {}", e))?;
     Ok(())
 }
 
