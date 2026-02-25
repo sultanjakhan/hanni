@@ -1785,21 +1785,28 @@ async function executeAction(actionJson) {
     }
 
     // S5: Confirmation for dangerous actions
-    const DANGEROUS_ACTIONS = ['run_shell', 'close_app', 'quit_app'];
+    const DANGEROUS_ACTIONS = ['run_shell', 'close_app', 'quit_app', 'open_app', 'start_focus'];
     if (DANGEROUS_ACTIONS.includes(actionType)) {
       const desc = actionType === 'run_shell' ? `Команда: ${action.command || action.cmd || '?'}`
+        : actionType === 'start_focus' ? `Фокус: ${action.duration || '?'} мин`
+        : actionType === 'open_app' ? `Открыть: ${action.name || action.app || '?'}`
         : `Закрыть: ${action.name || action.app || '?'}`;
       const confirmed = await new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.className = 'confirm-overlay';
-        overlay.innerHTML = `<div class="confirm-modal">
-          <div class="confirm-title">Подтверждение действия</div>
-          <div class="confirm-desc">${desc}</div>
-          <div class="confirm-buttons">
-            <button class="confirm-cancel">Отмена</button>
-            <button class="confirm-ok">Выполнить</button>
-          </div>
-        </div>`;
+        const modal = document.createElement('div');
+        modal.className = 'confirm-modal';
+        const title = document.createElement('div');
+        title.className = 'confirm-title';
+        title.textContent = 'Подтверждение действия';
+        const descEl = document.createElement('div');
+        descEl.className = 'confirm-desc';
+        descEl.textContent = desc;
+        const btns = document.createElement('div');
+        btns.className = 'confirm-buttons';
+        btns.innerHTML = '<button class="confirm-cancel">Отмена</button><button class="confirm-ok">Выполнить</button>';
+        modal.append(title, descEl, btns);
+        overlay.appendChild(modal);
         document.body.appendChild(overlay);
         overlay.querySelector('.confirm-cancel').onclick = () => { overlay.remove(); resolve(false); };
         overlay.querySelector('.confirm-ok').onclick = () => { overlay.remove(); resolve(true); };
