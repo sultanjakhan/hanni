@@ -26,8 +26,8 @@
 | CH4 | Edit user message + resend | M | ✅ |
 | CH5 | Адаптивная история (лимит по токенам, не по сообщениям) | S | ⬜ |
 | CH6 | Implicit feedback loop (retry → training data) | M | ⬜ |
-| CH7 | Streaming action indicator ("выполняет: web_search...") | S | ⬜ |
-| CH8 | Auto-categorize conversations | S | ⬜ |
+| CH7 | Streaming action indicator ("Выполняю: web_search...") | S | ✅ |
+| CH8 | Auto-categorize conversations (8 категорий) | S | ✅ |
 | CH9 | Smart context injection (по всей истории, не только последнее сообщение) | M | ✅ |
 
 ## M03: Memory (10 функций)

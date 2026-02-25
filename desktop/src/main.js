@@ -225,6 +225,8 @@ listen('update-available', (event) => {
 // ── Proactive message listener ──
 let lastProactiveTime = 0; // timestamp of last proactive message for engagement tracking
 listen('proactive-message', async (event) => {
+  // Prevent race condition: don't mutate history while chat is streaming
+  if (busy) return;
   const text = event.payload;
   lastProactiveTime = Date.now();
 
@@ -1545,8 +1547,13 @@ function _chatSettingsSetupMemory(memories) {
 
 // ── Chat helpers ──
 
+let _scrollRAF = null;
 function scrollDown() {
-  chat.scrollTop = chat.scrollHeight;
+  if (_scrollRAF) return;
+  _scrollRAF = requestAnimationFrame(() => {
+    chat.scrollTop = chat.scrollHeight;
+    _scrollRAF = null;
+  });
 }
 
 // Scroll-to-bottom floating button
@@ -2346,10 +2353,17 @@ async function send() {
       for (const tc of result.toolCalls) {
         let args;
         try { args = JSON.parse(tc.function.arguments); } catch (_) { args = {}; }
+        // CH7: Show streaming action indicator
+        const indicatorDiv = document.createElement('div');
+        indicatorDiv.className = 'action-indicator';
+        indicatorDiv.textContent = `Выполняю: ${tc.function.name}...`;
+        chat.appendChild(indicatorDiv);
+        scrollDown();
         // Inject action type for executeAction compatibility
         args.action = tc.function.name;
         const actionJson = JSON.stringify(args);
         const { success, result: actionResult } = await executeAction(actionJson);
+        indicatorDiv.remove();
         const actionDiv = document.createElement('div');
         actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
         actionDiv.textContent = actionResult;
@@ -2385,7 +2399,16 @@ async function send() {
     // Execute actions and show results
     const results = [];
     for (const actionJson of actions) {
+      // CH7: Show action indicator
+      let actionName = 'action';
+      try { const a = JSON.parse(actionJson); actionName = a.action || a.type || 'action'; } catch (_) {}
+      const indicatorDiv = document.createElement('div');
+      indicatorDiv.className = 'action-indicator';
+      indicatorDiv.textContent = `Выполняю: ${actionName}...`;
+      chat.appendChild(indicatorDiv);
+      scrollDown();
       const { success, result: actionResult } = await executeAction(actionJson);
+      indicatorDiv.remove();
       const actionDiv = document.createElement('div');
       actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
       actionDiv.textContent = actionResult;

@@ -1434,6 +1434,14 @@ fn migrate_events_source(conn: &rusqlite::Connection) {
     }
 }
 
+fn migrate_conversations_category(conn: &rusqlite::Connection) {
+    // CH8: Add category column for auto-categorization
+    let has_category = conn.prepare("SELECT category FROM conversations LIMIT 1").is_ok();
+    if !has_category {
+        let _ = conn.execute("ALTER TABLE conversations ADD COLUMN category TEXT", []);
+    }
+}
+
 fn migrate_facts_decay(conn: &rusqlite::Connection) {
     // ME1: Add access tracking columns for memory decay
     let has_access_count = conn.prepare("SELECT access_count FROM facts LIMIT 1").is_ok();
@@ -4374,12 +4382,13 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
 
     // Inject memory context: synthesized profile + relevant facts
     // Step 1: embed user message BEFORE acquiring DB lock (async call)
+    // Skip embedding in call_mode — use FTS5 only for faster voice responses
     let mem_user_msg_owned = messages.iter().rev()
         .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
         .and_then(|m| m.get("content").and_then(|c| c.as_str()))
         .unwrap_or("")
         .to_string();
-    let query_embedding: Option<Vec<f32>> = if !mem_user_msg_owned.is_empty() {
+    let query_embedding: Option<Vec<f32>> = if !call_mode && !mem_user_msg_owned.is_empty() {
         embed_texts(client, &[mem_user_msg_owned.clone()]).await
             .ok()
             .and_then(|mut e| if e.is_empty() { None } else { Some(e.remove(0)) })
@@ -5407,6 +5416,14 @@ async fn process_conversation_end(
     conversation_id: i64,
     app: AppHandle,
 ) -> Result<(), String> {
+    // Acquire LLM semaphore — MLX is single-threaded, prevent concurrent inference
+    let llm_state = app.state::<LlmBusy>();
+    let _permit = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        llm_state.0.acquire(),
+    ).await
+        .map_err(|_| "LLM busy — timeout".to_string())?
+        .map_err(|_| "LLM semaphore closed".to_string())?;
     let client = &app.state::<HttpClient>().0;
 
     // Build a compact version of the conversation for the LLM
@@ -5448,7 +5465,7 @@ async fn process_conversation_end(
         {{\"facts\": [{{\"category\":\"user\",\"key\":\"имя\",\"value\":\"Султан\"}},{{\"category\":\"user\",\"key\":\"университет\",\"value\":\"Учится в КБТУ на CS\"}}]}}\n\
         \"Артём — мой лучший друг, мы вместе кодим\" → \
         {{\"facts\": [{{\"category\":\"people\",\"key\":\"Артём\",\"value\":\"Лучший друг, вместе программируют\"}}]}}\n\n\
-        Верни ТОЛЬКО JSON: {{\"summary\": \"1-2 предложения\", \"facts\": [...], \"insights\": [{{\"type\": \"decision|goal|open_question\", \"content\": \"...\"}}]}}\n\n\
+        Верни ТОЛЬКО JSON: {{\"summary\": \"1-2 предложения\", \"category\": \"chat|work|health|money|food|hobby|planning|personal\", \"facts\": [...], \"insights\": [{{\"type\": \"decision|goal|open_question\", \"content\": \"...\"}}]}}\n\n\
         Разговор:\n{conv}\n/no_think",
         today = chrono::Local::now().format("%Y-%m-%d"),
         conv = conv_text
@@ -5524,6 +5541,7 @@ async fn process_conversation_end(
     #[derive(Deserialize)]
     struct ExtractionResult {
         summary: Option<String>,
+        category: Option<String>,
         #[serde(default)]
         facts: Vec<ExtractedFact>,
         #[serde(default)]
@@ -5545,14 +5563,14 @@ async fn process_conversation_end(
     if let Ok(result) = serde_json::from_str::<ExtractionResult>(json_str) {
         let now = chrono::Local::now().to_rfc3339();
 
-        // Update conversation summary (scoped DB access)
+        // Update conversation summary + category (scoped DB access)
         {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
             if let Some(summary) = &result.summary {
                 let _ = conn.execute(
-                    "UPDATE conversations SET summary=?1, ended_at=?2 WHERE id=?3",
-                    rusqlite::params![summary, now, conversation_id],
+                    "UPDATE conversations SET summary=?1, ended_at=?2, category=?3 WHERE id=?4",
+                    rusqlite::params![summary, now, result.category, conversation_id],
                 );
             }
         } // conn dropped here
@@ -9738,6 +9756,7 @@ pub fn run() {
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
     migrate_facts_decay(&conn);
+    migrate_conversations_category(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
