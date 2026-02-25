@@ -281,7 +281,7 @@ input.addEventListener('input', () => {
   clearTimeout(typingTimeout);
   typingTimeout = setTimeout(() => {
     invoke('set_user_typing', { typing: false }).catch(() => {});
-  }, 5000);
+  }, 10000);
 });
 
 // ── Reminder notifications ──

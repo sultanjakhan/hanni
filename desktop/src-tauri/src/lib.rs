@@ -9380,13 +9380,20 @@ async fn proactive_llm_call(
         return Ok(None);
     }
 
-    // Reject if model hallucinates things not in context (common patterns)
+    // Reject if model hallucinates food/drink/topics not in context
     let lower = text.to_lowercase();
-    if lower.contains("чайник") || lower.contains("чай ") || lower.contains("заварить") {
-        // Only allow tea references if something tea-related is in the actual context
-        let ctx_lower = context.to_lowercase();
-        if !ctx_lower.contains("чай") && !ctx_lower.contains("tea") {
-            return Ok(None);
+    let ctx_lower = context.to_lowercase();
+    // Common hallucination patterns: food, drinks, cooking suggestions not grounded in context
+    let hallucination_triggers: &[(&[&str], &[&str])] = &[
+        (&["чайник", "чай ", "заварить", "чаёк", "чайку"], &["чай", "tea", "чайн"]),
+        (&["кофе ", "кофейку", "кофеёк", "латте", "капучино"], &["кофе", "coffee", "кафе"]),
+        (&["приготовить ", "рецепт ", "готовить "], &["рецепт", "готов", "кухн", "еда", "блюд"]),
+    ];
+    for (triggers, context_markers) in hallucination_triggers {
+        if triggers.iter().any(|t| lower.contains(t)) {
+            if !context_markers.iter().any(|m| ctx_lower.contains(m)) {
+                return Ok(None);
+            }
         }
     }
 
@@ -10530,6 +10537,25 @@ pub fn run() {
                     state.recent_messages = loaded_msgs;
                 }
 
+                // Compute initial engagement rate from DB history (last 20 messages)
+                let initial_engagement = {
+                    let db = proactive_handle.state::<HanniDb>();
+                    let conn = db.conn();
+                    let replied: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM (SELECT user_replied FROM proactive_history ORDER BY id DESC LIMIT 20) WHERE user_replied=1",
+                        [], |row| row.get(0),
+                    ).unwrap_or(0);
+                    let total: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM (SELECT id FROM proactive_history ORDER BY id DESC LIMIT 20)",
+                        [], |row| row.get(0),
+                    ).unwrap_or(0);
+                    if total > 0 { Some(replied as f64 / total as f64) } else { None }
+                }; // conn dropped here before await
+                if let Some(eng) = initial_engagement {
+                    let mut state = proactive_state_ref.lock().await;
+                    state.engagement_rate = eng;
+                }
+
                 let mut last_check = std::time::Instant::now();
                 let mut first_run = true;
 
@@ -10649,7 +10675,7 @@ pub fn run() {
                         String::new()
                     };
 
-                    // Build memory context (5 core facts only — minimal noise)
+                    // Build memory context (8 core facts — better personalization)
                     let (mem_ctx, chat_snippet, user_name, todays_msgs) = {
                         let db = proactive_handle.state::<HanniDb>();
                         let conn = db.conn();
@@ -10659,7 +10685,7 @@ pub fn run() {
                             .unwrap_or("")
                             .to_string();
                         (
-                            build_memory_context_from_db(&conn, &ctx_hint, 5, None),
+                            build_memory_context_from_db(&conn, &ctx_hint, 8, None),
                             get_recent_chat_snippet(&conn, 4),
                             get_user_name_from_memory(&conn),
                             get_todays_proactive_messages(&conn),
