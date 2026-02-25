@@ -4348,9 +4348,24 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         format!("{}{}", SYSTEM_PROMPT_LITE, date_context)
     };
 
+    // C1: Inject user name into system prompt if available
+    let system_content = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        let user_name: Option<String> = conn.query_row(
+            "SELECT value FROM facts WHERE category='user' AND key='name' LIMIT 1",
+            [], |row| row.get(0),
+        ).ok();
+        if let Some(name) = user_name {
+            format!("Пользователя зовут {}. Обращайся по имени.\n\n{}", name, system_content)
+        } else {
+            system_content
+        }
+    };
+
     // Append complex-query hint for non-call mode
     let system_content = if !call_mode && is_complex_query(last_user_msg) {
-        format!("{}\n\nThis is a complex question. Think carefully. Structure your answer if helpful.", system_content)
+        format!("{}\n\nЭто сложный вопрос. Продумай пошагово. Структурируй ответ если нужно.", system_content)
     } else {
         system_content
     };
@@ -4434,12 +4449,12 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
     {
         let mut memory_block = String::new();
         if let Some(ref p) = profile {
-            memory_block.push_str("[About the user]\n");
+            memory_block.push_str("[О пользователе]\n");
             memory_block.push_str(p);
         }
         if !facts_ctx.is_empty() {
             if !memory_block.is_empty() { memory_block.push_str("\n\n"); }
-            memory_block.push_str("[Relevant details]\n");
+            memory_block.push_str("[Релевантные факты]\n");
             memory_block.push_str(&facts_ctx);
         }
         if !memory_block.is_empty() {
@@ -5820,9 +5835,9 @@ async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
         model: MODEL.into(),
         messages: vec![
             ChatMessage::text("system",
-                "You synthesize user facts into a concise profile paragraph. Write in Russian. \
-                 Return ONLY the profile text — no JSON, no markup, no headers. \
-                 Write as if describing a friend: natural, warm, 3-5 sentences."),
+                "Ты синтезируешь факты о пользователе в краткий профиль. Пиши на русском. \
+                 Верни ТОЛЬКО текст профиля — без JSON, без разметки, без заголовков. \
+                 Пиши как будто описываешь друга: естественно, тепло, 3-5 предложений."),
             ChatMessage::text("user", &format!(
                 "Собери эти факты в один связный абзац — профиль пользователя:\n\n{}\n/no_think", facts_text)),
         ],
@@ -8675,6 +8690,86 @@ async fn get_model_info() -> Result<ModelInfo, String> {
     })
 }
 
+// ── Health Check (C4) ──
+
+#[derive(Serialize)]
+struct HealthStatus {
+    mlx_online: bool,
+    mlx_model: String,
+    voice_server_online: bool,
+    db_ok: bool,
+    db_tables: usize,
+    db_facts: usize,
+    db_conversations: usize,
+    db_size_mb: f64,
+}
+
+#[tauri::command]
+async fn health_check(app: AppHandle) -> Result<HealthStatus, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // MLX server check
+    let mlx_online = client
+        .get("http://127.0.0.1:8234/v1/models")
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    // Voice server check
+    let voice_server_online = client
+        .get(format!("{}/health", VOICE_SERVER_URL))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    // DB checks
+    let (db_ok, db_tables, db_facts, db_conversations, db_size_mb) = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+
+        let tables: usize = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table'",
+            [], |row| row.get(0),
+        ).unwrap_or(0);
+
+        let facts: usize = conn.query_row(
+            "SELECT count(*) FROM facts", [], |row| row.get(0),
+        ).unwrap_or(0);
+
+        let convs: usize = conn.query_row(
+            "SELECT count(*) FROM conversations", [], |row| row.get(0),
+        ).unwrap_or(0);
+
+        // DB file size
+        let size: f64 = conn.query_row(
+            "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
+            [], |row| row.get::<_, i64>(0),
+        ).map(|bytes| bytes as f64 / 1_048_576.0).unwrap_or(0.0);
+
+        let integrity: String = conn.query_row(
+            "PRAGMA integrity_check", [], |row| row.get(0),
+        ).unwrap_or_else(|_| "error".into());
+
+        (integrity == "ok", tables, facts, convs, size)
+    };
+
+    Ok(HealthStatus {
+        mlx_online,
+        mlx_model: MODEL.to_string(),
+        voice_server_online,
+        db_ok,
+        db_tables,
+        db_facts,
+        db_conversations,
+        db_size_mb,
+    })
+}
+
 // ── Proactive messaging logic ──
 
 const PROACTIVE_PROMPT_HEADER: &str = r#"Ты — Ханни, тёплый AI-компаньон. Пиши как друг, который рядом.
@@ -9734,6 +9829,7 @@ pub fn run() {
             tracker_get_recent,
             get_integrations,
             get_model_info,
+            health_check,
             get_activity_summary,
             get_calendar_events,
             get_now_playing,
