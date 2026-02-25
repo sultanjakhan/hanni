@@ -1539,8 +1539,8 @@ fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, lim
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, category, key, value FROM facts
          WHERE category IN ('user', 'preferences')
-         ORDER BY (COALESCE(access_count,0) * 0.3 + CASE WHEN last_accessed IS NOT NULL
-           THEN (julianday('now') - julianday(last_accessed)) * -0.1 ELSE -5 END) DESC,
+         ORDER BY (COALESCE(access_count,0) * 0.5 + CASE WHEN last_accessed IS NOT NULL
+           THEN (julianday('now') - julianday(last_accessed)) * -0.05 ELSE -3 END) DESC,
            updated_at DESC LIMIT 20"
     ) {
         if let Ok(rows) = stmt.query_map([], |row| {
@@ -5189,8 +5189,8 @@ fn memory_recall(
             // ME1: Sort by decay score — frequently accessed + recently updated facts first
             let mut stmt = conn.prepare(
                 "SELECT key, value FROM facts WHERE category=?1
-                 ORDER BY (access_count * 0.3 + CASE WHEN last_accessed IS NOT NULL
-                   THEN (julianday('now') - julianday(last_accessed)) * -0.1 ELSE -10 END) DESC,
+                 ORDER BY (access_count * 0.5 + CASE WHEN last_accessed IS NOT NULL
+                   THEN (julianday('now') - julianday(last_accessed)) * -0.05 ELSE -3 END) DESC,
                  updated_at DESC"
             ).map_err(|e| format!("DB error: {}", e))?;
             let pairs: Vec<String> = stmt.query_map(rusqlite::params![category], |row| {
@@ -5488,6 +5488,7 @@ async fn process_conversation_end(
     let response = client
         .post(MLX_URL)
         .json(&request)
+        .timeout(std::time::Duration::from_secs(60))
         .send()
         .await
         .map_err(|e| format!("LLM error: {}", e))?;
@@ -5643,11 +5644,32 @@ async fn process_conversation_end(
         }; // conn dropped here
 
         // 3. Direct insert for facts with no similar matches (scoped DB access)
+        // ME7: Detect conflicts when existing value differs from new value
         {
             let db = app.state::<HanniDb>();
             let conn = db.conn();
             for &idx in &no_similar {
                 let fact = &result.facts[idx];
+                // Check for conflict: existing fact with same key but different value
+                let old_value: Option<String> = conn.query_row(
+                    "SELECT value FROM facts WHERE category=?1 AND key=?2",
+                    rusqlite::params![fact.category, fact.key],
+                    |row| row.get(0),
+                ).ok();
+                if let Some(ref old_val) = old_value {
+                    if old_val != &fact.value {
+                        // Memory conflict detected — log it
+                        let _ = conn.execute(
+                            "INSERT INTO conversation_insights (conversation_id, insight_type, content, created_at)
+                             VALUES (?1, 'memory_conflict', ?2, ?3)",
+                            rusqlite::params![
+                                conversation_id,
+                                format!("[{}] {}: '{}' → '{}'", fact.category, fact.key, old_val, fact.value),
+                                now
+                            ],
+                        );
+                    }
+                }
                 let inserted = conn.execute(
                     "INSERT INTO facts (category, key, value, source, created_at, updated_at)
                      VALUES (?1, ?2, ?3, 'auto', ?4, ?4)
@@ -5694,7 +5716,7 @@ async fn process_conversation_end(
                     })
                     .collect();
                 prompt_parts.push_str(&format!(
-                    "For #{}: {}\n",
+                    "Для #{}: {}\n",
                     batch_idx + 1,
                     sim_str.join(", ")
                 ));
@@ -5720,8 +5742,8 @@ async fn process_conversation_end(
                 tools: None,
             };
 
-            // Async LLM call — no DB lock held
-            if let Ok(resp) = client.post(MLX_URL).json(&dedup_request).send().await {
+            // Async LLM call — no DB lock held (30s timeout)
+            if let Ok(resp) = client.post(MLX_URL).json(&dedup_request).timeout(std::time::Duration::from_secs(30)).send().await {
                 if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
                     let raw_dedup = parsed.choices.first()
                         .map(|c| c.message.content.clone())
@@ -5813,10 +5835,13 @@ async fn process_conversation_end(
             }
         }
 
-        // Trigger profile re-synthesis if new facts were extracted
+        // ME8: Trigger profile re-synthesis if new facts were extracted (with 45s timeout)
         let app2 = app.clone();
         tokio::spawn(async move {
-            let _ = synthesize_user_profile(&app2).await;
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(45),
+                synthesize_user_profile(&app2),
+            ).await;
         });
     }
 
@@ -5867,7 +5892,7 @@ async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
         tools: None,
     };
 
-    let response = client.post(MLX_URL).json(&request).send().await
+    let response = client.post(MLX_URL).json(&request).timeout(std::time::Duration::from_secs(30)).send().await
         .map_err(|e| format!("Profile synthesis error: {}", e))?;
     let parsed: NonStreamResponse = response.json().await
         .map_err(|e| format!("Profile parse error: {}", e))?;
@@ -7107,13 +7132,13 @@ fn memory_cleanup(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, St
         removed += dup_count as u32;
     }
 
-    // 2. Remove stale facts: not accessed in 60+ days, access_count <= 1, source = 'auto'
+    // 2. Remove stale facts: not accessed in 90+ days, never accessed (access_count=0), source = 'auto'
     let stale: i64 = conn.query_row(
         "SELECT COUNT(*) FROM facts
          WHERE source = 'auto'
-           AND COALESCE(access_count, 0) <= 1
-           AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 60)
-           AND julianday('now') - julianday(updated_at) > 60",
+           AND COALESCE(access_count, 0) = 0
+           AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 90)
+           AND julianday('now') - julianday(updated_at) > 90",
         [], |row| row.get(0),
     ).unwrap_or(0);
     if stale > 0 {
@@ -7121,17 +7146,17 @@ fn memory_cleanup(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, St
             "DELETE FROM vec_facts WHERE fact_id IN (
                 SELECT id FROM facts
                 WHERE source = 'auto'
-                  AND COALESCE(access_count, 0) <= 1
-                  AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 60)
-                  AND julianday('now') - julianday(updated_at) > 60
+                  AND COALESCE(access_count, 0) = 0
+                  AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 90)
+                  AND julianday('now') - julianday(updated_at) > 90
             )", [],
         );
         let _ = conn.execute(
             "DELETE FROM facts
              WHERE source = 'auto'
-               AND COALESCE(access_count, 0) <= 1
-               AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 60)
-               AND julianday('now') - julianday(updated_at) > 60",
+               AND COALESCE(access_count, 0) = 0
+               AND (last_accessed IS NULL OR julianday('now') - julianday(last_accessed) > 90)
+               AND julianday('now') - julianday(updated_at) > 90",
             [],
         );
         removed += stale as u32;

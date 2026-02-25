@@ -1526,7 +1526,7 @@ function _chatSettingsSetupMemory(memories) {
       const cat = overlay.querySelector('.memory-add-cat').value;
       const key = overlay.querySelector('.memory-add-key').value.trim();
       const val = overlay.querySelector('.memory-add-val').value.trim();
-      if (!key || !val) return;
+      if (!key || key.length < 2 || !val || val.length < 2) { overlay.querySelector('.memory-add-key').style.borderColor = !key || key.length < 2 ? 'var(--accent)' : ''; return; }
       try { await invoke('memory_remember', { category: cat, key, value: val }); } catch (err) { console.error(err); }
       overlay.remove();
       reloadMem();
@@ -3403,7 +3403,7 @@ async function loadAllFacts(el) {
         const cat = overlay.querySelector('.memory-add-cat').value;
         const key = overlay.querySelector('.memory-add-key').value.trim();
         const val = overlay.querySelector('.memory-add-val').value.trim();
-        if (!key || !val) return;
+        if (!key || key.length < 2 || !val || val.length < 2) return;
         try { await invoke('memory_remember', { category: cat, key, value: val }); } catch (err) { console.error('Memory add error:', err); }
         overlay.remove();
         loadAllFacts(el);

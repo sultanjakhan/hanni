@@ -40,8 +40,8 @@
 | ME4 | Bulk operations ("забудь всё о X") | S | ⬜ |
 | ME5 | Adaptive extraction (обучение на удалениях) | M | ⬜ |
 | ME6 | Cross-conversation linking | M | ⬜ |
-| ME7 | Proactive memory conflict detection | S | ⬜ |
-| ME8 | Auto-synthesis user profile при изменении фактов | S | ⬜ |
+| ME7 | Proactive memory conflict detection | S | ✅ |
+| ME8 | Auto-synthesis user profile при изменении фактов | S | ✅ |
 
 ## M04: Voice (12 функций)
 
