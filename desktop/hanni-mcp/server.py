@@ -50,7 +50,7 @@ def handle_get_conversations(args):
     conn = get_db()
     limit = args.get("limit", 20)
     rows = conn.execute(
-        "SELECT id, summary, message_count, created_at, ended_at FROM conversations "
+        "SELECT id, summary, message_count, started_at, ended_at FROM conversations "
         "ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
     conn.close()
@@ -63,7 +63,7 @@ def handle_get_conversation(args):
     if not cid:
         return {"error": "id required"}
     row = conn.execute(
-        "SELECT id, summary, messages, message_count, created_at FROM conversations WHERE id=?",
+        "SELECT id, summary, messages, message_count, started_at FROM conversations WHERE id=?",
         (cid,)
     ).fetchone()
     conn.close()
@@ -81,7 +81,7 @@ def handle_get_proactive_history(args):
     conn = get_db()
     limit = args.get("limit", 30)
     rows = conn.execute(
-        "SELECT id, message, sent_at, engagement FROM proactive_history "
+        "SELECT id, message, sent_at, user_replied, reply_delay_secs FROM proactive_history "
         "ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
     conn.close()
