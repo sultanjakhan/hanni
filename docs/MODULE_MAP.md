@@ -2,7 +2,7 @@
 
 > Quick lookup: файл/секция → модуль.
 > Авто-генерация Phase 1. Обновляется при Phase 2.
-> Версия: v0.18.0-dev | Дата: 2026-02-23
+> Версия: v0.19.0 | Дата: 2026-02-26
 
 ## Обзор проекта
 
@@ -11,7 +11,7 @@
 | Язык(и) | Rust, JavaScript, CSS, Python, Bash |
 | Фреймворк(и) | Tauri 2, vanilla JS |
 | Архитектура | Hybrid monolithic (2 монолитных файла + сателлиты) |
-| Файл-тип | Monolithic (lib.rs 9734 LOC, main.js 6070 LOC) + multi-file (scripts, config) |
+| Файл-тип | Monolithic (lib.rs 10788 LOC, main.js 6658 LOC) + multi-file (scripts, config) |
 | Entry points | `lib.rs:run()` (backend), `index.html` → `main.js` (frontend) |
 | Конфиг-файлы | Cargo.toml, tauri.conf.json, package.json, capabilities/default.json |
 
@@ -33,14 +33,16 @@
 | 12 | lifestyle | Еда, деньги, mindset, здоровье/фитнес, контакты, дом (6 суб-доменов) | 2 | ~2200 |
 | 13 | page_framework | Мета страниц, свойства, database views, цели, настройки, фидбек, интеграции | 2 | ~1700 |
 | 14 | ui | Система вкладок (Cmd+W/T/1-9), навигация, Notion Dark тема, HTML структура | 3 | ~4500 |
-| 15 | ml_devops | Training data, Claude distillation, LoRA fine-tuning, CI/CD pipeline, finetune.py | 8 | ~1350 |
-| **TOTAL** | | | **46** | **~20168** |
+| 15 | ml_devops | Training data, Claude distillation, LoRA fine-tuning, CI/CD pipeline, finetune.py, prepare_data.py, MCP server | 11 | ~1800 |
+| **TOTAL** | | | **49** | **~23420** |
 
 ---
 
 ## Маппинг по путям
 
 ### Backend (Rust)
+
+> ⚠️ **Внимание:** Диапазоны строк lib.rs актуальны для v0.18.0 (9734 LOC). Текущий lib.rs = 10788 LOC (+1054). Секции после L3000 сместились на ~200-1000 строк вниз. Полный пересчёт при следующем Phase 1 аудите.
 
 | Файл | Секция / Функции | Строки (от-до) | LOC | Модуль |
 |------|-----------------|----------------|-----|--------|
@@ -112,7 +114,7 @@
 | voice_server.py | record_and_transcribe(), CPAL recording | L121-300 | 180 | voice |
 | voice_server.py | HTTP endpoints (/transcribe, /stop, /health, /tts) | L301-490 | 190 | voice |
 | voice_server.py | /embed endpoint (384d embeddings) | L490-530 | 41 | memory |
-| voice_server.py | /rerank endpoint (FlashRank) | L530-611 | 82 | memory |
+| voice_server.py | /rerank endpoint (FlashRank) | L530-778 | 249 | memory |
 
 ### Frontend (JavaScript)
 
@@ -183,7 +185,11 @@
 | Файл | Строки | Модуль |
 |------|--------|--------|
 | pc/tts_server.py | 120 | voice |
-| desktop/finetune.py | 95 | ml_devops |
+| desktop/finetune.py | 143 | ml_devops |
+| desktop/finetune_data/prepare_data.py | 309 | ml_devops |
+| desktop/finetune_data/synthetic_examples.jsonl | 73 | ml_devops |
+| desktop/hanni-mcp/server.py | 321 | ml_devops |
+| desktop/dev-server.py | 4 | ml_devops |
 | scripts/generate_training_data.py | 497 | ml_devops |
 | scripts/claude_distill.sh | 274 | ml_devops |
 | scripts/nightly_train.sh | 217 | ml_devops |
@@ -264,4 +270,4 @@ Life tracker: покупки/время/цели/заметки, трекинг 
 Визуальный слой: Notion Dark тема (CSS variables), система вкладок (открытие/закрытие, Cmd+W/T/1-9, localStorage), суб-сайдбар, skeleton loaders, 3753 строки CSS (все компоненты от чата до call mode), HTML-структура. Включает рендеринг tab bar, навигацию и keyboard shortcuts.
 
 ### 15. ml_devops
-MLOps и DevOps: генерация 77+ обучающих примеров, Claude-дистилляция, ночной LoRA fine-tuning (3 AM, feedback-based, adapter backup), QLoRA скрипт (finetune.py), UI для запуска fine-tuning (get_adapter_status + run_finetune), CI/CD pipeline (GitHub Actions → macOS build → release → gist update).
+MLOps и DevOps: генерация 77+ обучающих примеров, Claude-дистилляция, LoRA fine-tuning (mlx_lm v0.30+ subcommand syntax, YAML config, rank=8/scale=2.0), подготовка training data (prepare_data.py: DB export + synthetic examples + hallucination filtering), 73 curated synthetic examples, MCP сервер для Claude Code (hanni-mcp/server.py: facts, conversations, settings, test_chat, run_sql), CI/CD pipeline (GitHub Actions → macOS build → release → gist update).
