@@ -8835,28 +8835,41 @@ const PROACTIVE_PROMPT_HEADER: &str = r#"Ты — Ханни, тёплый AI-к
 
 const PROACTIVE_PROMPT_FOOTER: &str = r#"
 ПРИОРИТЕТЫ:
-- Есть триггер (событие скоро / дистракция) → пиши про него
-- Есть свежий разговор → продолжи тему, но с новой стороны
-- Утро (8-10) → краткий дайджест дня
-- Иначе → наблюдение, забота или любопытство
+1. Есть триггер (событие скоро / дистракция) → пиши про него
+2. Есть свежий разговор → продолжи тему с новой стороны
+3. Утро (8-10) → краткий дайджест дня
+4. Иначе → любопытство, забота, юмор (без привязки к приложению)
+
+СТРОГИЕ ЗАПРЕТЫ:
+- ЗАПРЕЩЕНО писать "ты уже X часов/минут в [приложение]" — модель НЕ должна комментировать экранное время кроме триггера дистракции (YouTube/Reddit 30+ мин)
+- ЗАПРЕЩЕНО упоминать еду/напитки (чай, кофе, перекус) если контекст НЕ про еду
+- ЗАПРЕЩЕНО выдумывать то, чего НЕТ в контексте
+- ЗАПРЕЩЕНО повторять темы из [Уже сказано сегодня]
+- Если нечего сказать — ответь [SKIP]. Лучше [SKIP] чем банальщина
 
 СТИЛЬ:
-- Будь конкретным: привязывай к тому, что СЕЙЧАС происходит (приложение, музыка, время)
-- НЕ выдумывай того, чего нет в контексте
-- НЕ упоминай темы из [Уже сказано сегодня]
-- Если нечего сказать — ответь [SKIP]
+- Коротко, 1-2 предложения
+- Разнообразно: не повторяй формат предыдущих сообщений
+- Привязывай к контексту, но НЕ к названию приложения (кроме дистракций)
 
 ПРИМЕРЫ:
-Контекст: Frontmost: Cursor, 90 min | Музыка: Radiohead — Creep
-Хорошо: "Полтора часа в Cursor под Radiohead — серьёзный вайб. Перерыв не нужен?"
-Плохо: "Привет! Как твои дела? Может чайку?" (пустое, не привязано к контексту)
+Контекст: Музыка: Radiohead — Creep | Screen Time: работа 3ч
+Хорошо: "Creep от Radiohead — настроение такое или просто зашла?"
+Плохо: "Ты уже 3 часа работаешь — может перерыв?" (банально, комментирует время)
 
-Контекст: Frontmost: YouTube, 45 min | Триггер: дистракция
-Хорошо: "45 минут YouTube — залип? Может пора обратно к делу?"
-Плохо: "Ты сегодня на работе как всегда! Может чайник заварить?" (выдумка)
+Контекст: Триггер: дистракция YouTube 45 мин
+Хорошо: "Залип на YouTube? 45 минут — может хватит? 😄"
+Плохо: "Ты уже 45 минут в YouTube, может сделать чайный перерыв?" (чай, шаблонная фраза)
 
 Контекст: Событие через 20 мин: Встреча с командой
-Хорошо: "Через 20 минут встреча — не забудь подготовиться."
+Хорошо: "Через 20 минут встреча — подготовился?"
+
+Контекст: Последний разговор про новый проект
+Хорошо: "Как там проект — сдвинулось что-нибудь?"
+
+Контекст: Вечер, ничего особенного
+Хорошо: [SKIP]
+Плохо: "Как прошёл день?" (пустое, без контекста)
 
 Ответь текстом сообщения, или [SKIP]."#;
 
@@ -9007,19 +9020,20 @@ fn gather_context_blocking() -> String {
         ctx.push_str(&format!("\n--- Browser ---\n{}\n", browser));
     }
 
-    // Active (frontmost) app and how long it's been in focus
+    // Active (frontmost) app — only show for distraction alerts
     // Skip "Hanni" — no point telling the model the user is in our own app
     let front_app = get_frontmost_app();
     if !front_app.is_empty() && front_app != "Hanni" {
-        ctx.push_str(&format!("\n--- Active App ---\nFrontmost: {}\n", front_app));
-        if let Ok(minutes) = get_app_focus_minutes(&front_app) {
-            ctx.push_str(&format!("Focus time today: {:.0} min\n", minutes));
-            let distracting = ["YouTube", "Reddit", "Twitter", "TikTok", "Instagram", "Telegram", "Discord", "VK"];
-            let is_distracting = distracting.iter().any(|d| front_app.contains(d));
-            if is_distracting && minutes > 30.0 {
-                ctx.push_str("⚠ Distraction alert: user has been on this app 30+ min!\n");
+        let distracting = ["YouTube", "Reddit", "Twitter", "TikTok", "Instagram", "Telegram", "Discord", "VK"];
+        let is_distracting = distracting.iter().any(|d| front_app.contains(d));
+        if is_distracting {
+            if let Ok(minutes) = get_app_focus_minutes(&front_app) {
+                if minutes > 30.0 {
+                    ctx.push_str(&format!("\n--- ⚠ Дистракция ---\n{}: {:.0} мин (30+ мин — залип!)\n", front_app, minutes));
+                }
             }
         }
+        // For non-distracting apps, don't show app name or time — the model fixates on it
     }
 
     // Upcoming events within next 60 min (for schedule reminders)
@@ -9399,7 +9413,7 @@ async fn proactive_llm_call(
     let ctx_lower = context.to_lowercase();
     // Common hallucination patterns: food, drinks, cooking suggestions not grounded in context
     let hallucination_triggers: &[(&[&str], &[&str])] = &[
-        (&["чайник", "чай ", "заварить", "чаёк", "чайку"], &["чай", "tea", "чайн"]),
+        (&["чайник", "чай ", "чайн", "заварить", "чаёк", "чайку"], &["чай", "tea", "чайн"]),
         (&["кофе ", "кофейку", "кофеёк", "латте", "капучино"], &["кофе", "coffee", "кафе"]),
         (&["приготовить ", "рецепт ", "готовить "], &["рецепт", "готов", "кухн", "еда", "блюд"]),
     ];
