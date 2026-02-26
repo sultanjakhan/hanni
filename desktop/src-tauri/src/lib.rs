@@ -4604,12 +4604,28 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         tools: tools_param,
     };
 
-    // Retry connection up to 3 times (MLX server may still be loading model)
+    // Retry connection up to 3 times (MLX server may still be loading model or return 404)
     let mut response = None;
     for attempt in 0..3 {
         match client.post(MLX_URL).json(&request).send().await {
-            Ok(r) => { response = Some(r); break; }
+            Ok(r) => {
+                let status = r.status();
+                if status.is_success() {
+                    response = Some(r);
+                    break;
+                } else {
+                    // Non-2xx status — read error body and retry
+                    let body = r.text().await.unwrap_or_default();
+                    eprintln!("[chat_inner] MLX error {}: {}", status, &body[..body.len().min(200)]);
+                    if attempt < 2 {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    } else {
+                        return Err(format!("MLX server error {}: {}", status, &body[..body.len().min(100)]));
+                    }
+                }
+            }
             Err(e) => {
+                eprintln!("[chat] MLX connection error (attempt {}): {}", attempt, e);
                 if attempt < 2 {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 } else {
