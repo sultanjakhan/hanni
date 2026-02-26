@@ -5481,10 +5481,13 @@ async fn process_conversation_end(
         - \"Привет\" → {{\"facts\": []}} (приветствие, не факт)\n\
         - \"Купил колу за 500\" → {{\"facts\": []}} (одноразовая покупка)\n\
         - \"Сейчас устал\" → {{\"facts\": []}} (временное состояние)\n\
-        - \"Земля вращается вокруг Солнца\" → {{\"facts\": []}} (общее знание)\n\n\
+        - \"Земля вращается вокруг Солнца\" → {{\"facts\": []}} (общее знание)\n\
+        - НЕ извлекай мета-факты о самооценке, психологии, уверенности (\"сомневается в навыках\", \"беспомощный\")\n\
+        - НЕ извлекай факты из ПРИМЕРОВ этого промпта — только из реального разговора\n\
+        - НЕ извлекай названия моделей/инструментов из контекста (\"изучает Qwen\", \"использует Claude\")\n\n\
         ПРИМЕРЫ:\n\
-        \"Меня зовут Султан, учусь в КБТУ на CS\" → \
-        {{\"facts\": [{{\"category\":\"user\",\"key\":\"имя\",\"value\":\"Султан\"}},{{\"category\":\"user\",\"key\":\"университет\",\"value\":\"Учится в КБТУ на CS\"}}]}}\n\
+        \"Меня зовут Дима, учусь в КазНУ на CS\" → \
+        {{\"facts\": [{{\"category\":\"user\",\"key\":\"имя\",\"value\":\"Дима\"}},{{\"category\":\"user\",\"key\":\"университет\",\"value\":\"Учится в КазНУ на CS\"}}]}}\n\
         \"Артём — мой лучший друг, мы вместе кодим\" → \
         {{\"facts\": [{{\"category\":\"people\",\"key\":\"Артём\",\"value\":\"Лучший друг, вместе программируют\"}}]}}\n\n\
         Верни ТОЛЬКО JSON: {{\"summary\": \"1-2 предложения\", \"category\": \"chat|work|health|money|food|hobby|planning|personal\", \"facts\": [...], \"insights\": [{{\"type\": \"decision|goal|open_question\", \"content\": \"...\"}}]}}\n\n\
@@ -5514,6 +5517,12 @@ async fn process_conversation_end(
         .send()
         .await
         .map_err(|e| format!("LLM error: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("MLX memory extraction error {}: {}", status, &body[..body.len().min(200)]));
+    }
 
     let parsed: NonStreamResponse = response
         .json()
@@ -5766,7 +5775,8 @@ async fn process_conversation_end(
 
             // Async LLM call — no DB lock held (30s timeout)
             if let Ok(resp) = client.post(MLX_URL).json(&dedup_request).timeout(std::time::Duration::from_secs(30)).send().await {
-                if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
+                if !resp.status().is_success() { eprintln!("[dedup] MLX error {}", resp.status()); }
+                else if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
                     let raw_dedup = parsed.choices.first()
                         .map(|c| c.message.content.clone())
                         .unwrap_or_default();
@@ -5916,6 +5926,11 @@ async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
 
     let response = client.post(MLX_URL).json(&request).timeout(std::time::Duration::from_secs(30)).send().await
         .map_err(|e| format!("Profile synthesis error: {}", e))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Profile synthesis MLX error {}: {}", status, &body[..body.len().min(200)]));
+    }
     let parsed: NonStreamResponse = response.json().await
         .map_err(|e| format!("Profile parse error: {}", e))?;
 
@@ -10478,6 +10493,7 @@ pub fn run() {
 
                     let resp = client.post(MLX_URL).json(&request).send().await;
                     if let Ok(resp) = resp {
+                        if !resp.status().is_success() { continue; }
                         if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
                             let raw = parsed.choices.first().map(|c| c.message.content.clone()).unwrap_or_default();
                             // Strip think tags
