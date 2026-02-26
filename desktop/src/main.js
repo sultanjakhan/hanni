@@ -57,6 +57,11 @@ function normalizeHistoryMessage(msg) {
   if (Array.isArray(msg)) {
     return { role: msg[0], content: msg[1] };
   }
+  // Strip proactive flag before sending to backend (it's JS-only metadata)
+  if (msg.proactive) {
+    const { proactive, ...rest } = msg;
+    return rest;
+  }
   return msg;
 }
 function getRole(msg) {
@@ -242,9 +247,9 @@ listen('proactive-message', async (event) => {
   ts.textContent = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   chat.appendChild(ts);
 
-  // Add to history so user can reply naturally
+  // Add to history so user can reply naturally (marked as proactive for context)
   const histIdx = history.length;
-  history.push({ role: 'assistant', content: text });
+  history.push({ role: 'assistant', content: text, proactive: true });
   scrollDown();
 
   // P1: Execute any action blocks from proactive messages
@@ -306,6 +311,8 @@ let voiceRecordStartTime = 0;
 
 async function startRecording() {
   if (isRecording || busy) return;
+  // Block proactive messages while recording (same as typing)
+  invoke('set_user_typing', { typing: true }).catch(() => {});
   await checkVoiceServer();
 
   if (voiceServerAvailable) {
@@ -378,6 +385,8 @@ async function stopRecordingAndSend() {
   recordBtn.classList.remove('transcribing');
   recordBtn.disabled = false;
   recordBtn.title = 'Удерживайте для записи';
+  // Release typing lock (delayed — give send() time to acquire busy flag)
+  setTimeout(() => invoke('set_user_typing', { typing: false }).catch(() => {}), 3000);
 }
 
 function cancelRecording() {
@@ -2312,6 +2321,14 @@ async function send() {
     attachPreview.style.display = 'none';
   } else {
     addMsg('user', text, isVoice);
+  }
+
+  // If previous message was a proactive/autonomous message, add context hint
+  // so the model focuses on the user's reply, not on echoing itself
+  const prevMsg = history[history.length - 1];
+  if (prevMsg && prevMsg.proactive) {
+    // Rewrite the proactive message to include a marker for the model
+    prevMsg.content = `[Автономное сообщение Ханни]: ${prevMsg.content}`;
   }
 
   history.push({ role: 'user', content: userContent });
