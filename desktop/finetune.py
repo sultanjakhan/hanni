@@ -53,6 +53,8 @@ def run_finetune(epochs=2, lr=2e-5, rank=8, num_layers=16, batch_size=1, grad_ch
 
     # Create config YAML for LoRA parameters
     # scale = alpha / rank (standard: alpha=2*rank → scale=2.0)
+    # For MoE models: can include mlp.switch_mlp.* keys but requires more RAM
+    # On 36GB Mac: attention-only LoRA works, MoE experts cause swap thrashing
     config = {
         "lora_parameters": {
             "rank": rank,
@@ -82,7 +84,7 @@ def run_finetune(epochs=2, lr=2e-5, rank=8, num_layers=16, batch_size=1, grad_ch
         "--steps-per-report", "10",
         "--steps-per-eval", "50",
         "--save-every", "50",
-        "--max-seq-length", "2048",
+        "--max-seq-length", "1024",
         "-c", str(config_path),
     ]
 
