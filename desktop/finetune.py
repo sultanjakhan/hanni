@@ -20,7 +20,7 @@ from pathlib import Path
 
 DATA_DIR = Path.home() / "Library" / "Application Support" / "Hanni" / "training"
 ADAPTER_DIR = Path.home() / "Library" / "Application Support" / "Hanni" / "lora-adapter"
-MODEL = "mlx-community/Qwen3-32B-4bit"
+MODEL = "NexVeridian/Qwen3.5-35B-A3B-4bit"
 
 
 def check_data():
