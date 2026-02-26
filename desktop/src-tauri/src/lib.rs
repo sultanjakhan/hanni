@@ -5450,15 +5450,17 @@ async fn process_conversation_end(
     let client = &app.state::<HttpClient>().0;
 
     // Build a compact version of the conversation for the LLM
+    // ONLY include user messages — assistant messages cause the model to extract
+    // hallucinated "facts" from its own responses (e.g. "user doubts their skills"
+    // from a proactive message saying "maybe you doubt yourself?")
     let conv_text: String = messages.iter()
         .filter(|m| {
             let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
-            role == "user" || role == "assistant"
+            role == "user"
         })
         .map(|m| {
-            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
             let content = m.get("content").and_then(|c| c.as_str()).unwrap_or("");
-            format!("{}: {}", role, content)
+            format!("user: {}", content)
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -5466,7 +5468,7 @@ async fn process_conversation_end(
     let prompt = format!(
         "Извлеки личные факты о пользователе из этого разговора.\n\n\
         ПРАВИЛА:\n\
-        - Извлекай ТОЛЬКО факты о пользователе из его сообщений (НЕ из ответов ассистента)\n\
+        - Ниже ТОЛЬКО сообщения пользователя. Извлекай факты СТРОГО из того, что он написал.\n\
         - Записывай на том же языке, на котором пишет пользователь\n\
         - Каждый факт должен быть самодостаточным (понятен без контекста)\n\
         - НЕ извлекай: приветствия, общие знания, одноразовые действия (покупки, еда), временные состояния\n\
