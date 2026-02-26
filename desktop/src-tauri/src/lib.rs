@@ -13,7 +13,7 @@ use std::process::{Child, Command};
 use std::io::Write;
 
 const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
-const MODEL: &str = "mlx-community/Qwen3-32B-4bit";
+const MODEL: &str = "NexVeridian/Qwen3.5-35B-A3B-4bit";
 
 const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, но выразительно. На "ты", по-русски.
 
@@ -4015,26 +4015,12 @@ fn start_mlx_server() -> Option<Child> {
         return None;
     }
 
-    // Check if LoRA adapter exists
-    let adapter_path = hanni_data_dir().join("lora-adapter").join("adapters.safetensors");
-    let adapter_dir = hanni_data_dir().join("lora-adapter");
-    let has_adapter = adapter_path.exists();
-
-    if has_adapter {
-        eprintln!("[mlx] LoRA adapter found at {:?}", adapter_dir);
-    }
-
-    let mut args = vec![
+    let args = vec![
         "-m", "mlx_lm", "server",
         "--model", MODEL,
         "--port", "8234",
         "--chat-template-args", r#"{"enable_thinking":false}"#,
     ];
-    let adapter_dir_str = adapter_dir.to_string_lossy().to_string();
-    if has_adapter {
-        args.push("--adapter-path");
-        args.push(&adapter_dir_str);
-    }
     eprintln!("[mlx] Starting MLX server: {} {:?}", python, args);
 
     // Log MLX stderr to file for debugging

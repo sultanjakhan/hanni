@@ -32,7 +32,7 @@ const MOCK_DATA = {
   process_conversation_end: () => null,
 
   // ── Model & Settings ──
-  get_model_info: () => ({ model_name: 'mlx-community/Qwen3-32B-4bit', server_url: 'http://127.0.0.1:8234/v1/chat/completions', server_online: true }),
+  get_model_info: () => ({ model_name: 'NexVeridian/Qwen3.5-35B-A3B-4bit', server_url: 'http://127.0.0.1:8234/v1/chat/completions', server_online: true }),
   get_training_stats: () => ({ conversations: 47, total_messages: 312 }),
   get_app_version: () => '0.18.0',
   get_app_setting: ({ key }) => {
@@ -337,7 +337,7 @@ const listeners = {};
 
 // ── Chat via real MLX server (streaming SSE) ──
 const MLX_URL = 'http://127.0.0.1:8234/v1/chat/completions';
-const MLX_MODEL = 'mlx-community/Qwen3-32B-4bit';
+const MLX_MODEL = 'NexVeridian/Qwen3.5-35B-A3B-4bit';
 
 const MOCK_SYSTEM_PROMPT = `Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, на "ты", по-русски.
 - Тёплый тон: юмор, любопытство, игривый сарказм (по-доброму).
