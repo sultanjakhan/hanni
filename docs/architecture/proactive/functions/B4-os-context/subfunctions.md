@@ -8,8 +8,8 @@
 | Метрика | Значение |
 |---------|----------|
 | Бизнес-функция | B4: Сбор контекста ОС |
-| Файл(ы) | lib.rs:L6483-6561 |
-| LOC | 79 |
+| Файл(ы) | lib.rs:L8916-9037 (v0.19.0, was L6483-6561 at v0.13.9) |
+| LOC | ~122 |
 | Подфункций | 7 |
 | Сложность (max) | Medium |
 
@@ -21,7 +21,7 @@
 | B4.2 | Screen Time (SQLite) | L6487-6490 | 4 | — → activity summary | DB SELECT (KnowledgeC.db) | query | Trivial |
 | B4.3 | Календарные события (AppleScript) | L6492-6516 | 25 | — → calendar events string | osascript (Calendar.app) | external | Medium |
 | B4.4 | Now Playing + Browser tab | L6518-6528 | 11 | — → music + browser strings | osascript (Music.app, browser) | external | Low |
-| B4.5 | Active App + Focus time + distraction alert | L6530-6542 | 13 | — → frontmost app + focus minutes + alert | osascript + DB query | external | Low |
+| B4.5 | Active App + Focus time + distraction alert | L9008-9020 | 13 | — → frontmost app + focus minutes + alert (skips "Hanni" self-reference v0.19.0) | osascript + DB query; Electron→Hanni mapping | external | Low |
 | B4.6 | Upcoming events (within 60 min) | L6544-6549 | 6 | — → upcoming events string | DB query (events table) | query | Trivial |
 | B4.7 | Morning digest (условный, 8-10 утра) | L6551-6559 | 9 | hour → morning digest data | DB queries (events, mood, health, goals) | query | Low |
 
@@ -59,6 +59,8 @@
        ▼
 ┌─ B4.5 Active App ──────────┐
 │  get_frontmost_app()         │ ──→ [System: frontmost app]
+│  map "Electron" → "Hanni"   │     (v0.19.0 fix)
+│  skip if app == "Hanni"     │     (self-reference filter)
 │  get_app_focus_minutes()     │ ←── [DB: KnowledgeC.db]
 │  check distraction threshold │
 │  append to ctx               │
@@ -87,3 +89,4 @@
 |---|-----------|---------|-------------|-----------|
 | B4.3 | Calendar | AppleScript может зависнуть при проблемах с Calendar.app — timeout 30s на уровне gather_context | Добавить отдельный timeout на каждый osascript вызов | Low |
 | B4.5 | Active App | Hardcoded список "distracting" приложений — не настраивается пользователем | Вынести в настройки или в память | Low |
+| B4.5 | Active App | ✅ RESOLVED v0.19.0: Tauri WebView процесс отображался как "Electron" — `get_frontmost_app()` теперь маппит Electron→Hanni, проактивный контекст пропускает self-reference | — | — |
