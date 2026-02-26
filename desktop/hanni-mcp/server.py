@@ -17,7 +17,7 @@ import requests
 # MCP protocol over stdio
 DB_PATH = os.path.expanduser("~/Library/Application Support/Hanni/hanni.db")
 MLX_URL = "http://127.0.0.1:8234/v1/chat/completions"
-MLX_MODEL = "mlx-community/Qwen3-32B-4bit"
+MLX_MODEL = "NexVeridian/Qwen3.5-35B-A3B-4bit"
 
 
 def get_db():
