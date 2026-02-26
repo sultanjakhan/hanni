@@ -4375,7 +4375,8 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         system_content
     };
 
-    let mut chat_messages = vec![ChatMessage::text("system", &system_content)];
+    // We'll build ONE consolidated system message (Qwen3.5 requires all system content at the beginning)
+    let mut system_parts: Vec<String> = vec![system_content.clone()];
 
     // Inject memory context: synthesized profile + relevant facts
     // Step 1: embed user message BEFORE acquiring DB lock (async call)
@@ -4464,7 +4465,7 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
             memory_block.push_str(&facts_ctx);
         }
         if !memory_block.is_empty() {
-            chat_messages.push(ChatMessage::text("system", &memory_block));
+            system_parts.push(memory_block);
         }
     }
 
@@ -4517,9 +4518,13 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
             context_block.push_str(&format!("[Недавние решения и вопросы]\n{}", insights_lines.join("\n")));
         }
         if !context_block.is_empty() {
-            chat_messages.push(ChatMessage::text("system", &context_block));
+            system_parts.push(context_block);
         }
     }
+
+    // Consolidate all system content into ONE system message (Qwen3.5 rejects system messages after user messages)
+    let consolidated_system = system_parts.join("\n\n---\n\n");
+    let mut chat_messages = vec![ChatMessage::text("system", &consolidated_system)];
 
     let history_limit = if mode.history_limit == usize::MAX { messages.len() } else { mode.history_limit };
     let skip = messages.len().saturating_sub(history_limit);
@@ -4527,6 +4532,10 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
     let max_msg_chars = mode.max_msg_chars;
     for msg_val in trimmed.iter() {
         if let Ok(mut cm) = serde_json::from_value::<ChatMessage>((*msg_val).clone()) {
+            // Skip system messages from history — Qwen3.5 only allows system at the beginning
+            if cm.role == "system" {
+                continue;
+            }
             // Don't truncate tool results — model needs full context to summarize
             let is_tool = cm.role == "tool";
             if max_msg_chars < usize::MAX && !is_tool {
@@ -9383,6 +9392,12 @@ async fn proactive_llm_call(
         .send()
         .await
         .map_err(|e| format!("LLM error: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("MLX proactive error {}: {}", status, &body[..body.len().min(200)]));
+    }
 
     let parsed: NonStreamResponse = response
         .json()
