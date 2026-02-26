@@ -8914,9 +8914,11 @@ async fn gather_context() -> String {
 // ── Reusable OS-context helpers (used by both gather_context and snapshot collector) ──
 
 fn get_frontmost_app() -> String {
-    run_osascript(
+    let name = run_osascript(
         "tell application \"System Events\" to return name of first application process whose frontmost is true"
-    ).unwrap_or_default().trim().to_string()
+    ).unwrap_or_default().trim().to_string();
+    // Tauri WebView reports as "Electron" on macOS — map to real app name
+    if name == "Electron" { "Hanni".to_string() } else { name }
 }
 
 fn get_browser_url() -> String {
@@ -9006,8 +9008,9 @@ fn gather_context_blocking() -> String {
     }
 
     // Active (frontmost) app and how long it's been in focus
+    // Skip "Hanni" — no point telling the model the user is in our own app
     let front_app = get_frontmost_app();
-    if !front_app.is_empty() {
+    if !front_app.is_empty() && front_app != "Hanni" {
         ctx.push_str(&format!("\n--- Active App ---\nFrontmost: {}\n", front_app));
         if let Ok(minutes) = get_app_focus_minutes(&front_app) {
             ctx.push_str(&format!("Focus time today: {:.0} min\n", minutes));
