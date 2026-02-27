@@ -664,6 +664,8 @@ struct TrackerData {
 
 // ── Proactive messaging types ──
 
+fn default_daily_limit() -> u32 { 20 }
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct ProactiveSettings {
     enabled: bool,
@@ -678,6 +680,8 @@ struct ProactiveSettings {
     quiet_end_time: String,   // "HH:MM" format, e.g. "08:00"
     #[serde(default)]
     enabled_styles: Vec<String>,
+    #[serde(default = "default_daily_limit")]
+    daily_limit: u32,  // 0 = no limit
 }
 
 impl ProactiveSettings {
@@ -718,6 +722,7 @@ impl Default for ProactiveSettings {
             quiet_start_time: String::new(),
             quiet_end_time: String::new(),
             enabled_styles: Vec::new(), // empty = all styles enabled (backward compat)
+            daily_limit: 20,
         }
     }
 }
@@ -736,7 +741,7 @@ struct ProactiveState {
     last_proactive_id: Option<i64>,       // ID in proactive_history table
     engagement_rate: f64,                 // rolling average reply rate (0.0-1.0)
     last_user_chat_time: Option<chrono::DateTime<chrono::Local>>,
-    pending_triggers: Vec<String>,        // triggers from snapshot collector
+    pending_triggers: Vec<(String, std::time::Instant)>,  // (text, created_at) — 10 min TTL
 }
 
 impl ProactiveState {
@@ -1481,6 +1486,18 @@ fn migrate_conversations_category(conn: &rusqlite::Connection) {
     }
 }
 
+fn migrate_proactive_history_v2(conn: &rusqlite::Connection) {
+    // v0.22: Add rating and style columns to proactive_history
+    let has_rating = conn.prepare("SELECT rating FROM proactive_history LIMIT 1").is_ok();
+    if !has_rating {
+        let _ = conn.execute("ALTER TABLE proactive_history ADD COLUMN rating INTEGER DEFAULT 0", []);
+    }
+    let has_style = conn.prepare("SELECT style FROM proactive_history LIMIT 1").is_ok();
+    if !has_style {
+        let _ = conn.execute("ALTER TABLE proactive_history ADD COLUMN style TEXT DEFAULT ''", []);
+    }
+}
+
 fn migrate_facts_decay(conn: &rusqlite::Connection) {
     // ME1: Add access tracking columns for memory decay
     let has_access_count = conn.prepare("SELECT access_count FROM facts LIMIT 1").is_ok();
@@ -1640,6 +1657,34 @@ fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str, lim
              ORDER BY updated_at DESC LIMIT ?1"
         ) {
             if let Ok(rows) = stmt.query_map(rusqlite::params![remaining as i64 + seen_ids.len() as i64], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            }) {
+                for row in rows.flatten() {
+                    if lines.len() >= limit {
+                        break;
+                    }
+                    if seen_ids.insert(row.0) {
+                        lines.push(format!("[{}] {}={}", row.1, row.2, row.3));
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Add up to 2 observation facts (low priority, for proactive personalization)
+    let obs_remaining = 2.min(limit.saturating_sub(lines.len()));
+    if obs_remaining > 0 {
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, category, key, value FROM facts
+             WHERE category = 'observation'
+             ORDER BY updated_at DESC LIMIT ?1"
+        ) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![obs_remaining as i64 + seen_ids.len() as i64], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
@@ -8972,7 +9017,7 @@ const PROACTIVE_PROMPT_FOOTER: &str = r#"
 Хорошо: [SKIP]
 Плохо: "Как прошёл день?" (пустое, без контекста)
 
-Ответь текстом сообщения, или [SKIP]."#;
+Формат ответа: [style:ID] текст сообщения (например [style:humor] Шутка тут), или [SKIP]."#;
 
 struct ProactiveStyleDef {
     id: &'static str,
@@ -8996,18 +9041,30 @@ const ALL_PROACTIVE_STYLES: &[ProactiveStyleDef] = &[
     ProactiveStyleDef { id: "continuity", description: "Продолжение: развить тему из недавнего разговора с новой стороны" },
 ];
 
-fn build_proactive_system_prompt(enabled_styles: &[String]) -> String {
+fn build_proactive_system_prompt(enabled_styles: &[String], recent_styles: &[String]) -> String {
+    let hour = chrono::Local::now().hour();
     let mut prompt = PROACTIVE_PROMPT_HEADER.to_string();
     let styles: Vec<&ProactiveStyleDef> = if enabled_styles.is_empty() {
-        // Empty = all enabled (backward compat)
         ALL_PROACTIVE_STYLES.iter().collect()
     } else {
         ALL_PROACTIVE_STYLES.iter()
             .filter(|s| enabled_styles.iter().any(|e| e == s.id))
             .collect()
     };
-    for style in &styles {
+    // Time-gate: digest only 8-10, journal only 19-23
+    let filtered: Vec<&&ProactiveStyleDef> = styles.iter()
+        .filter(|s| {
+            if s.id == "digest" && !(8..=10).contains(&hour) { return false; }
+            if s.id == "journal" && !(19..=23).contains(&hour) { return false; }
+            true
+        })
+        .collect();
+    for style in &filtered {
         prompt.push_str(&format!("- {}\n", style.description));
+    }
+    // Per-style cooldown hint
+    if !recent_styles.is_empty() {
+        prompt.push_str(&format!("\nНе используй эти стили (были недавно): {}\n", recent_styles.join(", ")));
     }
     prompt.push_str(PROACTIVE_PROMPT_FOOTER);
     prompt
@@ -9184,7 +9241,7 @@ fn get_upcoming_events_soon() -> Result<String, String> {
     let now = chrono::Local::now();
     let today = now.format("%Y-%m-%d").to_string();
     let current_time = now.format("%H:%M").to_string();
-    let soon_time = (now + chrono::Duration::minutes(60)).format("%H:%M").to_string();
+    let soon_time = (now + chrono::Duration::minutes(90)).format("%H:%M").to_string();
     let mut stmt = conn.prepare(
         "SELECT title, time, duration FROM events WHERE date = ?1 AND time >= ?2 AND time <= ?3 ORDER BY time"
     ).map_err(|e| e.to_string())?;
@@ -9375,17 +9432,35 @@ fn get_recent_chat_snippet(conn: &rusqlite::Connection, limit: usize) -> String 
     }
 }
 
-fn get_todays_proactive_messages(conn: &rusqlite::Connection) -> Vec<String> {
+fn get_recent_proactive_styles(conn: &rusqlite::Connection, count: usize) -> Vec<String> {
+    let mut styles = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT style FROM proactive_history WHERE style != '' ORDER BY id DESC LIMIT ?1"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![count as i64], |row| {
+            row.get::<_, String>(0)
+        }) {
+            for s in rows.flatten() {
+                if !styles.contains(&s) {
+                    styles.push(s);
+                }
+            }
+        }
+    }
+    styles
+}
+
+fn get_todays_proactive_messages(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut msgs = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT message FROM proactive_history WHERE sent_at >= ?1 ORDER BY id ASC"
+        "SELECT message, sent_at FROM proactive_history WHERE sent_at >= ?1 ORDER BY id ASC"
     ) {
         if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| {
-            row.get::<_, String>(0)
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }) {
-            for msg in rows.flatten() {
-                msgs.push(msg);
+            for pair in rows.flatten() {
+                msgs.push(pair);
             }
         }
     }
@@ -9411,11 +9486,12 @@ async fn proactive_llm_call(
     chat_snippet: &str,
     engagement_rate: f64,
     user_name: &str,
-    todays_messages: &[String],
+    todays_messages: &[(String, String)],
     enabled_styles: &[String],
+    recent_styles: &[String],
 ) -> Result<Option<String>, String> {
-    // Build dynamic system prompt from enabled styles
-    let mut sys_prompt = build_proactive_system_prompt(enabled_styles);
+    // Build dynamic system prompt from enabled styles (with time-gating & cooldown)
+    let mut sys_prompt = build_proactive_system_prompt(enabled_styles, recent_styles);
     if !user_name.is_empty() {
         sys_prompt = format!(
             "Пользователя зовут {}. Обращайся к нему по имени, на \"ты\".\n\n{}",
@@ -9448,13 +9524,15 @@ async fn proactive_llm_call(
         user_content.push_str(&format!("\n[Память]\n{}\n", memory_context));
     }
 
-    // Anti-repetition: only last 5 topics as short phrases
+    // Anti-repetition: last 5 topics with timestamps
     if !todays_messages.is_empty() {
         let last_n: Vec<_> = todays_messages.iter().rev().take(5).collect();
         user_content.push_str("\n[Уже сказано сегодня]\n");
-        for msg in last_n.iter().rev() {
+        for (msg, sent_at) in last_n.iter().rev() {
             let short = truncate_utf8(msg, 60);
-            user_content.push_str(&format!("- \"{}\"\n", short));
+            // Extract HH:MM from RFC3339 timestamp
+            let hm = if sent_at.len() >= 16 { &sent_at[11..16] } else { "" };
+            user_content.push_str(&format!("- {} \"{}\"\n", hm, short));
         }
     }
 
@@ -9878,6 +9956,15 @@ async fn report_user_chat_activity(
     Ok(())
 }
 
+#[tauri::command]
+fn rate_proactive(db: tauri::State<'_, HanniDb>, proactive_id: i64, rating: i64) -> Result<(), String> {
+    db.conn().execute(
+        "UPDATE proactive_history SET rating = ?1 WHERE id = ?2",
+        rusqlite::params![rating, proactive_id],
+    ).map_err(|e| format!("DB: {}", e))?;
+    Ok(())
+}
+
 // ── Updater ──
 
 fn updater_with_headers(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
@@ -9941,6 +10028,7 @@ pub fn run() {
     migrate_events_source(&conn);
     migrate_facts_decay(&conn);
     migrate_conversations_category(&conn);
+    migrate_proactive_history_v2(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -10262,6 +10350,7 @@ pub fn run() {
             get_flywheel_status,
             get_flywheel_history,
             run_flywheel_cycle,
+            rate_proactive,
         ])
         .setup(move |app| {
             // Auto-updater
@@ -10496,7 +10585,12 @@ pub fn run() {
 
                     if !triggers.is_empty() {
                         let mut state = snapshot_proactive_ref.lock().await;
-                        state.pending_triggers = triggers;
+                        let now_inst = std::time::Instant::now();
+                        // Append new triggers (keep existing that haven't expired)
+                        state.pending_triggers.retain(|(_, created)| created.elapsed().as_secs() < 600);
+                        for t in triggers {
+                            state.pending_triggers.push((t, now_inst));
+                        }
                     }
                 }
             });
@@ -10721,7 +10815,7 @@ pub fn run() {
                     // Poll every 5 seconds so we react quickly to settings changes
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-                    let (enabled, interval, quiet_start_min, quiet_end_min, is_typing, is_recording, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles) = {
+                    let (enabled, interval, quiet_start_min, quiet_end_min, is_typing, is_recording, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles, daily_limit) = {
                         let state = proactive_state_ref.lock().await;
                         (
                             state.settings.enabled,
@@ -10736,9 +10830,13 @@ pub fn run() {
                             state.recent_messages.clone(),
                             state.last_context_snapshot.clone(),
                             state.engagement_rate,
-                            state.pending_triggers.clone(),
+                            state.pending_triggers.iter()
+                                .filter(|(_, created)| created.elapsed().as_secs() < 600)
+                                .map(|(t, _)| t.clone())
+                                .collect::<Vec<String>>(),
                             state.last_user_chat_time,
                             state.settings.enabled_styles.clone(),
+                            state.settings.daily_limit,
                         )
                     };
 
@@ -10876,7 +10974,7 @@ pub fn run() {
                     };
 
                     // Build memory context (8 core facts — better personalization)
-                    let (mem_ctx, chat_snippet, user_name, todays_msgs) = {
+                    let (mem_ctx, chat_snippet, user_name, todays_msgs, recent_styles) = {
                         let db = proactive_handle.state::<HanniDb>();
                         let conn = db.conn();
                         // Pass current app as context hint for memory search
@@ -10889,42 +10987,66 @@ pub fn run() {
                             get_recent_chat_snippet(&conn, 4),
                             get_user_name_from_memory(&conn),
                             get_todays_proactive_messages(&conn),
+                            get_recent_proactive_styles(&conn, 3),
                         )
                     };
+
+                    // Daily limit check: skip if limit reached and no triggers
+                    if daily_limit > 0 && todays_msgs.len() as u32 >= daily_limit && triggers.is_empty() {
+                        eprintln!("[proactive] daily_count={} limit={} triggers=0 — skipping (daily limit reached)", todays_msgs.len(), daily_limit);
+                        continue;
+                    }
+                    eprintln!("[proactive] daily_count={} limit={} triggers={}", todays_msgs.len(), daily_limit, triggers.len());
+
                     // Acquire LLM semaphore during proactive call to prevent concurrent MLX requests
                     let proactive_sem = proactive_handle.state::<LlmBusy>();
                     let _proactive_permit = match proactive_sem.0.try_acquire() {
                         Ok(p) => p,
                         Err(_) => continue,
                     };
-                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles).await;
+                    let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles, &recent_styles).await;
                     drop(_proactive_permit);
 
                     // P4: Re-check typing after LLM call — discard proactive if user started chatting
                     let typing_during_call = proactive_state_ref.lock().await.user_is_typing;
 
                     match proactive_result {
-                        Ok(Some(message)) if !typing_during_call => {
-                            let _ = proactive_handle.emit("proactive-message", &message);
-                            if voice_enabled {
-                                speak_tts(&message, &voice_name);
-                            }
-                            // Record in proactive_history
+                        Ok(Some(raw_message)) if !typing_during_call => {
+                            // Parse [style:X] prefix if present
+                            let (style, message) = if raw_message.starts_with("[style:") {
+                                if let Some(end) = raw_message.find(']') {
+                                    let s = raw_message[7..end].to_string();
+                                    let m = raw_message[end+1..].trim().to_string();
+                                    (s, if m.is_empty() { raw_message.clone() } else { m })
+                                } else { (String::new(), raw_message) }
+                            } else { (String::new(), raw_message) };
+
+                            // Record in proactive_history (with style)
                             let proactive_id = {
                                 let db = proactive_handle.state::<HanniDb>();
                                 let conn = db.conn();
                                 let _ = conn.execute(
-                                    "INSERT INTO proactive_history (sent_at, message) VALUES (?1, ?2)",
-                                    rusqlite::params![chrono::Local::now().to_rfc3339(), &message],
+                                    "INSERT INTO proactive_history (sent_at, message, style) VALUES (?1, ?2, ?3)",
+                                    rusqlite::params![chrono::Local::now().to_rfc3339(), &message, &style],
                                 );
-                                Some(conn.last_insert_rowid())
+                                conn.last_insert_rowid()
                             };
+
+                            // Emit as JSON {text, id} for frontend feedback buttons
+                            let _ = proactive_handle.emit("proactive-message", serde_json::json!({
+                                "text": &message,
+                                "id": proactive_id,
+                            }));
+                            if voice_enabled {
+                                speak_tts(&message, &voice_name);
+                            }
+
                             let mut state = proactive_state_ref.lock().await;
                             state.last_message_time = Some(chrono::Local::now());
                             state.last_message_text = message.clone();
                             state.consecutive_skips = 0;
                             state.last_context_snapshot = context;
-                            state.last_proactive_id = proactive_id;
+                            state.last_proactive_id = Some(proactive_id);
                             // Update recent_messages (keep last 15)
                             state.recent_messages.push((message, chrono::Local::now()));
                             if state.recent_messages.len() > 15 {
@@ -10943,9 +11065,11 @@ pub fn run() {
                             state.consecutive_skips += 1;
                             state.last_context_snapshot = context;
                         }
-                        Err(_) => {
-                            // LLM server not running — back off
-                            last_check = std::time::Instant::now();
+                        Err(e) => {
+                            // LLM error — retry once after 30s by setting short backoff
+                            eprintln!("[proactive] LLM error: {} — will retry sooner", e);
+                            let base_interval_secs = interval * 60;
+                            last_check = std::time::Instant::now() - std::time::Duration::from_secs(base_interval_secs.saturating_sub(30));
                         }
                     }
                 }

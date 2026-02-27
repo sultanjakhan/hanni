@@ -232,7 +232,10 @@ let lastProactiveTime = 0; // timestamp of last proactive message for engagement
 listen('proactive-message', async (event) => {
   // Prevent race condition: don't mutate history while chat is streaming
   if (busy) return;
-  const text = event.payload;
+  // v0.22: payload is now {text, id} JSON
+  const payload = typeof event.payload === 'object' ? event.payload : { text: event.payload, id: 0 };
+  const text = payload.text;
+  const proactiveId = payload.id || 0;
   lastProactiveTime = Date.now();
 
   // Use addMsg to get proper wrapper with TTS button
@@ -267,10 +270,9 @@ listen('proactive-message', async (event) => {
 
   await autoSaveConversation();
 
-  // Add feedback buttons
-  if (wrapper && currentConversationId) {
-    wrapper.dataset.historyIdx = histIdx;
-    addFeedbackButtons(wrapper, currentConversationId, histIdx, text);
+  // Add proactive feedback buttons (copy + 👍/👎 — no regen)
+  if (wrapper) {
+    addProactiveFeedbackButtons(wrapper, proactiveId, text);
   }
 
   // Desktop notification if window not focused
@@ -1004,6 +1006,13 @@ async function loadChatSettings() {
               <input type="time" id="chat-quiet-end" class="form-input" style="width:90px;text-align:center" value="${quietEnd}">
             </div>
           </div>
+          <div class="settings-row">
+            <span class="settings-label">Лимит в день</span>
+            <div class="proactive-interval-row">
+              <input type="number" id="chat-daily-limit" class="proactive-interval-number" min="0" max="100" value="${proactive.daily_limit ?? 20}">
+              <span class="proactive-interval-unit">сообщ. (0 = безлимит)</span>
+            </div>
+          </div>
         </div>
         <div class="settings-section">
           <div class="settings-section-title">Модель</div>
@@ -1221,6 +1230,7 @@ async function loadChatSettings() {
         quiet_start_time: qStart,
         quiet_end_time: qEnd,
         enabled_styles: getEnabledStyles(),
+        daily_limit: parseInt(document.getElementById('chat-daily-limit')?.value || '20'),
       };
     };
     const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
@@ -1230,6 +1240,7 @@ async function loadChatSettings() {
     document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-quiet-start')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-quiet-end')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-daily-limit')?.addEventListener('change', saveChatSettings);
 
     // Thinking mode toggle
     document.getElementById('chat-thinking-toggle')?.addEventListener('change', (e) => {
@@ -1738,6 +1749,61 @@ function addFeedbackButtons(wrapper, conversationId, messageIndex, botText) {
   actions.appendChild(thumbDown);
   wrapper.appendChild(actions);
   return { thumbUp, thumbDown };
+}
+
+function addProactiveFeedbackButtons(wrapper, proactiveId, botText) {
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  // Copy button
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'feedback-btn copy-btn';
+  copyBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
+  copyBtn.title = 'Копировать';
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(botText || '');
+    copyBtn.classList.add('copied');
+    copyBtn.title = 'Скопировано!';
+    setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.title = 'Копировать'; }, 1500);
+  });
+
+  const thumbUp = document.createElement('button');
+  thumbUp.className = 'feedback-btn thumb-up';
+  thumbUp.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2 20h2V10H2v10zm20-9a2 2 0 0 0-2-2h-6.31l.95-4.57.03-.32a1.5 1.5 0 0 0-.44-1.06L13.17 2 7.59 7.59A2 2 0 0 0 7 9v10a2 2 0 0 0 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>';
+  thumbUp.title = 'Хороший ответ';
+
+  const thumbDown = document.createElement('button');
+  thumbDown.className = 'feedback-btn thumb-down';
+  thumbDown.innerHTML = '<svg viewBox="0 0 24 24"><path d="M22 4h-2v10h2V4zM2 13a2 2 0 0 0 2 2h6.31l-.95 4.57-.03.32c0 .4.17.77.44 1.06L10.83 22l5.58-5.59A2 2 0 0 0 17 15V5a2 2 0 0 0-2-2H6c-.83 0-1.54.5-1.84 1.22L1.14 11.27c-.09.23-.14.47-.14.73v2z"/></svg>';
+  thumbDown.title = 'Плохой ответ';
+
+  const handleClick = async (btn, rating) => {
+    const isActive = btn.classList.contains('active');
+    thumbUp.classList.remove('active');
+    thumbDown.classList.remove('active');
+    if (!isActive) {
+      btn.classList.add('active');
+      try {
+        await invoke('rate_proactive', { proactiveId, rating });
+      } catch (e) {
+        console.error('Rate proactive error:', e);
+      }
+    } else {
+      try {
+        await invoke('rate_proactive', { proactiveId, rating: 0 });
+      } catch (e) {
+        console.error('Rate proactive error:', e);
+      }
+    }
+  };
+
+  thumbUp.addEventListener('click', () => handleClick(thumbUp, 1));
+  thumbDown.addEventListener('click', () => handleClick(thumbDown, -1));
+
+  actions.appendChild(copyBtn);
+  actions.appendChild(thumbUp);
+  actions.appendChild(thumbDown);
+  wrapper.appendChild(actions);
 }
 
 // ── File attachment ──
