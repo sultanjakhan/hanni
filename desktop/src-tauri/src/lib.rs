@@ -4211,6 +4211,7 @@ fn ensure_voice_server_launchagent() {
 // Prevents repeated Calendar.app permission prompts by caching denial.
 // Also respects the apple_calendar_enabled user setting from the DB.
 static CALENDAR_ACCESS_DENIED: AtomicBool = AtomicBool::new(false);
+static CALENDAR_ACCESS_CHECKED: AtomicBool = AtomicBool::new(false); // true = already verified OK
 static APPLE_CALENDAR_DISABLED: AtomicBool = AtomicBool::new(false);
 
 // ── TTS speaking guard ──
@@ -4263,9 +4264,16 @@ fn check_calendar_access() -> bool {
     if CALENDAR_ACCESS_DENIED.load(Ordering::Relaxed) {
         return false;
     }
+    // Cache positive result too — don't re-prompt every cycle
+    if CALENDAR_ACCESS_CHECKED.load(Ordering::Relaxed) {
+        return true;
+    }
     let result = run_osascript(r#"tell application "Calendar" to count of calendars"#);
     match result {
-        Ok(_) => true,
+        Ok(_) => {
+            CALENDAR_ACCESS_CHECKED.store(true, Ordering::Relaxed);
+            true
+        }
         Err(e) => {
             let lower = e.to_lowercase();
             if lower.contains("not allowed") || lower.contains("denied")
