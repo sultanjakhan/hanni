@@ -764,6 +764,41 @@ body {
   flex-shrink: 0;
 }
 
+#input-toolbar {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.input-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.input-chip:hover {
+  border-color: var(--border-hover);
+  color: var(--text-secondary);
+}
+
+.input-chip.active {
+  background: var(--accent-fill);
+  color: var(--bg-page);
+  border-color: var(--accent-fill);
+}
+
+.input-chip svg { flex-shrink: 0; }
+
 #input-wrapper {
   display: flex;
   align-items: center;
