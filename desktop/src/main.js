@@ -928,19 +928,19 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory, thinkingVal, selfRefineVal] = await Promise.all([
       invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
       invoke('get_all_memories', { search: null }).catch(() => []),
-      invoke('get_app_setting', { key: 'wakeword_enabled' }).catch(() => null),
-      invoke('get_app_setting', { key: 'wakeword_keyword' }).catch(() => null),
       invoke('get_app_setting', { key: 'voice_clone_enabled' }).catch(() => null),
       invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null),
       invoke('list_voice_samples').catch(() => []),
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
       invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
       invoke('get_flywheel_history').catch(() => []),
+      invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
+      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -958,7 +958,8 @@ async function loadChatSettings() {
     el.innerHTML = `
       <div class="chat-settings-tabs">
         <button class="chat-settings-tab active" data-panel="memory">Память</button>
-        <button class="chat-settings-tab" data-panel="general">Основные</button>
+        <button class="chat-settings-tab" data-panel="model">Модель</button>
+        <button class="chat-settings-tab" data-panel="general">Автономный</button>
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
         <button class="chat-settings-tab" data-panel="data">Данные</button>
@@ -973,6 +974,28 @@ async function loadChatSettings() {
         </div>
         <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;" id="cs-mem-count">${memories.length} фактов</div>
         <div class="memory-browser" id="cs-mem-list"></div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-model">
+        <div class="settings-section">
+          <div class="settings-section-title">Режимы мышления</div>
+          <div class="settings-row">
+            <span class="settings-label">Thinking mode</span>
+            <span class="settings-hint">Глубокое размышление для сложных задач</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-thinking-toggle" ${thinkingVal === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Самопроверка</span>
+            <span class="settings-hint">Авто-критика сложных ответов</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div class="chat-settings-panel" id="cs-panel-general">
@@ -1053,24 +1076,6 @@ async function loadChatSettings() {
           <div class="settings-row">
             <span class="settings-label"></span>
             <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
-          </div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-section-title">Wake Word</div>
-          <div class="settings-row">
-            <span class="settings-label">Активация голосом</span>
-            <label class="toggle">
-              <input type="checkbox" id="chat-wakeword-enabled" ${wakeWordEnabled === 'true' ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">Ключевое слово</span>
-            <input class="form-input" id="chat-wakeword-keyword" value="${wakeWordKeyword || 'ханни'}" style="width:180px" placeholder="ханни">
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">Статус</span>
-            <span class="settings-value" id="chat-wakeword-status">${wakeWordEnabled === 'true' ? 'Слушаю...' : 'Выключен'}</span>
           </div>
         </div>
         <div class="settings-section">
@@ -1287,29 +1292,12 @@ async function loadChatSettings() {
       } catch { const s = document.getElementById('chat-tts-server-status'); if (s) s.textContent = 'Недоступен'; }
     }
 
-    // ── Wake Word handlers ──
-    document.getElementById('chat-wakeword-enabled')?.addEventListener('change', async (e) => {
-      const enabled = e.target.checked;
-      const keyword = document.getElementById('chat-wakeword-keyword')?.value.trim() || 'ханни';
-      await invoke('set_app_setting', { key: 'wakeword_enabled', value: String(enabled) });
-      await invoke('set_app_setting', { key: 'wakeword_keyword', value: keyword });
-      const statusEl = document.getElementById('chat-wakeword-status');
-      if (enabled) {
-        try {
-          await fetch(`${VOICE_SERVER}/wakeword/start`, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ keyword }),
-          });
-          if (statusEl) statusEl.textContent = 'Слушаю...';
-          startWakeWordSSE(keyword);
-        } catch (err) {
-          if (statusEl) statusEl.textContent = 'Ошибка: ' + String(err).substring(0, 40);
-        }
-      } else {
-        try { await fetch(`${VOICE_SERVER}/wakeword/stop`, { method: 'POST' }); } catch (_) {}
-        stopWakeWordSSE();
-        if (statusEl) statusEl.textContent = 'Выключен';
-      }
+    // ── Model toggle handlers ──
+    document.getElementById('chat-thinking-toggle')?.addEventListener('change', (e) => {
+      invoke('set_app_setting', { key: 'enable_thinking', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
+    });
+    document.getElementById('chat-self-refine-toggle')?.addEventListener('change', (e) => {
+      invoke('set_app_setting', { key: 'enable_self_refine', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
     });
 
     // ── Voice Clone handlers ──
@@ -3636,10 +3624,7 @@ async function loadSettings(subTab) {
 // ── About (Settings page) ──
 async function loadAbout(el) {
   try {
-    const [info, selfRefineVal] = await Promise.all([
-      invoke('get_model_info').catch(() => ({})),
-      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
-    ]);
+    const info = await invoke('get_model_info').catch(() => ({}));
     el.innerHTML = `
       <div class="about-wrapper">
         <div class="about-card">
@@ -3654,15 +3639,6 @@ async function loadAbout(el) {
             <div class="about-info-row"><span class="about-info-label">MLX сервер</span><span class="about-info-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
             <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="about-api-status">Проверяю...</span></div>
           </div>
-          <hr class="about-divider">
-          <div class="about-toggle-row">
-            <div class="about-toggle-info"><span class="about-toggle-label">Thinking mode</span><span class="about-toggle-hint">Глубокое размышление для сложных задач</span></div>
-            <label class="toggle"><input type="checkbox" id="about-thinking-toggle"><span class="toggle-slider"></span></label>
-          </div>
-          <div class="about-toggle-row">
-            <div class="about-toggle-info"><span class="about-toggle-label">Самопроверка</span><span class="about-toggle-hint">Авто-критика сложных ответов</span></div>
-            <label class="toggle"><input type="checkbox" id="about-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label>
-          </div>
           <div class="about-actions">
             <button class="settings-btn" id="about-check-update">Проверить обновления</button>
           </div>
@@ -3674,20 +3650,6 @@ async function loadAbout(el) {
       catch (err) { btn.textContent = 'Ошибка'; }
       setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
     });
-    const selfRefineToggle = document.getElementById('about-self-refine-toggle');
-    if (selfRefineToggle) {
-      selfRefineToggle.addEventListener('change', () => {
-        invoke('set_app_setting', { key: 'enable_self_refine', value: selfRefineToggle.checked ? 'true' : 'false' }).catch(() => {});
-      });
-    }
-    const thinkToggle = document.getElementById('about-thinking-toggle');
-    if (thinkToggle) {
-      const thinkVal = await invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null);
-      thinkToggle.checked = thinkVal === 'true';
-      thinkToggle.addEventListener('change', () => {
-        invoke('set_app_setting', { key: 'enable_thinking', value: thinkToggle.checked ? 'true' : 'false' }).catch(() => {});
-      });
-    }
     try {
       const resp = await fetch('http://127.0.0.1:8235/api/status');
       const apiEl = document.getElementById('about-api-status');

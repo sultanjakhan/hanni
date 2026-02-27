@@ -1273,7 +1273,7 @@ body {
 .about-divider {
   border: none;
   border-top: 1px solid var(--border-subtle);
-  margin: var(--space-5) 0;
+  margin: var(--space-4) 0;
 }
 
 .about-info-list {
