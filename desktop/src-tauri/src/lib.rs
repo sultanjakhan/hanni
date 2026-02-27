@@ -728,6 +728,8 @@ struct ProactiveState {
     last_message_text: String,
     consecutive_skips: u32,
     user_is_typing: bool,
+    is_recording: bool,
+    auto_quiet: bool,
     // v0.11.0: enhanced autonomy fields
     recent_messages: Vec<(String, chrono::DateTime<chrono::Local>)>, // last 15 proactive msgs with timestamps
     last_context_snapshot: String,        // context from previous proactive call (for delta)
@@ -745,6 +747,8 @@ impl ProactiveState {
             last_message_text: String::new(),
             consecutive_skips: 0,
             user_is_typing: false,
+            is_recording: false,
+            auto_quiet: false,
             recent_messages: Vec::new(),
             last_context_snapshot: String::new(),
             last_proactive_id: None,
@@ -4163,6 +4167,49 @@ fn ensure_voice_server_launchagent() {
 // Also respects the apple_calendar_enabled user setting from the DB.
 static CALENDAR_ACCESS_DENIED: AtomicBool = AtomicBool::new(false);
 static APPLE_CALENDAR_DISABLED: AtomicBool = AtomicBool::new(false);
+
+// ── TTS speaking guard ──
+// Prevents proactive messages from firing while TTS audio is playing.
+static IS_SPEAKING: AtomicBool = AtomicBool::new(false);
+
+struct SpeakingGuard;
+impl Drop for SpeakingGuard {
+    fn drop(&mut self) { IS_SPEAKING.store(false, Ordering::Relaxed); }
+}
+
+// ── Idle / screen lock detection (for auto-quiet) ──
+
+/// Returns seconds since last user input (mouse/keyboard) via IOKit HIDIdleTime
+fn get_macos_idle_seconds() -> f64 {
+    let output = match std::process::Command::new("ioreg")
+        .args(["-c", "IOHIDSystem", "-d", "4"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return 0.0,
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Parse HIDIdleTime = <nanoseconds>
+    for line in text.lines() {
+        if line.contains("HIDIdleTime") && !line.contains("HIDIdleTimeDelta") {
+            if let Some(pos) = line.rfind('=') {
+                let val = line[pos + 1..].trim().trim_matches('"');
+                if let Ok(ns) = val.parse::<u64>() {
+                    return ns as f64 / 1_000_000_000.0;
+                }
+            }
+        }
+    }
+    0.0
+}
+
+/// Checks if screen is locked (loginwindow is frontmost app)
+fn is_screen_locked() -> bool {
+    match run_osascript(r#"tell application "System Events" to get name of first application process whose frontmost is true"#) {
+        Ok(s) => s.trim() == "loginwindow",
+        Err(_) => false,
+    }
+}
 
 fn check_calendar_access() -> bool {
     if APPLE_CALENDAR_DISABLED.load(Ordering::Relaxed) {
@@ -9595,6 +9642,8 @@ fn speak_silero_core(text: &str, speaker: &str) -> Result<Vec<u8>, String> {
 /// Play WAV bytes via afplay (secure temp file — auto-cleanup, unique name, 0600 perms)
 fn play_wav_blocking(bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
+    IS_SPEAKING.store(true, Ordering::Relaxed);
+    let _guard = SpeakingGuard; // drop guard — clears flag on any exit
     let mut tmp = tempfile::Builder::new()
         .prefix("hanni_tts_")
         .suffix(".wav")
@@ -9655,10 +9704,12 @@ fn speak_tts_sync(text: &str, voice: &str) {
     let truncated = if text.len() > MAX_TTS_TEXT_LEN { &text[..text.floor_char_boundary(MAX_TTS_TEXT_LEN)] } else { text };
     let clean = clean_text_for_tts(truncated);
     if clean.is_empty() { return; }
-    // Local Silero TTS via voice server
+    // Local Silero TTS via voice server (play_wav_blocking sets IS_SPEAKING)
     if speak_silero_local_sync(&clean, silero_speaker_for(voice)) { return; }
-    // Fallback to macOS say
+    // Fallback to macOS say — also guard with IS_SPEAKING
     eprintln!("[TTS] Silero local failed, falling back to macOS say");
+    IS_SPEAKING.store(true, Ordering::Relaxed);
+    let _guard = SpeakingGuard;
     let _ = std::process::Command::new("say")
         .args(["-r", "210", &clean])
         .status();
@@ -9719,6 +9770,7 @@ async fn speak_text(text: String, voice: Option<String>) -> Result<(), String> {
 async fn stop_speaking() -> Result<(), String> {
     let _ = std::process::Command::new("killall").arg("say").output();
     let _ = std::process::Command::new("killall").arg("afplay").output();
+    IS_SPEAKING.store(false, Ordering::Relaxed);
     Ok(())
 }
 
@@ -9774,6 +9826,15 @@ async fn set_user_typing(
 ) -> Result<(), String> {
     let mut state = state.lock().await;
     state.user_is_typing = typing;
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_recording_state(
+    recording: bool,
+    state: tauri::State<'_, Arc<Mutex<ProactiveState>>>,
+) -> Result<(), String> {
+    state.lock().await.is_recording = recording;
     Ok(())
 }
 
@@ -9981,6 +10042,7 @@ pub fn run() {
             get_proactive_settings,
             set_proactive_settings,
             set_user_typing,
+            set_recording_state,
             report_proactive_engagement,
             report_user_chat_activity,
             memory_remember,
@@ -10652,12 +10714,14 @@ pub fn run() {
 
                 let mut last_check = std::time::Instant::now();
                 let mut first_run = true;
+                let mut prev_auto_quiet = false;
+                let mut wake_up_pending = false;
 
                 loop {
                     // Poll every 5 seconds so we react quickly to settings changes
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-                    let (enabled, interval, quiet_start_min, quiet_end_min, is_typing, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles) = {
+                    let (enabled, interval, quiet_start_min, quiet_end_min, is_typing, is_recording, skips, voice_enabled, voice_name, recent_msgs, last_ctx, engagement, triggers, last_user_chat, enabled_styles) = {
                         let state = proactive_state_ref.lock().await;
                         (
                             state.settings.enabled,
@@ -10665,6 +10729,7 @@ pub fn run() {
                             state.settings.quiet_start_minutes(),
                             state.settings.quiet_end_minutes(),
                             state.user_is_typing,
+                            state.is_recording,
                             state.consecutive_skips,
                             state.settings.voice_enabled,
                             state.settings.voice_name.clone(),
@@ -10752,8 +10817,49 @@ pub fn run() {
                     };
 
                     let llm_busy = proactive_handle.state::<LlmBusy>().0.available_permits() == 0;
+                    let call_active = {
+                        let cm = proactive_handle.state::<Arc<CallMode>>();
+                        let guard = cm.0.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.active
+                    };
+                    let is_speaking_now = IS_SPEAKING.load(Ordering::Relaxed);
 
-                    if in_quiet || is_typing || llm_busy {
+                    // Auto-quiet: detect idle/sleep without fixed quiet hours
+                    let (idle_secs, screen_locked) = tokio::task::spawn_blocking(|| {
+                        (get_macos_idle_seconds(), is_screen_locked())
+                    }).await.unwrap_or((0.0, false));
+                    let idle_min = idle_secs / 60.0;
+                    let hour = now_t.hour();
+                    let is_night = hour >= 22 || hour < 8;
+                    let auto_quiet = (screen_locked && is_night)  // locked at night = sleeping
+                        || (idle_min > 15.0 && is_night)          // 15 min idle at night
+                        || idle_min > 30.0;                        // 30 min idle anytime = away
+
+                    // Emit event on state change
+                    if auto_quiet != prev_auto_quiet {
+                        let _ = proactive_handle.emit("proactive-auto-quiet", auto_quiet);
+                        // Update ProactiveState for external queries
+                        proactive_state_ref.lock().await.auto_quiet = auto_quiet;
+                        prev_auto_quiet = auto_quiet;
+                    }
+
+                    eprintln!("[proactive] gate: quiet={} auto={} typing={} rec={} llm={} call={} speak={} wake={} idle={:.0}s",
+                        in_quiet, auto_quiet, is_typing, is_recording, llm_busy, call_active, is_speaking_now, wake_up_pending, idle_secs);
+
+                    if in_quiet || auto_quiet {
+                        wake_up_pending = true;
+                        continue;
+                    }
+
+                    // Smooth wake-up: wait for user activity after quiet period
+                    if wake_up_pending {
+                        if idle_min > 5.0 {
+                            continue; // user not active yet
+                        }
+                        wake_up_pending = false;
+                    }
+
+                    if is_typing || llm_busy || call_active || is_speaking_now || is_recording {
                         continue;
                     }
 
