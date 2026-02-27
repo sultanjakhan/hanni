@@ -159,7 +159,7 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: ['Blocklist', 'Integrations', 'About'] },
+  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: [] },
 };
 
 const TAB_DESCRIPTIONS = {
@@ -928,12 +928,10 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, thinkVal, selfRefineVal, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainAdapter, trainFlywheel, trainHistory] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, memories, wakeWordEnabled, wakeWordKeyword, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory] = await Promise.all([
       invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
-      invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
-      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
       invoke('get_all_memories', { search: null }).catch(() => []),
       invoke('get_app_setting', { key: 'wakeword_enabled' }).catch(() => null),
       invoke('get_app_setting', { key: 'wakeword_keyword' }).catch(() => null),
@@ -941,7 +939,6 @@ async function loadChatSettings() {
       invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null),
       invoke('list_voice_samples').catch(() => []),
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
-      invoke('get_adapter_status').catch(() => ({ exists: false, meta: null })),
       invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
       invoke('get_flywheel_history').catch(() => []),
     ]);
@@ -964,7 +961,7 @@ async function loadChatSettings() {
         <button class="chat-settings-tab" data-panel="general">Основные</button>
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
-        <button class="chat-settings-tab" data-panel="training">Обучение</button>
+        <button class="chat-settings-tab" data-panel="data">Данные</button>
       </div>
 
       <div class="chat-settings-panel active" id="cs-panel-memory">
@@ -1012,25 +1009,6 @@ async function loadChatSettings() {
               <input type="number" id="chat-daily-limit" class="proactive-interval-number" min="0" max="100" value="${proactive.daily_limit ?? 20}">
               <span class="proactive-interval-unit">сообщ. (0 = безлимит)</span>
             </div>
-          </div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-section-title">Модель</div>
-          <div class="settings-row">
-            <span class="settings-label">Thinking mode</span>
-            <span class="settings-hint">Глубокое размышление (медленнее)</span>
-            <label class="toggle">
-              <input type="checkbox" id="chat-thinking-toggle" ${thinkVal === 'true' ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">Самопроверка</span>
-            <span class="settings-hint">Авто-критика сложных ответов</span>
-            <label class="toggle">
-              <input type="checkbox" id="chat-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
           </div>
         </div>
       </div>
@@ -1147,7 +1125,7 @@ async function loadChatSettings() {
         </div>
       </div>
 
-      <div class="chat-settings-panel" id="cs-panel-training">
+      <div class="chat-settings-panel" id="cs-panel-data">
         <div class="settings-section">
           <div class="settings-section-title">Данные для обучения</div>
           <div class="settings-row"><span class="settings-label">Диалогов (4+ сообщений)</span><span class="settings-value">${trainStats.conversations}</span></div>
@@ -1158,15 +1136,6 @@ async function loadChatSettings() {
         <div class="settings-section">
           <div class="settings-section-title">Экспорт</div>
           <div class="settings-row"><span class="settings-label">JSONL</span><button class="settings-btn" id="train-export-btn">Экспорт данных</button></div>
-        </div>
-        <div class="settings-section">
-          <div class="settings-section-title">Fine-tuning (LoRA)</div>
-          <div class="settings-row"><span class="settings-label">Адаптер</span><span class="settings-value">${trainAdapter.exists ? 'Есть' + (trainAdapter.meta?.trained_at ? ' (' + trainAdapter.meta.trained_at.substring(0,10) + ')' : '') : 'Нет'}</span></div>
-          <div class="settings-row"><span class="settings-label">Обучить модель</span><button class="settings-btn btn-primary" id="train-finetune-btn">Запустить</button></div>
-          <div id="train-progress" class="hidden" style="margin-top:8px;">
-            <div class="train-progress-bar"><div class="train-progress-fill" id="train-fill"></div></div>
-            <div id="train-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
-          </div>
         </div>
         <div class="settings-section">
           <div class="settings-section-title">Data Flywheel</div>
@@ -1241,16 +1210,6 @@ async function loadChatSettings() {
     document.getElementById('chat-quiet-start')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-quiet-end')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-daily-limit')?.addEventListener('change', saveChatSettings);
-
-    // Thinking mode toggle
-    document.getElementById('chat-thinking-toggle')?.addEventListener('change', (e) => {
-      invoke('set_app_setting', { key: 'enable_thinking', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
-    });
-
-    // Self-refine toggle
-    document.getElementById('chat-self-refine-toggle')?.addEventListener('change', (e) => {
-      invoke('set_app_setting', { key: 'enable_self_refine', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
-    });
 
     // Interval slider <-> number sync
     const slider = document.getElementById('chat-proactive-slider');
@@ -1402,31 +1361,6 @@ async function loadChatSettings() {
       try { const r = await invoke('export_training_data'); btn.textContent = r.train_count + ' train + ' + r.valid_count + ' valid'; }
       catch (err) { btn.textContent = String(err).substring(0, 30); }
       setTimeout(() => { btn.textContent = 'Экспорт данных'; btn.disabled = false; }, 4000);
-    });
-    document.getElementById('train-finetune-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.disabled = true;
-      const progress = document.getElementById('train-progress');
-      const fill = document.getElementById('train-fill');
-      const status = document.getElementById('train-status');
-      progress?.classList.remove('hidden');
-      btn.textContent = 'Экспорт...';
-      if (status) status.textContent = 'Экспортируем данные...';
-      if (fill) fill.style.width = '10%';
-      try {
-        await invoke('export_training_data');
-        btn.textContent = 'Обучение...';
-        if (status) status.textContent = 'Запускаем fine-tuning (это может занять 10-30 минут)...';
-        if (fill) fill.style.width = '30%';
-        const r = await invoke('run_finetune');
-        if (fill) fill.style.width = '100%';
-        if (status) status.textContent = 'Готово!';
-        btn.textContent = 'Готово!';
-      } catch (err) {
-        if (fill) fill.style.width = '100%';
-        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
-        btn.textContent = 'Ошибка';
-      }
-      setTimeout(() => { btn.textContent = 'Запустить'; btn.disabled = false; }, 5000);
     });
     document.getElementById('flywheel-run-btn')?.addEventListener('click', async (e) => {
       const btn = e.target; btn.disabled = true;
@@ -3691,199 +3625,48 @@ function panelItem(item) {
   </div>`;
 }
 
-async function loadIntegrations(force) {
-  const integrationsContent = document.getElementById('settings-content');
-  if (!integrationsContent) return;
-  if (!force) integrationsContent.innerHTML = skeletonPage();
-  try {
-    const info = await invoke('get_integrations');
-
-    let accessItems = '';
-    for (const item of info.access) accessItems += panelItem(item);
-
-    let trackingItems = '';
-    for (const item of info.tracking) trackingItems += panelItem(item);
-
-    let appsItems = '';
-    for (const item of info.blocked_apps) appsItems += panelItem(item);
-
-    let sitesItems = '';
-    for (const item of info.blocked_sites) sitesItems += panelItem(item);
-
-    const blockerBadge = `<span class="panel-status-badge ${info.blocker_active ? 'on' : 'off'}">${info.blocker_active ? 'Активна' : 'Неактивна'}</span>`;
-
-    let macosItems = '';
-    if (info.macos) {
-      for (const item of info.macos) macosItems += panelItem(item);
-    }
-
-    const legend = `<div class="macos-legend">
-      <span><span class="legend-dot active"></span> Активно</span>
-      <span><span class="legend-dot ready"></span> По запросу</span>
-      <span><span class="legend-dot inactive"></span> Ожидание</span>
-    </div>`;
-
-    const appleCalEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
-    const googleIcsUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
-
-    integrationsContent.innerHTML = `
-      <div class="integrations-grid">
-        <div class="integration-card macos-card">
-          <div class="integration-card-title">Календари</div>
-          <div class="settings-row">
-            <span class="settings-label">Apple Calendar</span>
-            <label class="toggle"><input type="checkbox" id="int-apple-cal" ${appleCalEnabled !== 'false' ? 'checked' : ''}><span class="toggle-track"></span></label>
-          </div>
-          <div class="panel-item-detail" style="margin-bottom:8px;">Синхронизирует события из Calendar.app (включая Google, если добавлен в macOS)</div>
-          <div class="settings-row">
-            <span class="settings-label">Google Calendar ICS</span>
-          </div>
-          <div style="display:flex;gap:8px;margin-bottom:8px;">
-            <input class="form-input" id="int-google-ics" placeholder="https://calendar.google.com/...basic.ics" value="${escapeHtml(googleIcsUrl)}" style="flex:1">
-            <button class="btn-secondary" id="int-cal-save">Сохранить</button>
-          </div>
-          <div class="panel-item-detail">Вставьте приватный ICS URL из Google Calendar (Настройки → Настройки календаря → Секретный адрес)</div>
-        </div>
-        <div class="integration-card macos-card">
-          <div class="integration-card-title">macOS интеграции</div>
-          ${legend}
-          ${macosItems}
-        </div>
-        <div class="integration-card">
-          <div class="integration-card-title">Доступ</div>
-          ${accessItems}
-        </div>
-        <div class="integration-card">
-          <div class="integration-card-title">Трекинг</div>
-          ${trackingItems}
-        </div>
-        <div class="integration-card">
-          <div class="integration-card-title">Приложения</div>
-          ${blockerBadge}
-          ${appsItems}
-        </div>
-        <div class="integration-card">
-          <div class="integration-card-title">Сайты</div>
-          ${blockerBadge}
-          ${sitesItems}
-        </div>
-      </div>`;
-
-    // Calendar integration handlers
-    document.getElementById('int-apple-cal')?.addEventListener('change', async (e) => {
-      try {
-        await invoke('set_app_setting', { key: 'apple_calendar_enabled', value: e.target.checked ? 'true' : 'false' });
-      } catch (err) {
-        e.target.checked = !e.target.checked;
-        console.error('Failed to save Apple Calendar setting:', err);
-      }
-    });
-    document.getElementById('int-cal-save')?.addEventListener('click', async () => {
-      const btn = document.getElementById('int-cal-save');
-      const url = document.getElementById('int-google-ics')?.value.trim() || '';
-      try {
-        await invoke('set_app_setting', { key: 'google_calendar_ics_url', value: url });
-        if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = 'Сохранить', 1500); }
-      } catch (err) {
-        if (btn) { btn.textContent = '✗'; setTimeout(() => btn.textContent = 'Сохранить', 1500); }
-        console.error('Failed to save Google ICS URL:', err);
-      }
-    });
-  } catch (e) {
-    integrationsContent.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`;
-  }
-}
-
 // ── Settings page ──
 
 async function loadSettings(subTab) {
   const settingsContent = document.getElementById('settings-content');
   if (!settingsContent) return;
-  if (subTab === 'Blocklist') { loadBlocklist(settingsContent); return; }
-  if (subTab === 'Integrations') { loadIntegrations(); return; }
-  // Training moved to Chat > Настройки > Обучение
-  if (subTab === 'About') { loadAbout(settingsContent); return; }
-  // Default to Blocklist
-  loadBlocklist(settingsContent);
+  loadAbout(settingsContent);
 }
 
-// ── Blocklist (Settings sub-tab) ──
-async function loadBlocklist(el) {
-  try {
-    const items = await invoke('get_blocklist').catch(() => []);
-    const sites = items.filter(i => i.type === 'site');
-    const apps = items.filter(i => i.type === 'app');
-    el.innerHTML = `
-      <div class="module-header"><h2>Blocklist</h2><button class="btn-primary" id="bl-add-btn">+ Add</button></div>
-      <div class="module-card-title">Sites</div>
-      <div id="bl-sites">${sites.map(s => `<div class="focus-log-item">
-        <span class="focus-log-title">${escapeHtml(s.value)}</span>
-        <label class="toggle"><input type="checkbox" data-toggle="${s.id}" ${s.active?'checked':''}><span class="toggle-slider"></span></label>
-        ${s.schedule ? `<span style="color:var(--text-faint);font-size:11px;">${s.schedule}</span>` : ''}
-        <button class="memory-item-btn" data-bldel="${s.id}">&times;</button>
-      </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:4px 0;">None</div>'}</div>
-      <div class="module-card-title" style="margin-top:16px;">Apps</div>
-      <div id="bl-apps">${apps.map(a => `<div class="focus-log-item">
-        <span class="focus-log-title">${escapeHtml(a.value)}</span>
-        <label class="toggle"><input type="checkbox" data-toggle="${a.id}" ${a.active?'checked':''}><span class="toggle-slider"></span></label>
-        <button class="memory-item-btn" data-bldel="${a.id}">&times;</button>
-      </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:4px 0;">None</div>'}</div>`;
-    el.querySelectorAll('[data-toggle]').forEach(cb => {
-      cb.addEventListener('change', async () => {
-        await invoke('toggle_blocklist_item', { id: parseInt(cb.dataset.toggle) }).catch(()=>{});
-      });
-    });
-    el.querySelectorAll('[data-bldel]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        await invoke('remove_from_blocklist', { id: parseInt(btn.dataset.bldel) }).catch(()=>{});
-        loadBlocklist(el);
-      });
-    });
-    document.getElementById('bl-add-btn')?.addEventListener('click', () => {
-      const type = prompt('Type (site/app):') || 'site';
-      const value = prompt(type === 'site' ? 'Domain (e.g. youtube.com):' : 'App name (e.g. Discord):');
-      if (value) invoke('add_to_blocklist', { blockType: type, value, schedule: null }).then(() => loadBlocklist(el)).catch(e => alert(e));
-    });
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-// ── About (Settings sub-tab) ──
+// ── About (Settings page) ──
 async function loadAbout(el) {
   try {
-    const [info, trainingStats, adapterStatus] = await Promise.all([
+    const [info, selfRefineVal] = await Promise.all([
       invoke('get_model_info').catch(() => ({})),
-      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
-      invoke('get_adapter_status').catch(() => ({ exists: false, meta: null })),
+      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
     ]);
-    const adapterInfo = adapterStatus.exists
-      ? `Есть${adapterStatus.meta?.trained_at ? ` (${adapterStatus.meta.trained_at.substring(0,10)})` : ''}`
-      : 'Нет';
     el.innerHTML = `
-      <div class="settings-section">
-        <div class="settings-section-title">Hanni v${APP_VERSION}</div>
-        <div class="settings-row"><span class="settings-label">Обновления</span><button class="settings-btn" id="about-check-update">Проверить обновления</button></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Модель</div>
-        <div class="settings-row"><span class="settings-label">Название</span><span class="settings-value">${info.model_name||'?'}</span></div>
-        <div class="settings-row"><span class="settings-label">Сервер</span><span class="settings-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
-        <div class="settings-row"><span class="settings-label">Thinking mode</span><span class="settings-hint">Глубокое размышление (медленнее, для сложных задач)</span><label class="toggle"><input type="checkbox" id="about-thinking-toggle"><span class="toggle-slider"></span></label></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Данные</div>
-        <div class="settings-row"><span class="settings-label">Диалогов</span><span class="settings-value">${trainingStats.conversations}</span></div>
-        <div class="settings-row"><span class="settings-label">Сообщений</span><span class="settings-value">${trainingStats.total_messages}</span></div>
-        <div class="settings-row"><span class="settings-label">Экспорт</span><button class="settings-btn" id="about-export-btn">Экспорт JSONL</button></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Fine-tuning (LoRA)</div>
-        <div class="settings-row"><span class="settings-label">Адаптер</span><span class="settings-value">${adapterInfo}</span></div>
-        <div class="settings-row"><span class="settings-label">Обучение</span><button class="settings-btn" id="about-finetune-btn">Запустить fine-tuning</button></div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">HTTP API</div>
-        <div class="settings-row"><span class="settings-label">Адрес</span><span class="settings-value">127.0.0.1:8235</span></div>
-        <div class="settings-row"><span class="settings-label">Статус</span><span class="settings-value" id="about-api-status">Проверяю...</span></div>
+      <div class="about-wrapper">
+        <div class="about-card">
+          <div class="about-header">
+            <div class="about-logo">🤖</div>
+            <div class="about-name">Hanni</div>
+            <span class="about-version">v${APP_VERSION}</span>
+          </div>
+          <hr class="about-divider">
+          <div class="about-info-list">
+            <div class="about-info-row"><span class="about-info-label">Модель</span><span class="about-info-value">${info.model_name||'?'}</span></div>
+            <div class="about-info-row"><span class="about-info-label">MLX сервер</span><span class="about-info-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
+            <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="about-api-status">Проверяю...</span></div>
+          </div>
+          <hr class="about-divider">
+          <div class="about-toggle-row">
+            <div class="about-toggle-info"><span class="about-toggle-label">Thinking mode</span><span class="about-toggle-hint">Глубокое размышление для сложных задач</span></div>
+            <label class="toggle"><input type="checkbox" id="about-thinking-toggle"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="about-toggle-row">
+            <div class="about-toggle-info"><span class="about-toggle-label">Самопроверка</span><span class="about-toggle-hint">Авто-критика сложных ответов</span></div>
+            <label class="toggle"><input type="checkbox" id="about-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
+          <div class="about-actions">
+            <button class="settings-btn" id="about-check-update">Проверить обновления</button>
+          </div>
+        </div>
       </div>`;
     document.getElementById('about-check-update')?.addEventListener('click', async (e) => {
       const btn = e.target; btn.textContent = 'Проверяю...'; btn.disabled = true;
@@ -3891,24 +3674,12 @@ async function loadAbout(el) {
       catch (err) { btn.textContent = 'Ошибка'; }
       setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
     });
-    document.getElementById('about-export-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
-      try { const r = await invoke('export_training_data'); btn.textContent = `${r.train_count} train + ${r.valid_count} valid`; }
-      catch (err) { btn.textContent = String(err).substring(0, 30); }
-      setTimeout(() => { btn.textContent = 'Экспорт JSONL'; btn.disabled = false; }, 4000);
-    });
-    document.getElementById('about-finetune-btn')?.addEventListener('click', async (e) => {
-      const btn = e.target; btn.textContent = 'Запуск...'; btn.disabled = true;
-      try {
-        // First export fresh data
-        await invoke('export_training_data');
-        btn.textContent = 'Обучение...';
-        const r = await invoke('run_finetune');
-        btn.textContent = 'Готово!';
-      } catch (err) { btn.textContent = String(err).substring(0, 40); }
-      setTimeout(() => { btn.textContent = 'Запустить fine-tuning'; btn.disabled = false; }, 5000);
-    });
-    // Thinking mode toggle
+    const selfRefineToggle = document.getElementById('about-self-refine-toggle');
+    if (selfRefineToggle) {
+      selfRefineToggle.addEventListener('change', () => {
+        invoke('set_app_setting', { key: 'enable_self_refine', value: selfRefineToggle.checked ? 'true' : 'false' }).catch(() => {});
+      });
+    }
     const thinkToggle = document.getElementById('about-thinking-toggle');
     if (thinkToggle) {
       const thinkVal = await invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null);
@@ -3920,18 +3691,23 @@ async function loadAbout(el) {
     try {
       const resp = await fetch('http://127.0.0.1:8235/api/status');
       const apiEl = document.getElementById('about-api-status');
-      if (apiEl) { apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен'; apiEl.className = 'settings-value ' + (resp.ok ? 'online' : 'offline'); }
+      if (apiEl) { apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен'; apiEl.className = 'about-info-value ' + (resp.ok ? 'online' : 'offline'); }
     } catch (_) {
       const apiEl = document.getElementById('about-api-status');
-      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'settings-value offline'; }
+      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'about-info-value offline'; }
     }
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`; }
 }
 
 // ── Tab loaders (stubs) ──
-function showStub(containerId, icon, label) {
+function showStub(containerId, icon, label, desc) {
   const el = document.getElementById(containerId);
-  if (el) el.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">${icon}</div>${label}</div>`;
+  if (el) el.innerHTML = `<div class="tab-stub">
+    <div class="tab-stub-icon">${icon}</div>
+    <div class="tab-stub-title">${label}</div>
+    ${desc ? `<div class="tab-stub-desc">${desc}</div>` : ''}
+    <span class="tab-stub-badge">Скоро</span>
+  </div>`;
 }
 
 // ── Dashboard ──
@@ -4106,7 +3882,7 @@ async function loadFocus() {
       }, 1000);
     }
   } catch (e) {
-    showStub('focus-content', '&#9673;', 'Фокус — скоро');
+    showStub('focus-content', '🎯', 'Фокус', 'Глубокая работа и трекинг активности');
   }
 }
 
@@ -4152,7 +3928,7 @@ async function loadNotes(subTab) {
       }, 300);
     });
   } catch (e) {
-    showStub('notes-content', '&#9998;', 'Заметки — скоро');
+    showStub('notes-content', '📝', 'Заметки', 'Быстрые заметки и мысли');
   }
 }
 
@@ -4773,7 +4549,7 @@ async function loadWork() {
     const projects = await invoke('get_projects').catch(() => []);
     renderWork(pc, projects || []);
   } catch (e) {
-    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">&#9642;</div>Работа — скоро</div>';
+    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">💼</div><div class="tab-stub-title">Работа</div><div class="tab-stub-desc">Проекты и задачи</div><span class="tab-stub-badge">Скоро</span></div>';
   }
 }
 
@@ -4848,7 +4624,7 @@ async function loadDevelopment() {
     const items = await invoke('get_learning_items', { typeFilter: devFilter === 'all' ? null : devFilter }).catch(() => []);
     renderDevelopment(pc, items || []);
   } catch (e) {
-    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">&#9636;</div>Развитие — скоро</div>';
+    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">🚀</div><div class="tab-stub-title">Развитие</div><div class="tab-stub-desc">Обучение и саморазвитие</div><span class="tab-stub-badge">Скоро</span></div>';
   }
 }
 
@@ -5741,7 +5517,7 @@ async function loadSports(subTab) {
     const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
     renderSports(pc, workouts || [], stats);
   } catch (e) {
-    showStub('sports-content', '&#9829;', 'Спорт — скоро');
+    showStub('sports-content', '💪', 'Спорт', 'Тренировки и физическая активность');
   }
 }
 
@@ -5884,7 +5660,7 @@ async function loadHealth() {
     const habits = await invoke('get_habits_today').catch(() => []);
     renderHealth(pc, today, habits);
   } catch (e) {
-    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">&#10010;</div>Здоровье — скоро</div>';
+    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">❤️</div><div class="tab-stub-title">Здоровье</div><div class="tab-stub-desc">Метрики здоровья и привычки</div><span class="tab-stub-badge">Скоро</span></div>';
   }
 }
 
