@@ -928,7 +928,7 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory, thinkingVal, selfRefineVal] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory] = await Promise.all([
       invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
@@ -939,8 +939,6 @@ async function loadChatSettings() {
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
       invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
       invoke('get_flywheel_history').catch(() => []),
-      invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
-      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -958,7 +956,6 @@ async function loadChatSettings() {
     el.innerHTML = `
       <div class="chat-settings-tabs">
         <button class="chat-settings-tab active" data-panel="memory">Память</button>
-        <button class="chat-settings-tab" data-panel="model">Модель</button>
         <button class="chat-settings-tab" data-panel="general">Автономный</button>
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
@@ -974,28 +971,6 @@ async function loadChatSettings() {
         </div>
         <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;" id="cs-mem-count">${memories.length} фактов</div>
         <div class="memory-browser" id="cs-mem-list"></div>
-      </div>
-
-      <div class="chat-settings-panel" id="cs-panel-model">
-        <div class="settings-section">
-          <div class="settings-section-title">Режимы мышления</div>
-          <div class="settings-row">
-            <span class="settings-label">Thinking mode</span>
-            <span class="settings-hint">Глубокое размышление для сложных задач</span>
-            <label class="toggle">
-              <input type="checkbox" id="chat-thinking-toggle" ${thinkingVal === 'true' ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">Самопроверка</span>
-            <span class="settings-hint">Авто-критика сложных ответов</span>
-            <label class="toggle">
-              <input type="checkbox" id="chat-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-        </div>
       </div>
 
       <div class="chat-settings-panel" id="cs-panel-general">
@@ -1291,14 +1266,6 @@ async function loadChatSettings() {
         if (s) s.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
       } catch { const s = document.getElementById('chat-tts-server-status'); if (s) s.textContent = 'Недоступен'; }
     }
-
-    // ── Model toggle handlers ──
-    document.getElementById('chat-thinking-toggle')?.addEventListener('change', (e) => {
-      invoke('set_app_setting', { key: 'enable_thinking', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
-    });
-    document.getElementById('chat-self-refine-toggle')?.addEventListener('change', (e) => {
-      invoke('set_app_setting', { key: 'enable_self_refine', value: e.target.checked ? 'true' : 'false' }).catch(() => {});
-    });
 
     // ── Voice Clone handlers ──
     document.getElementById('chat-voice-clone-enabled')?.addEventListener('change', async (e) => {
@@ -2524,6 +2491,31 @@ async function newChat() {
 
 document.getElementById('new-chat')?.addEventListener('click', newChat);
 
+// ── Input toolbar chips (Thinking, Self-refine) ──
+const chipThinking = document.getElementById('chip-thinking');
+const chipSelfRefine = document.getElementById('chip-selfrefine');
+
+(async () => {
+  const [thinkVal, refineVal] = await Promise.all([
+    invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
+    invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
+  ]);
+  if (thinkVal === 'true') chipThinking?.classList.add('active');
+  if (refineVal === 'true') chipSelfRefine?.classList.add('active');
+})();
+
+chipThinking?.addEventListener('click', async () => {
+  chipThinking.classList.toggle('active');
+  const on = chipThinking.classList.contains('active');
+  await invoke('set_app_setting', { key: 'enable_thinking', value: on ? 'true' : 'false' }).catch(() => {});
+});
+
+chipSelfRefine?.addEventListener('click', async () => {
+  chipSelfRefine.classList.toggle('active');
+  const on = chipSelfRefine.classList.contains('active');
+  await invoke('set_app_setting', { key: 'enable_self_refine', value: on ? 'true' : 'false' }).catch(() => {});
+});
+
 sendBtn.addEventListener('click', send);
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -3624,7 +3616,10 @@ async function loadSettings(subTab) {
 // ── About (Settings page) ──
 async function loadAbout(el) {
   try {
-    const info = await invoke('get_model_info').catch(() => ({}));
+    const [info, selfRefineVal] = await Promise.all([
+      invoke('get_model_info').catch(() => ({})),
+      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
+    ]);
     el.innerHTML = `
       <div class="about-wrapper">
         <div class="about-card">
@@ -3639,6 +3634,15 @@ async function loadAbout(el) {
             <div class="about-info-row"><span class="about-info-label">MLX сервер</span><span class="about-info-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
             <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="about-api-status">Проверяю...</span></div>
           </div>
+          <hr class="about-divider">
+          <div class="about-toggle-row">
+            <div class="about-toggle-info"><span class="about-toggle-label">Thinking mode</span><span class="about-toggle-hint">Глубокое размышление для сложных задач</span></div>
+            <label class="toggle"><input type="checkbox" id="about-thinking-toggle"><span class="toggle-slider"></span></label>
+          </div>
+          <div class="about-toggle-row">
+            <div class="about-toggle-info"><span class="about-toggle-label">Самопроверка</span><span class="about-toggle-hint">Авто-критика сложных ответов</span></div>
+            <label class="toggle"><input type="checkbox" id="about-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label>
+          </div>
           <div class="about-actions">
             <button class="settings-btn" id="about-check-update">Проверить обновления</button>
           </div>
@@ -3650,6 +3654,22 @@ async function loadAbout(el) {
       catch (err) { btn.textContent = 'Ошибка'; }
       setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
     });
+    const selfRefineToggle = document.getElementById('about-self-refine-toggle');
+    if (selfRefineToggle) {
+      selfRefineToggle.addEventListener('change', () => {
+        invoke('set_app_setting', { key: 'enable_self_refine', value: selfRefineToggle.checked ? 'true' : 'false' }).catch(() => {});
+        chipSelfRefine?.classList.toggle('active', selfRefineToggle.checked);
+      });
+    }
+    const thinkToggle = document.getElementById('about-thinking-toggle');
+    if (thinkToggle) {
+      const thinkVal = await invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null);
+      thinkToggle.checked = thinkVal === 'true';
+      thinkToggle.addEventListener('change', () => {
+        invoke('set_app_setting', { key: 'enable_thinking', value: thinkToggle.checked ? 'true' : 'false' }).catch(() => {});
+        chipThinking?.classList.toggle('active', thinkToggle.checked);
+      });
+    }
     try {
       const resp = await fetch('http://127.0.0.1:8235/api/status');
       const apiEl = document.getElementById('about-api-status');
