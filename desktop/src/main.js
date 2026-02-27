@@ -279,6 +279,20 @@ listen('proactive-message', async (event) => {
   }
 });
 
+// ── Auto-quiet status listener ──
+listen('proactive-auto-quiet', (event) => {
+  const badge = document.getElementById('proactive-status-badge');
+  if (badge) {
+    if (event.payload) {
+      badge.textContent = 'Тишина (авто)';
+      badge.classList.add('quiet');
+    } else {
+      badge.textContent = 'Активен';
+      badge.classList.remove('quiet');
+    }
+  }
+});
+
 // ── Typing signal ──
 let typingTimeout = null;
 input.addEventListener('input', () => {
@@ -311,7 +325,8 @@ let voiceRecordStartTime = 0;
 
 async function startRecording() {
   if (isRecording || busy) return;
-  // Block proactive messages while recording (same as typing)
+  // Block proactive messages while recording
+  invoke('set_recording_state', { recording: true }).catch(() => {});
   invoke('set_user_typing', { typing: true }).catch(() => {});
   await checkVoiceServer();
 
@@ -385,6 +400,8 @@ async function stopRecordingAndSend() {
   recordBtn.classList.remove('transcribing');
   recordBtn.disabled = false;
   recordBtn.title = 'Удерживайте для записи';
+  // Release recording lock immediately
+  invoke('set_recording_state', { recording: false }).catch(() => {});
   // Release typing lock (delayed — give send() time to acquire busy flag)
   setTimeout(() => invoke('set_user_typing', { typing: false }).catch(() => {}), 3000);
 }
@@ -395,6 +412,8 @@ function cancelRecording() {
   recordPending = null;
   recordBtn.classList.remove('recording');
   recordBtn.title = 'Удерживайте для записи';
+  invoke('set_recording_state', { recording: false }).catch(() => {});
+  invoke('set_user_typing', { typing: false }).catch(() => {});
   if (voiceServerAvailable) {
     fetch(`${VOICE_SERVER}/stop`, { method: 'POST' }).catch(() => {});
   } else {
@@ -959,7 +978,7 @@ async function loadChatSettings() {
 
       <div class="chat-settings-panel" id="cs-panel-general">
         <div class="settings-section">
-          <div class="settings-section-title">Автономный режим</div>
+          <div class="settings-section-title">Автономный режим <span class="proactive-status-badge" id="proactive-status-badge">Активен</span></div>
           <div class="settings-row">
             <span class="settings-label">Включён</span>
             <label class="toggle">

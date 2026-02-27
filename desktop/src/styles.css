@@ -3784,6 +3784,26 @@ body.dragover::after {
   font-size: 14px;
 }
 
+/* ── Proactive status badge ── */
+
+.proactive-status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  margin-left: 6px;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
+.proactive-status-badge.quiet {
+  background: var(--text-faint);
+  color: var(--text-muted);
+}
+
 /* ── Proactive styles grid ── */
 
 .proactive-styles-section {
