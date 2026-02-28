@@ -10901,11 +10901,14 @@ pub fn run() {
                             score += 0.15;
                         }
 
-                        // context change (will be computed after gather, but approximate from triggers)
-                        // idle: no user chat >30 min
+                        // Block proactive while user is actively chatting
                         if let Some(last_chat) = last_user_chat {
-                            let idle_min = (chrono::Local::now() - last_chat).num_minutes();
-                            if idle_min > 30 { score += 0.1; }
+                            let chat_idle_min = (chrono::Local::now() - last_chat).num_minutes();
+                            if chat_idle_min < 5 {
+                                // User chatted in last 5 min — suppress proactive completely
+                                continue;
+                            }
+                            if chat_idle_min > 30 { score += 0.1; }
                         } else {
                             score += 0.1; // no chat at all — consider idle
                         }
