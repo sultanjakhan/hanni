@@ -3616,10 +3616,7 @@ async function loadSettings(subTab) {
 // ── About (Settings page) ──
 async function loadAbout(el) {
   try {
-    const [info, selfRefineVal] = await Promise.all([
-      invoke('get_model_info').catch(() => ({})),
-      invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
-    ]);
+    const info = await invoke('get_model_info').catch(() => ({}));
     el.innerHTML = `
       <div class="about-wrapper">
         <div class="about-card">
@@ -3635,14 +3632,6 @@ async function loadAbout(el) {
             <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="about-api-status">Проверяю...</span></div>
           </div>
           <hr class="about-divider">
-          <div class="about-toggle-row">
-            <div class="about-toggle-info"><span class="about-toggle-label">Thinking mode</span><span class="about-toggle-hint">Глубокое размышление для сложных задач</span></div>
-            <label class="toggle"><input type="checkbox" id="about-thinking-toggle"><span class="toggle-slider"></span></label>
-          </div>
-          <div class="about-toggle-row">
-            <div class="about-toggle-info"><span class="about-toggle-label">Самопроверка</span><span class="about-toggle-hint">Авто-критика сложных ответов</span></div>
-            <label class="toggle"><input type="checkbox" id="about-self-refine-toggle" ${selfRefineVal === 'true' ? 'checked' : ''}><span class="toggle-slider"></span></label>
-          </div>
           <div class="about-actions">
             <button class="settings-btn" id="about-check-update">Проверить обновления</button>
           </div>
@@ -3654,22 +3643,6 @@ async function loadAbout(el) {
       catch (err) { btn.textContent = 'Ошибка'; }
       setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
     });
-    const selfRefineToggle = document.getElementById('about-self-refine-toggle');
-    if (selfRefineToggle) {
-      selfRefineToggle.addEventListener('change', () => {
-        invoke('set_app_setting', { key: 'enable_self_refine', value: selfRefineToggle.checked ? 'true' : 'false' }).catch(() => {});
-        chipSelfRefine?.classList.toggle('active', selfRefineToggle.checked);
-      });
-    }
-    const thinkToggle = document.getElementById('about-thinking-toggle');
-    if (thinkToggle) {
-      const thinkVal = await invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null);
-      thinkToggle.checked = thinkVal === 'true';
-      thinkToggle.addEventListener('change', () => {
-        invoke('set_app_setting', { key: 'enable_thinking', value: thinkToggle.checked ? 'true' : 'false' }).catch(() => {});
-        chipThinking?.classList.toggle('active', thinkToggle.checked);
-      });
-    }
     try {
       const resp = await fetch('http://127.0.0.1:8235/api/status');
       const apiEl = document.getElementById('about-api-status');
