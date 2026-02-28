@@ -4413,7 +4413,7 @@ struct ChatModeConfig {
 }
 
 const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 500, max_tokens: 300, temperature: 0.6, include_tools: true };
-const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 30, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
+const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 15, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
 const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.6, include_tools: false };
 
 async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {

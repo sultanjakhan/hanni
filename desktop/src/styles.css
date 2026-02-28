@@ -773,15 +773,15 @@ body {
 .input-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  font-size: 12px;
+  gap: 7px;
+  padding: 6px 14px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
   color: var(--text-muted);
   background: transparent;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
@@ -789,17 +789,22 @@ body {
 
 .input-chip:hover {
   color: var(--text-secondary);
-  border-color: var(--border-default);
   background: var(--bg-hover);
 }
 
-.input-chip svg { flex-shrink: 0; }
+.input-chip .chip-icon {
+  flex-shrink: 0;
+  transition: transform 0.25s ease, filter 0.25s ease;
+}
 
 /* Thinking — blue accent */
 #chip-thinking.active {
   color: var(--color-blue);
   background: var(--color-blue-bg);
-  border-color: var(--color-blue);
+}
+#chip-thinking.active .chip-icon {
+  filter: drop-shadow(0 0 4px rgba(68, 122, 203, 0.5));
+  transform: scale(1.15);
 }
 #chip-thinking.active:hover {
   background: #2f3a4a;
@@ -809,7 +814,10 @@ body {
 #chip-selfrefine.active {
   color: var(--color-green);
   background: var(--color-green-bg);
-  border-color: var(--color-green);
+}
+#chip-selfrefine.active .chip-icon {
+  filter: drop-shadow(0 0 4px rgba(79, 151, 104, 0.5));
+  transform: scale(1.15);
 }
 #chip-selfrefine.active:hover {
   background: #303f36;
