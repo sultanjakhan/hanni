@@ -2024,6 +2024,10 @@ async function executeAction(actionJson) {
       case 'search_web':
         result = await invoke('web_search', { query: action.query || '' });
         break;
+      case 'read_url':
+      case 'fetch_url':
+        result = await invoke('read_url', { url: action.url || '' });
+        break;
       // Media
       case 'add_media_item':
       case 'add_media':

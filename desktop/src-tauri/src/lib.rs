@@ -27,6 +27,7 @@ const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопы
 - Память уже в контексте — search_memory только для конкретных запросов.
 - После результатов инструмента — резюмируй естественно. НЕ повторяй сырой вывод.
 - web_search для актуальной информации: факты, рецепты, цены, погода, новости.
+- read_url для чтения конкретной страницы по ссылке (после web_search или по прямой ссылке).
 
 СТИЛЬ:
 - Тёплый тон: лёгкий юмор, любопытство, игривый сарказм (по-доброму).
@@ -64,6 +65,9 @@ User: "купил колу за 500"
 User: "найди рецепт плова"
 → [web_search] "Нашёл классический рецепт: баранина, рис, морковь, зира..."
 НЕ: "Вот рецепт плова: ..." (без поиска)
+
+User: "прочитай что на этой странице https://example.com"
+→ [read_url] "На странице: ..." (краткое резюме содержимого)
 
 ПРИМЕРЫ ТОНА (подражай этому стилю — кратко, тепло, с характером):
 
@@ -124,7 +128,7 @@ const ACTION_KEYWORDS: &[&str] = &[
     "log_", "add_", "start_", "stop_", "get_", "run_", "open_", "set_",
     "купил", "поел", "ел ", "завтрак", "обед", "ужин", "перекус",
     "вес ", "шаг", "вод", "сон",
-    "загугли", "найди в интернете", "поищи", "погугли", "search", "web_search",
+    "загугли", "найди в интернете", "поищи", "погугли", "search", "web_search", "read_url", "прочитай страницу", "содержимое сайта",
     "запусти", "закрой", "переключ", "приложен",
     "поставь на паузу", "следующ", "предыдущ", "play", "pause", "next track",
     "через час", "через минут", "будильник",
@@ -338,6 +342,13 @@ fn build_tool_definitions() -> Vec<serde_json::Value> {
                 "query": {"type": "string"}
             },
             "required": ["query"]
+        })),
+        tool("read_url", "Fetch and read a web page, returning plain text content. Use after web_search to read a specific result page.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"}
+            },
+            "required": ["url"]
         })),
         // macOS Info
         tool("get_activity", "Get current user activity summary (active app, idle time)", serde_json::json!({
@@ -571,9 +582,11 @@ fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
         // Media
         (&["аниме", "манга", "фильм", "сериал", "книг", "музык", "игр", "подкаст", "смотрю", "читаю", "играю"],
          &["add_media"]),
-        // Web search
+        // Web search & read
         (&["загугли", "найди", "поищи", "погугли", "search", "web_search", "курс", "погод", "рецепт", "новост"],
-         &["web_search"]),
+         &["web_search", "read_url"]),
+        (&["прочитай страницу", "read_url", "fetch_url", "содержимое сайта", "что на сайте", "загрузи страницу", "прочитай ссылку"],
+         &["read_url"]),
         // System
         (&["открой", "open_url", "ссылк", "сайт"],
          &["open_url"]),
@@ -3568,6 +3581,64 @@ async fn web_search(query: String) -> Result<String, String> {
         Ok(format!("No results found for '{}'", query))
     } else {
         Ok(results.join("\n\n"))
+    }
+}
+
+#[tauri::command]
+async fn read_url(url: String) -> Result<String, String> {
+    // Validate URL scheme
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Only http/https URLs are supported".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("Fetch error: {}", e))?;
+
+    let html = response.text().await.map_err(|e| format!("Read error: {}", e))?;
+
+    // Strip script, style, nav, footer, header blocks
+    let re_blocks = regex::Regex::new(r"(?is)<(script|style|nav|footer|header|noscript|svg|iframe)[^>]*>.*?</\1>").unwrap();
+    let text = re_blocks.replace_all(&html, "");
+
+    // Strip all remaining HTML tags
+    let re_tags = regex::Regex::new(r"<[^>]+>").unwrap();
+    let text = re_tags.replace_all(&text, "");
+
+    // Decode common HTML entities
+    let text = text
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+
+    // Collapse whitespace: multiple spaces/tabs → single space, multiple newlines → double newline
+    let re_spaces = regex::Regex::new(r"[^\S\n]+").unwrap();
+    let text = re_spaces.replace_all(&text, " ");
+    let re_newlines = regex::Regex::new(r"\n{3,}").unwrap();
+    let text = re_newlines.replace_all(&text, "\n\n");
+
+    let text = text.trim().to_string();
+
+    // Truncate to ~4000 chars to fit LLM context
+    if text.len() > 4000 {
+        let truncated = &text[..text[..4000].rfind(' ').unwrap_or(4000)];
+        Ok(format!("{}\n\n[...truncated, {} chars total]", truncated, text.len()))
+    } else if text.is_empty() {
+        Ok(format!("Could not extract text from {}", url))
+    } else {
+        Ok(text)
     }
 }
 
@@ -10207,6 +10278,7 @@ pub fn run() {
             get_clipboard,
             set_clipboard,
             web_search,
+            read_url,
             // v0.7.0: Activities (Focus)
             start_activity,
             stop_activity,
