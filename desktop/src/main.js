@@ -144,7 +144,7 @@ const TAB_ICONS = {
 
 // ── Tab Registry ──
 const TAB_REGISTRY = {
-  chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: ['Настройки'], subIcons: { 'Настройки': TAB_ICONS.settings } },
+  chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: [], subIcons: {} },
   dashboard:   { label: 'Dashboard',   icon: TAB_ICONS.dashboard, closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
@@ -196,6 +196,7 @@ function renderPageHeader(tabId, extra) {
 let openTabs = ['chat', 'dashboard'];
 let activeTab = 'chat';
 let activeSubTab = {};
+let chatSidebarCollapsed = !!localStorage.getItem('hanni_chat_sidebar_collapsed');
 
 // Init default sub-tabs
 for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
@@ -455,7 +456,7 @@ listen('focus-ended', () => {
 // ── Conversation sidebar ──
 
 async function loadConversationsList(searchQuery) {
-  const convList = document.getElementById('conv-list');
+  const convList = document.getElementById('sidebar-conv-list') || document.getElementById('conv-list');
   if (!convList) return;
   try {
     let convs;
@@ -706,44 +707,99 @@ function renderSubSidebar() {
     return;
   }
 
-  sidebar.classList.remove('hidden');
-  items.innerHTML = '';
-  const subTabs = reg.subTabs;
-  const currentSub = activeTab === 'chat' ? activeSubTab[activeTab] : (activeSubTab[activeTab] ?? subTabs[0]);
-  for (const sub of subTabs) {
-    const item = document.createElement('div');
-    item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
-    const subIcon = reg.subIcons?.[sub];
-    if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.innerHTML = `<span class="sub-sidebar-dot"></span>${sub}`; }
-    item.addEventListener('click', () => {
-      if (activeTab === 'chat' && activeSubTab[activeTab] === sub) {
-        activeSubTab[activeTab] = null;
-      } else {
-        activeSubTab[activeTab] = sub;
-      }
-      saveTabs();
+  // Chat tab: conversations live in the sub-sidebar
+  if (activeTab === 'chat') {
+    sidebar.classList.remove('hidden');
+    sidebar.classList.toggle('collapsed', !!chatSidebarCollapsed);
+    const convPanel = document.getElementById('conversations-panel');
+    if (convPanel) convPanel.style.display = 'none';
+
+    items.innerHTML = '';
+
+    // Collapse toggle
+    const toggleRow = document.createElement('div');
+    toggleRow.className = 'sub-sidebar-toggle-row';
+    toggleRow.innerHTML = chatSidebarCollapsed
+      ? `<button class="sub-sidebar-collapse-btn" title="Развернуть">${TAB_ICONS.chat}</button>`
+      : `<button id="new-chat-sidebar-btn" class="sub-sidebar-new-chat">+ Новый чат</button>
+         <button class="sub-sidebar-collapse-btn" title="Свернуть">
+           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+         </button>`;
+    toggleRow.querySelector('.sub-sidebar-collapse-btn').addEventListener('click', () => {
+      chatSidebarCollapsed = !chatSidebarCollapsed;
+      localStorage.setItem('hanni_chat_sidebar_collapsed', chatSidebarCollapsed ? '1' : '');
       renderSubSidebar();
-      loadSubTabContent(activeTab, activeSubTab[activeTab]);
+      if (!chatSidebarCollapsed) loadConversationsList();
     });
-    items.appendChild(item);
+    toggleRow.querySelector('#new-chat-sidebar-btn')?.addEventListener('click', () => {
+      document.getElementById('new-chat-btn')?.click();
+    });
+    items.appendChild(toggleRow);
+
+    if (!chatSidebarCollapsed) {
+      // Search
+      const searchBox = document.createElement('div');
+      searchBox.className = 'sub-sidebar-search';
+      searchBox.innerHTML = `<input class="form-input sub-sidebar-conv-search" placeholder="Поиск..." autocomplete="off">`;
+      searchBox.querySelector('input').addEventListener('input', (e) => {
+        clearTimeout(convSearchTimeout);
+        convSearchTimeout = setTimeout(() => loadConversationsList(e.target.value), 300);
+      });
+      items.appendChild(searchBox);
+
+      // Conv list container
+      const convListEl = document.createElement('div');
+      convListEl.id = 'sidebar-conv-list';
+      convListEl.className = 'sub-sidebar-conv-list';
+      items.appendChild(convListEl);
+    }
+  } else {
+    sidebar.classList.remove('hidden', 'collapsed');
+    // Restore conversations panel visibility when leaving chat
+    const convPanel = document.getElementById('conversations-panel');
+    if (convPanel) convPanel.style.display = '';
+
+    items.innerHTML = '';
+    const subTabs = reg.subTabs;
+    const currentSub = activeSubTab[activeTab] ?? subTabs[0];
+    for (const sub of subTabs) {
+      const item = document.createElement('div');
+      item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
+      const subIcon = reg.subIcons?.[sub];
+      if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.innerHTML = `<span class="sub-sidebar-dot"></span>${sub}`; }
+      item.addEventListener('click', () => {
+        activeSubTab[activeTab] = sub;
+        saveTabs();
+        renderSubSidebar();
+        loadSubTabContent(activeTab, activeSubTab[activeTab]);
+      });
+      items.appendChild(item);
+    }
   }
+
+  // Bottom: gear + version
   const settingsBottom = document.getElementById('sub-sidebar-settings');
   if (settingsBottom) {
     settingsBottom.innerHTML = '';
-    if (activeTab !== 'chat') {
-      const gear = document.createElement('div');
-      gear.className = 'sub-sidebar-item';
-      gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span> Настройки`;
-      gear.addEventListener('click', () => {
+    const gear = document.createElement('div');
+    gear.className = 'sub-sidebar-item' + (activeTab === 'chat' && activeSubTab.chat === 'Настройки' ? ' active' : '');
+    gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span>${chatSidebarCollapsed && activeTab === 'chat' ? '' : ' Настройки'}`;
+    gear.addEventListener('click', () => {
+      if (activeTab === 'chat' && activeSubTab.chat === 'Настройки') {
+        activeSubTab.chat = null;
+        loadSubTabContent('chat', null);
+      } else {
         activeSubTab.chat = 'Настройки';
         switchTab('chat');
-      });
-      settingsBottom.appendChild(gear);
+      }
+    });
+    settingsBottom.appendChild(gear);
+    if (!(chatSidebarCollapsed && activeTab === 'chat')) {
+      const ver = document.createElement('div');
+      ver.className = 'version-label';
+      ver.textContent = `v${APP_VERSION}`;
+      settingsBottom.appendChild(ver);
     }
-    const ver = document.createElement('div');
-    ver.className = 'version-label';
-    ver.textContent = `v${APP_VERSION}`;
-    settingsBottom.appendChild(ver);
   }
   loadGoalsWidget();
 }
@@ -864,7 +920,7 @@ function loadSubTabContent(tabId, subTab) {
   switch (tabId) {
     case 'chat':
       if (subTab === 'Настройки') { showChatSettingsMode(); loadChatSettings(); }
-      else { hideChatSettingsMode(); loadConversationsList(); input.focus(); }
+      else { hideChatSettingsMode(); renderSubSidebar(); loadConversationsList(); input.focus(); }
       break;
     case 'dashboard': loadDashboard(); break;
     case 'calendar': loadCalendar(subTab); break;
