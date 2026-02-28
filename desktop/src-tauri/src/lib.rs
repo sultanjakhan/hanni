@@ -4257,6 +4257,15 @@ fn is_screen_locked() -> bool {
     }
 }
 
+fn persist_calendar_result(key: &str, value: &str) {
+    if let Ok(conn) = rusqlite::Connection::open(hanni_db_path()) {
+        let _ = conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",
+            rusqlite::params![key, value],
+        );
+    }
+}
+
 fn check_calendar_access() -> bool {
     if APPLE_CALENDAR_DISABLED.load(Ordering::Relaxed) {
         return false;
@@ -4264,7 +4273,6 @@ fn check_calendar_access() -> bool {
     if CALENDAR_ACCESS_DENIED.load(Ordering::Relaxed) {
         return false;
     }
-    // Cache positive result too — don't re-prompt every cycle
     if CALENDAR_ACCESS_CHECKED.load(Ordering::Relaxed) {
         return true;
     }
@@ -4272,17 +4280,12 @@ fn check_calendar_access() -> bool {
     match result {
         Ok(_) => {
             CALENDAR_ACCESS_CHECKED.store(true, Ordering::Relaxed);
+            persist_calendar_result("calendar_access_ok", "true");
             true
         }
-        Err(e) => {
-            let lower = e.to_lowercase();
-            if lower.contains("not allowed") || lower.contains("denied")
-                || lower.contains("not permitted") || lower.contains("1002")
-                || lower.contains("-1743") || lower.contains("assistive")
-                || lower.contains("timeout")
-            {
-                CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed);
-            }
+        Err(_) => {
+            CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed);
+            persist_calendar_result("calendar_access_denied", "true");
             false
         }
     }
@@ -10043,6 +10046,19 @@ pub fn run() {
         [], |row| row.get::<_, String>(0),
     ) {
         APPLE_CALENDAR_DISABLED.store(val == "false", Ordering::Relaxed);
+    }
+    // Restore persisted calendar access result — never re-prompt after first check
+    if let Ok(val) = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='calendar_access_ok'",
+        [], |row| row.get::<_, String>(0),
+    ) {
+        if val == "true" { CALENDAR_ACCESS_CHECKED.store(true, Ordering::Relaxed); }
+    }
+    if let Ok(val) = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='calendar_access_denied'",
+        [], |row| row.get::<_, String>(0),
+    ) {
+        if val == "true" { CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed); }
     }
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
