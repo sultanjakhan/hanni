@@ -144,7 +144,7 @@ const TAB_ICONS = {
 
 // ── Tab Registry ──
 const TAB_REGISTRY = {
-  chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: ['Чат', 'Настройки'], subIcons: { 'Чат': TAB_ICONS.chat, 'Настройки': TAB_ICONS.settings } },
+  chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: ['Настройки'], subIcons: { 'Настройки': TAB_ICONS.settings } },
   dashboard:   { label: 'Dashboard',   icon: TAB_ICONS.dashboard, closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
@@ -159,7 +159,6 @@ const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
   money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
-  settings:    { label: 'Settings',    icon: TAB_ICONS.settings,  closable: true,  subTabs: [] },
 };
 
 const TAB_DESCRIPTIONS = {
@@ -177,7 +176,6 @@ const TAB_DESCRIPTIONS = {
   food: 'Food log, recipes, and product inventory',
   money: 'Expenses, income, budgets, and savings',
   people: 'Contacts and relationship management',
-  settings: 'App configuration and preferences',
 };
 
 function renderPageHeader(tabId, extra) {
@@ -203,14 +201,20 @@ let activeSubTab = {};
 for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
   if (reg.subTabs?.length) activeSubTab[id] = reg.subTabs[0];
 }
+activeSubTab.chat = null; // Chat view shows chat by default, not settings
 
 // Restore from localStorage
 try {
   const saved = JSON.parse(localStorage.getItem('hanni_tabs'));
   if (saved) {
-    openTabs = saved.open || ['chat', 'dashboard'];
-    activeTab = saved.active || 'chat';
-    if (saved.sub) Object.assign(activeSubTab, saved.sub);
+    openTabs = (saved.open || ['chat', 'dashboard']).filter(id => TAB_REGISTRY[id]);
+    if (!openTabs.includes('chat')) openTabs.unshift('chat');
+    activeTab = TAB_REGISTRY[saved.active] ? saved.active : 'chat';
+    if (saved.sub) {
+      Object.assign(activeSubTab, saved.sub);
+      // Clean up old 'Чат' sub-tab value
+      if (activeSubTab.chat && activeSubTab.chat !== 'Настройки') activeSubTab.chat = null;
+    }
   }
 } catch (_) {}
 
@@ -705,34 +709,37 @@ function renderSubSidebar() {
   sidebar.classList.remove('hidden');
   items.innerHTML = '';
   const subTabs = reg.subTabs;
-  const currentSub = activeSubTab[activeTab] || subTabs[0];
+  const currentSub = activeTab === 'chat' ? activeSubTab[activeTab] : (activeSubTab[activeTab] ?? subTabs[0]);
   for (const sub of subTabs) {
     const item = document.createElement('div');
     item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
     const subIcon = reg.subIcons?.[sub];
     if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.innerHTML = `<span class="sub-sidebar-dot"></span>${sub}`; }
     item.addEventListener('click', () => {
-      activeSubTab[activeTab] = sub;
+      if (activeTab === 'chat' && activeSubTab[activeTab] === sub) {
+        activeSubTab[activeTab] = null;
+      } else {
+        activeSubTab[activeTab] = sub;
+      }
       saveTabs();
       renderSubSidebar();
-      loadSubTabContent(activeTab, sub);
+      loadSubTabContent(activeTab, activeSubTab[activeTab]);
     });
     items.appendChild(item);
   }
   const settingsBottom = document.getElementById('sub-sidebar-settings');
   if (settingsBottom) {
     settingsBottom.innerHTML = '';
-    const gear = document.createElement('div');
-    gear.className = 'sub-sidebar-item' + (activeTab === 'settings' ? ' active' : '');
-    gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span> Настройки`;
-    gear.addEventListener('click', () => {
-      if (!openTabs.includes('settings')) {
-        const idx = openTabs.indexOf(activeTab);
-        openTabs.splice(idx + 1, 0, 'settings');
-      }
-      switchTab('settings');
-    });
-    settingsBottom.appendChild(gear);
+    if (activeTab !== 'chat') {
+      const gear = document.createElement('div');
+      gear.className = 'sub-sidebar-item';
+      gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span> Настройки`;
+      gear.addEventListener('click', () => {
+        activeSubTab.chat = 'Настройки';
+        switchTab('chat');
+      });
+      settingsBottom.appendChild(gear);
+    }
     const ver = document.createElement('div');
     ver.className = 'version-label';
     ver.textContent = `v${APP_VERSION}`;
@@ -747,7 +754,7 @@ async function loadGoalsWidget() {
   if (section) section.classList.add('hidden');
 
   // Inject goals into content area
-  if (activeTab === 'chat' || activeTab === 'settings') return;
+  if (activeTab === 'chat') return;
   const contentEl = document.getElementById(`${activeTab}-content`);
   if (!contentEl) return;
 
@@ -849,7 +856,7 @@ function activateView() {
   if (view) view.classList.add('active');
   renderSubSidebar();
   const reg = TAB_REGISTRY[activeTab];
-  const sub = reg?.subTabs ? (activeSubTab[activeTab] || reg.subTabs[0]) : null;
+  const sub = reg?.subTabs ? (activeTab === 'chat' ? activeSubTab[activeTab] : (activeSubTab[activeTab] ?? reg.subTabs[0])) : null;
   loadSubTabContent(activeTab, sub);
 }
 
@@ -873,7 +880,6 @@ function loadSubTabContent(tabId, subTab) {
     case 'food': loadFood(subTab); break;
     case 'money': loadMoney(subTab); break;
     case 'people': loadPeople(subTab); break;
-    case 'settings': loadSettings(subTab); break;
   }
 }
 
@@ -960,6 +966,7 @@ async function loadChatSettings() {
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
         <button class="chat-settings-tab" data-panel="data">Данные</button>
+        <button class="chat-settings-tab" data-panel="about">О Hanni</button>
       </div>
 
       <div class="chat-settings-panel active" id="cs-panel-memory">
@@ -1142,6 +1149,28 @@ async function loadChatSettings() {
               </div>
             `).join('')}
           </div>` : ''}
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-about">
+        <div class="about-wrapper">
+          <div class="about-card">
+            <div class="about-header">
+              <div class="about-logo">🤖</div>
+              <div class="about-name">Hanni</div>
+              <span class="about-version">v${APP_VERSION}</span>
+            </div>
+            <hr class="about-divider">
+            <div class="about-info-list">
+              <div class="about-info-row"><span class="about-info-label">Модель</span><span class="about-info-value" id="cs-about-model">Загрузка...</span></div>
+              <div class="about-info-row"><span class="about-info-label">MLX сервер</span><span class="about-info-value" id="cs-about-mlx">Загрузка...</span></div>
+              <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="cs-about-api">Проверяю...</span></div>
+            </div>
+            <hr class="about-divider">
+            <div class="about-actions">
+              <button class="settings-btn" id="cs-about-check-update">Проверить обновления</button>
+            </div>
+          </div>
         </div>
       </div>`;
 
@@ -1341,6 +1370,27 @@ async function loadChatSettings() {
         btn.textContent = 'Ошибка';
       }
       setTimeout(() => { btn.textContent = 'Запустить цикл'; btn.disabled = false; }, 5000);
+    });
+
+    // ── About panel ──
+    invoke('get_model_info').catch(() => ({})).then(info => {
+      const modelEl = document.getElementById('cs-about-model');
+      if (modelEl) modelEl.textContent = info.model_name || '?';
+      const mlxEl = document.getElementById('cs-about-mlx');
+      if (mlxEl) { mlxEl.textContent = info.server_online ? 'Онлайн' : 'Офлайн'; mlxEl.className = 'about-info-value ' + (info.server_online ? 'online' : 'offline'); }
+    });
+    fetch('http://127.0.0.1:8235/api/status').then(resp => {
+      const apiEl = document.getElementById('cs-about-api');
+      if (apiEl) { apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен'; apiEl.className = 'about-info-value ' + (resp.ok ? 'online' : 'offline'); }
+    }).catch(() => {
+      const apiEl = document.getElementById('cs-about-api');
+      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'about-info-value offline'; }
+    });
+    document.getElementById('cs-about-check-update')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Проверяю...'; btn.disabled = true;
+      try { const r = await invoke('check_update'); btn.textContent = r; }
+      catch (err) { btn.textContent = 'Ошибка'; }
+      setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
     });
 
   } catch (e) {
@@ -3603,14 +3653,6 @@ function panelItem(item) {
       <div class="panel-item-detail">${item.detail}</div>
     </div>
   </div>`;
-}
-
-// ── Settings page ──
-
-async function loadSettings(subTab) {
-  const settingsContent = document.getElementById('settings-content');
-  if (!settingsContent) return;
-  loadAbout(settingsContent);
 }
 
 // ── About (Settings page) ──
