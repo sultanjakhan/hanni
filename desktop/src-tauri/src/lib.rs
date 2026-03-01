@@ -4851,8 +4851,9 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
     } else { mode.max_tokens };
 
     // Thinking mode needs extra budget — think tokens count against max_tokens
+    // Model can easily burn 500-1500 tokens on <think> block alone
     let adaptive_max_tokens = if thinking_enabled {
-        adaptive_max_tokens.max(1024)
+        adaptive_max_tokens.max(4096)
     } else {
         adaptive_max_tokens
     };
