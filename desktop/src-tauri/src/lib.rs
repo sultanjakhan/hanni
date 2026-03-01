@@ -1438,6 +1438,19 @@ fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             eval_score REAL,
             notes TEXT,
             adapter_path TEXT
+        );
+
+        -- v0.24.0: Custom Pages
+        CREATE TABLE IF NOT EXISTS custom_pages (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT 'Новая страница',
+            icon TEXT DEFAULT '📄',
+            description TEXT DEFAULT '',
+            content TEXT DEFAULT '',
+            sub_tabs TEXT DEFAULT '[]',
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }
@@ -6378,6 +6391,28 @@ fn delete_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn toggle_note_pin(id: i64, db: tauri::State<'_, HanniDb>) -> Result<bool, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute("UPDATE notes SET pinned = 1 - pinned, updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, id]).map_err(|e| format!("DB error: {}", e))?;
+    let new_val: bool = conn.query_row("SELECT pinned != 0 FROM notes WHERE id=?1", rusqlite::params![id],
+        |row| row.get(0)).unwrap_or(false);
+    Ok(new_val)
+}
+
+#[tauri::command]
+fn toggle_note_archive(id: i64, db: tauri::State<'_, HanniDb>) -> Result<bool, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute("UPDATE notes SET archived = 1 - archived, updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, id]).map_err(|e| format!("DB error: {}", e))?;
+    let new_val: bool = conn.query_row("SELECT archived != 0 FROM notes WHERE id=?1", rusqlite::params![id],
+        |row| row.get(0)).unwrap_or(false);
+    Ok(new_val)
+}
+
+#[tauri::command]
 fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let rows = if let Some(q) = search {
@@ -6406,7 +6441,7 @@ fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'
 fn get_notes_all(conn: &rusqlite::Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut stmt = conn.prepare(
         "SELECT id, title, content, tags, pinned, archived, created_at, updated_at FROM notes
-         WHERE archived=0 ORDER BY pinned DESC, updated_at DESC LIMIT 100"
+         ORDER BY pinned DESC, updated_at DESC LIMIT 200"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| note_from_row(row))
         .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
@@ -6434,6 +6469,111 @@ fn get_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value,
         rusqlite::params![id],
         |row| note_from_row(row),
     ).map_err(|e| format!("Not found: {}", e))
+}
+
+// ── v0.24.0: Custom Pages commands ──
+
+#[tauri::command]
+fn create_custom_page(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Local::now().to_rfc3339();
+    let sort_order: i32 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM custom_pages", [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    conn.execute(
+        "INSERT INTO custom_pages (id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at) VALUES (?1, 'Новая страница', '📄', '', '', '[]', ?2, ?3, ?3)",
+        rusqlite::params![id, sort_order, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(serde_json::json!({
+        "id": id,
+        "title": "Новая страница",
+        "icon": "📄",
+        "description": "",
+        "content": "",
+        "sub_tabs": "[]",
+        "sort_order": sort_order,
+        "created_at": now,
+        "updated_at": now,
+    }))
+}
+
+#[tauri::command]
+fn get_custom_pages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at FROM custom_pages ORDER BY sort_order"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, String>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "icon": row.get::<_, String>(2)?,
+            "description": row.get::<_, String>(3)?,
+            "content": row.get::<_, String>(4)?,
+            "sub_tabs": row.get::<_, String>(5)?,
+            "sort_order": row.get::<_, i32>(6)?,
+            "created_at": row.get::<_, String>(7)?,
+            "updated_at": row.get::<_, String>(8)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn get_custom_page(id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    conn.query_row(
+        "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at FROM custom_pages WHERE id=?1",
+        rusqlite::params![id],
+        |row| Ok(serde_json::json!({
+            "id": row.get::<_, String>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "icon": row.get::<_, String>(2)?,
+            "description": row.get::<_, String>(3)?,
+            "content": row.get::<_, String>(4)?,
+            "sub_tabs": row.get::<_, String>(5)?,
+            "sort_order": row.get::<_, i32>(6)?,
+            "created_at": row.get::<_, String>(7)?,
+            "updated_at": row.get::<_, String>(8)?,
+        })),
+    ).map_err(|e| format!("Not found: {}", e))
+}
+
+#[tauri::command]
+fn update_custom_page(
+    id: String, title: Option<String>, icon: Option<String>,
+    description: Option<String>, content: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    // Get current values for fields not provided
+    let (cur_title, cur_icon, cur_desc, cur_content): (String, String, String, String) = conn.query_row(
+        "SELECT title, icon, description, content FROM custom_pages WHERE id=?1",
+        rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    ).map_err(|e| format!("Not found: {}", e))?;
+    conn.execute(
+        "UPDATE custom_pages SET title=?1, icon=?2, description=?3, content=?4, updated_at=?5 WHERE id=?6",
+        rusqlite::params![
+            title.unwrap_or(cur_title),
+            icon.unwrap_or(cur_icon),
+            description.unwrap_or(cur_desc),
+            content.unwrap_or(cur_content),
+            now, id
+        ],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_custom_page(id: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM custom_pages WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
 }
 
 // ── v0.7.0: Events (Calendar) commands ──
@@ -10352,6 +10492,8 @@ pub fn run() {
             create_note,
             update_note,
             delete_note,
+            toggle_note_pin,
+            toggle_note_archive,
             get_notes,
             get_note,
             // v0.7.0: Events (Calendar)
@@ -10515,6 +10657,12 @@ pub fn run() {
             get_flywheel_history,
             run_flywheel_cycle,
             rate_proactive,
+            // v0.24.0: Custom Pages
+            create_custom_page,
+            get_custom_pages,
+            get_custom_page,
+            update_custom_page,
+            delete_custom_page,
         ])
         .setup(move |app| {
             // Auto-updater
