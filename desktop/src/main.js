@@ -2601,17 +2601,20 @@ async function newChat() {
 
 document.getElementById('new-chat')?.addEventListener('click', newChat);
 
-// ── Input toolbar chips (Thinking, Self-refine) ──
+// ── Input toolbar chips (Thinking, Self-refine, Web Search) ──
 const chipThinking = document.getElementById('chip-thinking');
 const chipSelfRefine = document.getElementById('chip-selfrefine');
+const chipWebSearch = document.getElementById('chip-websearch');
 
 (async () => {
-  const [thinkVal, refineVal] = await Promise.all([
+  const [thinkVal, refineVal, webVal] = await Promise.all([
     invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
     invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
+    invoke('get_app_setting', { key: 'enable_web_search' }).catch(() => null),
   ]);
   if (thinkVal === 'true') chipThinking?.classList.add('active');
   if (refineVal === 'true') chipSelfRefine?.classList.add('active');
+  if (webVal === 'true') chipWebSearch?.classList.add('active');
 })();
 
 chipThinking?.addEventListener('click', async () => {
@@ -2624,6 +2627,12 @@ chipSelfRefine?.addEventListener('click', async () => {
   chipSelfRefine.classList.toggle('active');
   const on = chipSelfRefine.classList.contains('active');
   await invoke('set_app_setting', { key: 'enable_self_refine', value: on ? 'true' : 'false' }).catch(() => {});
+});
+
+chipWebSearch?.addEventListener('click', async () => {
+  chipWebSearch.classList.toggle('active');
+  const on = chipWebSearch.classList.contains('active');
+  await invoke('set_app_setting', { key: 'enable_web_search', value: on ? 'true' : 'false' }).catch(() => {});
 });
 
 sendBtn.addEventListener('click', send);

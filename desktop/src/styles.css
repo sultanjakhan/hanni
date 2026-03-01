@@ -893,7 +893,7 @@ body {
   color: var(--text-muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
@@ -902,9 +902,12 @@ body {
 .input-chip:hover {
   color: var(--text-secondary);
   background: var(--bg-hover);
+  border-color: var(--border-default);
 }
 
 .input-chip .chip-icon {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   transition: transform 0.25s ease, filter 0.25s ease;
 }
@@ -933,6 +936,19 @@ body {
 }
 #chip-selfrefine.active:hover {
   background: #303f36;
+}
+
+/* Web search — purple accent */
+#chip-websearch.active {
+  color: var(--color-purple);
+  background: var(--color-purple-bg);
+}
+#chip-websearch.active .chip-icon {
+  filter: drop-shadow(0 0 4px rgba(134, 93, 187, 0.5));
+  transform: scale(1.15);
+}
+#chip-websearch.active:hover {
+  background: #3a2f4a;
 }
 
 #input-wrapper {
