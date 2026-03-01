@@ -4850,6 +4850,13 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         } else { mode.max_tokens }
     } else { mode.max_tokens };
 
+    // Thinking mode needs extra budget — think tokens count against max_tokens
+    let adaptive_max_tokens = if thinking_enabled {
+        adaptive_max_tokens.max(1024)
+    } else {
+        adaptive_max_tokens
+    };
+
     let request = ChatRequest {
         model: MODEL.into(),
         messages: chat_messages,
@@ -4946,21 +4953,36 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
                         }
 
                         if let Some(token) = &delta.content {
-                            if token.contains("<think>") {
-                                in_think = true;
-                                continue;
+                            // Handle think blocks — strip reasoning tokens
+                            let mut remaining = token.as_str();
+                            while !remaining.is_empty() {
+                                if in_think {
+                                    if let Some(pos) = remaining.find("</think>") {
+                                        in_think = false;
+                                        remaining = &remaining[pos + 8..];
+                                    } else {
+                                        break; // entire token is inside think block
+                                    }
+                                } else if let Some(pos) = remaining.find("<think>") {
+                                    // Emit text before <think>
+                                    let before = &remaining[..pos];
+                                    if !before.is_empty() {
+                                        full_reply.push_str(before);
+                                        let _ = app.emit("chat-token", TokenPayload {
+                                            token: before.to_string(),
+                                        });
+                                    }
+                                    in_think = true;
+                                    remaining = &remaining[pos + 7..];
+                                } else {
+                                    // Normal text outside think block
+                                    full_reply.push_str(remaining);
+                                    let _ = app.emit("chat-token", TokenPayload {
+                                        token: remaining.to_string(),
+                                    });
+                                    break;
+                                }
                             }
-                            if token.contains("</think>") {
-                                in_think = false;
-                                continue;
-                            }
-                            if in_think {
-                                continue;
-                            }
-                            full_reply.push_str(token);
-                            let _ = app.emit("chat-token", TokenPayload {
-                                token: token.clone(),
-                            });
                         }
                     }
                 }
