@@ -1,6 +1,7 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+
 // ── Markdown rendering setup ──
 const markedInstance = new marked.Marked({
   breaks: true,
@@ -351,7 +352,7 @@ async function startRecording() {
     try {
       const hasModel = await invoke('check_whisper_model');
       if (!hasModel) {
-        if (confirm('Модель Whisper не найдена (~1.5GB). Скачать?')) {
+        if (await confirmModal('Модель Whisper не найдена (~1.5GB). Скачать?')) {
           addMsg('bot', 'Скачиваю модель Whisper...');
           const unlisten = await listen('whisper-download-progress', (event) => {
             const msgs = chat.querySelectorAll('.msg.bot');
@@ -594,7 +595,7 @@ function escapeHtml(text) {
 }
 
 // Custom confirm modal (replaces window.confirm which may not work in Tauri WebView)
-function confirmModal(msg = 'Удалить?') {
+function confirmModal(msg = 'Удалить?', confirmLabel = 'Да') {
   return new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -602,7 +603,7 @@ function confirmModal(msg = 'Удалить?') {
       <div class="modal-title">${escapeHtml(msg)}</div>
       <div class="modal-actions">
         <button class="btn-secondary confirm-no">Отмена</button>
-        <button class="btn-primary confirm-yes" style="background:var(--danger, #ef4444)">Удалить</button>
+        <button class="btn-primary confirm-yes" style="background:var(--color-red)">${escapeHtml(confirmLabel)}</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
@@ -824,7 +825,7 @@ async function loadGoalsWidget() {
     wrapper.innerHTML = `
       <div class="goals-inline-header">
         <span class="goals-inline-title">Goals</span>
-        <button class="btn-small" id="add-goal-btn">+ Goal</button>
+        <button class="btn-smallall" id="add-goal-btn">+ Goal</button>
       </div>
       ${goals.length > 0 ? goals.map(g => {
         const pct = g.target_value > 0 ? Math.min(100, Math.round(g.current_value / g.target_value * 100)) : 0;
@@ -906,8 +907,22 @@ function switchTab(tabId) {
   activateView();
 }
 
+function ensureViewDiv(tabId) {
+  let view = document.getElementById(`view-${tabId}`);
+  if (!view) {
+    view = document.createElement('div');
+    view.id = `view-${tabId}`;
+    view.className = 'view';
+    view.innerHTML = `<div id="${tabId}-content" class="tab-content"></div>`;
+    document.getElementById('content-area').appendChild(view);
+  }
+  return view;
+}
+
 function activateView() {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  // Ensure view div exists for custom pages
+  if (activeTab.startsWith('page_')) ensureViewDiv(activeTab);
   const view = document.getElementById(`view-${activeTab}`);
   if (view) view.classList.add('active');
   renderSubSidebar();
@@ -936,6 +951,9 @@ function loadSubTabContent(tabId, subTab) {
     case 'food': loadFood(subTab); break;
     case 'money': loadMoney(subTab); break;
     case 'people': loadPeople(subTab); break;
+    default:
+      if (tabId.startsWith('page_')) loadCustomPage(tabId);
+      break;
   }
 }
 
@@ -946,6 +964,36 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
   const list = document.getElementById('tab-dropdown-list');
   const btn = document.getElementById('tab-add');
   list.innerHTML = '';
+
+  // "New Page" option — always first
+  const newPageItem = document.createElement('div');
+  newPageItem.className = 'tab-dropdown-item tab-dropdown-new-page';
+  newPageItem.innerHTML = `<span class="tab-item-icon">➕</span> Новая страница`;
+  newPageItem.addEventListener('click', async () => {
+    dropdown.classList.add('hidden');
+    try {
+      const page = await invoke('create_custom_page');
+      const tabId = `page_${page.id}`;
+      TAB_REGISTRY[tabId] = {
+        label: page.title,
+        icon: page.icon,
+        closable: true,
+        subTabs: [],
+        custom: true,
+        pageId: page.id,
+      };
+      ensureViewDiv(tabId);
+      openTab(tabId);
+    } catch (err) { console.error('Page create error:', err); }
+  });
+  list.appendChild(newPageItem);
+
+  // Separator
+  const sep = document.createElement('div');
+  sep.className = 'tab-dropdown-separator';
+  list.appendChild(sep);
+
+  // Existing closed tabs
   for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
     if (openTabs.includes(id)) continue;
     const item = document.createElement('div');
@@ -1145,8 +1193,8 @@ async function loadChatSettings() {
           <div class="proactive-styles-section">
             <div class="proactive-styles-desc">Какие стили Hanni может использовать в автономном режиме.</div>
             <div class="proactive-styles-actions">
-              <button class="btn-small" id="proactive-select-all">Все</button>
-              <button class="btn-small" id="proactive-select-none">Снять все</button>
+              <button class="btn-smallall" id="proactive-select-all">Все</button>
+              <button class="btn-smallall" id="proactive-select-none">Снять все</button>
             </div>
             <div class="proactive-styles-grid" id="proactive-styles-grid">
               ${PROACTIVE_STYLE_DEFINITIONS.map(s => {
@@ -2891,7 +2939,7 @@ async function loadPrinciples(el) {
       </div>`;
     el.querySelectorAll('[data-del]').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (confirm('Delete?')) { await invoke('delete_principle', { id: parseInt(btn.dataset.del) }).catch(()=>{}); loadPrinciples(el); }
+        if (await confirmModal('Удалить?')) { await invoke('delete_principle', { id: parseInt(btn.dataset.del) }).catch(()=>{}); loadPrinciples(el); }
       });
     });
     document.getElementById('add-principle-btn')?.addEventListener('click', () => {
@@ -3398,7 +3446,7 @@ window.toggleContactBlock = async (id) => {
   loadPeople(activeSubTab.people || 'All');
 };
 window.deleteContact = async (id) => {
-  if (confirm('Delete this contact?')) {
+  if (await confirmModal('Удалить контакт?')) {
     await invoke('delete_contact', { id });
     loadPeople(activeSubTab.people || 'All');
   }
@@ -3994,128 +4042,335 @@ async function loadFocus() {
   }
 }
 
+// ── Custom Pages ──
+const COMMON_EMOJIS = ['📄','📝','📋','📌','📎','📁','💡','🎯','🔥','⭐','🏠','💼','🎨','🎮','📚','🎵','💰','🏋️','❤️','🧠','🍔','📅','🔧','🚀','🌟','✅','📊','🗂️','💬','🔔'];
+let customPageAutoSave = null;
+
+async function loadCustomPage(tabId) {
+  const reg = TAB_REGISTRY[tabId];
+  if (!reg?.custom || !reg.pageId) return;
+  const el = document.getElementById(`${tabId}-content`);
+  if (!el) return;
+
+  try {
+    const page = await invoke('get_custom_page', { id: reg.pageId });
+
+    el.innerHTML = `
+      <div class="custom-page-header">
+        <div class="custom-page-icon-row">
+          <button class="custom-page-icon-btn" id="cp-icon-btn" title="Сменить иконку">${escapeHtml(page.icon || '📄')}</button>
+          <button class="btn-danger btn-small custom-page-delete-btn" id="cp-delete-btn">Удалить</button>
+        </div>
+        <input class="page-title-input" id="cp-title" value="${escapeHtml(page.title || '')}" placeholder="Без названия">
+        <input class="page-description-input" id="cp-desc" value="${escapeHtml(page.description || '')}" placeholder="Добавить описание...">
+      </div>
+      <div class="custom-page-content">
+        <textarea class="custom-page-body" id="cp-body" placeholder="Начните писать...">${escapeHtml(page.content || '')}</textarea>
+      </div>
+      <div class="custom-page-emoji-picker hidden" id="cp-emoji-picker">
+        ${COMMON_EMOJIS.map(e => `<button class="emoji-pick-btn">${e}</button>`).join('')}
+      </div>`;
+
+    // Auto-save helper
+    const autoSave = (field, value) => {
+      clearTimeout(customPageAutoSave);
+      customPageAutoSave = setTimeout(async () => {
+        const args = { id: reg.pageId };
+        args[field] = value;
+        await invoke('update_custom_page', args).catch(() => {});
+        // Sync title/icon to tab bar
+        if (field === 'title') { reg.label = value || 'Без названия'; renderTabBar(); }
+        if (field === 'icon') { reg.icon = value; renderTabBar(); }
+      }, 500);
+    };
+
+    document.getElementById('cp-title')?.addEventListener('input', (e) => autoSave('title', e.target.value));
+    document.getElementById('cp-desc')?.addEventListener('input', (e) => autoSave('description', e.target.value));
+    document.getElementById('cp-body')?.addEventListener('input', (e) => autoSave('content', e.target.value));
+
+    // Auto-resize textarea
+    const body = document.getElementById('cp-body');
+    if (body) {
+      const resize = () => { body.style.height = 'auto'; body.style.height = body.scrollHeight + 'px'; };
+      body.addEventListener('input', resize);
+      setTimeout(resize, 0);
+    }
+
+    // Emoji picker
+    const emojiPicker = document.getElementById('cp-emoji-picker');
+    document.getElementById('cp-icon-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      emojiPicker?.classList.toggle('hidden');
+    });
+    document.querySelectorAll('.emoji-pick-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emoji = btn.textContent;
+        document.getElementById('cp-icon-btn').textContent = emoji;
+        emojiPicker?.classList.add('hidden');
+        autoSave('icon', emoji);
+      });
+    });
+    // Close emoji picker on outside click
+    const closeEmojiPicker = (e) => {
+      if (!emojiPicker?.contains(e.target) && e.target.id !== 'cp-icon-btn') {
+        emojiPicker?.classList.add('hidden');
+      }
+    };
+    document.addEventListener('click', closeEmojiPicker);
+
+    // Delete page
+    document.getElementById('cp-delete-btn')?.addEventListener('click', async () => {
+      if (!(await confirmModal('Удалить страницу?'))) return;
+      await invoke('delete_custom_page', { id: reg.pageId }).catch(() => {});
+      closeTab(tabId);
+      delete TAB_REGISTRY[tabId];
+      const viewDiv = document.getElementById(`view-${tabId}`);
+      if (viewDiv) viewDiv.remove();
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📄</div><div class="empty-state-text">Страница не найдена</div></div>`;
+  }
+}
+
 // ── Notes ──
+let notesViewMode = 'list'; // 'list' or 'edit'
+
+function formatNoteDate(dateStr) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diff = now - date;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'только что';
+  if (mins < 60) return `${mins} мин назад`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} ч назад`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} дн назад`;
+  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+}
+
 async function loadNotes(subTab) {
   const el = document.getElementById('notes-content');
   if (!el) return;
+
+  if (notesViewMode === 'edit' && currentNoteId) {
+    renderNoteEditor(el, currentNoteId);
+    return;
+  }
+
   try {
     const filter = subTab === 'Pinned' ? 'pinned' : subTab === 'Archived' ? 'archived' : null;
     const notes = await invoke('get_notes', { filter, search: null });
-    const notesList = notes || [];
-
-    el.innerHTML = renderPageHeader('notes') + `<div class="page-content"><div class="notes-layout">
-      <div class="notes-list">
-        <div class="notes-list-header">
-          <input class="form-input" id="notes-search" placeholder="Поиск заметок..." autocomplete="off">
-          <button class="btn-primary" id="new-note-btn" style="width:100%;">+ Новая заметка</button>
-        </div>
-        <div class="notes-list-items" id="notes-list-items"></div>
-      </div>
-      <div class="notes-editor" id="notes-editor-panel">
-        <div class="notes-empty">Выберите заметку или создайте новую</div>
-      </div>
-    </div></div>`;
-
-    renderNotesList(notesList);
-
-    document.getElementById('new-note-btn')?.addEventListener('click', async () => {
-      try {
-        const id = await invoke('create_note', { title: 'Без названия', content: '', tags: '' });
-        currentNoteId = id;
-        loadNotes();
-      } catch (err) { alert('Ошибка: ' + err); }
-    });
-
-    document.getElementById('notes-search')?.addEventListener('input', async (e) => {
-      clearTimeout(noteAutoSaveTimeout);
-      noteAutoSaveTimeout = setTimeout(async () => {
-        try {
-          const results = await invoke('get_notes', { filter: null, search: e.target.value || null });
-          renderNotesList(results || []);
-        } catch (_) {}
-      }, 300);
-    });
+    renderNotesListView(el, notes || [], filter);
   } catch (e) {
     showStub('notes-content', '📝', 'Заметки', 'Быстрые заметки и мысли');
   }
 }
 
-function renderNotesList(notes) {
-  const list = document.getElementById('notes-list-items');
-  if (!list) return;
-  list.innerHTML = '';
-  for (const note of notes) {
-    const item = document.createElement('div');
-    item.className = 'note-list-item' + (note.id === currentNoteId ? ' active' : '');
-    const date = new Date(note.updated_at || note.created_at);
-    const dateStr = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-    item.innerHTML = `
-      <div class="note-list-item-title">${note.pinned ? '<span class="note-pinned-icon">&#x1F4CC;</span> ' : ''}${escapeHtml(note.title || 'Без названия')}</div>
-      <div class="note-list-item-preview">${escapeHtml((note.content || '').substring(0, 60))}</div>
-      <div class="note-list-item-meta">${dateStr}</div>`;
-    item.addEventListener('click', () => openNote(note.id));
-    list.appendChild(item);
+function renderNotesListView(el, notes, filter) {
+  notesViewMode = 'list';
+  const pinned = notes.filter(n => n.pinned && !n.archived);
+  const regular = notes.filter(n => !n.pinned && !n.archived);
+  const archived = notes.filter(n => n.archived);
+  const displayNotes = filter === 'pinned' ? pinned : filter === 'archived' ? archived : [...pinned, ...regular];
+
+  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
+    <div class="notes-toolbar">
+      <button class="btn-primary" id="new-note-btn">+ Новая заметка</button>
+      <div class="notes-search-wrap">
+        <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off">
+      </div>
+    </div>
+    <div class="notes-card-list" id="notes-card-list">
+      ${displayNotes.length === 0 ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">📝</div>
+          <div class="empty-state-text">Нет заметок</div>
+          <button class="btn-primary" id="empty-new-note-btn">Создать первую</button>
+        </div>` : ''}
+    </div>
+  </div>`;
+
+  const list = document.getElementById('notes-card-list');
+  const refresh = () => loadNotes();
+  if (list && displayNotes.length > 0) {
+    if (filter !== 'pinned' && filter !== 'archived' && pinned.length > 0) {
+      const section = document.createElement('div');
+      section.className = 'notes-section-label';
+      section.textContent = '📌 Закреплённые';
+      list.appendChild(section);
+      for (const note of pinned) list.appendChild(createNoteCard(note, refresh));
+
+      if (regular.length > 0) {
+        const sep = document.createElement('div');
+        sep.className = 'notes-section-label';
+        sep.textContent = 'Все заметки';
+        list.appendChild(sep);
+      }
+    }
+    const mainNotes = filter === 'pinned' ? pinned : filter === 'archived' ? archived : regular;
+    for (const note of mainNotes) list.appendChild(createNoteCard(note, refresh));
   }
+
+  document.getElementById('new-note-btn')?.addEventListener('click', createAndOpenNote);
+  document.getElementById('empty-new-note-btn')?.addEventListener('click', createAndOpenNote);
+
+  document.getElementById('notes-search')?.addEventListener('input', async (e) => {
+    clearTimeout(noteAutoSaveTimeout);
+    noteAutoSaveTimeout = setTimeout(async () => {
+      try {
+        const results = await invoke('get_notes', { filter: null, search: e.target.value || null });
+        renderNotesListView(el, results || [], null);
+      } catch (_) {}
+    }, 300);
+  });
 }
 
-async function openNote(id) {
-  currentNoteId = id;
+function createNoteCard(note, onRefresh) {
+  const card = document.createElement('div');
+  card.className = 'note-card card';
+  const preview = (note.content || '').substring(0, 120).replace(/\n/g, ' ');
+  card.innerHTML = `
+    <div class="note-card-body">
+      <div class="note-card-title">${note.pinned ? '<span class="note-pinned-icon">📌</span> ' : ''}${escapeHtml(note.title || 'Без названия')}</div>
+      ${preview ? `<div class="note-card-preview">${escapeHtml(preview)}</div>` : ''}
+      <div class="note-card-meta"><span>${formatNoteDate(note.updated_at || note.created_at)}</span></div>
+    </div>
+    <div class="note-card-actions">
+      <button class="note-card-action-btn" data-action="pin" title="${note.pinned ? 'Открепить' : 'Закрепить'}">${note.pinned ? '📌' : '📌'}</button>
+      <button class="note-card-action-btn" data-action="archive" title="${note.archived ? 'Разархивировать' : 'В архив'}">📦</button>
+      <button class="note-card-action-btn note-card-action-danger" data-action="delete" title="Удалить">🗑</button>
+    </div>`;
+  // Click card body to open editor
+  card.querySelector('.note-card-body').addEventListener('click', () => {
+    currentNoteId = note.id;
+    notesViewMode = 'edit';
+    const el = document.getElementById('notes-content');
+    if (el) renderNoteEditor(el, note.id);
+  });
+  // Pin
+  card.querySelector('[data-action="pin"]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await invoke('toggle_note_pin', { id: note.id }).catch(err => console.error('pin:', err));
+    if (onRefresh) onRefresh();
+  });
+  // Archive
+  card.querySelector('[data-action="archive"]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await invoke('toggle_note_archive', { id: note.id }).catch(err => console.error('archive:', err));
+    if (onRefresh) onRefresh();
+  });
+  // Delete
+  card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!(await confirmModal('Удалить заметку?'))) return;
+    await invoke('delete_note', { id: note.id }).catch(err => console.error('delete:', err));
+    if (onRefresh) onRefresh();
+  });
+  return card;
+}
+
+async function createAndOpenNote() {
+  try {
+    const id = await invoke('create_note', { title: '', content: '', tags: '' });
+    currentNoteId = id;
+    notesViewMode = 'edit';
+    const el = document.getElementById('notes-content');
+    if (el) renderNoteEditor(el, id);
+  } catch (err) { console.error('create_note error:', err); }
+}
+
+function saveCurrentNote(id) {
+  clearTimeout(noteAutoSaveTimeout);
+  const title = document.getElementById('note-title')?.value || '';
+  const content = document.getElementById('note-body')?.value || '';
+  const tags = document.getElementById('note-tags-input')?.value || '';
+  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null });
+}
+
+async function renderNoteEditor(el, id) {
   try {
     const note = await invoke('get_note', { id });
-    const panel = document.getElementById('notes-editor-panel');
-    if (!panel) return;
-    panel.innerHTML = `
-      <input class="notes-editor-title" id="note-title" value="${escapeHtml(note.title || '')}" placeholder="Заголовок...">
-      <div class="notes-editor-tags">
-        ${(note.tags || '').split(',').filter(t => t.trim()).map(t =>
-          `<span class="note-tag">${escapeHtml(t.trim())}</span>`
-        ).join('')}
-        <input class="form-input" id="note-tags-input" placeholder="Теги через запятую..." value="${escapeHtml(note.tags || '')}" style="font-size:11px;padding:2px 8px;width:auto;min-width:120px;">
+
+    el.innerHTML = `<div class="page-content note-edit-view">
+      <div class="note-edit-topbar">
+        <div class="note-breadcrumb" id="note-back-btn">← Notes</div>
+        <div class="note-edit-actions">
+          <button class="note-action-btn ${note.pinned ? 'active' : ''}" id="note-pin-btn" title="${note.pinned ? 'Открепить' : 'Закрепить'}">📌</button>
+          <button class="note-action-btn" id="note-archive-btn" title="${note.archived ? 'Разархивировать' : 'В архив'}">📦</button>
+          <button class="note-action-btn note-action-btn-danger" id="note-delete-btn" title="Удалить">🗑</button>
+        </div>
       </div>
-      <textarea class="notes-editor-body" id="note-body" placeholder="Начните писать...">${escapeHtml(note.content || '')}</textarea>
-      <div class="notes-editor-actions">
-        <button class="btn-secondary" id="note-pin-btn">${note.pinned ? 'Открепить' : 'Закрепить'}</button>
-        <button class="btn-secondary" id="note-archive-btn">${note.archived ? 'Разархивировать' : 'Архивировать'}</button>
-        <button class="btn-danger" id="note-delete-btn">Удалить</button>
-      </div>`;
+      <input class="page-title-input" id="note-title" value="${escapeHtml(note.title || '')}" placeholder="Без названия">
+      <textarea class="custom-page-body" id="note-body" placeholder="Начните писать...">${escapeHtml(note.content || '')}</textarea>
+      <input type="hidden" id="note-tags-input" value="${escapeHtml(note.tags || '')}">
+    </div>`;
+
+    // Auto-resize textarea
+    const body = document.getElementById('note-body');
+    if (body) {
+      const resize = () => { body.style.height = 'auto'; body.style.height = Math.max(200, body.scrollHeight) + 'px'; };
+      body.addEventListener('input', resize);
+      setTimeout(resize, 0);
+    }
+
+    if (!note.title) document.getElementById('note-title')?.focus();
+    else document.getElementById('note-body')?.focus();
 
     // Auto-save on typing
     const autoSave = () => {
       clearTimeout(noteAutoSaveTimeout);
-      noteAutoSaveTimeout = setTimeout(async () => {
-        const title = document.getElementById('note-title')?.value || '';
-        const content = document.getElementById('note-body')?.value || '';
-        const tags = document.getElementById('note-tags-input')?.value || '';
-        await invoke('update_note', { id, title, content, tags }).catch(() => {});
-      }, 1000);
+      noteAutoSaveTimeout = setTimeout(() => {
+        saveCurrentNote(id).catch(e => console.error('note autosave error:', e));
+      }, 800);
     };
     document.getElementById('note-title')?.addEventListener('input', autoSave);
     document.getElementById('note-body')?.addEventListener('input', autoSave);
-    document.getElementById('note-tags-input')?.addEventListener('input', autoSave);
 
+    // Back
+    document.getElementById('note-back-btn')?.addEventListener('click', () => {
+      saveCurrentNote(id).catch(() => {});
+      currentNoteId = null;
+      notesViewMode = 'list';
+      loadNotes();
+    });
+
+    // Pin
     document.getElementById('note-pin-btn')?.addEventListener('click', async () => {
-      await invoke('update_note', { id, title: note.title, content: note.content, tags: note.tags, pinned: !note.pinned }).catch(() => {});
-      loadNotes();
-    });
-    document.getElementById('note-archive-btn')?.addEventListener('click', async () => {
-      await invoke('update_note', { id, title: note.title, content: note.content, tags: note.tags, archived: !note.archived }).catch(() => {});
-      loadNotes();
-    });
-    document.getElementById('note-delete-btn')?.addEventListener('click', async () => {
-      if (confirm('Удалить заметку?')) {
-        await invoke('delete_note', { id }).catch(() => {});
-        currentNoteId = null;
-        loadNotes();
-      }
+      try {
+        await saveCurrentNote(id);
+        await invoke('toggle_note_pin', { id });
+        renderNoteEditor(el, id);
+      } catch (err) { console.error('pin error:', err); }
     });
 
-    // Highlight active item in list
-    document.querySelectorAll('.note-list-item').forEach(item => item.classList.remove('active'));
-    document.querySelectorAll('.note-list-item').forEach((item, idx) => {
-      // Re-select the clicked item
+    // Archive
+    document.getElementById('note-archive-btn')?.addEventListener('click', async () => {
+      try {
+        await saveCurrentNote(id);
+        await invoke('toggle_note_archive', { id });
+        currentNoteId = null;
+        notesViewMode = 'list';
+        loadNotes();
+      } catch (err) { console.error('archive error:', err); }
     });
+
+    // Delete
+    document.getElementById('note-delete-btn')?.addEventListener('click', async () => {
+      if (!(await confirmModal('Удалить заметку?'))) return;
+      try {
+        await invoke('delete_note', { id });
+        currentNoteId = null;
+        notesViewMode = 'list';
+        loadNotes();
+      } catch (err) { console.error('delete error:', err); }
+    });
+
   } catch (e) {
-    alert('Ошибка: ' + e);
+    console.error('renderNoteEditor error:', e);
+    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📝</div><div class="empty-state-text">Заметка не найдена</div></div>`;
   }
 }
 
@@ -5239,7 +5494,7 @@ function showColumnMenu(propDef, anchorRect, tabId, recordTable, reloadFn, el, r
           menu.remove();
           break;
         case 'delete':
-          if (confirm(`Удалить свойство "${propDef.name}"?`)) {
+          if (await confirmModal(`Удалить свойство "${propDef.name}"?`)) {
             try {
               await invoke('delete_property_definition', { id: propDef.id });
               if (reloadFn) reloadFn();
@@ -5599,7 +5854,7 @@ function showMediaDetail(item, mediaType) {
     } catch (err) { alert('Error: ' + err); }
   });
   document.getElementById('md-delete')?.addEventListener('click', async () => {
-    if (!confirm('Delete this item?')) return;
+    if (!(await confirmModal('Удалить?'))) return;
     await invoke('delete_media_item', { id: item.id }).catch(e => alert(e));
     overlay.remove();
     loadHobbies(MEDIA_LABELS[mediaType]);
@@ -5860,6 +6115,26 @@ function renderHealth(el, today, habits) {
 
 // ── Initialization ──
 (async () => {
+  // Load custom pages into TAB_REGISTRY before rendering
+  try {
+    const customPages = await invoke('get_custom_pages');
+    for (const page of customPages) {
+      const tabId = `page_${page.id}`;
+      TAB_REGISTRY[tabId] = {
+        label: page.title,
+        icon: page.icon,
+        closable: true,
+        subTabs: JSON.parse(page.sub_tabs || '[]'),
+        custom: true,
+        pageId: page.id,
+      };
+    }
+  } catch (_) {}
+
+  // Re-filter openTabs now that custom pages are registered
+  openTabs = openTabs.filter(id => TAB_REGISTRY[id]);
+  if (!openTabs.includes('chat')) openTabs.unshift('chat');
+
   // Render tab bar
   renderTabBar();
   activateView();
@@ -6103,7 +6378,7 @@ async function startCallMode() {
     try {
       const hasModel = await invoke('check_whisper_model');
       if (!hasModel) {
-        if (confirm('Модель Whisper не найдена (~1.5GB). Скачать для голосового ввода?')) {
+        if (await confirmModal('Модель Whisper не найдена (~1.5GB). Скачать для голосового ввода?')) {
           addMsg('bot', 'Скачиваю модель Whisper...');
           const unlisten = await listen('whisper-download-progress', (event) => {
             const msgs = chat.querySelectorAll('.msg.bot');
