@@ -4490,14 +4490,19 @@ const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_lim
 async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
 
-    // Read thinking mode setting (default: off)
-    let thinking_enabled = {
+    // Read thinking mode + web search settings (default: off)
+    let (thinking_enabled, web_search_enabled) = {
         let db = app.state::<HanniDb>();
         let conn = db.conn();
-        conn.query_row(
+        let thinking = conn.query_row(
             "SELECT value FROM app_settings WHERE key='enable_thinking'",
             [], |row| row.get::<_, String>(0),
-        ).ok().map(|v| v == "true").unwrap_or(false)
+        ).ok().map(|v| v == "true").unwrap_or(false);
+        let web = conn.query_row(
+            "SELECT value FROM app_settings WHERE key='enable_web_search'",
+            [], |row| row.get::<_, String>(0),
+        ).ok().map(|v| v == "true").unwrap_or(false);
+        (thinking, web)
     };
 
     // Build system prompt with current date/time context + full week lookup table
@@ -4575,6 +4580,13 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
     // Append complex-query hint for non-call mode
     let system_content = if !call_mode && is_complex_query(last_user_msg) {
         format!("{}\n\nЭто сложный вопрос. Продумай пошагово. Структурируй ответ если нужно.", system_content)
+    } else {
+        system_content
+    };
+
+    // Append web search hint when chip is enabled
+    let system_content = if web_search_enabled && !call_mode {
+        format!("{}\n\nВеб-поиск включён. Для поиска информации используй web_search, для чтения страниц — read_url.", system_content)
     } else {
         system_content
     };
@@ -4770,6 +4782,38 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         }
         Some(select_relevant_tools(&context))
     } else { None };
+
+    // Force web_search + read_url when web search chip is enabled
+    let tools_param = if web_search_enabled {
+        let web_tool_names = ["web_search", "read_url"];
+        match tools_param {
+            Some(mut tools) => {
+                // Ensure web tools are present
+                let all_defs = build_tool_definitions();
+                for name in &web_tool_names {
+                    let already = tools.iter().any(|t|
+                        t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) == Some(name)
+                    );
+                    if !already {
+                        if let Some(def) = all_defs.iter().find(|t|
+                            t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) == Some(name)
+                        ) {
+                            tools.push(def.clone());
+                        }
+                    }
+                }
+                Some(tools)
+            }
+            None => {
+                // LITE mode but web search forced — include only web tools
+                let all_defs = build_tool_definitions();
+                Some(all_defs.into_iter().filter(|t|
+                    t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str())
+                        .map(|n| web_tool_names.contains(&n)).unwrap_or(false)
+                ).collect())
+            }
+        }
+    } else { tools_param };
 
     // C5: Adaptive temperature based on query type
     let adaptive_temp = if !call_mode {
