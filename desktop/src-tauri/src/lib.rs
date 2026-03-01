@@ -1939,6 +1939,8 @@ struct ChatRequest {
 struct Delta {
     content: Option<String>,
     #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
     tool_calls: Option<Vec<ToolCallDelta>>,
 }
 
@@ -4584,6 +4586,9 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         system_content
     };
 
+    // Thinking mode: no prompt injection needed — we use enable_thinking template
+    // and stream the reasoning field as visible "🤔" text
+
     // Append web search hint when chip is enabled
     let system_content = if web_search_enabled && !call_mode {
         format!("{}\n\nВеб-поиск включён. Для поиска информации используй web_search, для чтения страниц — read_url.", system_content)
@@ -4850,8 +4855,8 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
         } else { mode.max_tokens }
     } else { mode.max_tokens };
 
-    // Thinking mode needs extra budget — think tokens count against max_tokens
-    // Model can easily burn 500-1500 tokens on <think> block alone
+    // Thinking mode: bump max_tokens (reasoning tokens count against limit)
+    // Model can burn 1000-3000 tokens on reasoning alone
     let adaptive_max_tokens = if thinking_enabled {
         adaptive_max_tokens.max(4096)
     } else {
@@ -4903,9 +4908,9 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
 
     let mut stream = response.bytes_stream();
     let mut full_reply = String::new();
-    let mut in_think = false;
     let mut buffer = String::new();
     let mut finish_reason: Option<String> = None;
+    let mut reasoning_started = false; // track if we've emitted 🤔 prefix
 
     // Tool call accumulator: index → (id, name, arguments)
     let mut tc_ids: HashMap<usize, String> = HashMap::new();
@@ -4953,36 +4958,28 @@ async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode
                             }
                         }
 
+                        // Stream reasoning tokens (thinking mode)
+                        if let Some(ref reasoning) = delta.reasoning {
+                            if !reasoning.is_empty() {
+                                reasoning_started = true;
+                                let _ = app.emit("chat-reasoning", TokenPayload {
+                                    token: reasoning.clone(),
+                                });
+                            }
+                        }
+
+                        // Stream content tokens (actual response)
                         if let Some(token) = &delta.content {
-                            // Handle think blocks — strip reasoning tokens
-                            let mut remaining = token.as_str();
-                            while !remaining.is_empty() {
-                                if in_think {
-                                    if let Some(pos) = remaining.find("</think>") {
-                                        in_think = false;
-                                        remaining = &remaining[pos + 8..];
-                                    } else {
-                                        break; // entire token is inside think block
-                                    }
-                                } else if let Some(pos) = remaining.find("<think>") {
-                                    // Emit text before <think>
-                                    let before = &remaining[..pos];
-                                    if !before.is_empty() {
-                                        full_reply.push_str(before);
-                                        let _ = app.emit("chat-token", TokenPayload {
-                                            token: before.to_string(),
-                                        });
-                                    }
-                                    in_think = true;
-                                    remaining = &remaining[pos + 7..];
-                                } else {
-                                    // Normal text outside think block
-                                    full_reply.push_str(remaining);
-                                    let _ = app.emit("chat-token", TokenPayload {
-                                        token: remaining.to_string(),
-                                    });
-                                    break;
+                            if !token.is_empty() {
+                                if reasoning_started {
+                                    reasoning_started = false;
+                                    // Signal end of reasoning phase
+                                    let _ = app.emit("chat-reasoning-done", ());
                                 }
+                                full_reply.push_str(token);
+                                let _ = app.emit("chat-token", TokenPayload {
+                                    token: token.clone(),
+                                });
                             }
                         }
                     }

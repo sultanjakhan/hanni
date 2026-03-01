@@ -2247,8 +2247,13 @@ async function streamChat(botDiv, t0, callMode = false) {
   let firstToken = 0;
   let tokens = 0;
   let fullReply = '';
+  let reasoningText = '';
   let toolCalls = [];
   let finishReason = null;
+
+  // Reasoning collapsible block (thinking mode)
+  let reasoningDetails = null;
+  let reasoningContent = null;
 
   let scrollRAF = null;
   const scrollDownThrottled = () => {
@@ -2256,6 +2261,35 @@ async function streamChat(botDiv, t0, callMode = false) {
       scrollRAF = requestAnimationFrame(() => { scrollDown(); scrollRAF = null; });
     }
   };
+
+  const unlistenReasoning = await listen('chat-reasoning', (event) => {
+    if (!firstToken) firstToken = performance.now() - t0;
+    const token = event.payload.token;
+    reasoningText += token;
+    // Create collapsible block on first reasoning token
+    if (!reasoningDetails) {
+      reasoningDetails = document.createElement('details');
+      reasoningDetails.className = 'thinking-block';
+      reasoningDetails.open = true;
+      const summary = document.createElement('summary');
+      summary.textContent = '🤔 Думает...';
+      reasoningDetails.appendChild(summary);
+      reasoningContent = document.createElement('div');
+      reasoningContent.className = 'thinking-content';
+      reasoningDetails.appendChild(reasoningContent);
+      botDiv.insertBefore(reasoningDetails, cursor);
+    }
+    reasoningContent.appendChild(document.createTextNode(token));
+    scrollDownThrottled();
+  });
+
+  const unlistenReasoningDone = await listen('chat-reasoning-done', () => {
+    if (reasoningDetails) {
+      reasoningDetails.open = false; // collapse when done
+      reasoningDetails.querySelector('summary').textContent = '🤔 Рассуждения';
+    }
+  });
+
   const unlisten = await listen('chat-token', (event) => {
     if (!firstToken) firstToken = performance.now() - t0;
     tokens++;
@@ -2265,7 +2299,13 @@ async function streamChat(botDiv, t0, callMode = false) {
     scrollDownThrottled();
   });
 
-  const unlistenDone = await listen('chat-done', () => {});
+  const unlistenDone = await listen('chat-done', () => {
+    // Fallback: close reasoning block if model ran out of tokens before content
+    if (reasoningDetails && reasoningDetails.open) {
+      reasoningDetails.open = false;
+      reasoningDetails.querySelector('summary').textContent = '🤔 Рассуждения';
+    }
+  });
 
   try {
     const msgs = history.slice(-20).map(normalizeHistoryMessage);
@@ -2300,6 +2340,8 @@ async function streamChat(botDiv, t0, callMode = false) {
 
   unlisten();
   unlistenDone();
+  unlistenReasoning();
+  unlistenReasoningDone();
   cursor.remove();
 
   // Re-render as Markdown after streaming completes
