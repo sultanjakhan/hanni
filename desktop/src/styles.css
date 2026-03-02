@@ -538,6 +538,7 @@ body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  position: relative;
 }
 
 /* ── Views ── */
@@ -2849,11 +2850,12 @@ body.dragover::after {
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: color var(--transition-normal), border-color var(--transition-normal), background var(--transition-normal);
   white-space: nowrap;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
 }
 .notes-view-btn:hover {
-  color: var(--text-primary);
+  color: var(--text-secondary);
   background: var(--bg-hover);
 }
 .notes-view-btn.active {
@@ -2866,33 +2868,34 @@ body.dragover::after {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
   margin-bottom: var(--space-3);
-  padding: var(--space-1) 0;
+  padding: var(--space-2) 0;
 }
 .notes-filter-chip {
   font-size: 12px;
-  padding: 3px 10px;
+  padding: 4px 10px;
   border-radius: var(--radius-pill);
   cursor: pointer;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  border: 1px solid transparent;
-  transition: all var(--transition-fast);
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  transition: all var(--transition-normal);
   white-space: nowrap;
 }
 .notes-filter-chip:hover {
+  color: var(--text-secondary);
   background: var(--bg-hover);
   border-color: var(--border-default);
 }
 .notes-filter-chip.active {
-  background: var(--accent-blue);
-  color: #fff;
-  border-color: var(--accent-blue);
+  background: var(--color-blue-bg);
+  color: var(--accent-blue);
+  border-color: rgba(68, 122, 203, 0.35);
 }
 .notes-filter-chip.tag.active {
-  border-color: var(--text-primary);
-  filter: brightness(1.2);
+  border-color: var(--border-default);
+  filter: brightness(1.1);
 }
 .notes-filter-divider {
   width: 1px;
@@ -5231,4 +5234,174 @@ body.dragover::after {
 
 .chat-settings-panel.active {
   display: block;
+}
+
+/* ── Focus Floating Widget ── */
+
+.focus-widget {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.focus-widget.hidden { display: none; }
+
+.focus-widget-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-card);
+  flex-shrink: 0;
+}
+.focus-widget-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+  transform: scale(1.05);
+}
+
+.focus-widget-popover {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  width: 240px;
+  box-shadow: var(--shadow-card);
+  animation: fw-scaleIn 0.15s ease;
+  transform-origin: bottom right;
+}
+.focus-widget-popover.hidden { display: none; }
+
+@keyframes fw-scaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.focus-widget-popover h4 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fw-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: 13px;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+.fw-input:focus { border-color: var(--accent-blue); outline: none; }
+
+.fw-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fw-preset {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-default);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.fw-preset:hover { border-color: var(--border-hover); color: var(--text-primary); }
+.fw-preset.selected { border-color: var(--accent-blue); color: var(--accent-blue); background: var(--blue-bg); }
+
+.fw-start-btn {
+  width: 100%;
+  padding: 7px 0;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.fw-start-btn:hover { opacity: 0.85; }
+
+.focus-widget-active {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--blue-bg);
+  border: 1px solid var(--accent-blue);
+  font-size: 13px;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-card);
+  animation: fw-scaleIn 0.15s ease;
+}
+
+.fw-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: pulse-focus 2s infinite;
+  flex-shrink: 0;
+}
+
+.fw-activity-name {
+  font-weight: 500;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fw-timer {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fw-stop-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+}
+.fw-stop-btn:hover { border-color: var(--accent-red); color: var(--accent-red); }
+
+.tab-focus-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: pulse-focus 2s infinite;
+  pointer-events: none;
 }
