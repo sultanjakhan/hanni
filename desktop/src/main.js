@@ -1062,7 +1062,8 @@ function loadSubTabContent(tabId, subTab) {
       break;
   }
   // Wire up editable page header controls (icon picker, description) after content renders
-  if (tabId !== 'chat') setTimeout(() => setupPageHeaderControls(tabId), 50);
+  // Notes handles its own via setupNotesControls()
+  if (tabId !== 'chat' && tabId !== 'notes') setTimeout(() => setupPageHeaderControls(tabId), 50);
 }
 
 // Tab add dropdown
@@ -4893,9 +4894,11 @@ function setupKanbanDnD(board, refresh) {
     });
     col.addEventListener('drop', async (e) => {
       e.preventDefault();
+      e.stopPropagation();
       col.classList.remove('drag-over');
-      const noteId = parseInt(e.dataTransfer.getData('text/plain'));
-      if (!noteId) return;
+      const raw = e.dataTransfer.getData('text/plain');
+      const noteId = parseInt(raw);
+      if (!noteId || isNaN(noteId)) return;
       const targetStatus = col.dataset.status;
       try {
         await invoke('update_note_status', { id: noteId, status: targetStatus });
@@ -5157,8 +5160,12 @@ function createNoteCard(note, onRefresh) {
       <button class="note-card-action-btn note-card-action-danger" data-action="delete" title="Удалить">🗑</button>
     </div>`;
 
+  // DnD state — prevent click from firing after drag
+  let wasDragged = false;
+
   // Click card body to open editor
   card.querySelector('.note-card-body').addEventListener('click', (e) => {
+    if (wasDragged) { wasDragged = false; return; }
     if (e.target.closest('[data-action="toggle-status"]')) return;
     currentNoteId = note.id;
     notesViewMode = 'edit';
@@ -5196,8 +5203,9 @@ function createNoteCard(note, onRefresh) {
 
   // DnD events
   card.addEventListener('dragstart', (e) => {
+    wasDragged = true;
     card.classList.add('dragging');
-    e.dataTransfer.setData('text/plain', note.id);
+    e.dataTransfer.setData('text/plain', String(note.id));
     e.dataTransfer.effectAllowed = 'move';
   });
   card.addEventListener('dragend', () => card.classList.remove('dragging'));
