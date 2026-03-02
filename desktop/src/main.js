@@ -262,55 +262,45 @@ async function saveTabSetting(tabId, key, val) {
   await invoke('set_app_setting', { key: `tab_${tabId}_${key}`, value: String(val) });
 }
 
-async function renderTabSettingsPanel(tabId) {
-  const panel = document.getElementById(`tab-settings-panel-${tabId}`);
-  if (!panel) return;
-  const defs = TAB_SETTINGS_DEFS[tabId];
-  if (!defs) return;
+async function renderTabSettingsPage(tabId) {
+  const reg = TAB_REGISTRY[tabId];
+  const el = document.getElementById(`${tabId}-content`);
+  if (!el || !reg) return;
+  const defs = TAB_SETTINGS_DEFS[tabId] || [];
 
-  let html = '<div class="tab-settings-header"><span>Настройки вкладки</span><button class="tab-settings-close" data-tab-id="' + tabId + '">&times;</button></div>';
+  let rowsHtml = '';
   for (const def of defs) {
     const val = await loadTabSetting(tabId, def.key) ?? def.default;
-    html += `<div class="tab-setting-row">`;
-    html += `<label class="tab-setting-label">${def.label}</label>`;
+    let controlHtml = '';
     if (def.type === 'toggle') {
-      html += `<label class="toggle"><input type="checkbox" data-tab-id="${tabId}" data-setting-key="${def.key}" ${val === 'true' ? 'checked' : ''}><span class="toggle-track"></span></label>`;
+      controlHtml = `<label class="toggle"><input type="checkbox" data-tab-id="${tabId}" data-setting-key="${def.key}" ${val === 'true' ? 'checked' : ''}><span class="toggle-track"></span></label>`;
     } else if (def.type === 'select') {
-      html += `<select class="form-input tab-setting-select" data-tab-id="${tabId}" data-setting-key="${def.key}">`;
-      for (const opt of def.options) html += `<option value="${opt.value}" ${val === opt.value ? 'selected' : ''}>${opt.label}</option>`;
-      html += `</select>`;
+      controlHtml = `<select class="form-input" data-tab-id="${tabId}" data-setting-key="${def.key}">` +
+        def.options.map(o => `<option value="${o.value}" ${val === o.value ? 'selected' : ''}>${o.label}</option>`).join('') + `</select>`;
     } else if (def.type === 'number') {
-      html += `<input class="form-input tab-setting-input" type="number" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}" style="width:80px;">`;
+      controlHtml = `<input class="form-input" type="number" min="${def.min || 1}" max="${def.max || 480}" step="1" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}" style="width:100px;">`;
     } else {
-      html += `<input class="form-input tab-setting-input" type="text" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}">`;
+      controlHtml = `<input class="form-input" type="text" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}">`;
     }
-    html += `</div>`;
+    rowsHtml += `<div class="settings-row"><span class="settings-label">${def.label}</span><span class="settings-value">${controlHtml}</span></div>`;
   }
-  panel.innerHTML = html;
+
+  el.innerHTML = renderPageHeader(tabId) + `<div class="page-content">
+    <div class="settings-section">
+      <div class="settings-section-title">Настройки — ${reg.label}</div>
+      ${rowsHtml || '<div style="color:var(--text-muted);font-size:13px;">Нет настроек для этой вкладки</div>'}
+    </div>
+  </div>`;
+  setupPageHeaderControls(tabId);
 
   // Wire up controls
-  panel.querySelectorAll('input[type="checkbox"]').forEach(el => {
-    el.addEventListener('change', () => saveTabSetting(el.dataset.tabId, el.dataset.settingKey, el.checked));
+  el.querySelectorAll('[data-setting-key]').forEach(ctrl => {
+    const ev = ctrl.type === 'checkbox' ? 'change' : 'change';
+    ctrl.addEventListener(ev, () => {
+      const v = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
+      saveTabSetting(ctrl.dataset.tabId, ctrl.dataset.settingKey, v);
+    });
   });
-  panel.querySelectorAll('select').forEach(el => {
-    el.addEventListener('change', () => saveTabSetting(el.dataset.tabId, el.dataset.settingKey, el.value));
-  });
-  panel.querySelectorAll('input[type="text"], input[type="number"]').forEach(el => {
-    el.addEventListener('change', () => saveTabSetting(el.dataset.tabId, el.dataset.settingKey, el.value));
-  });
-  panel.querySelector('.tab-settings-close')?.addEventListener('click', () => toggleTabSettings(tabId));
-}
-
-function toggleTabSettings(tabId) {
-  const panel = document.getElementById(`tab-settings-panel-${tabId}`);
-  if (!panel) return;
-  const isOpen = !panel.classList.contains('hidden');
-  if (isOpen) {
-    panel.classList.add('hidden');
-  } else {
-    panel.classList.remove('hidden');
-    renderTabSettingsPanel(tabId);
-  }
 }
 
 function renderPageHeader(tabId, extra) {
@@ -322,11 +312,9 @@ function renderPageHeader(tabId, extra) {
     : `<button class="page-header-icon-btn page-header-icon-svg" data-tab-id="${tabId}" title="Сменить иконку">${reg.icon || ''}</button>`;
   const desc = extra?.description || getTabDesc(tabId);
   const props = extra?.properties || [];
-  const hasSettings = TAB_SETTINGS_DEFS[tabId];
   return `<div class="page-header" data-tab-id="${tabId}">
     ${iconHtml}
     <div class="page-header-title">${extra?.title || reg.label}</div>
-    ${hasSettings ? `<button class="page-header-gear" data-tab-id="${tabId}" title="Настройки вкладки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>` : ''}
     <input class="page-header-desc-input" data-tab-id="${tabId}" value="${escapeHtml(desc)}" placeholder="Добавить описание...">
     ${props.length ? `<div class="page-header-properties">${props.map(p =>
       `<span class="page-property"><span class="page-property-label">${p.label}</span><span class="page-property-value ${p.class || ''}">${p.value}</span></span>`
@@ -334,7 +322,6 @@ function renderPageHeader(tabId, extra) {
     <div class="page-emoji-picker hidden" id="page-emoji-picker-${tabId}">
       ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
     </div>
-    ${hasSettings ? `<div class="tab-settings-panel hidden" id="tab-settings-panel-${tabId}"></div>` : ''}
   </div>`;
 }
 
@@ -376,11 +363,6 @@ function setupPageHeaderControls(tabId) {
     });
   }
 
-  // Gear → toggle tab settings panel
-  const gearBtn = document.querySelector(`.page-header-gear[data-tab-id="${tabId}"]`);
-  if (gearBtn) {
-    gearBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleTabSettings(tabId); });
-  }
 }
 
 let openTabs = ['chat'];
@@ -866,6 +848,7 @@ document.getElementById('conv-search')?.addEventListener('input', (e) => {
 });
 
 // ── Tab navigation ──
+let tabDragState = null;
 
 function renderTabBar() {
   const tabList = document.getElementById('tab-list');
@@ -877,7 +860,6 @@ function renderTabBar() {
     item.className = 'tab-item' + (tabId === activeTab ? ' active' : '');
     item.dataset.tabId = tabId;
     item.title = reg.label;
-    item.draggable = true;
     const customIcon = tabCustomizations[tabId]?.icon;
     item.innerHTML = customIcon
       ? `<span class="tab-item-icon tab-item-icon-emoji">${customIcon}</span>`
@@ -887,44 +869,65 @@ function renderTabBar() {
       dot.className = 'tab-focus-dot';
       item.appendChild(dot);
     }
-    item.addEventListener('click', () => switchTab(tabId));
+    item.addEventListener('click', (e) => {
+      if (item.dataset.wasDragged) { delete item.dataset.wasDragged; return; }
+      switchTab(tabId);
+    });
 
-    // Drag-to-reorder
-    item.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('tab-id', tabId);
-      e.dataTransfer.effectAllowed = 'move';
-      item.classList.add('dragging');
-    });
-    item.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const rect = item.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      item.classList.toggle('drag-over-above', e.clientY < midY);
-      item.classList.toggle('drag-over-below', e.clientY >= midY);
-    });
-    item.addEventListener('dragleave', () => {
-      item.classList.remove('drag-over-above', 'drag-over-below');
-    });
-    item.addEventListener('drop', (e) => {
-      e.preventDefault();
-      item.classList.remove('drag-over-above', 'drag-over-below');
-      const draggedId = e.dataTransfer.getData('tab-id');
-      if (!draggedId || draggedId === tabId) return;
-      const fromIdx = openTabs.indexOf(draggedId);
-      if (fromIdx === -1) return;
-      openTabs.splice(fromIdx, 1);
-      const rect = item.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      let toIdx = openTabs.indexOf(tabId);
-      if (e.clientY >= midY) toIdx++;
-      openTabs.splice(toIdx, 0, draggedId);
-      saveTabs();
-      renderTabBar();
-    });
-    item.addEventListener('dragend', () => {
-      item.classList.remove('dragging');
-      tabList.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+    // Drag-to-reorder (mouse events — reliable in WebKit/Tauri)
+    item.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const startY = e.clientY;
+      let dragging = false;
+
+      const onMove = (ev) => {
+        if (!dragging && Math.abs(ev.clientY - startY) > 5) {
+          dragging = true;
+          item.classList.add('dragging');
+          tabDragState = { tabId, el: item };
+        }
+        if (!dragging) return;
+        // Find drop target
+        tabList.querySelectorAll('.tab-item').forEach(el => {
+          el.classList.remove('drag-over-above', 'drag-over-below');
+          if (el === item) return;
+          const rect = el.getBoundingClientRect();
+          if (ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
+            const mid = rect.top + rect.height / 2;
+            el.classList.toggle('drag-over-above', ev.clientY < mid);
+            el.classList.toggle('drag-over-below', ev.clientY >= mid);
+          }
+        });
+      };
+
+      const onUp = (ev) => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        tabList.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over-above', 'drag-over-below', 'dragging'));
+        tabDragState = null;
+        if (!dragging) return;
+        item.dataset.wasDragged = '1';
+        // Find target
+        const target = [...tabList.querySelectorAll('.tab-item')].find(el => {
+          if (el === item) return false;
+          const rect = el.getBoundingClientRect();
+          return ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+        });
+        if (!target) return;
+        const targetId = target.dataset.tabId;
+        const fromIdx = openTabs.indexOf(tabId);
+        if (fromIdx === -1) return;
+        openTabs.splice(fromIdx, 1);
+        const targetRect = target.getBoundingClientRect();
+        let toIdx = openTabs.indexOf(targetId);
+        if (ev.clientY >= targetRect.top + targetRect.height / 2) toIdx++;
+        openTabs.splice(toIdx, 0, tabId);
+        saveTabs();
+        renderTabBar();
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
     });
 
     // Context menu (right click)
@@ -936,17 +939,34 @@ function renderTabBar() {
     tabList.appendChild(item);
   }
 
-  // Bottom area: settings gear + version
+  // Bottom area: settings gear (context-aware)
   const bottom = document.getElementById('tab-bar-bottom');
   if (bottom) {
     bottom.innerHTML = '';
     const gear = document.createElement('div');
-    gear.className = 'tab-item' + (activeTab === 'chat' && activeSubTab.chat === 'Настройки' ? ' active' : '');
+    const isOnSettings = activeSubTab[activeTab] === 'Настройки' || (activeTab === 'chat' && activeSubTab.chat === 'Настройки');
+    gear.className = 'tab-item' + (isOnSettings ? ' active' : '');
     gear.title = 'Настройки';
     gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span>`;
     gear.addEventListener('click', () => {
-      activeSubTab.chat = 'Настройки';
-      switchTab('chat');
+      if (activeTab === 'chat') {
+        if (activeSubTab.chat === 'Настройки') {
+          activeSubTab.chat = null;
+          loadSubTabContent('chat', null);
+        } else {
+          activeSubTab.chat = 'Настройки';
+          loadSubTabContent('chat', 'Настройки');
+        }
+      } else {
+        if (activeSubTab[activeTab] === 'Настройки') {
+          activeSubTab[activeTab] = TAB_REGISTRY[activeTab]?.subTabs?.[0] || null;
+        } else {
+          activeSubTab[activeTab] = 'Настройки';
+        }
+        saveTabs();
+        loadSubTabContent(activeTab, activeSubTab[activeTab]);
+      }
+      renderTabBar();
     });
     bottom.appendChild(gear);
   }
@@ -1085,21 +1105,34 @@ function renderSubSidebar() {
     renderSubTabBar(activeTab, reg);
   }
 
-  // Bottom: gear + version
+  // Bottom: gear (context-aware) + version
   const settingsBottom = document.getElementById('sub-sidebar-settings');
   if (settingsBottom) {
     settingsBottom.innerHTML = '';
     const gear = document.createElement('div');
-    gear.className = 'sub-sidebar-item' + (activeTab === 'chat' && activeSubTab.chat === 'Настройки' ? ' active' : '');
+    const onSettings = activeSubTab[activeTab] === 'Настройки' || (activeTab === 'chat' && activeSubTab.chat === 'Настройки');
+    gear.className = 'sub-sidebar-item' + (onSettings ? ' active' : '');
     gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span>${chatSidebarCollapsed && activeTab === 'chat' ? '' : ' Настройки'}`;
     gear.addEventListener('click', () => {
-      if (activeTab === 'chat' && activeSubTab.chat === 'Настройки') {
-        activeSubTab.chat = null;
-        loadSubTabContent('chat', null);
+      if (activeTab === 'chat') {
+        if (activeSubTab.chat === 'Настройки') {
+          activeSubTab.chat = null;
+          loadSubTabContent('chat', null);
+        } else {
+          activeSubTab.chat = 'Настройки';
+          loadSubTabContent('chat', 'Настройки');
+        }
       } else {
-        activeSubTab.chat = 'Настройки';
-        switchTab('chat');
+        if (activeSubTab[activeTab] === 'Настройки') {
+          activeSubTab[activeTab] = TAB_REGISTRY[activeTab]?.subTabs?.[0] || null;
+        } else {
+          activeSubTab[activeTab] = 'Настройки';
+        }
+        saveTabs();
+        loadSubTabContent(activeTab, activeSubTab[activeTab]);
       }
+      renderTabBar();
+      renderSubSidebar();
     });
     settingsBottom.appendChild(gear);
     if (!(chatSidebarCollapsed && activeTab === 'chat')) {
@@ -1266,6 +1299,11 @@ function activateView() {
 }
 
 function loadSubTabContent(tabId, subTab) {
+  // Per-tab settings page (gear button)
+  if (subTab === 'Настройки' && tabId !== 'chat') {
+    renderTabSettingsPage(tabId);
+    return;
+  }
   switch (tabId) {
     case 'chat':
       if (subTab === 'Настройки') { showChatSettingsMode(); loadChatSettings(); }
@@ -8387,7 +8425,7 @@ function createFocusWidget() {
       <span class="fw-pulse-dot"></span>
       <span class="fw-activity-name" id="fw-activity-name"></span>
       <span class="fw-timer" id="fw-timer">00:00</span>
-      <span class="fw-popout-btn" id="fw-popout-btn" title="Pop out">↗</span>
+      <span class="fw-popout-btn" id="fw-popout-btn" title="Окно поверх всех"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></span>
       <span class="fw-stop-btn" id="fw-stop-btn">■</span>
     </div>
     <div class="focus-widget-btn" id="fw-idle-btn">◎</div>
