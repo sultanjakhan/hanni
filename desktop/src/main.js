@@ -225,11 +225,6 @@ const TAB_SETTINGS_DEFS = {
       { value: 'title', label: 'По названию' },
     ], default: 'updated' },
   ],
-  dashboard: [
-    { key: 'density', label: 'Плотность', type: 'select', options: [
-      { value: 'compact', label: 'Компактная' }, { value: 'normal', label: 'Обычная' },
-    ], default: 'normal' },
-  ],
   calendar: [
     { key: 'first_day', label: 'Первый день недели', type: 'select', options: [
       { value: 'mon', label: 'Понедельник' }, { value: 'sun', label: 'Воскресенье' },
@@ -241,18 +236,7 @@ const TAB_SETTINGS_DEFS = {
   ],
 };
 
-// Generic tabs get goals visibility + default sub-tab
-for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
-  if (TAB_SETTINGS_DEFS[id] || id === 'chat') continue;
-  const settings = [{ key: 'show_goals', label: 'Показывать цели', type: 'toggle', default: 'true' }];
-  if (reg.subTabs?.length > 1) {
-    settings.push({
-      key: 'default_subtab', label: 'Под-таб по умолчанию', type: 'select',
-      options: reg.subTabs.map(s => ({ value: s, label: s })), default: reg.subTabs[0],
-    });
-  }
-  TAB_SETTINGS_DEFS[id] = settings;
-}
+// Only tabs with explicit settings get the gear — no auto-generation
 
 async function loadTabSetting(tabId, key) {
   try { return await invoke('get_app_setting', { key: `tab_${tabId}_${key}` }); } catch (_) { return null; }
@@ -275,8 +259,8 @@ async function renderTabSettingsPage(tabId) {
     if (def.type === 'toggle') {
       controlHtml = `<label class="toggle"><input type="checkbox" data-tab-id="${tabId}" data-setting-key="${def.key}" ${val === 'true' ? 'checked' : ''}><span class="toggle-track"></span></label>`;
     } else if (def.type === 'select') {
-      controlHtml = `<select class="form-input" data-tab-id="${tabId}" data-setting-key="${def.key}">` +
-        def.options.map(o => `<option value="${o.value}" ${val === o.value ? 'selected' : ''}>${o.label}</option>`).join('') + `</select>`;
+      controlHtml = `<div class="setting-pills" data-tab-id="${tabId}" data-setting-key="${def.key}">` +
+        def.options.map(o => `<button class="setting-pill${val === o.value ? ' active' : ''}" data-value="${o.value}">${o.label}</button>`).join('') + `</div>`;
     } else if (def.type === 'number') {
       controlHtml = `<input class="form-input" type="number" min="${def.min || 1}" max="${def.max || 480}" step="1" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}" style="width:100px;">`;
     } else {
@@ -293,12 +277,22 @@ async function renderTabSettingsPage(tabId) {
   </div>`;
   setupPageHeaderControls(tabId);
 
-  // Wire up controls
-  el.querySelectorAll('[data-setting-key]').forEach(ctrl => {
-    const ev = ctrl.type === 'checkbox' ? 'change' : 'change';
-    ctrl.addEventListener(ev, () => {
+  // Wire up input/checkbox/number controls
+  el.querySelectorAll('input[data-setting-key], select[data-setting-key]').forEach(ctrl => {
+    ctrl.addEventListener('change', () => {
       const v = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
       saveTabSetting(ctrl.dataset.tabId, ctrl.dataset.settingKey, v);
+    });
+  });
+
+  // Wire up pill buttons
+  el.querySelectorAll('.setting-pills').forEach(group => {
+    group.querySelectorAll('.setting-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        group.querySelectorAll('.setting-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        saveTabSetting(group.dataset.tabId, group.dataset.settingKey, pill.dataset.value);
+      });
     });
   });
 }
@@ -952,21 +946,21 @@ function renderTabBar() {
       if (activeTab === 'chat') {
         if (activeSubTab.chat === 'Настройки') {
           activeSubTab.chat = null;
-          loadSubTabContent('chat', null);
         } else {
           activeSubTab.chat = 'Настройки';
-          loadSubTabContent('chat', 'Настройки');
         }
       } else {
+        if (!TAB_SETTINGS_DEFS[activeTab]?.length) return; // no settings for this tab
         if (activeSubTab[activeTab] === 'Настройки') {
           activeSubTab[activeTab] = TAB_REGISTRY[activeTab]?.subTabs?.[0] || null;
         } else {
           activeSubTab[activeTab] = 'Настройки';
         }
-        saveTabs();
-        loadSubTabContent(activeTab, activeSubTab[activeTab]);
       }
+      saveTabs();
+      loadSubTabContent(activeTab, activeSubTab[activeTab] ?? (activeTab === 'chat' ? activeSubTab.chat : null));
       renderTabBar();
+      renderSubSidebar();
     });
     bottom.appendChild(gear);
   }
@@ -1049,8 +1043,8 @@ function renderSubSidebar() {
     return;
   }
 
-  // Chat tab: conversations live in the sub-sidebar
-  if (activeTab === 'chat') {
+  // Chat tab: conversations live in the sub-sidebar (hidden during settings)
+  if (activeTab === 'chat' && activeSubTab.chat !== 'Настройки') {
     sidebar.classList.remove('hidden');
     sidebar.classList.toggle('collapsed', !!chatSidebarCollapsed);
     const convPanel = document.getElementById('conversations-panel');
@@ -1105,35 +1099,10 @@ function renderSubSidebar() {
     renderSubTabBar(activeTab, reg);
   }
 
-  // Bottom: gear (context-aware) + version
+  // Bottom: version only (gear is in tab bar)
   const settingsBottom = document.getElementById('sub-sidebar-settings');
   if (settingsBottom) {
     settingsBottom.innerHTML = '';
-    const gear = document.createElement('div');
-    const onSettings = activeSubTab[activeTab] === 'Настройки' || (activeTab === 'chat' && activeSubTab.chat === 'Настройки');
-    gear.className = 'sub-sidebar-item' + (onSettings ? ' active' : '');
-    gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span>${chatSidebarCollapsed && activeTab === 'chat' ? '' : ' Настройки'}`;
-    gear.addEventListener('click', () => {
-      if (activeTab === 'chat') {
-        if (activeSubTab.chat === 'Настройки') {
-          activeSubTab.chat = null;
-          loadSubTabContent('chat', null);
-        } else {
-          activeSubTab.chat = 'Настройки';
-          loadSubTabContent('chat', 'Настройки');
-        }
-      } else {
-        if (activeSubTab[activeTab] === 'Настройки') {
-          activeSubTab[activeTab] = TAB_REGISTRY[activeTab]?.subTabs?.[0] || null;
-        } else {
-          activeSubTab[activeTab] = 'Настройки';
-        }
-        saveTabs();
-        loadSubTabContent(activeTab, activeSubTab[activeTab]);
-      }
-      renderTabBar();
-      renderSubSidebar();
-    });
     settingsBottom.appendChild(gear);
     if (!(chatSidebarCollapsed && activeTab === 'chat')) {
       const ver = document.createElement('div');
@@ -4958,7 +4927,7 @@ async function renderNotesPage() {
   const allTags = new Set();
   allNotes.forEach(n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean).forEach(t => allTags.add(t)));
 
-  el.innerHTML = renderNotesHeader() + renderNotesViewBar() + renderNotesFilterBar(allTags) + `<div id="notes-view-content" class="page-content"></div>`;
+  el.innerHTML = renderPageHeader('notes') + renderNotesToolbar() + renderNotesViewBar() + renderNotesFilterBar(allTags) + `<div id="notes-view-content" class="page-content"></div>`;
 
   const content = document.getElementById('notes-view-content');
   if (!content) return;
@@ -4974,29 +4943,11 @@ async function renderNotesPage() {
   setupNotesControls();
 }
 
-function renderNotesHeader() {
-  const customIcon = tabCustomizations.notes?.icon;
-  const iconHtml = customIcon
-    ? `<button class="page-header-icon-btn" data-tab-id="notes" title="Сменить иконку">${customIcon}</button>`
-    : `<button class="page-header-icon-btn page-header-icon-svg" data-tab-id="notes" title="Сменить иконку">${TAB_ICONS.notes}</button>`;
-  const desc = getTabDesc('notes');
-  return `<div class="notes-header" data-tab-id="notes">
-    <div class="notes-header-top">
-      <div class="notes-header-left">
-        ${iconHtml}
-        <div class="page-header-title">Notes</div>
-      </div>
-      <div class="notes-header-actions">
-        <button class="btn-primary" id="new-note-btn">+ Новая</button>
-        <button class="btn-secondary" id="new-task-btn">+ Задача</button>
-        <div class="notes-search-wrap">
-          <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off" value="${escapeHtml(notesSearchQuery)}">
-        </div>
-      </div>
-    </div>
-    ${desc ? `<input class="page-header-desc-input" data-tab-id="notes" value="${escapeHtml(desc)}" placeholder="Добавить описание...">` : `<input class="page-header-desc-input" data-tab-id="notes" value="" placeholder="Добавить описание...">`}
-    <div class="page-emoji-picker hidden" id="page-emoji-picker-notes">
-      ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
+function renderNotesToolbar() {
+  return `<div class="notes-toolbar">
+    <button class="btn-primary" id="new-note-btn">+ Новая заметка</button>
+    <div class="notes-search-wrap">
+      <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off" value="${escapeHtml(notesSearchQuery)}">
     </div>
   </div>`;
 }
@@ -5063,9 +5014,8 @@ function setupNotesControls() {
     });
   });
 
-  // New note / task
+  // New note
   document.getElementById('new-note-btn')?.addEventListener('click', createAndOpenNote);
-  document.getElementById('new-task-btn')?.addEventListener('click', createAndOpenTask);
 
   // Search
   document.getElementById('notes-search')?.addEventListener('input', (e) => {
