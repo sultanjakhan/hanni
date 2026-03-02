@@ -74,8 +74,8 @@
 <div class="idle" id="idle-msg">No active focus</div>
 
 <script>
-  const { invoke, event } = window.__TAURI__;
-  const { listen, emit } = event;
+  const { invoke } = window.__TAURI__.core;
+  const { listen, emit } = window.__TAURI__.event;
 
   const pill = document.getElementById('pill');
   const idleMsg = document.getElementById('idle-msg');
