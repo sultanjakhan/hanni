@@ -101,120 +101,90 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-xs); }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
 
-/* ── Top Tab Bar ── */
+/* ── Drag region (window controls) ── */
+
+#drag-region {
+  height: 28px;
+  min-height: 28px;
+  -webkit-app-region: drag;
+  background: var(--bg-sidebar);
+}
+
+/* ── Vertical Tab Bar (left sidebar) ── */
 
 #tab-bar {
-  height: 40px;
-  min-height: 40px;
+  width: 48px;
+  min-width: 48px;
   background: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
   display: flex;
-  align-items: flex-end;
-  -webkit-app-region: drag;
-  padding-left: 76px;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
   overflow: hidden;
+  -webkit-app-region: no-drag;
 }
 
 #tab-list {
   display: flex;
-  height: 100%;
-  align-items: flex-end;
-  overflow-x: auto;
-  min-width: 0;
-  padding-top: var(--space-1);
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  width: 100%;
+  padding: 0 4px;
 }
 
-#tab-bar > .tab-bar-left {
-  display: flex;
-  align-items: flex-end;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-#tab-list::-webkit-scrollbar { height: 0; }
+#tab-list::-webkit-scrollbar { width: 0; }
 
 .tab-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 14px;
-  min-width: 120px;
-  max-width: 220px;
-  height: 32px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   -webkit-app-region: no-drag;
   transition: background var(--transition-fast), color var(--transition-fast);
   position: relative;
   flex-shrink: 0;
-  border-radius: 6px 6px 0 0;
-  margin-left: 1px;
+  border-radius: var(--radius-md);
 }
 
-/* Vertical dividers between inactive tabs */
-.tab-item::before {
-  content: '';
-  position: absolute;
-  left: -1px;
-  top: 8px;
-  bottom: 8px;
-  width: 1px;
-  background: var(--border-default);
-  transition: opacity var(--transition-fast);
-}
-
-.tab-item:first-child::before { opacity: 0; }
-.tab-item.active::before { opacity: 0; }
-.tab-item.before-active::before { opacity: 0; }
+.tab-item::before { display: none; }
 
 .tab-item:hover { background: var(--bg-hover); color: var(--text-secondary); }
-.tab-item:hover::before { opacity: 0; }
 
 .tab-item.active {
   color: var(--text-primary);
-  background: var(--bg-page);
-  height: 36px;
-  border: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--bg-page);
-  margin-bottom: -1px;
-  z-index: 1;
+  background: var(--bg-hover);
 }
 
-.tab-item-icon { flex-shrink: 0; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
-.tab-item-icon svg { width: 16px; height: 16px; }
+.tab-item.active::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent-blue);
+}
+
+.tab-item-icon { flex-shrink: 0; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 16px; }
+.tab-item-icon svg { width: 18px; height: 18px; }
 .tab-item.active .tab-item-icon { color: var(--text-primary); }
-.tab-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tab-item-label { display: none; }
 
-.tab-item-close {
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-sm);
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 11px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: all var(--transition-fast);
-}
-
-.tab-item:hover .tab-item-close { opacity: 1; }
-.tab-item-close:hover { background: var(--border-default); color: var(--text-secondary); }
+.tab-item-close { display: none; }
 
 #tab-add {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-md);
   border: none;
   background: transparent;
@@ -225,25 +195,65 @@ body {
   align-items: center;
   justify-content: center;
   -webkit-app-region: no-drag;
-  margin: 0 4px 6px;
+  margin: 4px 0;
   flex-shrink: 0;
   transition: all var(--transition-fast);
-  align-self: flex-end;
 }
 
 #tab-add:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-#tab-bar-right {
-  padding-right: var(--space-3);
-  border-bottom: 1px solid var(--bg-page);
-  margin-bottom: -1px;
+#tab-bar-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  width: 100%;
+}
+
+/* ── Horizontal Sub-Tab Bar ── */
+
+.sub-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.sub-tab-bar::-webkit-scrollbar { height: 0; }
+
+.sub-tab-pill {
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.sub-tab-pill:hover { color: var(--text-secondary); background: var(--bg-hover); }
+
+.sub-tab-pill.active {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 /* ── Tab Dropdown ── */
 
 #tab-dropdown {
   position: fixed;
-  top: 40px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -2210,110 +2220,176 @@ body.dragover::after {
 
 /* ── Focus tab ── */
 
+/* Focus — Ring Timer */
 .focus-current {
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-  text-align: center;
-  margin-bottom: var(--space-5);
-  box-shadow: var(--shadow-inset-border);
-  transition: all var(--transition-normal);
+  display: flex; flex-direction: column; align-items: center;
+  padding: var(--space-6); margin-bottom: var(--space-4);
 }
-
-.focus-current-title {
-  font-size: 14px;
-  color: var(--text-muted);
+.focus-ring-container {
+  position: relative; width: 180px; height: 180px; margin-bottom: var(--space-4);
+}
+.focus-ring-container.idle { opacity: 0.5; }
+.focus-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.focus-ring-bg {
+  fill: none; stroke: var(--border-default); stroke-width: 6;
+}
+.focus-ring-progress {
+  fill: none; stroke: var(--accent-blue); stroke-width: 6;
+  stroke-linecap: round; transition: stroke-dashoffset 1s linear;
+  stroke-dasharray: 339.29; stroke-dashoffset: 339.29;
+}
+.focus-ring-progress.break { stroke: var(--color-green); }
+.focus-ring-inner {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.focus-current-timer {
+  font-size: 36px; font-weight: 700; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.focus-current-activity {
+  font-size: 14px; color: var(--text-secondary); margin-top: var(--space-1);
+}
+.focus-blocking-badge {
+  font-size: 12px; color: var(--color-green); background: var(--color-green-bg);
+  padding: 3px 10px; border-radius: var(--radius-pill); margin-bottom: var(--space-3);
+}
+.focus-actions {
+  display: flex; gap: var(--space-2); margin-top: var(--space-3);
+}
+.focus-title-input {
+  max-width: 300px; text-align: center; margin-bottom: var(--space-3);
+}
+.focus-start-row {
   margin-bottom: var(--space-2);
 }
-
-.focus-current-activity {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: var(--space-1);
+.focus-check-label {
+  font-size: 12px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 6px; justify-content: center;
 }
 
-.focus-current-timer {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
+/* Focus — Presets */
 .focus-presets {
-  display: flex;
-  gap: var(--space-2);
-  margin-bottom: var(--space-5);
-  flex-wrap: wrap;
+  display: flex; gap: var(--space-2); margin-bottom: var(--space-3);
+  flex-wrap: wrap; justify-content: center;
 }
-
 .focus-preset {
-  padding: 12px 20px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-default);
-  background: var(--bg-card);
-  color: var(--text-muted);
-  font-size: 14px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  flex: 1;
-  min-width: 100px;
-  text-align: center;
+  padding: 6px 14px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border-default); background: var(--bg-card);
+  color: var(--text-muted); font-size: 13px; font-family: inherit;
+  cursor: pointer; transition: all var(--transition-fast);
 }
-
 .focus-preset:hover {
-  border-color: var(--border-hover);
-  color: var(--text-primary);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  border-color: var(--border-hover); color: var(--text-primary);
 }
 .focus-preset.active {
-  background: var(--accent-blue);
-  border-color: var(--accent-blue);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(68, 122, 203, 0.3);
+  background: var(--accent-blue); border-color: var(--accent-blue);
+  color: #fff; box-shadow: 0 2px 8px rgba(68, 122, 203, 0.3);
 }
 
-.focus-log { margin-top: var(--space-5); }
+/* Focus — Today Stats */
+.focus-today-stats {
+  display: flex; gap: var(--space-3); justify-content: center;
+  margin-bottom: var(--space-4); flex-wrap: wrap;
+}
+.focus-stat {
+  text-align: center; padding: var(--space-3) var(--space-4);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); min-width: 80px;
+}
+.focus-stat-value {
+  font-size: 18px; font-weight: 600; color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.focus-stat-label {
+  font-size: 11px; color: var(--text-muted); margin-top: 2px;
+}
 
+/* Focus — Log */
+.focus-log-header {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: var(--space-2); margin-top: var(--space-3);
+}
+.focus-log { margin-bottom: var(--space-3); }
+.focus-day-group { margin-bottom: var(--space-4); }
 .focus-log-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 12px 14px;
-  margin-bottom: var(--space-1);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  transition: all var(--transition-fast);
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 10px 14px; margin-bottom: var(--space-1);
+  border-radius: var(--radius-md); background: var(--bg-card);
+  border: 1px solid var(--border-subtle); transition: all var(--transition-fast);
 }
-
 .focus-log-item:hover {
-  border-color: var(--border-hover);
-  background: var(--bg-hover);
+  border-color: var(--border-hover); background: var(--bg-hover);
 }
-
 .focus-log-time {
-  font-size: 11px;
-  color: var(--text-muted);
-  min-width: 50px;
+  font-size: 11px; color: var(--text-muted); min-width: 50px;
   font-variant-numeric: tabular-nums;
 }
 .focus-log-title { font-size: 14px; color: var(--text-secondary); flex: 1; }
 .focus-log-duration {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
+  font-size: 13px; font-weight: 500; color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
-
 .focus-log-category {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-blue-bg);
-  color: var(--color-blue);
+  font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm);
+  background: var(--color-blue-bg); color: var(--color-blue);
+}
+
+/* Focus — History Chart */
+.focus-chart {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.focus-chart-title {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+}
+.focus-chart-bars {
+  display: flex; gap: var(--space-2); align-items: flex-end; height: 140px;
+}
+.focus-chart-bar-col {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  height: 100%;
+}
+.focus-chart-bar-value {
+  font-size: 10px; color: var(--text-muted); margin-bottom: 4px;
+  font-variant-numeric: tabular-nums; min-height: 14px;
+}
+.focus-chart-bar-track {
+  flex: 1; width: 100%; display: flex; align-items: flex-end;
+}
+.focus-chart-bar {
+  width: 100%; background: var(--accent-blue); border-radius: 3px 3px 0 0;
+  min-height: 2px; transition: height 0.3s ease;
+}
+.focus-chart-bar-label {
+  font-size: 11px; color: var(--text-muted); margin-top: 4px;
+}
+
+/* Focus — Category Breakdown */
+.focus-breakdown {
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg); padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.focus-breakdown-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.focus-breakdown-label {
+  font-size: 13px; color: var(--text-secondary); min-width: 70px;
+}
+.focus-breakdown-bar-track {
+  flex: 1; height: 8px; background: var(--bg-hover);
+  border-radius: 4px; overflow: hidden;
+}
+.focus-breakdown-bar {
+  height: 100%; border-radius: 4px; transition: width 0.3s ease;
+}
+.focus-breakdown-value {
+  font-size: 12px; color: var(--text-muted); min-width: 50px;
+  text-align: right; font-variant-numeric: tabular-nums;
 }
 
 /* ── Notes tab ── */
@@ -2410,19 +2486,12 @@ body.dragover::after {
   color: var(--text-faint);
 }
 
-.note-card-tags {
-  display: flex;
-  gap: var(--space-1);
-}
-
 .note-pinned-icon { font-size: 13px; }
 
 .note-tag {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  background: var(--color-blue-bg);
-  color: var(--color-blue);
+  border-radius: var(--radius-pill);
 }
 
 /* Note inline editor */
@@ -2486,6 +2555,304 @@ body.dragover::after {
 .note-action-btn-danger:hover {
   background: var(--color-red-bg);
   border-color: var(--color-red);
+}
+
+/* Note task bar */
+.note-task-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+.note-task-bar .form-select,
+.note-task-bar .form-input {
+  font-size: 13px;
+  padding: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+.note-status-select { max-width: 120px; }
+.note-due-input { max-width: 150px; }
+.note-reminder-input { max-width: 200px; }
+.note-tab-select { max-width: 150px; }
+
+/* Tags row in editor */
+.note-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  min-height: 28px;
+}
+.note-tag-pill {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.note-tag-remove {
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 14px;
+  line-height: 1;
+}
+.note-tag-remove:hover { opacity: 1; }
+.note-tag-input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 2px 4px;
+  min-width: 60px;
+  width: 80px;
+}
+.note-tag-input::placeholder { color: var(--text-faint); }
+
+/* Tag filter bar */
+.notes-tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+.note-tag-filter-pill {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+}
+.note-tag-filter-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+.note-tag-filter-pill.active {
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+}
+
+/* Card tags */
+.note-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+/* Due date indicators */
+.due-overdue { color: var(--color-red); font-weight: 500; }
+.due-today { color: var(--color-yellow); font-weight: 500; }
+.due-soon { color: var(--color-blue); }
+.due-later { color: var(--text-muted); }
+.note-card-due { margin-left: var(--space-1); }
+
+/* Task done state */
+.task-done .note-card-title { text-decoration: line-through; opacity: 0.5; }
+.task-done .note-card-preview { opacity: 0.4; }
+
+/* Status icon in card */
+.note-status-icon {
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.7;
+}
+.note-status-icon:hover { opacity: 1; }
+
+/* Tab badge on card */
+.note-tab-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* Markdown preview */
+.note-preview {
+  min-height: 200px;
+  padding: var(--space-2) 0;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+.note-preview h1,
+.note-preview h2,
+.note-preview h3 { margin: 1em 0 0.5em; color: var(--text-primary); }
+.note-preview h1 { font-size: 1.5em; }
+.note-preview h2 { font-size: 1.3em; }
+.note-preview h3 { font-size: 1.1em; }
+.note-preview p { margin: 0.5em 0; }
+.note-preview code {
+  background: var(--bg-elevated);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  font-size: 0.9em;
+}
+.note-preview pre {
+  background: var(--bg-elevated);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.note-preview pre code { background: none; padding: 0; }
+.note-preview blockquote {
+  border-left: 3px solid var(--border-default);
+  margin: 0.5em 0;
+  padding-left: var(--space-3);
+  color: var(--text-muted);
+}
+.note-preview ul, .note-preview ol { padding-left: 1.5em; margin: 0.5em 0; }
+.note-preview table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+.note-preview th, .note-preview td {
+  border: 1px solid var(--border-default);
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+}
+.note-preview th { background: var(--bg-elevated); font-weight: 600; }
+.note-preview a { color: var(--accent-blue); }
+.note-preview img { max-width: 100%; border-radius: var(--radius-sm); }
+
+/* DnD */
+.note-card.dragging { opacity: 0.4; }
+.note-card.drag-over { border-top: 2px solid var(--accent-blue); }
+
+/* ── Kanban Board ── */
+.kanban-board {
+  display: flex; gap: var(--space-3); min-height: 400px; overflow-x: auto;
+}
+.kanban-column {
+  flex: 1; display: flex; flex-direction: column; min-width: 200px;
+  background: var(--bg-sidebar); border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.kanban-column-header {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: var(--space-3); padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+}
+.kanban-column-count {
+  font-size: 11px; color: var(--text-muted); background: var(--bg-hover);
+  padding: 1px 7px; border-radius: var(--radius-pill); margin-left: auto;
+}
+.kanban-add-btn {
+  background: none; border: none; color: var(--text-muted); font-size: 16px;
+  cursor: pointer; padding: 0 4px; line-height: 1; border-radius: var(--radius-sm);
+}
+.kanban-add-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.kanban-column-cards {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column;
+  gap: var(--space-2); min-height: 60px; padding: var(--space-1);
+  border-radius: var(--radius-sm); transition: background var(--transition-fast);
+}
+.kanban-column-cards.drag-over {
+  background: var(--bg-hover);
+}
+.kanban-column-cards .note-card {
+  margin: 0;
+}
+
+/* ── Timeline View ── */
+.timeline-view { padding: var(--space-2) 0; }
+.timeline-group { margin-bottom: var(--space-4); }
+.timeline-group.overdue .timeline-group-header { color: var(--color-red); }
+.timeline-group.no-date .timeline-group-header { color: var(--text-muted); }
+.timeline-group-header {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  padding-bottom: var(--space-1); margin-bottom: var(--space-2);
+}
+.timeline-item {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  cursor: pointer; transition: background var(--transition-fast);
+}
+.timeline-item:hover { background: var(--bg-hover); }
+.timeline-date {
+  width: 55px; font-size: 12px; color: var(--text-muted); flex-shrink: 0;
+  text-align: right;
+}
+.timeline-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 2px solid var(--accent-blue); flex-shrink: 0; box-sizing: border-box;
+}
+.timeline-dot.done { background: var(--color-green); border-color: var(--color-green); }
+.timeline-dot.overdue { border-color: var(--color-red); }
+.timeline-content { flex: 1; min-width: 0; }
+.timeline-title {
+  font-size: 14px; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.timeline-tags { margin-top: 2px; }
+.timeline-item.task-done .timeline-title { text-decoration: line-through; opacity: 0.5; }
+.timeline-today-badge {
+  font-size: 11px; color: var(--accent-blue); background: var(--color-blue-bg);
+  padding: 1px 6px; border-radius: var(--radius-pill);
+}
+.timeline-overdue-badge {
+  font-size: 11px; color: var(--color-red); background: var(--color-red-bg);
+  padding: 1px 6px; border-radius: var(--radius-pill);
+}
+
+/* Linked notes (for other tabs) */
+.linked-notes-section {
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--border-default);
+  padding-top: var(--space-4);
+}
+.linked-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+.linked-notes-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+}
+.linked-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.linked-note-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.linked-note-item:hover { background: var(--bg-hover); }
+.linked-note-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.linked-note-item.task-done .linked-note-title { text-decoration: line-through; opacity: 0.5; }
+.linked-note-date {
+  font-size: 12px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  margin-left: var(--space-2);
 }
 
 /* ── Empty state ── */
@@ -2785,6 +3152,42 @@ body.dragover::after {
   font-size: 14px;
   color: var(--text-secondary);
   flex: 1;
+}
+
+/* Calendar ↔ Tasks */
+.calendar-task-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--color-green); display: inline-block;
+}
+.calendar-task-dot.done { opacity: 0.4; }
+.calendar-day-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.calendar-day-panel-section {
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-top: var(--space-3); margin-bottom: var(--space-1);
+}
+.calendar-day-panel-section:first-of-type { margin-top: 0; }
+.calendar-task-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px;
+}
+.calendar-task-item:hover { background: var(--bg-hover); }
+.calendar-task-item .note-status-icon {
+  cursor: pointer; flex-shrink: 0;
+}
+.calendar-task-title {
+  flex: 1; color: var(--text-secondary); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.calendar-day-panel-empty {
+  font-size: 13px; color: var(--text-muted); padding: var(--space-2) 0;
+}
+.btn-sm {
+  font-size: 12px; padding: 2px 8px; border-radius: var(--radius-sm);
 }
 
 /* ── Calendar List (table view) ── */
