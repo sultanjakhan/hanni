@@ -177,6 +177,7 @@ body {
 
 .tab-item-icon { flex-shrink: 0; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 16px; }
 .tab-item-icon svg { width: 18px; height: 18px; }
+.tab-item-icon-emoji { font-size: 15px; }
 .tab-item.active .tab-item-icon { color: var(--text-primary); }
 .tab-item-label { display: none; }
 
@@ -1980,12 +1981,37 @@ body.dragover::after {
   padding: 48px 0 20px;
   max-width: 900px;
   margin: 0 auto;
+  position: relative;
 }
 .page-header-emoji {
   margin-bottom: var(--space-2);
   color: var(--text-secondary);
 }
 .page-header-emoji svg { width: 36px; height: 36px; }
+
+/* Clickable icon button (Notion-style) */
+.page-header-icon-btn {
+  font-size: 36px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-normal);
+  line-height: 1;
+  margin-bottom: var(--space-2);
+  display: block;
+}
+.page-header-icon-btn:hover {
+  background: var(--bg-hover);
+}
+.page-header-icon-btn.page-header-icon-svg {
+  color: var(--text-secondary);
+}
+.page-header-icon-btn.page-header-icon-svg svg {
+  width: 36px;
+  height: 36px;
+}
 
 .page-header-title {
   font-size: 28px;
@@ -1994,11 +2020,49 @@ body.dragover::after {
   margin-bottom: var(--space-1);
   letter-spacing: -0.5px;
 }
+
+/* Editable description input */
+.page-header-desc-input {
+  display: block;
+  width: 100%;
+  font-size: 14px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin-bottom: var(--space-3);
+  font-family: inherit;
+  line-height: 1.5;
+}
+.page-header-desc-input::placeholder {
+  color: var(--text-faint);
+}
+.page-header-desc-input:focus {
+  color: var(--text-secondary);
+}
+
 .page-header-description {
   font-size: 14px;
   color: var(--text-muted);
   margin-bottom: var(--space-3);
   line-height: 1.5;
+}
+
+/* Page emoji picker (shared across all tabs) */
+.page-emoji-picker {
+  position: absolute;
+  top: 90px;
+  left: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  box-shadow: var(--shadow-md);
+  z-index: 100;
 }
 .page-header-properties {
   display: flex;
@@ -2805,6 +2869,7 @@ body.dragover::after {
 /* ── Notes Header (Notion-style) ── */
 .notes-header {
   padding: var(--space-4) 0 0;
+  position: relative;
 }
 .notes-header-top {
   display: flex;
@@ -2817,12 +2882,24 @@ body.dragover::after {
   align-items: center;
   gap: var(--space-2);
 }
-.notes-header-left .page-header-emoji {
-  display: flex;
-  align-items: center;
+.notes-header-left .page-header-icon-btn {
+  font-size: 24px;
+  margin-bottom: 0;
+  padding: var(--space-1);
+}
+.notes-header-left .page-header-icon-btn.page-header-icon-svg svg {
+  width: 24px;
+  height: 24px;
 }
 .notes-header-left .page-header-title {
   margin: 0;
+}
+.notes-header > .page-header-desc-input {
+  margin-top: var(--space-1);
+  margin-bottom: var(--space-2);
+}
+.notes-header > .page-emoji-picker {
+  top: 50px;
 }
 .notes-header-actions {
   display: flex;
@@ -5240,7 +5317,7 @@ body.dragover::after {
 
 .focus-widget {
   position: absolute;
-  bottom: 16px;
+  bottom: 80px;
   right: 16px;
   z-index: 900;
   display: flex;
@@ -5307,6 +5384,9 @@ body.dragover::after {
   box-sizing: border-box;
 }
 .fw-input:focus { border-color: var(--accent-blue); outline: none; }
+.fw-input[type="number"] { -moz-appearance: textfield; }
+.fw-input[type="number"]::-webkit-inner-spin-button,
+.fw-input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
 .fw-presets {
   display: flex;
@@ -5354,6 +5434,7 @@ body.dragover::after {
   color: var(--text-primary);
   box-shadow: var(--shadow-card);
   animation: fw-scaleIn 0.15s ease;
+  cursor: pointer;
 }
 
 .fw-pulse-dot {

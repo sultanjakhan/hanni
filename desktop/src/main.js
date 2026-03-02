@@ -94,6 +94,10 @@ let currentConversationId = null;
 let isSpeaking = false;
 let convSearchTimeout = null;
 let focusTimerInterval = null;
+let focusWidgetActivity = null;
+let focusWidgetOpen = false;
+let focusWidgetTimerInterval = null;
+let focusWidgetPollInterval = null;
 let currentNoteId = null;
 let noteAutoSaveTimeout = null;
 let tagColorMap = {};
@@ -185,19 +189,86 @@ const TAB_DESCRIPTIONS = {
   people: 'Contacts and relationship management',
 };
 
+// ── Page customization (Notion-like editable icon/description) ──
+const PAGE_EMOJIS = ['📄','📝','📋','📌','📎','📁','💡','🎯','🔥','⭐','🏠','💼','🎨','🎮','📚','🎵','💰','🏋️','❤️','🧠','🍔','📅','🔧','🚀','🌟','✅','📊','🗂️','💬','🔔','🧪','🔬','📸','🎬','🎭','🎪','🏆','🗺️','🌍','🧩'];
+let tabCustomizations = {};
+try { tabCustomizations = JSON.parse(localStorage.getItem('hanni_tab_custom') || '{}'); } catch(_) {}
+
+function saveTabCustom() {
+  localStorage.setItem('hanni_tab_custom', JSON.stringify(tabCustomizations));
+}
+
+function getTabIcon(tabId) {
+  const custom = tabCustomizations[tabId];
+  if (custom?.icon) return custom.icon;
+  return TAB_REGISTRY[tabId]?.icon || '';
+}
+
+function getTabDesc(tabId) {
+  const custom = tabCustomizations[tabId];
+  if (custom?.desc !== undefined) return custom.desc;
+  return TAB_DESCRIPTIONS[tabId] || '';
+}
+
 function renderPageHeader(tabId, extra) {
   const reg = TAB_REGISTRY[tabId];
   if (!reg) return '';
-  const desc = extra?.description || TAB_DESCRIPTIONS[tabId] || '';
+  const customIcon = tabCustomizations[tabId]?.icon;
+  const iconHtml = customIcon
+    ? `<button class="page-header-icon-btn" data-tab-id="${tabId}" title="Сменить иконку">${customIcon}</button>`
+    : `<button class="page-header-icon-btn page-header-icon-svg" data-tab-id="${tabId}" title="Сменить иконку">${reg.icon || ''}</button>`;
+  const desc = extra?.description || getTabDesc(tabId);
   const props = extra?.properties || [];
-  return `<div class="page-header">
-    <div class="page-header-emoji">${reg.icon || ''}</div>
+  return `<div class="page-header" data-tab-id="${tabId}">
+    ${iconHtml}
     <div class="page-header-title">${extra?.title || reg.label}</div>
-    ${desc ? `<div class="page-header-description">${desc}</div>` : ''}
+    <input class="page-header-desc-input" data-tab-id="${tabId}" value="${escapeHtml(desc)}" placeholder="Добавить описание...">
     ${props.length ? `<div class="page-header-properties">${props.map(p =>
       `<span class="page-property"><span class="page-property-label">${p.label}</span><span class="page-property-value ${p.class || ''}">${p.value}</span></span>`
     ).join('')}</div>` : ''}
+    <div class="page-emoji-picker hidden" id="page-emoji-picker-${tabId}">
+      ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
+    </div>
   </div>`;
+}
+
+function setupPageHeaderControls(tabId) {
+  // Icon click → toggle emoji picker
+  const iconBtn = document.querySelector(`.page-header-icon-btn[data-tab-id="${tabId}"]`);
+  const picker = document.getElementById(`page-emoji-picker-${tabId}`);
+  if (iconBtn && picker) {
+    iconBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      picker.classList.toggle('hidden');
+    });
+    picker.querySelectorAll('.emoji-pick-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const emoji = btn.dataset.emoji;
+        if (!tabCustomizations[tabId]) tabCustomizations[tabId] = {};
+        tabCustomizations[tabId].icon = emoji;
+        saveTabCustom();
+        iconBtn.textContent = emoji;
+        iconBtn.classList.remove('page-header-icon-svg');
+        picker.classList.add('hidden');
+        renderTabBar();
+      });
+    });
+    const closePicker = (e) => {
+      if (!picker.contains(e.target) && e.target !== iconBtn) picker.classList.add('hidden');
+    };
+    document.addEventListener('click', closePicker, { once: false });
+  }
+
+  // Description edit
+  const descInput = document.querySelector(`.page-header-desc-input[data-tab-id="${tabId}"]`);
+  if (descInput) {
+    descInput.addEventListener('input', () => {
+      if (!tabCustomizations[tabId]) tabCustomizations[tabId] = {};
+      tabCustomizations[tabId].desc = descInput.value;
+      saveTabCustom();
+    });
+  }
 }
 
 let openTabs = ['chat', 'dashboard'];
@@ -467,6 +538,7 @@ listen('focus-ended', () => {
     clearInterval(focusTimerInterval);
     focusTimerInterval = null;
   }
+  updateFocusWidget();
 });
 
 // ── Conversation sidebar ──
@@ -690,7 +762,15 @@ function renderTabBar() {
     item.className = 'tab-item' + (tabId === activeTab ? ' active' : '');
     item.dataset.tabId = tabId;
     item.title = reg.label;
-    item.innerHTML = `<span class="tab-item-icon">${reg.icon || ''}</span>`;
+    const customIcon = tabCustomizations[tabId]?.icon;
+    item.innerHTML = customIcon
+      ? `<span class="tab-item-icon tab-item-icon-emoji">${customIcon}</span>`
+      : `<span class="tab-item-icon">${reg.icon || ''}</span>`;
+    if (tabId === 'focus' && focusWidgetActivity) {
+      const dot = document.createElement('span');
+      dot.className = 'tab-focus-dot';
+      item.appendChild(dot);
+    }
     item.addEventListener('click', () => switchTab(tabId));
     tabList.appendChild(item);
   }
@@ -930,6 +1010,7 @@ function switchTab(tabId) {
   saveTabs();
   renderTabBar();
   activateView();
+  updateFocusWidgetVisibility();
 }
 
 function ensureViewDiv(tabId) {
@@ -980,6 +1061,8 @@ function loadSubTabContent(tabId, subTab) {
       if (tabId.startsWith('page_')) loadCustomPage(tabId);
       break;
   }
+  // Wire up editable page header controls (icon picker, description) after content renders
+  if (tabId !== 'chat') setTimeout(() => setupPageHeaderControls(tabId), 50);
 }
 
 // Tab add dropdown
@@ -1041,6 +1124,7 @@ document.addEventListener('click', () => {
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   if (!e.metaKey && !e.ctrlKey) return;
+  if (e.shiftKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); toggleFocusWidgetPopover(); return; }
   if (e.key === 'w') { e.preventDefault(); if (TAB_REGISTRY[activeTab]?.closable) closeTab(activeTab); return; }
   if (e.key === 't') { e.preventDefault(); document.getElementById('tab-add')?.click(); return; }
   const num = parseInt(e.key);
@@ -2197,9 +2281,11 @@ async function executeAction(actionJson) {
           duration: action.duration || null,
           apps: null, sites: null,
         });
+        setTimeout(() => updateFocusWidget(), 100);
         break;
       case 'stop_activity':
         result = await invoke('stop_activity');
+        setTimeout(() => updateFocusWidget(), 100);
         break;
       case 'get_current_activity':
         result = await invoke('get_current_activity');
@@ -2209,12 +2295,14 @@ async function executeAction(actionJson) {
         const cat = action.category || 'work';
         startPomodoro(title, cat, action.focus_mode || false);
         result = `Помодоро запущен: ${title} (25 мин)`;
+        setTimeout(() => updateFocusWidget(), 100);
         break;
       }
       case 'stop_pomodoro':
         pomodoroState.active = false;
         await invoke('stop_activity').catch(() => {});
         result = 'Помодоро остановлен';
+        setTimeout(() => updateFocusWidget(), 100);
         break;
       // Navigation
       case 'open_tab':
@@ -4606,10 +4694,15 @@ async function renderNotesPage() {
 }
 
 function renderNotesHeader() {
-  return `<div class="notes-header">
+  const customIcon = tabCustomizations.notes?.icon;
+  const iconHtml = customIcon
+    ? `<button class="page-header-icon-btn" data-tab-id="notes" title="Сменить иконку">${customIcon}</button>`
+    : `<button class="page-header-icon-btn page-header-icon-svg" data-tab-id="notes" title="Сменить иконку">${TAB_ICONS.notes}</button>`;
+  const desc = getTabDesc('notes');
+  return `<div class="notes-header" data-tab-id="notes">
     <div class="notes-header-top">
       <div class="notes-header-left">
-        <div class="page-header-emoji">${TAB_ICONS.notes}</div>
+        ${iconHtml}
         <div class="page-header-title">Notes</div>
       </div>
       <div class="notes-header-actions">
@@ -4619,6 +4712,10 @@ function renderNotesHeader() {
           <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off" value="${escapeHtml(notesSearchQuery)}">
         </div>
       </div>
+    </div>
+    ${desc ? `<input class="page-header-desc-input" data-tab-id="notes" value="${escapeHtml(desc)}" placeholder="Добавить описание...">` : `<input class="page-header-desc-input" data-tab-id="notes" value="" placeholder="Добавить описание...">`}
+    <div class="page-emoji-picker hidden" id="page-emoji-picker-notes">
+      ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
     </div>
   </div>`;
 }
@@ -4654,6 +4751,9 @@ function renderNotesFilterBar(allTags) {
 }
 
 function setupNotesControls() {
+  // Page header controls (icon picker, description)
+  setupPageHeaderControls('notes');
+
   // View bar clicks
   document.querySelectorAll('.notes-view-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -7219,6 +7319,11 @@ function renderHealth(el, today, habits) {
   renderTabBar();
   activateView();
 
+  // Focus floating widget
+  createFocusWidget();
+  updateFocusWidget();
+  focusWidgetPollInterval = setInterval(() => updateFocusWidget(), 3000);
+
   // Auto-restore last conversation
   try {
     const convs = await invoke('get_conversations', { limit: 1 });
@@ -7995,5 +8100,193 @@ document.addEventListener('keydown', (e) => {
     endCallMode();
   }
 });
+
+// ── Focus Floating Widget ──
+
+function createFocusWidget() {
+  const existing = document.getElementById('focus-widget');
+  if (existing) existing.remove();
+  const widget = document.createElement('div');
+  widget.id = 'focus-widget';
+  widget.className = 'focus-widget';
+  widget.innerHTML = `
+    <div class="focus-widget-popover hidden" id="fw-popover">
+      <h4>Быстрый старт</h4>
+      <input class="fw-input" id="fw-input" placeholder="Название..." />
+      <input class="fw-input" id="fw-duration" type="number" min="1" max="480" placeholder="Длительность (мин)..." />
+      <div class="fw-presets">
+        <span class="fw-preset" data-cat="work">Работа</span>
+        <span class="fw-preset" data-cat="study">Учёба</span>
+        <span class="fw-preset" data-cat="sport">Спорт</span>
+        <span class="fw-preset" data-cat="rest">Отдых</span>
+        <span class="fw-preset" data-cat="hobby">Хобби</span>
+        <span class="fw-preset" data-cat="other">Другое</span>
+      </div>
+      <button class="fw-start-btn" id="fw-start-btn">Начать</button>
+    </div>
+    <div class="focus-widget-active hidden" id="fw-active">
+      <span class="fw-pulse-dot"></span>
+      <span class="fw-activity-name" id="fw-activity-name"></span>
+      <span class="fw-timer" id="fw-timer">00:00</span>
+      <span class="fw-stop-btn" id="fw-stop-btn">■</span>
+    </div>
+    <div class="focus-widget-btn" id="fw-idle-btn">◎</div>
+  `;
+  document.getElementById('content-area').appendChild(widget);
+  bindFocusWidgetEvents();
+}
+
+function bindFocusWidgetEvents() {
+  const idleBtn = document.getElementById('fw-idle-btn');
+  const popover = document.getElementById('fw-popover');
+  const startBtn = document.getElementById('fw-start-btn');
+  const stopBtn = document.getElementById('fw-stop-btn');
+  const presets = document.querySelectorAll('.fw-preset');
+  let selectedCat = 'other';
+
+  idleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleFocusWidgetPopover();
+  });
+
+  presets.forEach(p => {
+    p.addEventListener('click', (e) => {
+      e.stopPropagation();
+      presets.forEach(x => x.classList.remove('selected'));
+      p.classList.add('selected');
+      selectedCat = p.dataset.cat;
+      const fwInput = document.getElementById('fw-input');
+      if (!fwInput.value.trim()) fwInput.value = p.textContent;
+    });
+  });
+
+  startBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const fwInput = document.getElementById('fw-input');
+    const durationInput = document.getElementById('fw-duration');
+    const title = fwInput.value.trim() || 'Без названия';
+    const durMin = parseInt(durationInput.value);
+    const duration = durMin > 0 ? durMin : null;
+    try {
+      await invoke('start_activity', {
+        title, category: selectedCat, focusMode: false, duration, apps: null, sites: null,
+      });
+    } catch (_) {}
+    fwInput.value = '';
+    durationInput.value = '';
+    presets.forEach(x => x.classList.remove('selected'));
+    selectedCat = 'other';
+    popover.classList.add('hidden');
+    focusWidgetOpen = false;
+    await updateFocusWidget();
+  });
+
+  stopBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try { await invoke('stop_activity'); } catch (_) {}
+    await updateFocusWidget();
+  });
+
+  document.getElementById('fw-active').addEventListener('click', (e) => {
+    if (e.target.closest('.fw-stop-btn')) return;
+    switchTab('focus');
+  });
+
+  document.addEventListener('click', (e) => {
+    const widget = document.getElementById('focus-widget');
+    if (focusWidgetOpen && widget && !widget.contains(e.target)) {
+      popover.classList.add('hidden');
+      focusWidgetOpen = false;
+    }
+  });
+}
+
+function toggleFocusWidgetPopover() {
+  const popover = document.getElementById('fw-popover');
+  if (!popover) return;
+  if (focusWidgetActivity) return;
+  focusWidgetOpen = !focusWidgetOpen;
+  popover.classList.toggle('hidden', !focusWidgetOpen);
+  if (focusWidgetOpen) {
+    const fwInput = document.getElementById('fw-input');
+    if (fwInput) setTimeout(() => fwInput.focus(), 50);
+  }
+}
+
+async function updateFocusWidget() {
+  const widget = document.getElementById('focus-widget');
+  if (!widget) return;
+
+  let activity = null;
+  try {
+    activity = await invoke('get_current_activity');
+  } catch (_) {}
+
+  const idleBtn = document.getElementById('fw-idle-btn');
+  const activeBar = document.getElementById('fw-active');
+  const popover = document.getElementById('fw-popover');
+
+  if (activity && activity.id) {
+    const changed = !focusWidgetActivity || focusWidgetActivity.id !== activity.id;
+    focusWidgetActivity = activity;
+    idleBtn.classList.add('hidden');
+    popover.classList.add('hidden');
+    focusWidgetOpen = false;
+    activeBar.classList.remove('hidden');
+    document.getElementById('fw-activity-name').textContent = activity.title || 'Активность';
+    if (changed) startFocusWidgetTimer(activity.started_at);
+    updateSidebarFocusIndicator(true);
+  } else {
+    focusWidgetActivity = null;
+    stopFocusWidgetTimer();
+    activeBar.classList.add('hidden');
+    idleBtn.classList.remove('hidden');
+    updateSidebarFocusIndicator(false);
+  }
+
+  updateFocusWidgetVisibility();
+}
+
+function startFocusWidgetTimer(startedAt) {
+  stopFocusWidgetTimer();
+  const start = new Date(startedAt).getTime();
+  const timerEl = document.getElementById('fw-timer');
+  function tick() {
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    if (timerEl) timerEl.textContent = h > 0
+      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  tick();
+  focusWidgetTimerInterval = setInterval(tick, 1000);
+}
+
+function stopFocusWidgetTimer() {
+  if (focusWidgetTimerInterval) {
+    clearInterval(focusWidgetTimerInterval);
+    focusWidgetTimerInterval = null;
+  }
+}
+
+function updateSidebarFocusIndicator(active) {
+  const focusTab = document.querySelector('.tab-item[data-tab-id="focus"]');
+  if (!focusTab) return;
+  const existing = focusTab.querySelector('.tab-focus-dot');
+  if (active && !existing) {
+    const dot = document.createElement('span');
+    dot.className = 'tab-focus-dot';
+    focusTab.appendChild(dot);
+  } else if (!active && existing) {
+    existing.remove();
+  }
+}
+
+function updateFocusWidgetVisibility() {
+  const widget = document.getElementById('focus-widget');
+  if (widget) widget.classList.toggle('hidden', activeTab === 'focus');
+}
 
 input.focus();
