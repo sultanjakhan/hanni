@@ -6754,6 +6754,30 @@ fn delete_custom_page(id: String, db: tauri::State<'_, HanniDb>) -> Result<(), S
     Ok(())
 }
 
+// ── Focus Overlay Window ──
+
+#[tauri::command]
+fn toggle_focus_overlay(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("focus-overlay") {
+        let _ = win.close();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "focus-overlay",
+        tauri::WebviewUrl::App("focus-overlay.html".into()),
+    )
+    .title("Focus")
+    .inner_size(220.0, 56.0)
+    .decorations(false)
+    .always_on_top(true)
+    .resizable(false)
+    .skip_taskbar(true)
+    .build()
+    .map_err(|e| format!("Window error: {}", e))?;
+    Ok(())
+}
+
 // ── v0.7.0: Events (Calendar) commands ──
 
 #[tauri::command]
@@ -10852,6 +10876,8 @@ pub fn run() {
             get_custom_page,
             update_custom_page,
             delete_custom_page,
+            // Focus Overlay
+            toggle_focus_overlay,
         ])
         .setup(move |app| {
             // Auto-updater
