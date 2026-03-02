@@ -334,7 +334,8 @@ function renderPageHeader(tabId, extra) {
     <div class="page-emoji-picker hidden" id="page-emoji-picker-${tabId}">
       ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
     </div>
-  </div><div class="tab-settings-panel hidden" id="tab-settings-panel-${tabId}"></div>`;
+    ${hasSettings ? `<div class="tab-settings-panel hidden" id="tab-settings-panel-${tabId}"></div>` : ''}
+  </div>`;
 }
 
 function setupPageHeaderControls(tabId) {
