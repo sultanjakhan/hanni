@@ -1720,6 +1720,36 @@ body {
   color: var(--bg-page);
 }
 
+/* ── Setting pills (per-tab settings) ── */
+.setting-pills {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.setting-pill {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.setting-pill:hover {
+  border-color: var(--border-hover);
+  color: var(--text-secondary);
+}
+
+.setting-pill.active {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--bg-page);
+}
+
 /* ── Chat settings mode ── */
 
 #view-chat.chat-settings-mode #chat-container,
@@ -2883,49 +2913,7 @@ body.dragover::after {
   padding: 1px 6px; border-radius: var(--radius-pill);
 }
 
-/* ── Notes Header (Notion-style) ── */
-.notes-header {
-  padding: var(--space-4) 0 0;
-  position: relative;
-}
-.notes-header-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-.notes-header-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.notes-header-left .page-header-icon-btn {
-  font-size: 24px;
-  margin-bottom: 0;
-  padding: var(--space-1);
-}
-.notes-header-left .page-header-icon-btn.page-header-icon-svg svg {
-  width: 24px;
-  height: 24px;
-}
-.notes-header-left .page-header-title {
-  margin: 0;
-}
-.notes-header > .page-header-desc-input {
-  margin-top: var(--space-1);
-  margin-bottom: var(--space-2);
-}
-.notes-header > .page-emoji-picker {
-  top: 50px;
-}
-.notes-header-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.notes-header-actions .notes-search-wrap {
-  max-width: 200px;
-}
+/* Notes uses standard .page-header now */
 
 /* ── Notes View Bar (Notion-style underline tabs) ── */
 .notes-view-bar {
