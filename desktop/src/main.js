@@ -98,6 +98,10 @@ let currentNoteId = null;
 let noteAutoSaveTimeout = null;
 let tagColorMap = {};
 let noteTagFilter = null;
+let notesView = localStorage.getItem('hanni_notes_view') || 'all';
+let notesFilters = new Set();
+let notesSearchQuery = '';
+let notesTableSort = { col: 'updated_at', dir: 'desc' };
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = null;
@@ -151,7 +155,7 @@ const TAB_REGISTRY = {
   dashboard:   { label: 'Dashboard',   icon: TAB_ICONS.dashboard, closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
-  notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: ['All', 'Tasks', 'Kanban', 'Timeline', 'Pinned', 'Archived'] },
+  notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: [] },
   work:        { label: 'Work',        icon: TAB_ICONS.work, closable: true,  subTabs: ['Projects'] },
   development: { label: 'Development', icon: TAB_ICONS.development, closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
   home:        { label: 'Home',        icon: TAB_ICONS.home, closable: true,  subTabs: ['Supplies', 'Shopping List'] },
@@ -2252,7 +2256,7 @@ async function executeAction(actionJson) {
           tag.className = 'memory-toast';
           tag.textContent = `✅ Задача: ${action.title || 'Новая задача'}${action.due_date ? ' → ' + action.due_date : ''}`;
           tag.style.cursor = 'pointer';
-          tag.addEventListener('click', () => { activateTab('notes'); setTimeout(() => { activeSubTab.notes = 'Tasks'; loadNotes('Tasks'); }, 100); });
+          tag.addEventListener('click', () => { activateTab('notes'); setTimeout(() => { notesFilters = new Set(['task']); loadNotes(); }, 100); });
           document.getElementById('chat')?.appendChild(tag);
           setTimeout(() => tag.classList.add('fade-out'), 4000);
           setTimeout(() => tag.remove(), 4500); }
@@ -4517,6 +4521,49 @@ async function loadTagColorMap() {
 }
 
 async function loadNotes(subTab) {
+  await renderNotesPage();
+}
+
+// ── Notes Page: Notion-like views + filter chips ──
+
+function applyNotesFilters(notes) {
+  let result = notes;
+
+  // Status filters (OR logic)
+  if (notesFilters.size > 0) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    result = result.filter(n => {
+      const conditions = [];
+      if (notesFilters.has('pin')) conditions.push(!!n.pinned);
+      if (notesFilters.has('archive')) conditions.push(!!n.archived);
+      if (notesFilters.has('task')) conditions.push(n.status === 'task');
+      if (notesFilters.has('done')) conditions.push(n.status === 'done');
+      if (notesFilters.has('overdue')) conditions.push(n.status === 'task' && n.due_date && n.due_date < todayStr);
+      return conditions.some(c => c);
+    });
+  } else {
+    result = result.filter(n => !n.archived);
+  }
+
+  // Tag filter (AND)
+  if (noteTagFilter) {
+    result = result.filter(n => (n.tags || '').split(',').map(t => t.trim()).includes(noteTagFilter));
+  }
+
+  // Search filter
+  if (notesSearchQuery) {
+    const q = notesSearchQuery.toLowerCase();
+    result = result.filter(n =>
+      (n.title || '').toLowerCase().includes(q) ||
+      (n.content || '').toLowerCase().includes(q) ||
+      (n.tags || '').toLowerCase().includes(q)
+    );
+  }
+
+  return result;
+}
+
+async function renderNotesPage() {
   const el = document.getElementById('notes-content');
   if (!el) return;
 
@@ -4525,215 +4572,209 @@ async function loadNotes(subTab) {
     return;
   }
 
+  notesViewMode = 'list';
   await loadTagColorMap();
 
+  let allNotes;
   try {
-    if (subTab === 'Tasks') {
-      const notes = await invoke('get_notes', { filter: 'tasks', search: null });
-      renderTasksView(el, notes || []);
-      return;
-    }
-    if (subTab === 'Kanban') {
-      const notes = await invoke('get_notes', { filter: null, search: null });
-      renderKanbanView(el, notes || []);
-      return;
-    }
-    if (subTab === 'Timeline') {
-      const notes = await invoke('get_notes', { filter: 'tasks', search: null });
-      renderTimelineView(el, notes || []);
-      return;
-    }
-    const filter = subTab === 'Pinned' ? 'pinned' : subTab === 'Archived' ? 'archived' : null;
-    const notes = await invoke('get_notes', { filter, search: null });
-    renderNotesListView(el, notes || [], filter);
+    allNotes = await invoke('get_notes', { filter: null, search: null }) || [];
   } catch (e) {
     showStub('notes-content', '📝', 'Заметки', 'Быстрые заметки и мысли');
+    return;
   }
+
+  const filtered = applyNotesFilters(allNotes);
+
+  // Collect all tags
+  const allTags = new Set();
+  allNotes.forEach(n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean).forEach(t => allTags.add(t)));
+
+  el.innerHTML = renderNotesHeader() + renderNotesViewBar() + renderNotesFilterBar(allTags) + `<div id="notes-view-content" class="page-content"></div>`;
+
+  const content = document.getElementById('notes-view-content');
+  if (!content) return;
+
+  switch (notesView) {
+    case 'kanban':   renderKanbanContent(content, filtered); break;
+    case 'timeline': renderTimelineContent(content, filtered); break;
+    case 'table':    renderTableView(content, filtered); break;
+    case 'gallery':  renderGalleryView(content, filtered); break;
+    default:         renderListContent(content, filtered, allNotes); break;
+  }
+
+  setupNotesControls();
 }
 
-function renderNotesListView(el, notes, filter) {
-  notesViewMode = 'list';
-  const pinned = notes.filter(n => n.pinned && !n.archived);
-  const regular = notes.filter(n => !n.pinned && !n.archived);
-  const archived = notes.filter(n => n.archived);
-  let displayNotes = filter === 'pinned' ? pinned : filter === 'archived' ? archived : [...pinned, ...regular];
-
-  // Apply tag filter
-  if (noteTagFilter) {
-    displayNotes = displayNotes.filter(n => (n.tags || '').split(',').map(t => t.trim()).includes(noteTagFilter));
-  }
-
-  // Collect all tags for filter pills
-  const allTags = new Set();
-  notes.forEach(n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean).forEach(t => allTags.add(t)));
-
-  const tagFilterHtml = allTags.size > 0 ? `<div class="notes-tag-filter" id="notes-tag-filter">
-    <span class="note-tag-filter-pill ${!noteTagFilter ? 'active' : ''}" data-tag="">Все</span>
-    ${[...allTags].map(t => `<span class="note-tag-filter-pill badge-${tagColorMap[t] || 'blue'} ${noteTagFilter === t ? 'active' : ''}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}
-  </div>` : '';
-
-  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
-    <div class="notes-toolbar">
-      <button class="btn-primary" id="new-note-btn">+ Новая заметка</button>
-      <div class="notes-search-wrap">
-        <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off">
+function renderNotesHeader() {
+  return `<div class="notes-header">
+    <div class="notes-header-top">
+      <div class="notes-header-left">
+        <div class="page-header-emoji">${TAB_ICONS.notes}</div>
+        <div class="page-header-title">Notes</div>
+      </div>
+      <div class="notes-header-actions">
+        <button class="btn-primary" id="new-note-btn">+ Новая</button>
+        <button class="btn-secondary" id="new-task-btn">+ Задача</button>
+        <div class="notes-search-wrap">
+          <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off" value="${escapeHtml(notesSearchQuery)}">
+        </div>
       </div>
     </div>
-    ${tagFilterHtml}
-    <div class="notes-card-list" id="notes-card-list">
-      ${displayNotes.length === 0 ? `
-        <div class="empty-state">
-          <div class="empty-state-icon">📝</div>
-          <div class="empty-state-text">Нет заметок</div>
-          <button class="btn-primary" id="empty-new-note-btn">Создать первую</button>
-        </div>` : ''}
-    </div>
   </div>`;
+}
 
-  const list = document.getElementById('notes-card-list');
-  const refresh = () => loadNotes();
-  if (list && displayNotes.length > 0) {
-    if (filter !== 'pinned' && filter !== 'archived' && pinned.length > 0 && !noteTagFilter) {
-      const section = document.createElement('div');
-      section.className = 'notes-section-label';
-      section.textContent = '📌 Закреплённые';
-      list.appendChild(section);
-      const pinnedFiltered = noteTagFilter ? pinned.filter(n => (n.tags || '').split(',').map(t => t.trim()).includes(noteTagFilter)) : pinned;
-      for (const note of pinnedFiltered) list.appendChild(createNoteCard(note, refresh));
+function renderNotesViewBar() {
+  const views = [
+    { id: 'all', label: 'All' },
+    { id: 'kanban', label: 'Kanban' },
+    { id: 'timeline', label: 'Timeline' },
+    { id: 'table', label: 'Table' },
+    { id: 'gallery', label: 'Gallery' },
+  ];
+  return `<div class="notes-view-bar">
+    ${views.map(v => `<button class="notes-view-btn${notesView === v.id ? ' active' : ''}" data-view="${v.id}">${v.label}</button>`).join('')}
+  </div>`;
+}
 
-      if (regular.length > 0) {
-        const sep = document.createElement('div');
-        sep.className = 'notes-section-label';
-        sep.textContent = 'Все заметки';
-        list.appendChild(sep);
-      }
-    }
-    const mainNotes = noteTagFilter
-      ? displayNotes.filter(n => !n.pinned || filter === 'pinned')
-      : (filter === 'pinned' ? pinned : filter === 'archived' ? archived : regular);
-    for (const note of mainNotes) list.appendChild(createNoteCard(note, refresh));
+function renderNotesFilterBar(allTags) {
+  const filters = [
+    { id: 'pin', label: '📌 Pin' },
+    { id: 'archive', label: '📦 Архив' },
+    { id: 'task', label: '☐ Задачи' },
+    { id: 'done', label: '✅ Готово' },
+    { id: 'overdue', label: '🔴 Просрочено' },
+  ];
+  const tagChips = allTags.size > 0 ? `<span class="notes-filter-divider"></span>` +
+    [...allTags].map(t => `<button class="notes-filter-chip tag badge-${tagColorMap[t] || 'blue'}${noteTagFilter === t ? ' active' : ''}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('') : '';
 
-    // DnD sorting
-    setupNotesDnD(list);
-  }
+  return `<div class="notes-filter-bar">
+    ${filters.map(f => `<button class="notes-filter-chip${notesFilters.has(f.id) ? ' active' : ''}" data-filter="${f.id}">${f.label}</button>`).join('')}
+    ${tagChips}
+  </div>`;
+}
 
-  // Tag filter clicks
-  document.getElementById('notes-tag-filter')?.addEventListener('click', (e) => {
-    const pill = e.target.closest('.note-tag-filter-pill');
-    if (!pill) return;
-    noteTagFilter = pill.dataset.tag || null;
-    loadNotes();
+function setupNotesControls() {
+  // View bar clicks
+  document.querySelectorAll('.notes-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      notesView = btn.dataset.view;
+      localStorage.setItem('hanni_notes_view', notesView);
+      renderNotesPage();
+    });
   });
 
-  document.getElementById('new-note-btn')?.addEventListener('click', createAndOpenNote);
-  document.getElementById('empty-new-note-btn')?.addEventListener('click', createAndOpenNote);
+  // Filter chip clicks
+  document.querySelectorAll('.notes-filter-chip[data-filter]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const f = chip.dataset.filter;
+      if (notesFilters.has(f)) notesFilters.delete(f);
+      else notesFilters.add(f);
+      renderNotesPage();
+    });
+  });
 
-  document.getElementById('notes-search')?.addEventListener('input', async (e) => {
+  // Tag chip clicks
+  document.querySelectorAll('.notes-filter-chip[data-tag]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const t = chip.dataset.tag;
+      noteTagFilter = noteTagFilter === t ? null : t;
+      renderNotesPage();
+    });
+  });
+
+  // New note / task
+  document.getElementById('new-note-btn')?.addEventListener('click', createAndOpenNote);
+  document.getElementById('new-task-btn')?.addEventListener('click', createAndOpenTask);
+
+  // Search
+  document.getElementById('notes-search')?.addEventListener('input', (e) => {
     clearTimeout(noteAutoSaveTimeout);
-    noteAutoSaveTimeout = setTimeout(async () => {
-      try {
-        const results = await invoke('get_notes', { filter: null, search: e.target.value || null });
-        renderNotesListView(el, results || [], null);
-      } catch (_) {}
+    noteAutoSaveTimeout = setTimeout(() => {
+      notesSearchQuery = e.target.value || '';
+      renderNotesPage();
     }, 300);
   });
 }
 
-function renderTasksView(el, notes) {
-  notesViewMode = 'list';
-  const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
-  const overdue = notes.filter(n => n.status === 'task' && n.due_date && n.due_date < todayStr);
-  const today = notes.filter(n => n.status === 'task' && n.due_date === todayStr);
-  const upcoming = notes.filter(n => n.status === 'task' && (!n.due_date || n.due_date > todayStr));
-  const done = notes.filter(n => n.status === 'done');
-
-  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
-    <div class="notes-toolbar">
-      <button class="btn-primary" id="new-task-btn">+ Новая задача</button>
-    </div>
-    <div class="notes-card-list" id="tasks-list"></div>
-  </div>`;
-
-  const list = document.getElementById('tasks-list');
-  const refresh = () => loadNotes('Tasks');
-  if (!list) return;
-
-  const sections = [
-    { label: '🔴 Просроченные', items: overdue },
-    { label: '🟡 Сегодня', items: today },
-    { label: '🔵 Предстоящие', items: upcoming },
-    { label: '✅ Выполненные', items: done },
-  ];
-  for (const sec of sections) {
-    if (sec.items.length === 0) continue;
-    const lbl = document.createElement('div');
-    lbl.className = 'notes-section-label';
-    lbl.textContent = sec.label;
-    list.appendChild(lbl);
-    for (const note of sec.items) list.appendChild(createNoteCard(note, refresh));
-  }
+// ── List View (default) ──
+function renderListContent(container, notes, allNotes) {
+  const pinned = notes.filter(n => n.pinned && !n.archived);
+  const regular = notes.filter(n => !n.pinned);
 
   if (notes.length === 0) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-text">Нет задач</div>
-      <button class="btn-primary" id="empty-new-task-btn">Создать задачу</button></div>`;
-    document.getElementById('empty-new-task-btn')?.addEventListener('click', createAndOpenTask);
+    container.innerHTML = `<div class="empty-state">
+      <div class="empty-state-icon">📝</div>
+      <div class="empty-state-text">Нет заметок</div>
+      <button class="btn-primary" id="empty-new-note-btn">Создать первую</button>
+    </div>`;
+    document.getElementById('empty-new-note-btn')?.addEventListener('click', createAndOpenNote);
+    return;
   }
 
-  document.getElementById('new-task-btn')?.addEventListener('click', createAndOpenTask);
+  const list = document.createElement('div');
+  list.className = 'notes-card-list';
+  list.id = 'notes-card-list';
+  const refresh = () => renderNotesPage();
+
+  if (pinned.length > 0) {
+    const section = document.createElement('div');
+    section.className = 'notes-section-label';
+    section.textContent = '📌 Закреплённые';
+    list.appendChild(section);
+    for (const note of pinned) list.appendChild(createNoteCard(note, refresh));
+
+    if (regular.length > 0) {
+      const sep = document.createElement('div');
+      sep.className = 'notes-section-label';
+      sep.textContent = 'Все заметки';
+      list.appendChild(sep);
+    }
+  }
+  for (const note of regular) list.appendChild(createNoteCard(note, refresh));
+
+  container.appendChild(list);
+  setupNotesDnD(list);
 }
 
-async function createAndOpenTask() {
-  try {
-    const id = await invoke('create_note', { title: '', content: '', tags: '', status: 'task', tabName: null, dueDate: null, reminderAt: null });
-    currentNoteId = id;
-    notesViewMode = 'edit';
-    const el = document.getElementById('notes-content');
-    if (el) renderNoteEditor(el, id);
-  } catch (err) { console.error('create_task error:', err); }
-}
-
-function renderKanbanView(el, notes) {
-  notesViewMode = 'list';
-  const nonArchived = notes.filter(n => !n.archived);
+// ── Kanban View ──
+function renderKanbanContent(container, notes) {
   const columns = [
-    { status: 'note', label: 'Заметки', icon: '📝', items: nonArchived.filter(n => !n.status || n.status === 'note') },
-    { status: 'task', label: 'Задачи', icon: '☐', items: nonArchived.filter(n => n.status === 'task') },
-    { status: 'done', label: 'Готово', icon: '✅', items: nonArchived.filter(n => n.status === 'done') },
+    { status: 'note', label: 'Заметки', icon: '📝', items: notes.filter(n => !n.status || n.status === 'note') },
+    { status: 'task', label: 'Задачи', icon: '☐', items: notes.filter(n => n.status === 'task') },
+    { status: 'done', label: 'Готово', icon: '✅', items: notes.filter(n => n.status === 'done') },
   ];
 
-  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
-    <div class="kanban-board" id="kanban-board">
-      ${columns.map(col => `
-        <div class="kanban-column" data-status="${col.status}">
-          <div class="kanban-column-header">
-            <span>${col.icon} ${col.label}</span>
-            <span class="kanban-column-count">${col.items.length}</span>
-            <button class="kanban-add-btn" data-status="${col.status}">+</button>
-          </div>
-          <div class="kanban-column-cards" data-status="${col.status}"></div>
+  container.innerHTML = `<div class="kanban-board" id="kanban-board">
+    ${columns.map(col => `
+      <div class="kanban-column" data-status="${col.status}">
+        <div class="kanban-column-header">
+          <span>${col.icon} ${col.label}</span>
+          <span class="kanban-column-count">${col.items.length}</span>
+          <button class="kanban-add-btn" data-status="${col.status}">+</button>
         </div>
-      `).join('')}
-    </div>
+        <div class="kanban-column-cards" data-status="${col.status}"></div>
+      </div>
+    `).join('')}
   </div>`;
 
-  const refresh = () => loadNotes('Kanban');
+  const refresh = () => renderNotesPage();
   for (const col of columns) {
-    const container = el.querySelector(`.kanban-column-cards[data-status="${col.status}"]`);
-    if (!container) continue;
-    for (const note of col.items) container.appendChild(createNoteCard(note, refresh));
+    const colEl = container.querySelector(`.kanban-column-cards[data-status="${col.status}"]`);
+    if (!colEl) continue;
+    for (const note of col.items) colEl.appendChild(createNoteCard(note, refresh));
   }
 
-  setupKanbanDnD(el.querySelector('#kanban-board'), refresh);
+  setupKanbanDnD(container.querySelector('#kanban-board'), refresh);
 
-  el.querySelectorAll('.kanban-add-btn').forEach(btn => {
+  container.querySelectorAll('.kanban-add-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const status = btn.dataset.status === 'note' ? null : btn.dataset.status;
       try {
         const id = await invoke('create_note', { title: '', content: '', tags: '', status, tabName: null, dueDate: null, reminderAt: null });
         currentNoteId = id;
         notesViewMode = 'edit';
-        renderNoteEditor(el, id);
+        const el = document.getElementById('notes-content');
+        if (el) renderNoteEditor(el, id);
       } catch (err) { console.error('kanban create:', err); }
     });
   });
@@ -4764,12 +4805,11 @@ function setupKanbanDnD(board, refresh) {
   });
 }
 
-function renderTimelineView(el, notes) {
-  notesViewMode = 'list';
+// ── Timeline View ──
+function renderTimelineContent(container, notes) {
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
 
-  // Get Monday of current week
   const dayOfWeek = now.getDay() || 7;
   const thisMonday = new Date(now);
   thisMonday.setDate(now.getDate() - dayOfWeek + 1);
@@ -4839,24 +4879,153 @@ function renderTimelineView(el, notes) {
       ${g.items.map(renderItem).join('')}
     </div>`).join('');
 
-  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
-    <div class="notes-toolbar">
-      <button class="btn-primary" id="timeline-new-task-btn">+ Новая задача</button>
-    </div>
-    <div class="timeline-view">${groupsHtml || '<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-text">Нет задач</div></div>'}</div>
-  </div>`;
+  container.innerHTML = `<div class="timeline-view">${groupsHtml || '<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-text">Нет задач</div></div>'}</div>`;
 
-  el.querySelectorAll('.timeline-item').forEach(item => {
+  container.querySelectorAll('.timeline-item').forEach(item => {
     item.addEventListener('click', () => {
       const noteId = parseInt(item.dataset.noteId);
       if (!noteId) return;
       currentNoteId = noteId;
       notesViewMode = 'edit';
-      renderNoteEditor(el, noteId);
+      const el = document.getElementById('notes-content');
+      if (el) renderNoteEditor(el, noteId);
+    });
+  });
+}
+
+// ── Table View ──
+function renderTableView(container, notes) {
+  const sortedNotes = [...notes].sort((a, b) => {
+    const col = notesTableSort.col;
+    const dir = notesTableSort.dir === 'asc' ? 1 : -1;
+    const av = a[col] || '';
+    const bv = b[col] || '';
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+
+  const sortIcon = (col) => {
+    if (notesTableSort.col !== col) return '';
+    return notesTableSort.dir === 'asc' ? ' &uarr;' : ' &darr;';
+  };
+
+  const statusPill = (status) => {
+    if (status === 'done') return '<span class="table-status-pill table-status-done">Готово</span>';
+    if (status === 'task') return '<span class="table-status-pill table-status-task">Задача</span>';
+    return '<span class="table-status-pill table-status-note">Заметка</span>';
+  };
+
+  const rows = sortedNotes.map(n => {
+    const tagsHtml = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean)
+      .map(t => `<span class="note-tag badge-${tagColorMap[t] || 'blue'}">${escapeHtml(t)}</span>`).join('');
+    const dueHtml = n.due_date ? formatDueDate(n.due_date) : '<span class="text-faint">—</span>';
+    return `<tr class="notes-table-row" data-note-id="${n.id}">
+      <td class="notes-table-title">${n.pinned ? '📌 ' : ''}${escapeHtml(n.title || 'Без названия')}</td>
+      <td>${statusPill(n.status)}</td>
+      <td>${dueHtml}</td>
+      <td class="notes-table-tags">${tagsHtml || '<span class="text-faint">—</span>'}</td>
+      <td class="text-faint">${formatNoteDate(n.updated_at || n.created_at)}</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `<div class="notes-table-wrap">
+    <table class="notes-table">
+      <thead>
+        <tr>
+          <th class="notes-table-sortable" data-sort="title">Название${sortIcon('title')}</th>
+          <th class="notes-table-sortable" data-sort="status">Статус${sortIcon('status')}</th>
+          <th class="notes-table-sortable" data-sort="due_date">Дата${sortIcon('due_date')}</th>
+          <th>Теги</th>
+          <th class="notes-table-sortable" data-sort="updated_at">Обновлено${sortIcon('updated_at')}</th>
+        </tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="5"><div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">Нет заметок</div></div></td></tr>'}</tbody>
+    </table>
+  </div>`;
+
+  // Sort clicks
+  container.querySelectorAll('.notes-table-sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (notesTableSort.col === col) {
+        notesTableSort.dir = notesTableSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        notesTableSort.col = col;
+        notesTableSort.dir = 'asc';
+      }
+      renderNotesPage();
     });
   });
 
-  document.getElementById('timeline-new-task-btn')?.addEventListener('click', createAndOpenTask);
+  // Row clicks
+  container.querySelectorAll('.notes-table-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const noteId = parseInt(row.dataset.noteId);
+      if (!noteId) return;
+      currentNoteId = noteId;
+      notesViewMode = 'edit';
+      const el = document.getElementById('notes-content');
+      if (el) renderNoteEditor(el, noteId);
+    });
+  });
+}
+
+// ── Gallery View ──
+function renderGalleryView(container, notes) {
+  if (notes.length === 0) {
+    container.innerHTML = `<div class="empty-state">
+      <div class="empty-state-icon">🖼</div>
+      <div class="empty-state-text">Нет заметок</div>
+      <button class="btn-primary" id="empty-new-note-btn">Создать первую</button>
+    </div>`;
+    document.getElementById('empty-new-note-btn')?.addEventListener('click', createAndOpenNote);
+    return;
+  }
+
+  const cards = notes.map(n => {
+    const preview = (n.content || '').substring(0, 200).replace(/\n/g, ' ');
+    const statusIcon = n.status === 'done' ? '☑ ' : n.status === 'task' ? '☐ ' : '';
+    const tagsHtml = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean)
+      .map(t => `<span class="note-tag badge-${tagColorMap[t] || 'blue'}">${escapeHtml(t)}</span>`).join('');
+    const dueHtml = (n.status === 'task' || n.status === 'done') && n.due_date ? `<span class="gallery-card-due">${formatDueDate(n.due_date)}</span>` : '';
+    return `<div class="gallery-card card${n.status === 'done' ? ' task-done' : ''}" data-note-id="${n.id}">
+      <div class="gallery-card-header">
+        <span class="gallery-card-title">${statusIcon}${n.pinned ? '📌 ' : ''}${escapeHtml(n.title || 'Без названия')}</span>
+      </div>
+      ${preview ? `<div class="gallery-card-preview">${escapeHtml(preview)}</div>` : ''}
+      <div class="gallery-card-footer">
+        ${tagsHtml ? `<div class="gallery-card-tags">${tagsHtml}</div>` : ''}
+        <div class="gallery-card-meta">
+          <span class="text-faint">${formatNoteDate(n.updated_at || n.created_at)}</span>
+          ${dueHtml}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = `<div class="gallery-grid">${cards}</div>`;
+
+  container.querySelectorAll('.gallery-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const noteId = parseInt(card.dataset.noteId);
+      if (!noteId) return;
+      currentNoteId = noteId;
+      notesViewMode = 'edit';
+      const el = document.getElementById('notes-content');
+      if (el) renderNoteEditor(el, noteId);
+    });
+  });
+}
+
+async function createAndOpenTask() {
+  try {
+    const id = await invoke('create_note', { title: '', content: '', tags: '', status: 'task', tabName: null, dueDate: null, reminderAt: null });
+    currentNoteId = id;
+    notesViewMode = 'edit';
+    const el = document.getElementById('notes-content');
+    if (el) renderNoteEditor(el, id);
+  } catch (err) { console.error('create_task error:', err); }
 }
 
 function createNoteCard(note, onRefresh) {
