@@ -16,6 +16,11 @@ Thumbs.db
 
 # Build
 desktop/src-tauri/target/
+desktop/node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
 
 # Serena
 .serena/

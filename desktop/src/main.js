@@ -1,5 +1,5 @@
 const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+const { listen, emit } = window.__TAURI__.event;
 
 
 // ── Markdown rendering setup ──
@@ -136,7 +136,6 @@ const PROACTIVE_STYLE_DEFINITIONS = [
 const _s = (d) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const TAB_ICONS = {
   chat:        _s('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
-  dashboard:   _s('<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>'),
   calendar:    _s('<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>'),
   focus:       _s('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>'),
   notes:       _s('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
@@ -156,7 +155,6 @@ const TAB_ICONS = {
 // ── Tab Registry ──
 const TAB_REGISTRY = {
   chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: [], subIcons: {} },
-  dashboard:   { label: 'Dashboard',   icon: TAB_ICONS.dashboard, closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
   notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: [] },
@@ -173,7 +171,6 @@ const TAB_REGISTRY = {
 };
 
 const TAB_DESCRIPTIONS = {
-  dashboard: 'Overview of your day, activities, and quick actions',
   calendar: 'Events, schedules, and calendar integrations',
   focus: 'Deep work sessions and activity tracking',
   notes: 'Quick notes, ideas, and thoughts',
@@ -210,6 +207,112 @@ function getTabDesc(tabId) {
   return TAB_DESCRIPTIONS[tabId] || '';
 }
 
+// ── Per-tab settings definitions ──
+const TAB_SETTINGS_DEFS = {
+  focus: [
+    { key: 'default_duration', label: 'Длительность по умолчанию (мин)', type: 'number', default: '25' },
+    { key: 'default_category', label: 'Категория по умолчанию', type: 'text', default: '' },
+    { key: 'auto_focus_mode', label: 'Авто-фокус режим', type: 'toggle', default: 'false' },
+  ],
+  notes: [
+    { key: 'default_view', label: 'Вид по умолчанию', type: 'select', options: [
+      { value: 'list', label: 'Список' }, { value: 'kanban', label: 'Канбан' },
+      { value: 'table', label: 'Таблица' }, { value: 'gallery', label: 'Галерея' },
+      { value: 'timeline', label: 'Таймлайн' },
+    ], default: 'list' },
+    { key: 'default_sort', label: 'Сортировка', type: 'select', options: [
+      { value: 'updated', label: 'По обновлению' }, { value: 'created', label: 'По созданию' },
+      { value: 'title', label: 'По названию' },
+    ], default: 'updated' },
+  ],
+  dashboard: [
+    { key: 'density', label: 'Плотность', type: 'select', options: [
+      { value: 'compact', label: 'Компактная' }, { value: 'normal', label: 'Обычная' },
+    ], default: 'normal' },
+  ],
+  calendar: [
+    { key: 'first_day', label: 'Первый день недели', type: 'select', options: [
+      { value: 'mon', label: 'Понедельник' }, { value: 'sun', label: 'Воскресенье' },
+    ], default: 'mon' },
+    { key: 'default_view', label: 'Вид по умолчанию', type: 'select', options: [
+      { value: 'Месяц', label: 'Месяц' }, { value: 'Неделя', label: 'Неделя' },
+      { value: 'День', label: 'День' }, { value: 'Список', label: 'Список' },
+    ], default: 'Месяц' },
+  ],
+};
+
+// Generic tabs get goals visibility + default sub-tab
+for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
+  if (TAB_SETTINGS_DEFS[id] || id === 'chat') continue;
+  const settings = [{ key: 'show_goals', label: 'Показывать цели', type: 'toggle', default: 'true' }];
+  if (reg.subTabs?.length > 1) {
+    settings.push({
+      key: 'default_subtab', label: 'Под-таб по умолчанию', type: 'select',
+      options: reg.subTabs.map(s => ({ value: s, label: s })), default: reg.subTabs[0],
+    });
+  }
+  TAB_SETTINGS_DEFS[id] = settings;
+}
+
+async function loadTabSetting(tabId, key) {
+  try { return await invoke('get_app_setting', { key: `tab_${tabId}_${key}` }); } catch (_) { return null; }
+}
+
+async function saveTabSetting(tabId, key, val) {
+  await invoke('set_app_setting', { key: `tab_${tabId}_${key}`, value: String(val) });
+}
+
+async function renderTabSettingsPanel(tabId) {
+  const panel = document.getElementById(`tab-settings-panel-${tabId}`);
+  if (!panel) return;
+  const defs = TAB_SETTINGS_DEFS[tabId];
+  if (!defs) return;
+
+  let html = '<div class="tab-settings-header"><span>Настройки вкладки</span><button class="tab-settings-close" data-tab-id="' + tabId + '">&times;</button></div>';
+  for (const def of defs) {
+    const val = await loadTabSetting(tabId, def.key) ?? def.default;
+    html += `<div class="tab-setting-row">`;
+    html += `<label class="tab-setting-label">${def.label}</label>`;
+    if (def.type === 'toggle') {
+      html += `<label class="toggle"><input type="checkbox" data-tab-id="${tabId}" data-setting-key="${def.key}" ${val === 'true' ? 'checked' : ''}><span class="toggle-track"></span></label>`;
+    } else if (def.type === 'select') {
+      html += `<select class="form-input tab-setting-select" data-tab-id="${tabId}" data-setting-key="${def.key}">`;
+      for (const opt of def.options) html += `<option value="${opt.value}" ${val === opt.value ? 'selected' : ''}>${opt.label}</option>`;
+      html += `</select>`;
+    } else if (def.type === 'number') {
+      html += `<input class="form-input tab-setting-input" type="number" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}" style="width:80px;">`;
+    } else {
+      html += `<input class="form-input tab-setting-input" type="text" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}">`;
+    }
+    html += `</div>`;
+  }
+  panel.innerHTML = html;
+
+  // Wire up controls
+  panel.querySelectorAll('input[type="checkbox"]').forEach(el => {
+    el.addEventListener('change', () => saveTabSetting(el.dataset.tabId, el.dataset.settingKey, el.checked));
+  });
+  panel.querySelectorAll('select').forEach(el => {
+    el.addEventListener('change', () => saveTabSetting(el.dataset.tabId, el.dataset.settingKey, el.value));
+  });
+  panel.querySelectorAll('input[type="text"], input[type="number"]').forEach(el => {
+    el.addEventListener('change', () => saveTabSetting(el.dataset.tabId, el.dataset.settingKey, el.value));
+  });
+  panel.querySelector('.tab-settings-close')?.addEventListener('click', () => toggleTabSettings(tabId));
+}
+
+function toggleTabSettings(tabId) {
+  const panel = document.getElementById(`tab-settings-panel-${tabId}`);
+  if (!panel) return;
+  const isOpen = !panel.classList.contains('hidden');
+  if (isOpen) {
+    panel.classList.add('hidden');
+  } else {
+    panel.classList.remove('hidden');
+    renderTabSettingsPanel(tabId);
+  }
+}
+
 function renderPageHeader(tabId, extra) {
   const reg = TAB_REGISTRY[tabId];
   if (!reg) return '';
@@ -219,9 +322,11 @@ function renderPageHeader(tabId, extra) {
     : `<button class="page-header-icon-btn page-header-icon-svg" data-tab-id="${tabId}" title="Сменить иконку">${reg.icon || ''}</button>`;
   const desc = extra?.description || getTabDesc(tabId);
   const props = extra?.properties || [];
+  const hasSettings = TAB_SETTINGS_DEFS[tabId];
   return `<div class="page-header" data-tab-id="${tabId}">
     ${iconHtml}
     <div class="page-header-title">${extra?.title || reg.label}</div>
+    ${hasSettings ? `<button class="page-header-gear" data-tab-id="${tabId}" title="Настройки вкладки"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>` : ''}
     <input class="page-header-desc-input" data-tab-id="${tabId}" value="${escapeHtml(desc)}" placeholder="Добавить описание...">
     ${props.length ? `<div class="page-header-properties">${props.map(p =>
       `<span class="page-property"><span class="page-property-label">${p.label}</span><span class="page-property-value ${p.class || ''}">${p.value}</span></span>`
@@ -229,7 +334,7 @@ function renderPageHeader(tabId, extra) {
     <div class="page-emoji-picker hidden" id="page-emoji-picker-${tabId}">
       ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
     </div>
-  </div>`;
+  </div><div class="tab-settings-panel hidden" id="tab-settings-panel-${tabId}"></div>`;
 }
 
 function setupPageHeaderControls(tabId) {
@@ -269,9 +374,15 @@ function setupPageHeaderControls(tabId) {
       saveTabCustom();
     });
   }
+
+  // Gear → toggle tab settings panel
+  const gearBtn = document.querySelector(`.page-header-gear[data-tab-id="${tabId}"]`);
+  if (gearBtn) {
+    gearBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleTabSettings(tabId); });
+  }
 }
 
-let openTabs = ['chat', 'dashboard'];
+let openTabs = ['chat'];
 let activeTab = 'chat';
 let activeSubTab = {};
 let chatSidebarCollapsed = !!localStorage.getItem('hanni_chat_sidebar_collapsed');
@@ -286,7 +397,7 @@ activeSubTab.chat = null; // Chat view shows chat by default, not settings
 try {
   const saved = JSON.parse(localStorage.getItem('hanni_tabs'));
   if (saved) {
-    openTabs = (saved.open || ['chat', 'dashboard']).filter(id => TAB_REGISTRY[id]);
+    openTabs = (saved.open || ['chat']).filter(id => TAB_REGISTRY[id]);
     if (!openTabs.includes('chat')) openTabs.unshift('chat');
     activeTab = TAB_REGISTRY[saved.active] ? saved.active : 'chat';
     if (saved.sub) {
@@ -322,6 +433,7 @@ listen('proactive-message', async (event) => {
   lastProactiveTime = Date.now();
 
   // Use addMsg to get proper wrapper with TTS button
+  removeChatWelcomeCard();
   const msgDiv = addMsg('bot', text);
   const wrapper = msgDiv.closest('.msg-wrapper');
   if (wrapper) {
@@ -599,6 +711,7 @@ async function loadConversationsList(searchQuery) {
             currentConversationId = null;
             history = [];
             chat.innerHTML = '';
+            renderChatWelcomeCard();
           }
           loadConversationsList();
         });
@@ -738,6 +851,7 @@ document.getElementById('new-chat-btn')?.addEventListener('click', async () => {
   currentConversationId = null;
   history = [];
   chat.innerHTML = '';
+  renderChatWelcomeCard();
   input.focus();
   loadConversationsList();
 });
@@ -762,6 +876,7 @@ function renderTabBar() {
     item.className = 'tab-item' + (tabId === activeTab ? ' active' : '');
     item.dataset.tabId = tabId;
     item.title = reg.label;
+    item.draggable = true;
     const customIcon = tabCustomizations[tabId]?.icon;
     item.innerHTML = customIcon
       ? `<span class="tab-item-icon tab-item-icon-emoji">${customIcon}</span>`
@@ -772,6 +887,51 @@ function renderTabBar() {
       item.appendChild(dot);
     }
     item.addEventListener('click', () => switchTab(tabId));
+
+    // Drag-to-reorder
+    item.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('tab-id', tabId);
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
+    });
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      item.classList.toggle('drag-over-above', e.clientY < midY);
+      item.classList.toggle('drag-over-below', e.clientY >= midY);
+    });
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over-above', 'drag-over-below');
+    });
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over-above', 'drag-over-below');
+      const draggedId = e.dataTransfer.getData('tab-id');
+      if (!draggedId || draggedId === tabId) return;
+      const fromIdx = openTabs.indexOf(draggedId);
+      if (fromIdx === -1) return;
+      openTabs.splice(fromIdx, 1);
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      let toIdx = openTabs.indexOf(tabId);
+      if (e.clientY >= midY) toIdx++;
+      openTabs.splice(toIdx, 0, draggedId);
+      saveTabs();
+      renderTabBar();
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      tabList.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+    });
+
+    // Context menu (right click)
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showTabContextMenu(tabId, e.clientX, e.clientY);
+    });
+
     tabList.appendChild(item);
   }
 
@@ -789,6 +949,73 @@ function renderTabBar() {
     });
     bottom.appendChild(gear);
   }
+}
+
+function showTabContextMenu(tabId, x, y) {
+  let menu = document.getElementById('tab-context-menu');
+  if (menu) menu.remove();
+  menu = document.createElement('div');
+  menu.id = 'tab-context-menu';
+
+  const reg = TAB_REGISTRY[tabId];
+  const idx = openTabs.indexOf(tabId);
+  const items = [];
+
+  // Close
+  if (reg?.closable) {
+    items.push({ label: 'Закрыть', action: () => closeTab(tabId), cls: 'danger' });
+  }
+  // Close others
+  const closableOthers = openTabs.filter(id => id !== tabId && TAB_REGISTRY[id]?.closable);
+  if (closableOthers.length) {
+    items.push({ label: 'Закрыть другие', action: () => { closableOthers.forEach(id => closeTab(id)); } });
+  }
+  if (items.length && (idx > 0 || idx < openTabs.length - 1)) {
+    items.push({ separator: true });
+  }
+  // Move up / down
+  if (idx > 0) {
+    items.push({ label: 'Переместить вверх', action: () => moveTab(tabId, -1) });
+  }
+  if (idx < openTabs.length - 1) {
+    items.push({ label: 'Переместить вниз', action: () => moveTab(tabId, 1) });
+  }
+
+  if (!items.length) return;
+
+  for (const it of items) {
+    if (it.separator) {
+      const sep = document.createElement('div');
+      sep.className = 'tab-ctx-separator';
+      menu.appendChild(sep);
+    } else {
+      const el = document.createElement('div');
+      el.className = 'tab-ctx-item' + (it.cls ? ` ${it.cls}` : '');
+      el.textContent = it.label;
+      el.addEventListener('click', () => { menu.remove(); it.action(); });
+      menu.appendChild(el);
+    }
+  }
+
+  // Position: ensure within viewport
+  document.body.appendChild(menu);
+  const mr = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, window.innerWidth - mr.width - 8) + 'px';
+  menu.style.top = Math.min(y, window.innerHeight - mr.height - 8) + 'px';
+
+  const closeMenu = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', closeMenu); } };
+  setTimeout(() => document.addEventListener('click', closeMenu), 0);
+}
+
+function moveTab(tabId, direction) {
+  const idx = openTabs.indexOf(tabId);
+  if (idx === -1) return;
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= openTabs.length) return;
+  openTabs.splice(idx, 1);
+  openTabs.splice(newIdx, 0, tabId);
+  saveTabs();
+  renderTabBar();
 }
 
 function renderSubSidebar() {
@@ -1043,7 +1270,6 @@ function loadSubTabContent(tabId, subTab) {
       if (subTab === 'Настройки') { showChatSettingsMode(); loadChatSettings(); }
       else { hideChatSettingsMode(); renderSubSidebar(); loadConversationsList(); input.focus(); }
       break;
-    case 'dashboard': loadDashboard(); break;
     case 'calendar': loadCalendar(subTab); break;
     case 'focus': loadFocus(subTab); break;
     case 'notes': loadNotes(subTab); break;
@@ -2678,6 +2904,8 @@ async function send() {
   lastMessageWasVoice = false;
   lastSttTimeMs = 0;
 
+  removeChatWelcomeCard();
+
   let userContent = text;
   if (attachedFile) {
     userContent += `\n\n📎 Файл: ${attachedFile.name}\n\`\`\`\n${attachedFile.content}\n\`\`\``;
@@ -2876,6 +3104,7 @@ async function newChat() {
   currentConversationId = null;
   history = [];
   chat.innerHTML = '';
+  renderChatWelcomeCard();
   loadConversationsList();
   input.focus();
 }
@@ -4057,74 +4286,86 @@ function showStub(containerId, icon, label, desc) {
   </div>`;
 }
 
-// ── Dashboard ──
-async function loadDashboard() {
-  const el = document.getElementById('dashboard-content');
-  if (!el) return;
-  el.innerHTML = skeletonPage();
+// ── Chat Welcome Card (replaces Dashboard tab) ──
+
+function removeChatWelcomeCard() {
+  document.getElementById('chat-welcome-card')?.remove();
+}
+
+async function renderChatWelcomeCard() {
+  if (chat.querySelector('.msg, .msg-wrapper, .user-wrapper')) return;
+  removeChatWelcomeCard();
+
+  const now = new Date();
+  const greeting = now.getHours() < 12 ? 'Доброе утро' : now.getHours() < 18 ? 'Добрый день' : 'Добрый вечер';
+  const dateStr = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  let statsHtml = `
+    <div class="welcome-stats">
+      <div class="welcome-stat"><div class="welcome-stat-value">—</div><div class="welcome-stat-label">Активности</div></div>
+      <div class="welcome-stat"><div class="welcome-stat-value">—</div><div class="welcome-stat-label">Фокус</div></div>
+      <div class="welcome-stat"><div class="welcome-stat-value">—</div><div class="welcome-stat-label">Заметки</div></div>
+      <div class="welcome-stat"><div class="welcome-stat-value">—</div><div class="welcome-stat-label">События</div></div>
+    </div>`;
+  let focusBanner = '';
+  let eventsHtml = '';
+
+  const card = document.createElement('div');
+  card.id = 'chat-welcome-card';
+  card.innerHTML = `
+    <div class="welcome-greeting">${greeting}!</div>
+    <div class="welcome-date">${dateStr}</div>
+    ${focusBanner}${statsHtml}${eventsHtml}
+    <div class="welcome-actions">
+      <button class="welcome-action-btn" onclick="switchTab('notes')">Заметка</button>
+      <button class="welcome-action-btn" onclick="switchTab('focus')">Фокус</button>
+      <button class="welcome-action-btn" onclick="switchTab('calendar')">Календарь</button>
+      <button class="welcome-action-btn" onclick="switchTab('health')">Здоровье</button>
+    </div>`;
+  chat.appendChild(card);
+
+  // Load real data async
   try {
     const data = await invoke('get_dashboard_data');
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const greeting = now.getHours() < 12 ? 'Доброе утро' : now.getHours() < 18 ? 'Добрый день' : 'Добрый вечер';
+    if (!document.getElementById('chat-welcome-card')) return;
 
-    let focusBanner = '';
     if (data.current_activity) {
-      focusBanner = `<div class="dashboard-focus-banner">
+      focusBanner = `<div class="welcome-focus">
         <div class="dashboard-focus-indicator"></div>
-        <div class="dashboard-focus-text">${escapeHtml(data.current_activity.title)}</div>
-        <div class="dashboard-focus-time">${data.current_activity.elapsed || ''}</div>
+        <span class="welcome-focus-text">${escapeHtml(data.current_activity.title)}</span>
+        <span class="welcome-focus-time">${data.current_activity.elapsed || ''}</span>
       </div>`;
     }
 
-    el.innerHTML = renderPageHeader('dashboard') + `<div class="page-content">
-      <div class="dashboard-greeting">${greeting}!</div>
-      <div class="dashboard-date">${dateStr}</div>
-      ${focusBanner}
-      <div class="dashboard-stats">
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.activities_today || 0}</div><div class="dashboard-stat-label">Активности</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.focus_minutes || 0}м</div><div class="dashboard-stat-label">Фокус</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.notes_count || 0}</div><div class="dashboard-stat-label">Заметки</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${data.events_today || 0}</div><div class="dashboard-stat-label">События</div></div>
-      </div>
-      ${data.events && data.events.length > 0 ? `
-        <div class="dashboard-section-title">События сегодня</div>
-        ${data.events.map(e => `<div class="calendar-event-item">
-          <span class="calendar-event-time">${e.time || ''}</span>
-          <span class="calendar-event-title">${escapeHtml(e.title)}</span>
-        </div>`).join('')}` : ''}
-      ${data.recent_notes && data.recent_notes.length > 0 ? `
-        <div class="dashboard-section-title">Последние заметки</div>
-        ${data.recent_notes.map(n => `<div class="calendar-event-item">
-          <span class="calendar-event-title">${escapeHtml(n.title)}</span>
-        </div>`).join('')}` : ''}
-      <div class="dashboard-section-title">Быстрые действия</div>
-      <div class="dashboard-quick-actions">
-        <button class="btn-primary" onclick="switchTab('notes')">Новая заметка</button>
-        <button class="btn-primary" onclick="switchTab('focus')">Начать активность</button>
-        <button class="btn-primary" onclick="switchTab('health')">Залогировать</button>
-      </div></div>`;
-  } catch (e) {
-    // Fallback for when backend command doesn't exist yet
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const greeting = now.getHours() < 12 ? 'Доброе утро' : now.getHours() < 18 ? 'Добрый день' : 'Добрый вечер';
-    el.innerHTML = renderPageHeader('dashboard') + `<div class="page-content">
-      <div class="dashboard-greeting">${greeting}!</div>
-      <div class="dashboard-date">${dateStr}</div>
-      <div class="dashboard-stats">
-        <div class="dashboard-stat"><div class="dashboard-stat-value">0</div><div class="dashboard-stat-label">Активности</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">0м</div><div class="dashboard-stat-label">Фокус</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">0</div><div class="dashboard-stat-label">Заметки</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">0</div><div class="dashboard-stat-label">События</div></div>
-      </div>
-      <div class="dashboard-section-title">Быстрые действия</div>
-      <div class="dashboard-quick-actions">
-        <button class="btn-primary" onclick="switchTab('notes')">Новая заметка</button>
-        <button class="btn-primary" onclick="switchTab('focus')">Начать активность</button>
-        <button class="btn-primary" onclick="switchTab('health')">Залогировать</button>
-      </div></div>`;
-  }
+    statsHtml = `
+      <div class="welcome-stats">
+        <div class="welcome-stat"><div class="welcome-stat-value">${data.activities_today || 0}</div><div class="welcome-stat-label">Активности</div></div>
+        <div class="welcome-stat"><div class="welcome-stat-value">${data.focus_minutes || 0}м</div><div class="welcome-stat-label">Фокус</div></div>
+        <div class="welcome-stat"><div class="welcome-stat-value">${data.notes_count || 0}</div><div class="welcome-stat-label">Заметки</div></div>
+        <div class="welcome-stat"><div class="welcome-stat-value">${data.events_today || 0}</div><div class="welcome-stat-label">События</div></div>
+      </div>`;
+
+    if (data.events && data.events.length > 0) {
+      eventsHtml = `<div class="welcome-events">
+        <div class="welcome-section-title">Сегодня</div>
+        ${data.events.slice(0, 3).map(e => `<div class="welcome-event">
+          <span class="welcome-event-time">${e.time || ''}</span>
+          <span class="welcome-event-title">${escapeHtml(e.title)}</span>
+        </div>`).join('')}
+      </div>`;
+    }
+
+    card.innerHTML = `
+      <div class="welcome-greeting">${greeting}!</div>
+      <div class="welcome-date">${dateStr}</div>
+      ${focusBanner}${statsHtml}${eventsHtml}
+      <div class="welcome-actions">
+        <button class="welcome-action-btn" onclick="switchTab('notes')">Заметка</button>
+        <button class="welcome-action-btn" onclick="switchTab('focus')">Фокус</button>
+        <button class="welcome-action-btn" onclick="switchTab('calendar')">Календарь</button>
+        <button class="welcome-action-btn" onclick="switchTab('health')">Здоровье</button>
+      </div>`;
+  } catch (_) {}
 }
 
 // ── Focus ──
@@ -5495,8 +5736,16 @@ let syncedMonths = new Set();
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
-  if (subTab === 'Интеграции') { renderCalendarIntegrations(el); return; }
-  if (subTab === 'Список') { renderCalendarList(el); return; }
+
+  // Ensure page header exists
+  if (!el.querySelector('.page-header')) {
+    el.innerHTML = renderPageHeader('calendar') + '<div id="calendar-view-content" class="page-content calendar-full-width"></div>';
+    setupPageHeaderControls('calendar');
+  }
+  const viewEl = document.getElementById('calendar-view-content') || el;
+
+  if (subTab === 'Интеграции') { renderCalendarIntegrations(viewEl); return; }
+  if (subTab === 'Список') { renderCalendarList(viewEl); return; }
 
   // Auto-sync when navigating to a month not yet synced
   const monthKey = `${calendarYear}-${calendarMonth + 1}`;
@@ -5515,11 +5764,11 @@ async function loadCalendar(subTab) {
           if (googleUrl) await invoke('sync_google_ics', { url: googleUrl, month: calendarMonth + 1, year: calendarYear });
           // Refresh view after background sync completes
           const freshEvents = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
-          const calEl = document.getElementById('calendar-content');
-          if (calEl && subTab === 'Список') renderCalendarList(calEl);
-          else if (calEl && !subTab || subTab === 'Месяц') renderCalendar(calEl, freshEvents || []);
-          else if (calEl && subTab === 'Неделя') renderWeekCalendar(calEl, freshEvents || []);
-          else if (calEl && subTab === 'День') renderDayCalendar(calEl, freshEvents || []);
+          const calViewEl = document.getElementById('calendar-view-content');
+          if (calViewEl && subTab === 'Список') renderCalendarList(calViewEl);
+          else if (calViewEl && !subTab || subTab === 'Месяц') renderCalendar(calViewEl, freshEvents || []);
+          else if (calViewEl && subTab === 'Неделя') renderWeekCalendar(calViewEl, freshEvents || []);
+          else if (calViewEl && subTab === 'День') renderDayCalendar(calViewEl, freshEvents || []);
         } catch (e) { console.error('Auto-sync error:', e); }
       };
       syncAndRefresh(); // fire and forget — non-blocking
@@ -5530,16 +5779,16 @@ async function loadCalendar(subTab) {
     const events = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
     const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
     if (subTab === 'Неделя') {
-      renderWeekCalendar(el, events || []);
+      renderWeekCalendar(viewEl, events || []);
     } else if (subTab === 'День') {
-      renderDayCalendar(el, events || []);
+      renderDayCalendar(viewEl, events || []);
     } else {
-      renderCalendar(el, events || [], tasks || []);
+      renderCalendar(viewEl, events || [], tasks || []);
     }
   } catch (e) {
-    if (subTab === 'Неделя') renderWeekCalendar(el, []);
-    else if (subTab === 'День') renderDayCalendar(el, []);
-    else renderCalendar(el, []);
+    if (subTab === 'Неделя') renderWeekCalendar(viewEl, []);
+    else if (subTab === 'День') renderDayCalendar(viewEl, []);
+    else renderCalendar(viewEl, []);
   }
 }
 
@@ -7355,6 +7604,7 @@ function renderHealth(el, today, habits) {
       }
     }
   } catch (_) {}
+  if (chat.children.length === 0) renderChatWelcomeCard();
   loadConversationsList();
 })();
 
@@ -8136,6 +8386,7 @@ function createFocusWidget() {
       <span class="fw-pulse-dot"></span>
       <span class="fw-activity-name" id="fw-activity-name"></span>
       <span class="fw-timer" id="fw-timer">00:00</span>
+      <span class="fw-popout-btn" id="fw-popout-btn" title="Pop out">↗</span>
       <span class="fw-stop-btn" id="fw-stop-btn">■</span>
     </div>
     <div class="focus-widget-btn" id="fw-idle-btn">◎</div>
@@ -8195,8 +8446,13 @@ function bindFocusWidgetEvents() {
     await updateFocusWidget();
   });
 
+  document.getElementById('fw-popout-btn')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try { await invoke('toggle_focus_overlay'); } catch (err) { console.error('Focus overlay error:', err); }
+  });
+
   document.getElementById('fw-active').addEventListener('click', (e) => {
-    if (e.target.closest('.fw-stop-btn')) return;
+    if (e.target.closest('.fw-stop-btn') || e.target.closest('.fw-popout-btn')) return;
     switchTab('focus');
   });
 
@@ -8244,12 +8500,14 @@ async function updateFocusWidget() {
     document.getElementById('fw-activity-name').textContent = activity.title || 'Активность';
     if (changed) startFocusWidgetTimer(activity.started_at);
     updateSidebarFocusIndicator(true);
+    emit('focus-state', { active: true, title: activity.title, started_at: activity.started_at });
   } else {
     focusWidgetActivity = null;
     stopFocusWidgetTimer();
     activeBar.classList.add('hidden');
     idleBtn.classList.remove('hidden');
     updateSidebarFocusIndicator(false);
+    emit('focus-state', { active: false });
   }
 
   updateFocusWidgetVisibility();
@@ -8296,5 +8554,12 @@ function updateFocusWidgetVisibility() {
   const widget = document.getElementById('focus-widget');
   if (widget) widget.classList.toggle('hidden', activeTab === 'focus');
 }
+
+// Listen for focus-state from overlay window (e.g. stop from overlay)
+listen('focus-state', (ev) => {
+  if (!ev.payload.active && focusWidgetActivity) {
+    updateFocusWidget();
+  }
+});
 
 input.focus();
