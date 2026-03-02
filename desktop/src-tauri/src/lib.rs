@@ -18,9 +18,14 @@ const MODEL: &str = "NexVeridian/Qwen3.5-35B-A3B-4bit";
 const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, но выразительно. На "ты", по-русски.
 
 ИНСТРУМЕНТЫ:
-- Когда пользователь просит что-то СДЕЛАТЬ — ВСЕГДА вызывай инструмент.
-- "запомни", "запиши", "добавь", "потратил" → инструмент. НИКОГДА не говори "ок" без действия!
-- Можно вызывать несколько инструментов за раз.
+- Когда пользователь просит СДЕЛАТЬ что-то — ВСЕГДА вызывай инструмент через ```action блок.
+- ФОРМАТ ВЫЗОВА (обязательно!):
+```action
+{"action":"имя_действия", "параметр":"значение"}
+```
+- БЕЗ ```action блока действие НЕ выполнится! Просто слова "записала/создала" — НЕ работают.
+- "запомни", "запиши", "добавь", "потратил", "создай задачу" → ```action блок. НИКОГДА не говори "ок" без блока!
+- Можно вызывать несколько ```action блоков за раз.
 - Даты: считай от [Current context] Today. "завтра"=Today+1, "послезавтра"=Today+2. Формат YYYY-MM-DD.
 - Целодневные события: create_event с time="" и duration=0.
 - Запоминай важные факты (имя, предпочтения, привычки, люди) через remember.
@@ -53,21 +58,60 @@ const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопы
 - НЕ повторяй сообщение пользователя.
 - Если в истории есть "[Автономное сообщение Ханни]:" — это твоё предыдущее сообщение. НЕ повторяй его, НЕ ссылайся на него, НЕ развивай его тему. Просто ответь на то, что написал пользователь.
 
-ПРИМЕРЫ ИНСТРУМЕНТОВ:
-User: "сколько я потратил на еду?"
-→ [get_transactions] "За неделю на еду ушло 12,400₸. Больше всего — доставка в среду."
-НЕ: "Хороший вопрос! Давай посмотрим." (без инструмента)
+ПРИМЕРЫ (ВСЕГДА используй ```action блок!):
 
 User: "купил колу за 500"
-→ [add_transaction] "Записала — 500₸ на колу."
-НЕ: [remember] (покупка ≠ факт для запоминания)
+```action
+{"action":"add_transaction","amount":500,"category":"food","description":"кола"}
+```
+Записала — 500₸ на колу.
+
+User: "создай задачу купить молоко на завтра"
+```action
+{"action":"create_task","title":"Купить молоко","due_date":"2026-03-03"}
+```
+Готово! Задача на завтра.
+
+User: "запусти помодоро"
+```action
+{"action":"start_pomodoro","title":"Работа","category":"work"}
+```
+Поехали! 25 минут фокуса 🍅
+
+User: "начни трекать работу"
+```action
+{"action":"start_activity","name":"Работа","category":"work"}
+```
+Трекаю! Удачи.
+
+User: "стоп" / "заверши"
+```action
+{"action":"stop_activity"}
+```
+Остановила.
+
+User: "какие у меня задачи?"
+```action
+{"action":"get_tasks"}
+```
+(резюмируй список)
+
+User: "открой календарь"
+```action
+{"action":"open_tab","tab":"calendar"}
+```
 
 User: "найди рецепт плова"
-→ [web_search] "Нашёл классический рецепт: баранина, рис, морковь, зира..."
-НЕ: "Вот рецепт плова: ..." (без поиска)
+```action
+{"action":"web_search","query":"рецепт плова"}
+```
+(резюме результатов)
 
-User: "прочитай что на этой странице https://example.com"
-→ [read_url] "На странице: ..." (краткое резюме содержимого)
+User: "запомни что я люблю зелёный чай"
+```action
+{"action":"remember","category":"user","key":"любимый напиток","value":"зелёный чай"}
+```
+Запомнила!
 
 ПРИМЕРЫ ТОНА (подражай этому стилю — кратко, тепло, с характером):
 
@@ -132,6 +176,9 @@ const ACTION_KEYWORDS: &[&str] = &[
     "запусти", "закрой", "переключ", "приложен",
     "поставь на паузу", "следующ", "предыдущ", "play", "pause", "next track",
     "через час", "через минут", "будильник",
+    "помодоро", "pomodoro", "трекай", "начни трекать", "заверши", "останови",
+    "открой вкладк", "открой календарь", "открой заметк", "открой фокус",
+    "покажи задач", "какие задач", "мои задач",
 ];
 
 fn needs_full_prompt(user_msg: &str) -> bool {
@@ -199,13 +246,33 @@ fn build_tool_definitions() -> Vec<serde_json::Value> {
             "required": ["query"]
         })),
         // Notes & Life Tracker
-        tool("add_note", "Create a note or reminder", serde_json::json!({
+        tool("create_note", "Создать заметку или задачу", serde_json::json!({
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
-                "content": {"type": "string"}
+                "content": {"type": "string"},
+                "tags": {"type": "string", "description": "Comma-separated tags"},
+                "due_date": {"type": "string", "description": "ISO date YYYY-MM-DD"},
+                "tab": {"type": "string", "description": "Tab name to link to"},
+                "remind_at": {"type": "string", "description": "ISO datetime for reminder"},
+                "status": {"type": "string", "enum": ["note", "task"]}
             },
-            "required": ["title","content"]
+            "required": ["title"]
+        })),
+        tool("search_notes", "Найти заметки по запросу, тегу или табу", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "tag": {"type": "string"},
+                "tab": {"type": "string"}
+            }
+        })),
+        tool("complete_task", "Отметить задачу как выполненную", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"}
+            },
+            "required": ["id"]
         })),
         tool("add_time", "Log time spent on an activity", serde_json::json!({
             "type": "object",
@@ -553,8 +620,8 @@ fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
         (&["запомни", "помни", "забудь", "вспомни", "запиши факт"],
          &["remember", "recall", "forget", "search_memory"]),
         // Notes
-        (&["заметк", "запиши", "напомни", "заметку", "записку", "note"],
-         &["add_note"]),
+        (&["заметк", "запиши", "напомни", "заметку", "записку", "note", "задач", "дедлайн", "todo", "задачу"],
+         &["create_note", "search_notes", "complete_task"]),
         // Calendar
         (&["встреч", "событи", "календар", "дедлайн", "экзамен", "расписан"],
          &["create_event", "delete_event", "sync_calendar"]),
@@ -647,7 +714,7 @@ fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
 
     // If nothing matched (generic action request), include a basic set
     if selected_names.len() <= 1 {
-        selected_names.extend_from_slice(&["add_note", "web_search", "create_event", "add_transaction"]);
+        selected_names.extend_from_slice(&["create_note", "web_search", "create_event", "add_transaction"]);
     }
 
     // Filter the full tool list
@@ -1535,6 +1602,24 @@ fn migrate_facts_decay(conn: &rusqlite::Connection) {
         let _ = conn.execute("ALTER TABLE facts ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE facts ADD COLUMN last_accessed TEXT", []);
     }
+}
+
+fn migrate_notes_v2(conn: &rusqlite::Connection) {
+    // Notes enhancement: tab linking, tasks, reminders, DnD sort, colors
+    conn.execute("ALTER TABLE notes ADD COLUMN tab_name TEXT", []).ok();
+    conn.execute("ALTER TABLE notes ADD COLUMN status TEXT NOT NULL DEFAULT 'note'", []).ok();
+    conn.execute("ALTER TABLE notes ADD COLUMN due_date TEXT", []).ok();
+    conn.execute("ALTER TABLE notes ADD COLUMN reminder_at TEXT", []).ok();
+    conn.execute("ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE notes ADD COLUMN color TEXT", []).ok();
+
+    // Tag colors table
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS note_tags (
+            name TEXT PRIMARY KEY,
+            color TEXT NOT NULL DEFAULT 'blue'
+        );"
+    ).ok();
 }
 
 // ── Semantic memory helpers (sqlite-vec + fastembed) ──
@@ -6350,12 +6435,18 @@ fn get_activity_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Resu
 // ── v0.7.0: Notes commands ──
 
 #[tauri::command]
-fn create_note(title: String, content: String, tags: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+fn create_note(
+    title: String, content: String, tags: String,
+    tab_name: Option<String>, status: Option<String>,
+    due_date: Option<String>, reminder_at: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
+    let st = status.unwrap_or_else(|| "note".to_string());
     conn.execute(
-        "INSERT INTO notes (title, content, tags, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
-        rusqlite::params![title, content, tags, now],
+        "INSERT INTO notes (title, content, tags, tab_name, status, due_date, reminder_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        rusqlite::params![title, content, tags, tab_name, st, due_date, reminder_at, now],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
@@ -6364,20 +6455,25 @@ fn create_note(title: String, content: String, tags: String, db: tauri::State<'_
 fn update_note(
     id: i64, title: String, content: String, tags: String,
     pinned: Option<bool>, archived: Option<bool>,
+    tab_name: Option<String>, status: Option<String>,
+    due_date: Option<String>, reminder_at: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    // Get current values for pinned/archived if not provided
-    let (cur_pinned, cur_archived): (i32, i32) = conn.query_row(
-        "SELECT pinned, archived FROM notes WHERE id=?1", rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap_or((0, 0));
+    let (cur_pinned, cur_archived, cur_tab, cur_status, cur_due, cur_reminder): (i32, i32, Option<String>, String, Option<String>, Option<String>) = conn.query_row(
+        "SELECT pinned, archived, tab_name, status, due_date, reminder_at FROM notes WHERE id=?1", rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3).unwrap_or_else(|_| "note".into()), row.get(4)?, row.get(5)?)),
+    ).unwrap_or((0, 0, None, "note".into(), None, None));
     let p = pinned.map(|v| v as i32).unwrap_or(cur_pinned);
     let a = archived.map(|v| v as i32).unwrap_or(cur_archived);
+    let tn = if tab_name.is_some() { tab_name } else { cur_tab };
+    let st = status.unwrap_or(cur_status);
+    let dd = if due_date.is_some() { due_date } else { cur_due };
+    let ra = if reminder_at.is_some() { reminder_at } else { cur_reminder };
     conn.execute(
-        "UPDATE notes SET title=?1, content=?2, tags=?3, pinned=?4, archived=?5, updated_at=?6 WHERE id=?7",
-        rusqlite::params![title, content, tags, p, a, now, id],
+        "UPDATE notes SET title=?1, content=?2, tags=?3, pinned=?4, archived=?5, tab_name=?6, status=?7, due_date=?8, reminder_at=?9, updated_at=?10 WHERE id=?11",
+        rusqlite::params![title, content, tags, p, a, tn, st, dd, ra, now, id],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -6413,7 +6509,7 @@ fn toggle_note_archive(id: i64, db: tauri::State<'_, HanniDb>) -> Result<bool, S
 }
 
 #[tauri::command]
-fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let rows = if let Some(q) = search {
         if q.trim().is_empty() { get_notes_all(&conn)? }
@@ -6423,7 +6519,7 @@ fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'
             else {
                 let fts_query = words.join(" OR ");
                 let mut stmt = conn.prepare(
-                    "SELECT n.id, n.title, n.content, n.tags, n.pinned, n.archived, n.created_at, n.updated_at
+                    "SELECT n.id, n.title, n.content, n.tags, n.pinned, n.archived, n.created_at, n.updated_at, n.tab_name, n.status, n.due_date, n.reminder_at, n.sort_order
                      FROM notes_fts fts JOIN notes n ON n.id = fts.rowid
                      WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT 50"
                 ).map_err(|e| format!("DB error: {}", e))?;
@@ -6431,6 +6527,24 @@ fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'
                     .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
                 result
             }
+        }
+    } else if let Some(ref f) = filter {
+        if f == "tasks" {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+                 WHERE status IN ('task','done') AND archived=0 ORDER BY CASE WHEN status='done' THEN 1 ELSE 0 END, due_date ASC NULLS LAST, updated_at DESC LIMIT 200"
+            ).map_err(|e| format!("DB error: {}", e))?;
+            let result: Vec<serde_json::Value> = stmt.query_map([], |row| note_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+            result
+        } else if let Some(tab) = f.strip_prefix("tab:") {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+                 WHERE tab_name=?1 AND archived=0 ORDER BY pinned DESC, sort_order ASC, updated_at DESC LIMIT 200"
+            ).map_err(|e| format!("DB error: {}", e))?;
+            let result: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![tab], |row| note_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+            result
+        } else {
+            get_notes_all(&conn)?
         }
     } else {
         get_notes_all(&conn)?
@@ -6440,7 +6554,7 @@ fn get_notes(_filter: Option<String>, search: Option<String>, db: tauri::State<'
 
 fn get_notes_all(conn: &rusqlite::Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at FROM notes
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
          ORDER BY pinned DESC, updated_at DESC LIMIT 200"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| note_from_row(row))
@@ -6458,6 +6572,11 @@ fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Err
         "archived": row.get::<_, i32>(5)? != 0,
         "created_at": row.get::<_, String>(6)?,
         "updated_at": row.get::<_, String>(7)?,
+        "tab_name": row.get::<_, Option<String>>(8)?,
+        "status": row.get::<_, String>(9)?,
+        "due_date": row.get::<_, Option<String>>(10)?,
+        "reminder_at": row.get::<_, Option<String>>(11)?,
+        "sort_order": row.get::<_, i32>(12)?,
     }))
 }
 
@@ -6465,10 +6584,69 @@ fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Err
 fn get_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
     conn.query_row(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at FROM notes WHERE id=?1",
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes WHERE id=?1",
         rusqlite::params![id],
         |row| note_from_row(row),
     ).map_err(|e| format!("Not found: {}", e))
+}
+
+#[tauri::command]
+fn update_note_status(id: i64, status: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "UPDATE notes SET status=?1, updated_at=?2 WHERE id=?3",
+        rusqlite::params![status, now, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn reorder_notes(ids: Vec<i64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    for (i, id) in ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE notes SET sort_order=?1 WHERE id=?2",
+            rusqlite::params![i as i32, id],
+        ).map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_note_tags(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare("SELECT name, color FROM note_tags ORDER BY name")
+        .map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "name": row.get::<_, String>(0)?,
+            "color": row.get::<_, String>(1)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+fn set_note_tag_color(name: String, color: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute(
+        "INSERT INTO note_tags (name, color) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET color=?2",
+        rusqlite::params![name, color],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_notes_for_tab(tab_name: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+         WHERE tab_name=?1 AND archived=0 ORDER BY pinned DESC, sort_order ASC, updated_at DESC LIMIT 100"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![tab_name], |row| note_from_row(row))
+        .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
 }
 
 // ── v0.24.0: Custom Pages commands ──
@@ -10319,6 +10497,7 @@ pub fn run() {
     migrate_facts_decay(&conn);
     migrate_conversations_category(&conn);
     migrate_proactive_history_v2(&conn);
+    migrate_notes_v2(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -10397,7 +10576,7 @@ pub fn run() {
         transcription_gen: 0,
     })));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(HttpClient(reqwest::Client::new()))
         .manage(LlmBusy(tokio::sync::Semaphore::new(1)))
         .manage(proactive_state.clone())
@@ -10410,7 +10589,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(tauri_plugin_webdriver_automation::init());
+
+    builder
         .invoke_handler(tauri::generate_handler![
             chat,
             read_file,
@@ -10496,6 +10680,11 @@ pub fn run() {
             toggle_note_archive,
             get_notes,
             get_note,
+            update_note_status,
+            reorder_notes,
+            get_note_tags,
+            set_note_tag_color,
+            get_notes_for_tab,
             // v0.7.0: Events (Calendar)
             create_event,
             get_events,
@@ -11052,6 +11241,29 @@ pub fn run() {
                         let _ = reminder_handle.emit("reminder-fired", &title);
                         let _ = run_osascript(&format!(
                             "display notification \"{}\" with title \"Напоминание\"",
+                            title.replace("\\", "\\\\").replace("\"", "\\\"")
+                        ));
+                    }
+                    // Check note reminders
+                    let note_due: Vec<(i64, String)> = {
+                        let db = reminder_handle.state::<HanniDb>();
+                        let conn = db.conn();
+                        let mut stmt = match conn.prepare(
+                            "SELECT id, title FROM notes WHERE reminder_at IS NOT NULL AND reminder_at <= ?1"
+                        ) { Ok(s) => s, Err(_) => continue };
+                        let rows: Vec<(i64, String)> = stmt.query_map(rusqlite::params![now], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        }).ok().into_iter().flatten().filter_map(|r| r.ok()).collect();
+                        for (id, _) in &rows {
+                            let _ = conn.execute("UPDATE notes SET reminder_at=NULL WHERE id=?1", rusqlite::params![id]);
+                        }
+                        rows
+                    };
+                    for (id, title) in note_due {
+                        let payload = serde_json::json!({"id": id, "title": title});
+                        let _ = reminder_handle.emit("note-reminder-fired", &payload);
+                        let _ = run_osascript(&format!(
+                            "display notification \"{}\" with title \"Заметка\"",
                             title.replace("\\", "\\\\").replace("\"", "\\\"")
                         ));
                     }

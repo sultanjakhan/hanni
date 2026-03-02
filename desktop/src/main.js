@@ -96,6 +96,8 @@ let convSearchTimeout = null;
 let focusTimerInterval = null;
 let currentNoteId = null;
 let noteAutoSaveTimeout = null;
+let tagColorMap = {};
+let noteTagFilter = null;
 let calendarYear = new Date().getFullYear();
 let calendarMonth = new Date().getMonth();
 let selectedCalendarDate = null;
@@ -149,7 +151,7 @@ const TAB_REGISTRY = {
   dashboard:   { label: 'Dashboard',   icon: TAB_ICONS.dashboard, closable: true,  subTabs: ['Overview'] },
   calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
   focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
-  notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: ['All', 'Pinned', 'Archived'] },
+  notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: ['All', 'Tasks', 'Kanban', 'Timeline', 'Pinned', 'Archived'] },
   work:        { label: 'Work',        icon: TAB_ICONS.work, closable: true,  subTabs: ['Projects'] },
   development: { label: 'Development', icon: TAB_ICONS.development, closable: true,  subTabs: ['Courses', 'Skills', 'Articles'] },
   home:        { label: 'Home',        icon: TAB_ICONS.home, closable: true,  subTabs: ['Supplies', 'Shopping List'] },
@@ -318,6 +320,15 @@ listen('reminder-fired', (event) => {
   scrollDown();
   if (!document.hasFocus()) {
     new Notification('Напоминание', { body: title });
+  }
+});
+
+listen('note-reminder-fired', (event) => {
+  const { id, title } = event.payload;
+  addMsg('bot', `📝 Заметка-напоминание: **${title}**`);
+  scrollDown();
+  if (!document.hasFocus()) {
+    new Notification('Заметка', { body: title });
   }
 });
 
@@ -668,33 +679,31 @@ document.getElementById('conv-search')?.addEventListener('input', (e) => {
 function renderTabBar() {
   const tabList = document.getElementById('tab-list');
   tabList.innerHTML = '';
-  const items = [];
   for (const tabId of openTabs) {
     const reg = TAB_REGISTRY[tabId];
     if (!reg) continue;
     const item = document.createElement('div');
     item.className = 'tab-item' + (tabId === activeTab ? ' active' : '');
     item.dataset.tabId = tabId;
-    item.innerHTML = `<span class="tab-item-icon">${reg.icon || ''}</span><span class="tab-item-label">${reg.label}</span>` +
-      (reg.closable ? `<button class="tab-item-close" data-tab="${tabId}">&times;</button>` : '');
-    item.addEventListener('click', (e) => {
-      if (e.target.classList.contains('tab-item-close')) return;
-      switchTab(tabId);
-    });
-    if (reg.closable) {
-      item.querySelector('.tab-item-close').addEventListener('click', (e) => {
-        e.stopPropagation();
-        closeTab(tabId);
-      });
-    }
+    item.title = reg.label;
+    item.innerHTML = `<span class="tab-item-icon">${reg.icon || ''}</span>`;
+    item.addEventListener('click', () => switchTab(tabId));
     tabList.appendChild(item);
-    items.push({ el: item, tabId });
   }
-  // Mark tab before active for hiding its divider
-  for (let i = 0; i < items.length; i++) {
-    if (items[i].tabId === activeTab && i > 0) {
-      items[i - 1].el.classList.add('before-active');
-    }
+
+  // Bottom area: settings gear + version
+  const bottom = document.getElementById('tab-bar-bottom');
+  if (bottom) {
+    bottom.innerHTML = '';
+    const gear = document.createElement('div');
+    gear.className = 'tab-item' + (activeTab === 'chat' && activeSubTab.chat === 'Настройки' ? ' active' : '');
+    gear.title = 'Настройки';
+    gear.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.settings}</span>`;
+    gear.addEventListener('click', () => {
+      activeSubTab.chat = 'Настройки';
+      switchTab('chat');
+    });
+    bottom.appendChild(gear);
   }
 }
 
@@ -755,27 +764,13 @@ function renderSubSidebar() {
       items.appendChild(convListEl);
     }
   } else {
-    sidebar.classList.remove('hidden', 'collapsed');
+    sidebar.classList.add('hidden');
     // Restore conversations panel visibility when leaving chat
     const convPanel = document.getElementById('conversations-panel');
     if (convPanel) convPanel.style.display = '';
 
-    items.innerHTML = '';
-    const subTabs = reg.subTabs;
-    const currentSub = activeSubTab[activeTab] ?? subTabs[0];
-    for (const sub of subTabs) {
-      const item = document.createElement('div');
-      item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
-      const subIcon = reg.subIcons?.[sub];
-      if (subIcon) { item.innerHTML = `<span class="tab-item-icon">${subIcon}</span> ${sub}`; } else { item.innerHTML = `<span class="sub-sidebar-dot"></span>${sub}`; }
-      item.addEventListener('click', () => {
-        activeSubTab[activeTab] = sub;
-        saveTabs();
-        renderSubSidebar();
-        loadSubTabContent(activeTab, activeSubTab[activeTab]);
-      });
-      items.appendChild(item);
-    }
+    // Render horizontal sub-tab pills in content area
+    renderSubTabBar(activeTab, reg);
   }
 
   // Bottom: gear + version
@@ -803,6 +798,32 @@ function renderSubSidebar() {
     }
   }
   loadGoalsWidget();
+}
+
+function renderSubTabBar(tabId, reg) {
+  if (!reg?.subTabs?.length) return;
+  const viewEl = document.getElementById(`view-${tabId}`);
+  if (!viewEl) return;
+
+  // Remove existing sub-tab bar if any
+  viewEl.querySelector('.sub-tab-bar')?.remove();
+
+  const currentSub = activeSubTab[tabId] ?? reg.subTabs[0];
+  const bar = document.createElement('div');
+  bar.className = 'sub-tab-bar';
+  for (const sub of reg.subTabs) {
+    const pill = document.createElement('button');
+    pill.className = 'sub-tab-pill' + (sub === currentSub ? ' active' : '');
+    pill.textContent = sub;
+    pill.addEventListener('click', () => {
+      activeSubTab[tabId] = sub;
+      saveTabs();
+      renderSubTabBar(tabId, reg);
+      loadSubTabContent(tabId, sub);
+    });
+    bar.appendChild(pill);
+  }
+  viewEl.insertBefore(bar, viewEl.firstChild);
 }
 
 async function loadGoalsWidget() {
@@ -939,7 +960,7 @@ function loadSubTabContent(tabId, subTab) {
       break;
     case 'dashboard': loadDashboard(); break;
     case 'calendar': loadCalendar(subTab); break;
-    case 'focus': loadFocus(); break;
+    case 'focus': loadFocus(subTab); break;
     case 'notes': loadNotes(subTab); break;
     case 'work': loadWork(); break;
     case 'development': loadDevelopment(); break;
@@ -1002,9 +1023,10 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
     item.addEventListener('click', () => { dropdown.classList.add('hidden'); openTab(id); });
     list.appendChild(item);
   }
-  // Position dropdown near + button
+  // Position dropdown near + button (vertical tab bar)
   const rect = btn.getBoundingClientRect();
-  dropdown.style.left = Math.max(8, rect.left) + 'px';
+  dropdown.style.left = (rect.right + 4) + 'px';
+  dropdown.style.top = Math.max(8, rect.top) + 'px';
   dropdown.classList.toggle('hidden');
 });
 
@@ -1976,17 +1998,32 @@ async function executeAction(actionJson) {
         });
         break;
       case 'add_note':
-        result = await invoke('tracker_add_note', {
+      case 'create_note':
+        result = await invoke('create_note', {
           title: action.title || '',
-          content: action.content || ''
+          content: action.content || '',
+          tags: action.tags || '',
+          tabName: action.tab || null,
+          status: action.status || 'note',
+          dueDate: action.due_date || null,
+          reminderAt: action.remind_at || null,
         });
-        // If in call mode, also save audio recording
         if (callModeActive && action.save_audio) {
           try {
             const wavPath = await invoke('save_voice_note', { title: action.title || 'note' });
             result = (result || '') + ' (audio: ' + wavPath + ')';
           } catch (_) {}
         }
+        break;
+      case 'search_notes': {
+        const filter = action.tab ? `tab:${action.tab}` : null;
+        const notes = await invoke('get_notes', { filter, search: action.query || null });
+        result = JSON.stringify((notes || []).slice(0, 5).map(n => ({ id: n.id, title: n.title, tags: n.tags, status: n.status })));
+        break;
+      }
+      case 'complete_task':
+        await invoke('update_note_status', { id: action.id, status: 'done' });
+        result = 'Задача отмечена как выполненная';
         break;
       case 'get_stats':
         result = await invoke('tracker_get_stats');
@@ -2150,8 +2187,11 @@ async function executeAction(actionJson) {
       // Activities (time tracking)
       case 'start_activity':
         result = await invoke('start_activity', {
-          name: action.name || action.activity || '',
+          title: action.name || action.title || action.activity || '',
           category: action.category || 'other',
+          focusMode: action.focus_mode || false,
+          duration: action.duration || null,
+          apps: null, sites: null,
         });
         break;
       case 'stop_activity':
@@ -2160,8 +2200,66 @@ async function executeAction(actionJson) {
       case 'get_current_activity':
         result = await invoke('get_current_activity');
         break;
-      // Projects & Tasks
-      case 'create_task':
+      case 'start_pomodoro': {
+        const title = action.title || action.name || 'Помодоро';
+        const cat = action.category || 'work';
+        startPomodoro(title, cat, action.focus_mode || false);
+        result = `Помодоро запущен: ${title} (25 мин)`;
+        break;
+      }
+      case 'stop_pomodoro':
+        pomodoroState.active = false;
+        await invoke('stop_activity').catch(() => {});
+        result = 'Помодоро остановлен';
+        break;
+      // Navigation
+      case 'open_tab':
+        activateTab(action.tab || 'chat');
+        result = `Открыта вкладка: ${action.tab}`;
+        break;
+      case 'open_note': {
+        const noteId = action.id || action.note_id;
+        if (noteId) {
+          activateTab('notes');
+          setTimeout(() => {
+            currentNoteId = noteId;
+            notesViewMode = 'edit';
+            const notesEl = document.getElementById('notes-content');
+            if (notesEl) renderNoteEditor(notesEl, noteId);
+          }, 100);
+          result = `Заметка #${noteId} открыта`;
+        } else { result = 'Не указан id заметки'; }
+        break;
+      }
+      case 'get_tasks': {
+        const taskFilter = action.status || 'tasks';
+        const tasks = await invoke('get_notes', { filter: taskFilter, search: action.query || null });
+        result = JSON.stringify((tasks || []).slice(0, 10).map(n => ({
+          id: n.id, title: n.title, status: n.status, due_date: n.due_date, tags: n.tags
+        })));
+        break;
+      }
+      case 'create_task': {
+        const taskId = await invoke('create_note', {
+          title: action.title || '', content: action.content || '',
+          tags: action.tags || '', status: 'task',
+          tabName: action.tab || null,
+          dueDate: action.due_date || null,
+          reminderAt: action.remind_at || null,
+        });
+        result = `Задача создана (id: ${taskId})`;
+        { const tag = document.createElement('div');
+          tag.className = 'memory-toast';
+          tag.textContent = `✅ Задача: ${action.title || 'Новая задача'}${action.due_date ? ' → ' + action.due_date : ''}`;
+          tag.style.cursor = 'pointer';
+          tag.addEventListener('click', () => { activateTab('notes'); setTimeout(() => { activeSubTab.notes = 'Tasks'; loadNotes('Tasks'); }, 100); });
+          document.getElementById('chat')?.appendChild(tag);
+          setTimeout(() => tag.classList.add('fade-out'), 4000);
+          setTimeout(() => tag.remove(), 4500); }
+        break;
+      }
+      // Projects & Tasks (legacy — work tab)
+      case 'create_project_task':
         result = await invoke('create_task', {
           projectId: action.project_id || 1, title: action.title || '',
           description: action.description || '', priority: action.priority || 'medium',
@@ -3937,49 +4035,112 @@ async function loadDashboard() {
 }
 
 // ── Focus ──
-async function loadFocus() {
+// Pomodoro state
+let pomodoroState = { active: false, mode: 'work', workMin: 25, breakMin: 5, startedAt: 0, totalSec: 0 };
+
+async function loadFocus(subTab) {
   const el = document.getElementById('focus-content');
   if (!el) return;
+  if (subTab === 'History') { renderFocusHistory(el); return; }
+  renderFocusCurrent(el);
+}
+
+async function renderFocusCurrent(el) {
   el.innerHTML = skeletonPage();
   try {
     const current = await invoke('get_current_activity').catch(() => null);
     const log = await invoke('get_activity_log', { date: null }).catch(() => []);
+    const focusStatus = await invoke('get_focus_status').catch(() => ({ active: false }));
 
-    let currentHtml = '';
+    let timerHtml = '';
     if (current) {
-      currentHtml = `<div class="focus-current">
-        <div class="focus-current-title">Сейчас</div>
-        <div class="focus-current-activity">${escapeHtml(current.title)}</div>
-        <div class="focus-current-timer" id="focus-timer">${current.elapsed || '00:00'}</div>
-        <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;">
+      // Active session — show ring timer
+      timerHtml = `<div class="focus-current">
+        <div class="focus-ring-container">
+          <svg class="focus-ring" viewBox="0 0 120 120">
+            <circle class="focus-ring-bg" cx="60" cy="60" r="54" />
+            <circle class="focus-ring-progress" id="focus-ring-progress" cx="60" cy="60" r="54" />
+          </svg>
+          <div class="focus-ring-inner">
+            <div class="focus-current-timer" id="focus-timer">00:00</div>
+            <div class="focus-current-activity">${escapeHtml(current.title)}</div>
+          </div>
+        </div>
+        ${focusStatus.active ? '<div class="focus-blocking-badge">🛡 Блокировка активна</div>' : ''}
+        <div class="focus-actions">
           <button class="btn-danger" id="stop-activity-btn">Завершить</button>
         </div>
       </div>`;
+    } else if (pomodoroState.active) {
+      // Pomodoro break/work countdown
+      const modeLabel = pomodoroState.mode === 'work' ? 'Работа' : 'Перерыв';
+      timerHtml = `<div class="focus-current">
+        <div class="focus-ring-container">
+          <svg class="focus-ring" viewBox="0 0 120 120">
+            <circle class="focus-ring-bg" cx="60" cy="60" r="54" />
+            <circle class="focus-ring-progress ${pomodoroState.mode === 'break' ? 'break' : ''}" id="focus-ring-progress" cx="60" cy="60" r="54" />
+          </svg>
+          <div class="focus-ring-inner">
+            <div class="focus-current-timer" id="focus-timer">00:00</div>
+            <div class="focus-current-activity">${modeLabel}</div>
+          </div>
+        </div>
+        <div class="focus-actions">
+          <button class="btn-secondary" id="pomo-skip-btn">Пропустить</button>
+          <button class="btn-danger" id="pomo-stop-btn">Стоп</button>
+        </div>
+      </div>`;
     } else {
-      currentHtml = `<div class="focus-current">
-        <div class="focus-current-title">Чем занимаешься?</div>
-        <div style="margin-top:12px;">
-          <input id="activity-title" class="form-input" placeholder="Название активности..." style="max-width:300px;margin:0 auto 12px;display:block;text-align:center;">
-          <div class="focus-presets" id="activity-presets">
-            <button class="focus-preset" data-category="work">Работа</button>
-            <button class="focus-preset" data-category="study">Учёба</button>
-            <button class="focus-preset" data-category="sport">Спорт</button>
-            <button class="focus-preset" data-category="rest">Отдых</button>
-            <button class="focus-preset" data-category="hobby">Хобби</button>
-            <button class="focus-preset" data-category="other">Другое</button>
+      // Idle — show start form + pomodoro
+      timerHtml = `<div class="focus-current">
+        <div class="focus-ring-container idle">
+          <svg class="focus-ring" viewBox="0 0 120 120">
+            <circle class="focus-ring-bg" cx="60" cy="60" r="54" />
+          </svg>
+          <div class="focus-ring-inner">
+            <div class="focus-current-timer" style="color:var(--text-muted);">00:00</div>
+            <div class="focus-current-activity" style="color:var(--text-faint);">Готов</div>
           </div>
-          <div style="display:flex;gap:8px;justify-content:center;align-items:center;margin-top:8px;">
-            <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;">
-              <input type="checkbox" id="focus-block-check"> Блокировать отвлечения
-            </label>
-          </div>
-          <button class="btn-primary" id="start-activity-btn" style="margin-top:12px;">Начать</button>
+        </div>
+        <input id="activity-title" class="form-input focus-title-input" placeholder="Название активности..." autocomplete="off">
+        <div class="focus-presets" id="activity-presets">
+          <button class="focus-preset" data-category="work">Работа</button>
+          <button class="focus-preset" data-category="study">Учёба</button>
+          <button class="focus-preset" data-category="sport">Спорт</button>
+          <button class="focus-preset" data-category="rest">Отдых</button>
+          <button class="focus-preset" data-category="hobby">Хобби</button>
+          <button class="focus-preset" data-category="other">Другое</button>
+        </div>
+        <div class="focus-start-row">
+          <label class="focus-check-label"><input type="checkbox" id="focus-block-check"> Блокировать отвлечения</label>
+        </div>
+        <div class="focus-actions">
+          <button class="btn-primary" id="start-activity-btn">Начать</button>
+          <button class="btn-secondary" id="start-pomo-btn" title="Pomodoro 25/5">🍅 Помодоро</button>
         </div>
       </div>`;
     }
 
+    // Today's stats summary
+    const totalMin = log.reduce((sum, item) => {
+      const match = (item.duration || '').match(/(\d+)ч\s*(\d+)м|(\d+)м/);
+      if (match) return sum + (parseInt(match[1] || 0) * 60) + parseInt(match[2] || match[3] || 0);
+      return sum;
+    }, 0);
+    const categories = {};
+    log.forEach(item => { categories[item.category || 'other'] = (categories[item.category || 'other'] || 0) + 1; });
+    const catLabels = { work: 'Работа', study: 'Учёба', sport: 'Спорт', rest: 'Отдых', hobby: 'Хобби', other: 'Другое' };
+
+    const statsHtml = `<div class="focus-today-stats">
+      <div class="focus-stat"><div class="focus-stat-value">${Math.floor(totalMin / 60)}ч ${totalMin % 60}м</div><div class="focus-stat-label">Всего сегодня</div></div>
+      <div class="focus-stat"><div class="focus-stat-value">${log.length}</div><div class="focus-stat-label">Сессий</div></div>
+      ${Object.entries(categories).slice(0, 3).map(([cat, count]) =>
+        `<div class="focus-stat"><div class="focus-stat-value">${count}</div><div class="focus-stat-label">${catLabels[cat] || cat}</div></div>`
+      ).join('')}
+    </div>`;
+
     const logHtml = log.length > 0 ? `
-      <div class="module-card-title" style="margin-top:8px;">Лог за сегодня</div>
+      <div class="focus-log-header">Сегодня</div>
       <div class="focus-log">
         ${log.map(item => `<div class="focus-log-item">
           <span class="focus-log-time">${item.time || ''}</span>
@@ -3989,7 +4150,7 @@ async function loadFocus() {
         </div>`).join('')}
       </div>` : '';
 
-    el.innerHTML = renderPageHeader('focus') + '<div class="page-content">' + currentHtml + logHtml + '</div>';
+    el.innerHTML = renderPageHeader('focus') + `<div class="page-content">${timerHtml}${statsHtml}${logHtml}</div>`;
 
     // Bind events
     let selectedCategory = 'other';
@@ -4008,37 +4169,212 @@ async function loadFocus() {
       const focusMode = document.getElementById('focus-block-check')?.checked || false;
       try {
         await invoke('start_activity', { title, category: selectedCategory, focusMode, duration: null, apps: null, sites: null });
-        loadFocus();
-      } catch (err) {
-        alert('Ошибка: ' + err);
-      }
+        loadFocus('Current');
+      } catch (err) { alert('Ошибка: ' + err); }
     });
 
     document.getElementById('stop-activity-btn')?.addEventListener('click', async () => {
-      try {
-        await invoke('stop_activity');
-        loadFocus();
-      } catch (err) {
-        alert('Ошибка: ' + err);
+      try { await invoke('stop_activity'); loadFocus('Current'); }
+      catch (err) { alert('Ошибка: ' + err); }
+    });
+
+    // Pomodoro buttons
+    document.getElementById('start-pomo-btn')?.addEventListener('click', () => {
+      const title = document.getElementById('activity-title')?.value?.trim() || 'Помодоро';
+      const focusMode = document.getElementById('focus-block-check')?.checked || false;
+      startPomodoro(title, selectedCategory, focusMode);
+    });
+
+    document.getElementById('pomo-skip-btn')?.addEventListener('click', () => {
+      if (pomodoroState.mode === 'work') {
+        invoke('stop_activity').catch(() => {});
+        pomodoroState.mode = 'break';
+        pomodoroState.startedAt = Date.now();
+        pomodoroState.totalSec = pomodoroState.breakMin * 60;
+      } else {
+        pomodoroState.mode = 'work';
+        pomodoroState.startedAt = Date.now();
+        pomodoroState.totalSec = pomodoroState.workMin * 60;
+        invoke('start_activity', { title: 'Помодоро', category: 'work', focusMode: false, duration: null, apps: null, sites: null }).catch(() => {});
       }
+      loadFocus('Current');
+    });
+
+    document.getElementById('pomo-stop-btn')?.addEventListener('click', () => {
+      pomodoroState.active = false;
+      invoke('stop_activity').catch(() => {});
+      loadFocus('Current');
     });
 
     // Update timer
-    if (current && current.started_at) {
-      if (focusTimerInterval) clearInterval(focusTimerInterval);
-      const startedAt = new Date(current.started_at).getTime();
-      focusTimerInterval = setInterval(() => {
-        const timerEl = document.getElementById('focus-timer');
-        if (!timerEl || activeTab !== 'focus') { clearInterval(focusTimerInterval); return; }
-        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-        const h = Math.floor(elapsed / 3600);
-        const m = Math.floor((elapsed % 3600) / 60);
-        const s = elapsed % 60;
-        timerEl.textContent = h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-      }, 1000);
-    }
+    startFocusTimer(current);
+
   } catch (e) {
     showStub('focus-content', '🎯', 'Фокус', 'Глубокая работа и трекинг активности');
+  }
+}
+
+function startFocusTimer(current) {
+  if (focusTimerInterval) clearInterval(focusTimerInterval);
+  const circumference = 2 * Math.PI * 54;
+
+  if (current && current.started_at) {
+    const startedAt = new Date(current.started_at).getTime();
+    const updateTimer = () => {
+      const timerEl = document.getElementById('focus-timer');
+      const ringEl = document.getElementById('focus-ring-progress');
+      if (!timerEl || activeTab !== 'focus') { clearInterval(focusTimerInterval); return; }
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const h = Math.floor(elapsed / 3600);
+      const m = Math.floor((elapsed % 3600) / 60);
+      const s = elapsed % 60;
+      timerEl.textContent = h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      // Ring: animate based on minutes (full circle = 60 min)
+      if (ringEl) {
+        const progress = Math.min(1, elapsed / 3600);
+        ringEl.style.strokeDasharray = circumference;
+        ringEl.style.strokeDashoffset = circumference * (1 - progress);
+      }
+    };
+    updateTimer();
+    focusTimerInterval = setInterval(updateTimer, 1000);
+  } else if (pomodoroState.active) {
+    const updatePomo = () => {
+      const timerEl = document.getElementById('focus-timer');
+      const ringEl = document.getElementById('focus-ring-progress');
+      if (!timerEl || activeTab !== 'focus') { clearInterval(focusTimerInterval); return; }
+      const elapsed = Math.floor((Date.now() - pomodoroState.startedAt) / 1000);
+      const remaining = Math.max(0, pomodoroState.totalSec - elapsed);
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      timerEl.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      if (ringEl) {
+        const progress = 1 - (remaining / pomodoroState.totalSec);
+        ringEl.style.strokeDasharray = circumference;
+        ringEl.style.strokeDashoffset = circumference * (1 - progress);
+      }
+      if (remaining <= 0) {
+        clearInterval(focusTimerInterval);
+        if (pomodoroState.mode === 'work') {
+          invoke('stop_activity').catch(() => {});
+          invoke('send_notification', { title: 'Помодоро', body: 'Время перерыва! 5 минут.' }).catch(() => {});
+          pomodoroState.mode = 'break';
+          pomodoroState.startedAt = Date.now();
+          pomodoroState.totalSec = pomodoroState.breakMin * 60;
+        } else {
+          invoke('send_notification', { title: 'Помодоро', body: 'Перерыв окончен! Поехали.' }).catch(() => {});
+          pomodoroState.mode = 'work';
+          pomodoroState.startedAt = Date.now();
+          pomodoroState.totalSec = pomodoroState.workMin * 60;
+          invoke('start_activity', { title: 'Помодоро', category: 'work', focusMode: false, duration: null, apps: null, sites: null }).catch(() => {});
+        }
+        loadFocus('Current');
+      }
+    };
+    updatePomo();
+    focusTimerInterval = setInterval(updatePomo, 1000);
+  }
+}
+
+async function startPomodoro(title, category, focusMode) {
+  pomodoroState = { active: true, mode: 'work', workMin: 25, breakMin: 5, startedAt: Date.now(), totalSec: 25 * 60 };
+  try {
+    await invoke('start_activity', { title: title || 'Помодоро', category: category || 'work', focusMode, duration: 25, apps: null, sites: null });
+  } catch (_) {}
+  loadFocus('Current');
+}
+
+async function renderFocusHistory(el) {
+  el.innerHTML = skeletonPage();
+  try {
+    // Load last 7 days
+    const days = [];
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const log = await invoke('get_activity_log', { date: dateStr }).catch(() => []);
+      const totalMin = log.reduce((sum, item) => {
+        const match = (item.duration || '').match(/(\d+)ч\s*(\d+)м|(\d+)м/);
+        if (match) return sum + (parseInt(match[1] || 0) * 60) + parseInt(match[2] || match[3] || 0);
+        return sum;
+      }, 0);
+      days.push({ date: dateStr, log, totalMin });
+    }
+
+    const maxMin = Math.max(1, ...days.map(d => d.totalMin));
+    const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const todayStr = today.toISOString().slice(0, 10);
+
+    // Weekly bar chart
+    const chartHtml = `<div class="focus-chart">
+      <div class="focus-chart-title">Последние 7 дней</div>
+      <div class="focus-chart-bars">
+        ${days.slice().reverse().map(d => {
+          const pct = Math.round((d.totalMin / maxMin) * 100);
+          const dayDate = new Date(d.date + 'T00:00:00');
+          const label = d.date === todayStr ? 'Сегодня' : dayNames[dayDate.getDay()];
+          const hours = Math.floor(d.totalMin / 60);
+          const mins = d.totalMin % 60;
+          const timeLabel = hours > 0 ? `${hours}ч${mins > 0 ? ` ${mins}м` : ''}` : `${mins}м`;
+          return `<div class="focus-chart-bar-col">
+            <div class="focus-chart-bar-value">${d.totalMin > 0 ? timeLabel : ''}</div>
+            <div class="focus-chart-bar-track"><div class="focus-chart-bar" style="height:${Math.max(2, pct)}%"></div></div>
+            <div class="focus-chart-bar-label">${label}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+    // Category breakdown for this week
+    const allLogs = days.flatMap(d => d.log);
+    const catTotals = {};
+    const catLabels = { work: 'Работа', study: 'Учёба', sport: 'Спорт', rest: 'Отдых', hobby: 'Хобби', other: 'Другое' };
+    const catColors = { work: 'var(--color-blue)', study: 'var(--color-purple)', sport: 'var(--color-green)', rest: 'var(--color-yellow)', hobby: 'var(--color-pink)', other: 'var(--text-muted)' };
+    allLogs.forEach(item => {
+      const cat = item.category || 'other';
+      const match = (item.duration || '').match(/(\d+)ч\s*(\d+)м|(\d+)м/);
+      const min = match ? (parseInt(match[1] || 0) * 60) + parseInt(match[2] || match[3] || 0) : 0;
+      catTotals[cat] = (catTotals[cat] || 0) + min;
+    });
+    const totalWeekMin = Object.values(catTotals).reduce((a, b) => a + b, 0);
+
+    const breakdownHtml = totalWeekMin > 0 ? `<div class="focus-breakdown">
+      <div class="focus-chart-title">По категориям</div>
+      ${Object.entries(catTotals).sort((a, b) => b[1] - a[1]).map(([cat, min]) => {
+        const pct = Math.round((min / totalWeekMin) * 100);
+        const hours = Math.floor(min / 60);
+        const mins = min % 60;
+        return `<div class="focus-breakdown-row">
+          <span class="focus-breakdown-label">${catLabels[cat] || cat}</span>
+          <div class="focus-breakdown-bar-track"><div class="focus-breakdown-bar" style="width:${pct}%;background:${catColors[cat] || 'var(--text-muted)'}"></div></div>
+          <span class="focus-breakdown-value">${hours > 0 ? `${hours}ч ${mins}м` : `${mins}м`}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+    // Daily logs
+    const logsHtml = days.filter(d => d.log.length > 0).map(d => {
+      const dayDate = new Date(d.date + 'T00:00:00');
+      const label = d.date === todayStr ? 'Сегодня' : `${dayDate.getDate()} ${['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'][dayDate.getMonth()]}, ${dayNames[dayDate.getDay()]}`;
+      return `<div class="focus-day-group">
+        <div class="focus-log-header">${label}</div>
+        <div class="focus-log">
+          ${d.log.map(item => `<div class="focus-log-item">
+            <span class="focus-log-time">${item.time || ''}</span>
+            <span class="focus-log-title">${escapeHtml(item.title)}</span>
+            <span class="focus-log-category">${item.category || ''}</span>
+            <span class="focus-log-duration">${item.duration || ''}</span>
+          </div>`).join('')}
+        </div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = renderPageHeader('focus') + `<div class="page-content">${chartHtml}${breakdownHtml}${logsHtml || '<div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">Нет данных за неделю</div></div>'}</div>`;
+
+  } catch (e) {
+    showStub('focus-content', '📊', 'История', 'История активностей');
   }
 }
 
@@ -4136,6 +4472,7 @@ async function loadCustomPage(tabId) {
 
 // ── Notes ──
 let notesViewMode = 'list'; // 'list' or 'edit'
+let notePreviewMode = false;
 
 function formatNoteDate(dateStr) {
   const date = new Date(dateStr);
@@ -4151,6 +4488,34 @@ function formatNoteDate(dateStr) {
   return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
+function formatDueDate(dateStr) {
+  if (!dateStr) return '';
+  const due = new Date(dateStr + (dateStr.includes('T') ? '' : 'T23:59:59'));
+  const now = new Date();
+  const diffMs = due - now;
+  const days = Math.ceil(diffMs / 86400000);
+  if (days < 0) return `<span class="due-overdue">просрочено ${Math.abs(days)} дн</span>`;
+  if (days === 0) return '<span class="due-today">сегодня</span>';
+  if (days <= 3) return `<span class="due-soon">через ${days} дн</span>`;
+  return `<span class="due-later">через ${days} дн</span>`;
+}
+
+function renderNoteTags(tagsStr) {
+  if (!tagsStr) return '';
+  return tagsStr.split(',').map(t => t.trim()).filter(Boolean).map(t => {
+    const color = tagColorMap[t] || 'blue';
+    return `<span class="note-tag badge-${color}">${escapeHtml(t)}</span>`;
+  }).join('');
+}
+
+async function loadTagColorMap() {
+  try {
+    const tags = await invoke('get_note_tags');
+    tagColorMap = {};
+    for (const t of tags) tagColorMap[t.name] = t.color;
+  } catch (_) {}
+}
+
 async function loadNotes(subTab) {
   const el = document.getElementById('notes-content');
   if (!el) return;
@@ -4160,7 +4525,24 @@ async function loadNotes(subTab) {
     return;
   }
 
+  await loadTagColorMap();
+
   try {
+    if (subTab === 'Tasks') {
+      const notes = await invoke('get_notes', { filter: 'tasks', search: null });
+      renderTasksView(el, notes || []);
+      return;
+    }
+    if (subTab === 'Kanban') {
+      const notes = await invoke('get_notes', { filter: null, search: null });
+      renderKanbanView(el, notes || []);
+      return;
+    }
+    if (subTab === 'Timeline') {
+      const notes = await invoke('get_notes', { filter: 'tasks', search: null });
+      renderTimelineView(el, notes || []);
+      return;
+    }
     const filter = subTab === 'Pinned' ? 'pinned' : subTab === 'Archived' ? 'archived' : null;
     const notes = await invoke('get_notes', { filter, search: null });
     renderNotesListView(el, notes || [], filter);
@@ -4174,7 +4556,21 @@ function renderNotesListView(el, notes, filter) {
   const pinned = notes.filter(n => n.pinned && !n.archived);
   const regular = notes.filter(n => !n.pinned && !n.archived);
   const archived = notes.filter(n => n.archived);
-  const displayNotes = filter === 'pinned' ? pinned : filter === 'archived' ? archived : [...pinned, ...regular];
+  let displayNotes = filter === 'pinned' ? pinned : filter === 'archived' ? archived : [...pinned, ...regular];
+
+  // Apply tag filter
+  if (noteTagFilter) {
+    displayNotes = displayNotes.filter(n => (n.tags || '').split(',').map(t => t.trim()).includes(noteTagFilter));
+  }
+
+  // Collect all tags for filter pills
+  const allTags = new Set();
+  notes.forEach(n => (n.tags || '').split(',').map(t => t.trim()).filter(Boolean).forEach(t => allTags.add(t)));
+
+  const tagFilterHtml = allTags.size > 0 ? `<div class="notes-tag-filter" id="notes-tag-filter">
+    <span class="note-tag-filter-pill ${!noteTagFilter ? 'active' : ''}" data-tag="">Все</span>
+    ${[...allTags].map(t => `<span class="note-tag-filter-pill badge-${tagColorMap[t] || 'blue'} ${noteTagFilter === t ? 'active' : ''}" data-tag="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}
+  </div>` : '';
 
   el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
     <div class="notes-toolbar">
@@ -4183,6 +4579,7 @@ function renderNotesListView(el, notes, filter) {
         <input class="form-input" id="notes-search" placeholder="Поиск..." autocomplete="off">
       </div>
     </div>
+    ${tagFilterHtml}
     <div class="notes-card-list" id="notes-card-list">
       ${displayNotes.length === 0 ? `
         <div class="empty-state">
@@ -4196,12 +4593,13 @@ function renderNotesListView(el, notes, filter) {
   const list = document.getElementById('notes-card-list');
   const refresh = () => loadNotes();
   if (list && displayNotes.length > 0) {
-    if (filter !== 'pinned' && filter !== 'archived' && pinned.length > 0) {
+    if (filter !== 'pinned' && filter !== 'archived' && pinned.length > 0 && !noteTagFilter) {
       const section = document.createElement('div');
       section.className = 'notes-section-label';
       section.textContent = '📌 Закреплённые';
       list.appendChild(section);
-      for (const note of pinned) list.appendChild(createNoteCard(note, refresh));
+      const pinnedFiltered = noteTagFilter ? pinned.filter(n => (n.tags || '').split(',').map(t => t.trim()).includes(noteTagFilter)) : pinned;
+      for (const note of pinnedFiltered) list.appendChild(createNoteCard(note, refresh));
 
       if (regular.length > 0) {
         const sep = document.createElement('div');
@@ -4210,9 +4608,22 @@ function renderNotesListView(el, notes, filter) {
         list.appendChild(sep);
       }
     }
-    const mainNotes = filter === 'pinned' ? pinned : filter === 'archived' ? archived : regular;
+    const mainNotes = noteTagFilter
+      ? displayNotes.filter(n => !n.pinned || filter === 'pinned')
+      : (filter === 'pinned' ? pinned : filter === 'archived' ? archived : regular);
     for (const note of mainNotes) list.appendChild(createNoteCard(note, refresh));
+
+    // DnD sorting
+    setupNotesDnD(list);
   }
+
+  // Tag filter clicks
+  document.getElementById('notes-tag-filter')?.addEventListener('click', (e) => {
+    const pill = e.target.closest('.note-tag-filter-pill');
+    if (!pill) return;
+    noteTagFilter = pill.dataset.tag || null;
+    loadNotes();
+  });
 
   document.getElementById('new-note-btn')?.addEventListener('click', createAndOpenNote);
   document.getElementById('empty-new-note-btn')?.addEventListener('click', createAndOpenNote);
@@ -4228,28 +4639,272 @@ function renderNotesListView(el, notes, filter) {
   });
 }
 
+function renderTasksView(el, notes) {
+  notesViewMode = 'list';
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const overdue = notes.filter(n => n.status === 'task' && n.due_date && n.due_date < todayStr);
+  const today = notes.filter(n => n.status === 'task' && n.due_date === todayStr);
+  const upcoming = notes.filter(n => n.status === 'task' && (!n.due_date || n.due_date > todayStr));
+  const done = notes.filter(n => n.status === 'done');
+
+  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
+    <div class="notes-toolbar">
+      <button class="btn-primary" id="new-task-btn">+ Новая задача</button>
+    </div>
+    <div class="notes-card-list" id="tasks-list"></div>
+  </div>`;
+
+  const list = document.getElementById('tasks-list');
+  const refresh = () => loadNotes('Tasks');
+  if (!list) return;
+
+  const sections = [
+    { label: '🔴 Просроченные', items: overdue },
+    { label: '🟡 Сегодня', items: today },
+    { label: '🔵 Предстоящие', items: upcoming },
+    { label: '✅ Выполненные', items: done },
+  ];
+  for (const sec of sections) {
+    if (sec.items.length === 0) continue;
+    const lbl = document.createElement('div');
+    lbl.className = 'notes-section-label';
+    lbl.textContent = sec.label;
+    list.appendChild(lbl);
+    for (const note of sec.items) list.appendChild(createNoteCard(note, refresh));
+  }
+
+  if (notes.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-text">Нет задач</div>
+      <button class="btn-primary" id="empty-new-task-btn">Создать задачу</button></div>`;
+    document.getElementById('empty-new-task-btn')?.addEventListener('click', createAndOpenTask);
+  }
+
+  document.getElementById('new-task-btn')?.addEventListener('click', createAndOpenTask);
+}
+
+async function createAndOpenTask() {
+  try {
+    const id = await invoke('create_note', { title: '', content: '', tags: '', status: 'task', tabName: null, dueDate: null, reminderAt: null });
+    currentNoteId = id;
+    notesViewMode = 'edit';
+    const el = document.getElementById('notes-content');
+    if (el) renderNoteEditor(el, id);
+  } catch (err) { console.error('create_task error:', err); }
+}
+
+function renderKanbanView(el, notes) {
+  notesViewMode = 'list';
+  const nonArchived = notes.filter(n => !n.archived);
+  const columns = [
+    { status: 'note', label: 'Заметки', icon: '📝', items: nonArchived.filter(n => !n.status || n.status === 'note') },
+    { status: 'task', label: 'Задачи', icon: '☐', items: nonArchived.filter(n => n.status === 'task') },
+    { status: 'done', label: 'Готово', icon: '✅', items: nonArchived.filter(n => n.status === 'done') },
+  ];
+
+  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
+    <div class="kanban-board" id="kanban-board">
+      ${columns.map(col => `
+        <div class="kanban-column" data-status="${col.status}">
+          <div class="kanban-column-header">
+            <span>${col.icon} ${col.label}</span>
+            <span class="kanban-column-count">${col.items.length}</span>
+            <button class="kanban-add-btn" data-status="${col.status}">+</button>
+          </div>
+          <div class="kanban-column-cards" data-status="${col.status}"></div>
+        </div>
+      `).join('')}
+    </div>
+  </div>`;
+
+  const refresh = () => loadNotes('Kanban');
+  for (const col of columns) {
+    const container = el.querySelector(`.kanban-column-cards[data-status="${col.status}"]`);
+    if (!container) continue;
+    for (const note of col.items) container.appendChild(createNoteCard(note, refresh));
+  }
+
+  setupKanbanDnD(el.querySelector('#kanban-board'), refresh);
+
+  el.querySelectorAll('.kanban-add-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const status = btn.dataset.status === 'note' ? null : btn.dataset.status;
+      try {
+        const id = await invoke('create_note', { title: '', content: '', tags: '', status, tabName: null, dueDate: null, reminderAt: null });
+        currentNoteId = id;
+        notesViewMode = 'edit';
+        renderNoteEditor(el, id);
+      } catch (err) { console.error('kanban create:', err); }
+    });
+  });
+}
+
+function setupKanbanDnD(board, refresh) {
+  if (!board) return;
+  board.querySelectorAll('.kanban-column-cards').forEach(col => {
+    col.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      col.classList.add('drag-over');
+    });
+    col.addEventListener('dragleave', (e) => {
+      if (!col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+    });
+    col.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const noteId = parseInt(e.dataTransfer.getData('text/plain'));
+      if (!noteId) return;
+      const targetStatus = col.dataset.status;
+      try {
+        await invoke('update_note_status', { id: noteId, status: targetStatus });
+        refresh();
+      } catch (err) { console.error('kanban drop:', err); }
+    });
+  });
+}
+
+function renderTimelineView(el, notes) {
+  notesViewMode = 'list';
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  // Get Monday of current week
+  const dayOfWeek = now.getDay() || 7;
+  const thisMonday = new Date(now);
+  thisMonday.setDate(now.getDate() - dayOfWeek + 1);
+  thisMonday.setHours(0, 0, 0, 0);
+  const thisSunday = new Date(thisMonday);
+  thisSunday.setDate(thisMonday.getDate() + 6);
+  const nextMonday = new Date(thisMonday);
+  nextMonday.setDate(thisMonday.getDate() + 7);
+  const nextSunday = new Date(nextMonday);
+  nextSunday.setDate(nextMonday.getDate() + 6);
+
+  const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const thisMondayStr = toDateStr(thisMonday);
+  const thisSundayStr = toDateStr(thisSunday);
+  const nextMondayStr = toDateStr(nextMonday);
+  const nextSundayStr = toDateStr(nextSunday);
+
+  const overdue = notes.filter(n => n.status === 'task' && n.due_date && n.due_date < todayStr);
+  const thisWeek = notes.filter(n => n.due_date && n.due_date >= thisMondayStr && n.due_date <= thisSundayStr && !(n.status === 'task' && n.due_date < todayStr));
+  const nextWeek = notes.filter(n => n.due_date && n.due_date >= nextMondayStr && n.due_date <= nextSundayStr);
+  const later = notes.filter(n => n.due_date && n.due_date > nextSundayStr);
+  const noDate = notes.filter(n => !n.due_date);
+
+  const formatWeekRange = (mon, sun) => {
+    const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    return `${mon.getDate()} ${months[mon.getMonth()]} – ${sun.getDate()} ${months[sun.getMonth()]}`;
+  };
+
+  const groups = [
+    { label: 'Просроченные', items: overdue, cls: 'overdue' },
+    { label: `Эта неделя (${formatWeekRange(thisMonday, thisSunday)})`, items: thisWeek, cls: '' },
+    { label: `Следующая неделя (${formatWeekRange(nextMonday, nextSunday)})`, items: nextWeek, cls: '' },
+    { label: 'Позже', items: later, cls: '' },
+    { label: 'Без даты', items: noDate, cls: 'no-date' },
+  ];
+
+  const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const formatDateShort = (dateStr) => {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${d.getDate()} ${months[d.getMonth()]}`;
+  };
+
+  const renderItem = (note) => {
+    const isDone = note.status === 'done';
+    const isOverdue = note.status === 'task' && note.due_date && note.due_date < todayStr;
+    const isToday = note.due_date === todayStr;
+    const tagsHtml = renderNoteTags(note.tags);
+    const dotCls = isDone ? 'done' : isOverdue ? 'overdue' : '';
+    const todayBadge = isToday ? '<span class="timeline-today-badge">сегодня</span>' : '';
+    const overdueBadge = isOverdue ? `<span class="timeline-overdue-badge">просрочено</span>` : '';
+    return `<div class="timeline-item${isDone ? ' task-done' : ''}" data-note-id="${note.id}">
+      <div class="timeline-date">${formatDateShort(note.due_date)}</div>
+      <div class="timeline-dot ${dotCls}"></div>
+      <div class="timeline-content">
+        <div class="timeline-title">${escapeHtml(note.title || 'Без названия')}</div>
+        ${tagsHtml ? `<div class="timeline-tags">${tagsHtml}</div>` : ''}
+      </div>
+      ${todayBadge}${overdueBadge}
+    </div>`;
+  };
+
+  const groupsHtml = groups
+    .filter(g => g.items.length > 0)
+    .map(g => `<div class="timeline-group ${g.cls}">
+      <div class="timeline-group-header">${g.label}</div>
+      ${g.items.map(renderItem).join('')}
+    </div>`).join('');
+
+  el.innerHTML = renderPageHeader('notes') + `<div class="page-content">
+    <div class="notes-toolbar">
+      <button class="btn-primary" id="timeline-new-task-btn">+ Новая задача</button>
+    </div>
+    <div class="timeline-view">${groupsHtml || '<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-text">Нет задач</div></div>'}</div>
+  </div>`;
+
+  el.querySelectorAll('.timeline-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const noteId = parseInt(item.dataset.noteId);
+      if (!noteId) return;
+      currentNoteId = noteId;
+      notesViewMode = 'edit';
+      renderNoteEditor(el, noteId);
+    });
+  });
+
+  document.getElementById('timeline-new-task-btn')?.addEventListener('click', createAndOpenTask);
+}
+
 function createNoteCard(note, onRefresh) {
   const card = document.createElement('div');
-  card.className = 'note-card card';
+  const isTask = note.status === 'task' || note.status === 'done';
+  card.className = `note-card card${note.status === 'done' ? ' task-done' : ''}`;
+  card.draggable = true;
+  card.dataset.noteId = note.id;
   const preview = (note.content || '').substring(0, 120).replace(/\n/g, ' ');
+  const tagsHtml = renderNoteTags(note.tags);
+  const dueHtml = isTask ? formatDueDate(note.due_date) : '';
+  const tabBadge = note.tab_name ? `<span class="note-tab-badge">${escapeHtml(note.tab_name)}</span>` : '';
+  const statusIcon = note.status === 'done' ? '☑' : note.status === 'task' ? '☐' : '';
+
   card.innerHTML = `
     <div class="note-card-body">
-      <div class="note-card-title">${note.pinned ? '<span class="note-pinned-icon">📌</span> ' : ''}${escapeHtml(note.title || 'Без названия')}</div>
+      <div class="note-card-title">${statusIcon ? `<span class="note-status-icon" data-action="toggle-status">${statusIcon}</span> ` : ''}${note.pinned ? '<span class="note-pinned-icon">📌</span> ' : ''}${escapeHtml(note.title || 'Без названия')}</div>
       ${preview ? `<div class="note-card-preview">${escapeHtml(preview)}</div>` : ''}
-      <div class="note-card-meta"><span>${formatNoteDate(note.updated_at || note.created_at)}</span></div>
+      <div class="note-card-meta">
+        <span>${formatNoteDate(note.updated_at || note.created_at)}</span>
+        ${dueHtml ? `<span class="note-card-due">${dueHtml}</span>` : ''}
+        ${tabBadge}
+      </div>
+      ${tagsHtml ? `<div class="note-card-tags">${tagsHtml}</div>` : ''}
     </div>
     <div class="note-card-actions">
-      <button class="note-card-action-btn" data-action="pin" title="${note.pinned ? 'Открепить' : 'Закрепить'}">${note.pinned ? '📌' : '📌'}</button>
+      <button class="note-card-action-btn" data-action="pin" title="${note.pinned ? 'Открепить' : 'Закрепить'}">📌</button>
       <button class="note-card-action-btn" data-action="archive" title="${note.archived ? 'Разархивировать' : 'В архив'}">📦</button>
       <button class="note-card-action-btn note-card-action-danger" data-action="delete" title="Удалить">🗑</button>
     </div>`;
+
   // Click card body to open editor
-  card.querySelector('.note-card-body').addEventListener('click', () => {
+  card.querySelector('.note-card-body').addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="toggle-status"]')) return;
     currentNoteId = note.id;
     notesViewMode = 'edit';
     const el = document.getElementById('notes-content');
     if (el) renderNoteEditor(el, note.id);
   });
+
+  // Toggle task status
+  card.querySelector('[data-action="toggle-status"]')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const nextStatus = note.status === 'done' ? 'task' : note.status === 'task' ? 'done' : 'task';
+    await invoke('update_note_status', { id: note.id, status: nextStatus }).catch(err => console.error('status:', err));
+    if (onRefresh) onRefresh();
+  });
+
   // Pin
   card.querySelector('[data-action="pin"]').addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -4269,12 +4924,61 @@ function createNoteCard(note, onRefresh) {
     await invoke('delete_note', { id: note.id }).catch(err => console.error('delete:', err));
     if (onRefresh) onRefresh();
   });
+
+  // DnD events
+  card.addEventListener('dragstart', (e) => {
+    card.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', note.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+
   return card;
+}
+
+function setupNotesDnD(list) {
+  let dragOverCard = null;
+  list.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const card = e.target.closest('.note-card');
+    if (card && card !== dragOverCard) {
+      dragOverCard?.classList.remove('drag-over');
+      card.classList.add('drag-over');
+      dragOverCard = card;
+    }
+  });
+  list.addEventListener('dragleave', (e) => {
+    if (!list.contains(e.relatedTarget)) {
+      dragOverCard?.classList.remove('drag-over');
+      dragOverCard = null;
+    }
+  });
+  list.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragOverCard?.classList.remove('drag-over');
+    const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+    const targetCard = e.target.closest('.note-card');
+    if (!targetCard) return;
+    const targetId = parseInt(targetCard.dataset.noteId);
+    if (draggedId === targetId) return;
+
+    // Reorder DOM
+    const cards = [...list.querySelectorAll('.note-card')];
+    const ids = cards.map(c => parseInt(c.dataset.noteId));
+    const fromIdx = ids.indexOf(draggedId);
+    const toIdx = ids.indexOf(targetId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    ids.splice(fromIdx, 1);
+    ids.splice(toIdx, 0, draggedId);
+    await invoke('reorder_notes', { ids }).catch(err => console.error('reorder:', err));
+    loadNotes();
+  });
 }
 
 async function createAndOpenNote() {
   try {
-    const id = await invoke('create_note', { title: '', content: '', tags: '' });
+    const id = await invoke('create_note', { title: '', content: '', tags: '', tabName: null, status: null, dueDate: null, reminderAt: null });
     currentNoteId = id;
     notesViewMode = 'edit';
     const el = document.getElementById('notes-content');
@@ -4287,24 +4991,63 @@ function saveCurrentNote(id) {
   const title = document.getElementById('note-title')?.value || '';
   const content = document.getElementById('note-body')?.value || '';
   const tags = document.getElementById('note-tags-input')?.value || '';
-  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null });
+  const tabName = document.getElementById('note-tab-select')?.value || null;
+  const status = document.getElementById('note-status-select')?.value || null;
+  const dueDate = document.getElementById('note-due-date')?.value || null;
+  const reminderAt = document.getElementById('note-reminder')?.value || null;
+  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null, tabName, status, dueDate, reminderAt });
 }
 
 async function renderNoteEditor(el, id) {
   try {
     const note = await invoke('get_note', { id });
+    notePreviewMode = false;
+
+    // Build tab options
+    const tabKeys = Object.keys(TAB_REGISTRY).filter(k => k !== 'chat' && !k.startsWith('page_'));
+    const tabOptions = tabKeys.map(k => `<option value="${k}" ${note.tab_name === k ? 'selected' : ''}>${TAB_REGISTRY[k].label}</option>`).join('');
+
+    // Parse tags for pills
+    const tags = (note.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+    const tagPillsHtml = tags.map(t => {
+      const color = tagColorMap[t] || 'blue';
+      return `<span class="note-tag-pill badge-${color}" data-tag="${escapeHtml(t)}">${escapeHtml(t)} <span class="note-tag-remove">×</span></span>`;
+    }).join('');
 
     el.innerHTML = `<div class="page-content note-edit-view">
       <div class="note-edit-topbar">
         <div class="note-breadcrumb" id="note-back-btn">← Notes</div>
         <div class="note-edit-actions">
+          <button class="note-action-btn" id="note-preview-btn" title="Markdown">👁</button>
           <button class="note-action-btn ${note.pinned ? 'active' : ''}" id="note-pin-btn" title="${note.pinned ? 'Открепить' : 'Закрепить'}">📌</button>
           <button class="note-action-btn" id="note-archive-btn" title="${note.archived ? 'Разархивировать' : 'В архив'}">📦</button>
           <button class="note-action-btn note-action-btn-danger" id="note-delete-btn" title="Удалить">🗑</button>
         </div>
       </div>
+
+      <div class="note-task-bar">
+        <select class="form-select note-status-select" id="note-status-select">
+          <option value="note" ${note.status === 'note' ? 'selected' : ''}>Заметка</option>
+          <option value="task" ${note.status === 'task' ? 'selected' : ''}>Задача</option>
+          <option value="done" ${note.status === 'done' ? 'selected' : ''}>Выполнено</option>
+        </select>
+        <input type="date" class="form-input note-due-input" id="note-due-date" value="${note.due_date || ''}" placeholder="Дедлайн">
+        <input type="datetime-local" class="form-input note-reminder-input" id="note-reminder" value="${note.reminder_at || ''}" placeholder="Напомнить">
+        <select class="form-select note-tab-select" id="note-tab-select">
+          <option value="">— Без таба —</option>
+          ${tabOptions}
+        </select>
+      </div>
+
       <input class="page-title-input" id="note-title" value="${escapeHtml(note.title || '')}" placeholder="Без названия">
+
+      <div class="note-tags-row" id="note-tags-row">
+        ${tagPillsHtml}
+        <input class="note-tag-input" id="note-tag-add" placeholder="+ тег" autocomplete="off">
+      </div>
+
       <textarea class="custom-page-body" id="note-body" placeholder="Начните писать...">${escapeHtml(note.content || '')}</textarea>
+      <div class="note-preview markdown-body" id="note-preview" style="display:none"></div>
       <input type="hidden" id="note-tags-input" value="${escapeHtml(note.tags || '')}">
     </div>`;
 
@@ -4328,6 +5071,71 @@ async function renderNoteEditor(el, id) {
     };
     document.getElementById('note-title')?.addEventListener('input', autoSave);
     document.getElementById('note-body')?.addEventListener('input', autoSave);
+    document.getElementById('note-status-select')?.addEventListener('change', autoSave);
+    document.getElementById('note-due-date')?.addEventListener('change', autoSave);
+    document.getElementById('note-reminder')?.addEventListener('change', autoSave);
+    document.getElementById('note-tab-select')?.addEventListener('change', autoSave);
+
+    // Markdown preview toggle
+    document.getElementById('note-preview-btn')?.addEventListener('click', () => {
+      notePreviewMode = !notePreviewMode;
+      const ta = document.getElementById('note-body');
+      const pv = document.getElementById('note-preview');
+      const btn = document.getElementById('note-preview-btn');
+      if (notePreviewMode) {
+        pv.innerHTML = renderMarkdown(ta.value || '');
+        ta.style.display = 'none';
+        pv.style.display = 'block';
+        btn.classList.add('active');
+      } else {
+        ta.style.display = '';
+        pv.style.display = 'none';
+        btn.classList.remove('active');
+      }
+    });
+
+    // Tag input
+    const tagInput = document.getElementById('note-tag-add');
+    const tagsRow = document.getElementById('note-tags-row');
+    tagInput?.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        const val = tagInput.value.trim().replace(/,/g, '');
+        if (!val) return;
+        const hidden = document.getElementById('note-tags-input');
+        const curTags = (hidden.value || '').split(',').map(t => t.trim()).filter(Boolean);
+        if (!curTags.includes(val)) {
+          curTags.push(val);
+          hidden.value = curTags.join(', ');
+          // Ensure tag has a color
+          if (!tagColorMap[val]) {
+            const colors = ['blue','green','purple','orange','yellow','red','pink'];
+            tagColorMap[val] = colors[curTags.length % colors.length];
+            invoke('set_note_tag_color', { name: val, color: tagColorMap[val] }).catch(() => {});
+          }
+          const pill = document.createElement('span');
+          pill.className = `note-tag-pill badge-${tagColorMap[val]}`;
+          pill.dataset.tag = val;
+          pill.innerHTML = `${escapeHtml(val)} <span class="note-tag-remove">×</span>`;
+          tagsRow.insertBefore(pill, tagInput);
+        }
+        tagInput.value = '';
+        autoSave();
+      }
+    });
+
+    // Remove tag on click ×
+    tagsRow?.addEventListener('click', (e) => {
+      const rm = e.target.closest('.note-tag-remove');
+      if (!rm) return;
+      const pill = rm.closest('.note-tag-pill');
+      const tag = pill?.dataset.tag;
+      if (!tag) return;
+      pill.remove();
+      const hidden = document.getElementById('note-tags-input');
+      hidden.value = (hidden.value || '').split(',').map(t => t.trim()).filter(t => t !== tag).join(', ');
+      autoSave();
+    });
 
     // Back
     document.getElementById('note-back-btn')?.addEventListener('click', () => {
@@ -4374,6 +5182,37 @@ async function renderNoteEditor(el, id) {
   }
 }
 
+async function renderLinkedNotes(container, tabName) {
+  try {
+    const notes = await invoke('get_notes_for_tab', { tabName });
+    if (!notes || notes.length === 0) return;
+    const section = document.createElement('div');
+    section.className = 'linked-notes-section';
+    section.innerHTML = `<div class="linked-notes-header"><span>📝 Связанные заметки</span><span class="linked-notes-count">${notes.length}</span></div>`;
+    const list = document.createElement('div');
+    list.className = 'linked-notes-list';
+    for (const n of notes.slice(0, 10)) {
+      const item = document.createElement('div');
+      item.className = `linked-note-item${n.status === 'done' ? ' task-done' : ''}`;
+      const statusIcon = n.status === 'done' ? '☑ ' : n.status === 'task' ? '☐ ' : '';
+      item.innerHTML = `<span class="linked-note-title">${statusIcon}${escapeHtml(n.title || 'Без названия')}</span>
+        <span class="linked-note-date">${formatNoteDate(n.updated_at)}</span>`;
+      item.addEventListener('click', () => {
+        activateTab('notes');
+        setTimeout(() => {
+          currentNoteId = n.id;
+          notesViewMode = 'edit';
+          const el = document.getElementById('notes-content');
+          if (el) renderNoteEditor(el, n.id);
+        }, 100);
+      });
+      list.appendChild(item);
+    }
+    section.appendChild(list);
+    container.appendChild(section);
+  } catch (_) {}
+}
+
 // ── Calendar ──
 let syncedMonths = new Set();
 async function loadCalendar(subTab) {
@@ -4412,12 +5251,13 @@ async function loadCalendar(subTab) {
 
   try {
     const events = await invoke('get_events', { month: calendarMonth + 1, year: calendarYear }).catch(() => []);
+    const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
     if (subTab === 'Неделя') {
       renderWeekCalendar(el, events || []);
     } else if (subTab === 'День') {
       renderDayCalendar(el, events || []);
     } else {
-      renderCalendar(el, events || []);
+      renderCalendar(el, events || [], tasks || []);
     }
   } catch (e) {
     if (subTab === 'Неделя') renderWeekCalendar(el, []);
@@ -4426,7 +5266,8 @@ async function loadCalendar(subTab) {
   }
 }
 
-function renderCalendar(el, events) {
+function renderCalendar(el, events, tasks) {
+  tasks = tasks || [];
   const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
@@ -4446,6 +5287,14 @@ function renderCalendar(el, events) {
     eventsByDate[d].push(ev);
   }
 
+  // Group tasks by due_date
+  const tasksByDate = {};
+  for (const t of tasks) {
+    if (!t.due_date) continue;
+    if (!tasksByDate[t.due_date]) tasksByDate[t.due_date] = [];
+    tasksByDate[t.due_date].push(t);
+  }
+
   let daysHtml = '';
   // Prev month days
   const prevLast = new Date(calendarYear, calendarMonth, 0).getDate();
@@ -4458,10 +5307,12 @@ function renderCalendar(el, events) {
     const isToday = dateStr === todayStr;
     const isSelected = dateStr === selectedCalendarDate;
     const dayEvents = eventsByDate[dateStr] || [];
+    const dayTasks = tasksByDate[dateStr] || [];
     const dots = dayEvents.slice(0, 3).map(e => `<span class="calendar-event-dot" style="background:${e.color || 'var(--accent-blue)'}"></span>`).join('');
+    const taskDots = dayTasks.slice(0, 2).map(t => `<span class="calendar-task-dot${t.status === 'done' ? ' done' : ''}"></span>`).join('');
     daysHtml += `<div class="calendar-day${isToday ? ' today' : ''}${isSelected ? ' selected' : ''}" data-date="${dateStr}">
       <span class="calendar-day-number">${d}</span>
-      <div class="calendar-day-dots">${dots}</div>
+      <div class="calendar-day-dots">${dots}${taskDots}</div>
     </div>`;
   }
   // Next month days
@@ -4472,15 +5323,39 @@ function renderCalendar(el, events) {
   }
 
   let dayPanelHtml = '';
-  if (selectedCalendarDate && eventsByDate[selectedCalendarDate]) {
-    const dayEvts = eventsByDate[selectedCalendarDate];
-    dayPanelHtml = `<div class="calendar-day-panel">
-      <div class="calendar-day-panel-title">${selectedCalendarDate}</div>
+  if (selectedCalendarDate) {
+    const dayEvts = eventsByDate[selectedCalendarDate] || [];
+    const dayTasks = tasksByDate[selectedCalendarDate] || [];
+    const hasContent = dayEvts.length > 0 || dayTasks.length > 0;
+
+    const eventsSection = dayEvts.length > 0 ? `
+      <div class="calendar-day-panel-section">События</div>
       ${dayEvts.map(e => `<div class="calendar-event-item">
         <span class="calendar-event-time">${e.time || ''}</span>
         <span class="calendar-event-title">${escapeHtml(e.title)}</span>
         ${e.source && e.source !== 'manual' ? `<span class="badge badge-gray">${e.source === 'apple' ? '🍎' : '📅'}</span>` : ''}
-      </div>`).join('')}
+      </div>`).join('')}` : '';
+
+    const tasksSection = dayTasks.length > 0 ? `
+      <div class="calendar-day-panel-section">Задачи</div>
+      ${dayTasks.map(t => {
+        const statusIcon = t.status === 'done' ? '☑' : '☐';
+        const tagsHtml = (t.tags || '').split(',').map(tg => tg.trim()).filter(Boolean)
+          .map(tg => `<span class="note-tag badge-${tagColorMap[tg] || 'blue'}">${escapeHtml(tg)}</span>`).join('');
+        return `<div class="calendar-task-item" data-id="${t.id}">
+          <span class="note-status-icon" data-action="toggle-task">${statusIcon}</span>
+          <span class="calendar-task-title" data-action="open-task">${escapeHtml(t.title || 'Без названия')}</span>
+          ${tagsHtml}
+        </div>`;
+      }).join('')}` : '';
+
+    dayPanelHtml = `<div class="calendar-day-panel">
+      <div class="calendar-day-panel-header">
+        <div class="calendar-day-panel-title">${selectedCalendarDate}</div>
+        <button class="btn-sm btn-secondary" id="cal-add-task-btn">+ Задача</button>
+      </div>
+      ${eventsSection}${tasksSection}
+      ${!hasContent ? '<div class="calendar-day-panel-empty">Нет событий</div>' : ''}
     </div>`;
   }
 
@@ -4542,6 +5417,42 @@ function renderCalendar(el, events) {
       console.error('Calendar sync error:', e);
     }
     setTimeout(() => { if (btn) { btn.textContent = '↻ Синхр.'; btn.disabled = false; } }, 2000);
+  });
+
+  // Calendar task interactions
+  document.querySelectorAll('.calendar-task-item').forEach(item => {
+    item.querySelector('[data-action="toggle-task"]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(item.dataset.id);
+      const task = tasks.find(t => t.id === id);
+      if (!task) return;
+      const nextStatus = task.status === 'done' ? 'task' : 'done';
+      await invoke('update_note_status', { id, status: nextStatus }).catch(err => console.error('cal task toggle:', err));
+      loadCalendar();
+    });
+    item.querySelector('[data-action="open-task"]')?.addEventListener('click', () => {
+      const id = parseInt(item.dataset.id);
+      activateTab('notes');
+      setTimeout(() => {
+        currentNoteId = id;
+        notesViewMode = 'edit';
+        const notesEl = document.getElementById('notes-content');
+        if (notesEl) renderNoteEditor(notesEl, id);
+      }, 100);
+    });
+  });
+
+  document.getElementById('cal-add-task-btn')?.addEventListener('click', async () => {
+    try {
+      const id = await invoke('create_note', { title: '', content: '', tags: '', status: 'task', tabName: null, dueDate: selectedCalendarDate, reminderAt: null });
+      activateTab('notes');
+      setTimeout(() => {
+        currentNoteId = id;
+        notesViewMode = 'edit';
+        const notesEl = document.getElementById('notes-content');
+        if (notesEl) renderNoteEditor(notesEl, id);
+      }, 100);
+    } catch (err) { console.error('cal add task:', err); }
   });
 }
 

@@ -10,14 +10,8 @@
 <script src="marked.min.js"></script>
 </head>
 <body>
-<!-- Top tab bar (browser-like) -->
-<div id="tab-bar">
-  <div class="tab-bar-left">
-    <div id="tab-list"></div>
-    <button id="tab-add" title="Открыть вкладку">+</button>
-  </div>
-  <div id="tab-bar-right"></div>
-</div>
+<!-- Drag region for window controls -->
+<div id="drag-region"></div>
 
 <!-- Tab add dropdown -->
 <div id="tab-dropdown" class="hidden">
@@ -25,7 +19,14 @@
 </div>
 
 <div id="app-body">
-  <!-- Left sub-sidebar -->
+  <!-- Left vertical tab bar -->
+  <div id="tab-bar">
+    <div id="tab-list"></div>
+    <button id="tab-add" title="Открыть вкладку">+</button>
+    <div id="tab-bar-bottom"></div>
+  </div>
+
+  <!-- Chat sub-sidebar (only for chat) -->
   <div id="sub-sidebar" class="hidden">
     <div id="sub-sidebar-items"></div>
     <div id="sub-sidebar-goals" class="sub-sidebar-section hidden">
