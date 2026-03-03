@@ -30,7 +30,8 @@ pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: O
         ).ok().map(|v| v == "true").unwrap_or(false)
     };
 
-    let result = if use_openclaw {
+    // Call mode always uses direct MLX (fast ~3s vs 30s+ through OpenClaw)
+    let result = if use_openclaw && !is_call {
         chat_openclaw(&app, messages.clone(), is_call).await?
     } else {
         let result = chat_inner(&app, messages.clone(), is_call).await?;
