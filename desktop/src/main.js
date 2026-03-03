@@ -1099,11 +1099,10 @@ function renderSubSidebar() {
     renderSubTabBar(activeTab, reg);
   }
 
-  // Bottom: version only (gear is in tab bar)
+  // Bottom: version label only (gear is in tab bar)
   const settingsBottom = document.getElementById('sub-sidebar-settings');
   if (settingsBottom) {
     settingsBottom.innerHTML = '';
-    settingsBottom.appendChild(gear);
     if (!(chatSidebarCollapsed && activeTab === 'chat')) {
       const ver = document.createElement('div');
       ver.className = 'version-label';
