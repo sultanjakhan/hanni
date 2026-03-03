@@ -160,6 +160,7 @@ async function loadChatSettings() {
         <button class="chat-settings-tab" data-panel="general">Автономный</button>
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
+        <button class="chat-settings-tab" data-panel="tools">Инструменты</button>
         <button class="chat-settings-tab" data-panel="data">Данные</button>
         <button class="chat-settings-tab" data-panel="appearance">Оформление</button>
         <button class="chat-settings-tab" data-panel="about">О Hanni</button>
@@ -177,19 +178,6 @@ async function loadChatSettings() {
       </div>
 
       <div class="chat-settings-panel" id="cs-panel-general">
-        <div class="settings-section">
-          <div class="settings-section-title">AI движок</div>
-          <div class="settings-row">
-            <span class="settings-label">OpenClaw</span>
-            <label class="toggle">
-              <input type="checkbox" id="chat-use-openclaw" ${useOpenClaw === 'true' ? 'checked' : ''}>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <div class="settings-row" style="opacity:0.7">
-            <span class="settings-label" style="font-size:12px">Агент, MCP инструменты, Talk Mode, Telegram</span>
-          </div>
-        </div>
         <div class="settings-section">
           <div class="settings-section-title">Автономный режим <span class="proactive-status-badge" id="proactive-status-badge">Активен</span></div>
           <div class="settings-row">
@@ -317,6 +305,31 @@ async function loadChatSettings() {
                 </div>`;
               }).join('')}
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-tools">
+        <div class="settings-section">
+          <div class="settings-section-title">AI движок</div>
+          <div class="settings-row">
+            <span class="settings-label">OpenClaw Gateway</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-use-openclaw" ${useOpenClaw === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">Агент, 24 инструмента, Talk Mode, Telegram</span>
+          </div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">Дашборд: <a href="#" onclick="window.__TAURI__.shell.open('http://127.0.0.1:18789/');return false" style="color:var(--blue)">localhost:18789</a></span>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Встроенные инструменты</div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">web_search, read_url, set_timer, open_app, media, calendar, notes, money</span>
           </div>
         </div>
       </div>
