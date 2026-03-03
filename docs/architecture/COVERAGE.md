@@ -1,225 +1,159 @@
 # Hanni — Coverage Tracker
 
-> Master-реестр всех файлов/секций проекта. Каждый элемент приписан к модулю.
+> Master-реестр всех файлов проекта. Каждый элемент приписан к модулю.
 > Гарантия полноты: сумма всех модулей + unassigned = total.
-> Версия: v0.19.0 | Дата: 2026-02-26 | Phase 2: ✅ complete (149 бизнес-функций) | Phase 3: ✅ complete (561 подфункций)
-> ⚠️ **Внимание:** Диапазоны строк и LOC в таблицах ниже актуальны для v0.13.9. С тех пор lib.rs вырос с 8,201 до 10,788 LOC (+31%), main.js с 5,376 до 6,658 (+24%). Полный пересчёт при следующем аудите.
+> Версия: v0.25.0 | Дата: 2026-03-03 | Phase 2: done (149 бизнес-функций) | Phase 3: done (561 подфункций)
+> Кодовая база модуляризирована: 13 Rust + 12 JS + 7 CSS модулей.
 
 ## Общая статистика
 
 | Метрика | Значение |
 |---------|----------|
-| Всего исходных файлов | 24 (+4 новых: prepare_data.py, synthetic_examples.jsonl, hanni-mcp/server.py, dev-server.py) |
-| Всего элементов (файлов + секций monolith) | ~105 |
-| Распределено по модулям | ~102 |
+| Всего исходных файлов | 36 (14 .rs + 12 .js + 8 .css + 1 .html + scripts/config) |
+| Распределено по модулям | 36 |
 | Не распределено (test/ref) | 3 |
-| Покрытие | ~97% |
-| Общий LOC (исходники) | ~22,260 |
+| Покрытие | ~100% |
+| Общий LOC (исходники) | ~26,569 |
 | LOC тестовые/справочные | ~1,721 |
 
 ## Счётчик по модулям
 
-| Модуль | Элементов | LOC | % от общего | Бизнес-функций | Подфункций | Статус Phase 1 | Статус Phase 2 | Статус Phase 3 |
-|--------|-----------|-----|-------------|----------------|------------|----------------|----------------|----------------|
-| core | 11 | ~1,800 | 9.6% | 5 (B5) | 31 | ✅ mapped | ✅ done | ✅ done |
-| chat | 2 | ~1,340 | 7.1% | 10 (B4+F6) | 56 | ✅ mapped | ✅ done | ✅ done |
-| memory | 2 | ~620 | 3.3% | 8 (B5+F3) | 17 | ✅ mapped | ✅ done | ✅ done |
-| voice | 3 | ~1,650 | 8.8% | 11 (B8+F2+I1) | 73 | ✅ mapped | ✅ done | ✅ done |
-| proactive | 2 | ~690 | 3.7% | 10 (B8+F2) | 29 | ✅ mapped | ✅ done | ✅ done |
-| system | 1 | ~540 | 2.9% | 8 (B8) | 28 | ✅ mapped | ✅ done | ✅ done |
-| focus | 2 | ~350 | 1.9% | 7 (B5+F2) | 13 | ✅ mapped | ✅ done | ✅ done |
-| calendar | 2 | ~1,030 | 5.5% | 10 (B4+F6) | 60 | ✅ mapped | ✅ done | ✅ done |
-| tracker | 2 | ~600 | 3.2% | 6 (B5+F1) | 31 | ✅ mapped | ✅ done | ✅ done |
-| content | 2 | ~520 | 2.8% | 6 (B3+F3) | 31 | ✅ mapped | ✅ done | ✅ done |
-| media | 2 | ~460 | 2.4% | 7 (B4+F3) | 22 | ✅ mapped | ✅ done | ✅ done |
-| lifestyle | 2 | ~2,080 | 11.0% | 25 (B18+F7) | 53 | ✅ mapped | ✅ done | ✅ done |
-| page_framework | 2 | ~1,610 | 8.5% | 14 (B8+F6) | 77 | ✅ mapped | ✅ done | ✅ done |
-| ui | 3 | ~4,370 | 23.2% | 17 (F17) | 11 | ✅ mapped | ✅ done | ✅ done |
-| ml_devops | 7 | ~1,180 | 6.3% | 5 (B5) | 29 | ✅ mapped | ✅ done | ✅ done |
-| **unassigned (test/ref)** | **3** | **~1,508** | — | — | — | ❓ | — | — |
-| **TOTAL** | **97** | **~20,348** | **100%** | **149** | **561** | — | — | — |
+| Модуль | Файлы | LOC | % от общего | Бизнес-функций | Подфункций | Статус |
+|--------|-------|-----|-------------|----------------|------------|--------|
+| core | types.rs, prompts.rs, db.rs, lib.rs, main.rs, state.js (partial), main.js, configs | ~2,800 | 10.5% | 5 (B5) | 31 | done |
+| chat | chat.rs, chat.js, conversations.js, actions.js | ~2,880 | 10.8% | 10 (B4+F6) | 56 | done |
+| memory | memory.rs, tab-data.js (partial) | ~1,150 | 4.3% | 8 (B5+F3) | 17 | done |
+| voice | voice.rs, voice.js, tts_server.py | ~2,110 | 7.9% | 11 (B8+F2+I1) | 73 | done |
+| proactive | proactive.rs | ~1,035 | 3.9% | 10 (B8+F2) | 29 | done |
+| system | macos.rs, commands_meta.rs (partial) | ~620 | 2.3% | 8 (B8) | 28 | done |
+| focus | commands_data.rs (partial), tab-focus.js | ~560 | 2.1% | 7 (B5+F2) | 13 | done |
+| calendar | calendar.rs, tab-calendar.js | ~1,120 | 4.2% | 10 (B4+F6) | 60 | done |
+| tracker | commands_data.rs (partial), tab-data.js (partial) | ~600 | 2.3% | 6 (B5+F1) | 31 | done |
+| content | notes.rs, tab-notes.js | ~1,890 | 7.1% | 6 (B3+F3) | 31 | done |
+| media | commands_data.rs (partial), tab-data.js (partial) | ~460 | 1.7% | 7 (B4+F3) | 22 | done |
+| lifestyle | commands_data.rs, commands_meta.rs (partial), tab-data.js (partial) | ~3,790 | 14.3% | 25 (B18+F7) | 53 | done |
+| page_framework | commands_meta.rs (partial), tab-notes.js (partial), tabs.js (partial) | ~1,700 | 6.4% | 14 (B8+F6) | 77 | done |
+| ui | state.js, utils.js, tabs.js, css/*.css, index.html | ~7,300 | 27.5% | 17 (F17) | 11 | done |
+| ml_devops | scripts/*, finetune*, hanni-mcp/*, release.yml | ~1,800 | 6.8% | 5 (B5) | 29 | done |
+| **unassigned (test/ref)** | **3 files** | **~1,721** | — | — | — | n/a |
+| **TOTAL** | **36+** | **~26,569** | **100%** | **149** | **561** | — |
 
 ---
 
 ## Полный список
 
-### Layer 1: Backend (Rust — lib.rs 10788 LOC, was 8201 at v0.13.9)
+### Layer 1: Backend (Rust — 13 модулей, 11,831 LOC)
 
-| # | Секция | Строки (от-до) | LOC | Модуль | Статус |
-|---|--------|----------------|-----|--------|--------|
-| 1 | Imports | L1-13 | 13 | core | ✅ |
-| 2 | MLX_URL, MODEL, SYSTEM_PROMPT, SYSTEM_PROMPT_LITE, ACTION_KEYWORDS | L14-155 | 142 | core | ✅ |
-| 3 | needs_full_prompt(), data_file_path() | L158-167 | 10 | core | ✅ |
-| 4 | TrackerData struct | L168-180 | 13 | tracker | ✅ |
-| 5 | ProactiveSettings, ProactiveState, impl блоки | L181-271 | 91 | proactive | ✅ |
-| 6 | HanniDb, hanni_data_dir, migrate_old_data_dir, copy_dir_recursive | L274-345 | 72 | core | ✅ |
-| 7 | init_db() (40+ таблиц) | L346-879 | 534 | core | ✅ |
-| 8 | migrate_memory_json(), migrate_events_source() | L880-932 | 53 | memory | ✅ |
-| 9 | build_memory_context_from_db() | L933-1025 | 93 | memory | ✅ |
-| 10 | proactive_settings_path(), load/save_proactive_settings() | L1026-1050 | 25 | proactive | ✅ |
-| 11 | Chat types (ChatMessage, ChatRequest, Delta, Choice, etc.) | L1052-1093 | 42 | chat | ✅ |
-| 12 | WhisperState, AudioRecording | L1094-1103 | 10 | voice | ✅ |
-| 13 | Whisper model, recording commands, transcribe | L1104-1233 | 130 | voice | ✅ |
-| 14 | start_audio_capture() | L1234-1371 | 138 | voice | ✅ |
-| 15 | Call mode commands (start, stop, resume, bargein, save_voice_note) | L1371-1487 | 117 | voice | ✅ |
-| 16 | start_call_audio_loop() | L1488-1803 | 316 | voice | ✅ |
-| 17 | FocusState, FocusManager, CallModeState, CallMode, FocusStatus | L1805-1837 | 33 | focus | ✅ |
-| 18 | start_focus, stop_focus, get_focus_status, update_blocklist | L1839-1995 | 157 | focus | ✅ |
-| 19 | run_shell, open_url, send_notification, set_volume, get_clipboard, set_clipboard, web_search | L1999-2130 | 132 | system | ✅ |
-| 20 | get_training_stats, export_training_data, rate_message, get_message_ratings | L2133-2319 | 187 | page_framework | ✅ |
-| 21 | api_token, find_python, start_mlx_server | L2322-2521 | 200 | system | ✅ |
-| 22 | check_calendar_access, run_osascript, classify_app | L2525-2694 | 170 | system | ✅ |
-| 23 | chat (main LLM endpoint) | L2695-2883 | 189 | chat | ✅ |
-| 24 | read_file, list_dir | L2885-2936 | 52 | system | ✅ |
-| 25 | load_tracker_data, save_tracker_data | L2918-2957 | 40 | tracker | ✅ |
-| 26 | tracker_add_purchase → tracker_get_recent | L2937-3057 | 121 | tracker | ✅ |
-| 27 | get_activity_summary, get_calendar_events, get_now_playing, get_browser_tab | L3058-3243 | 186 | tracker | ✅ |
-| 28 | memory_remember, memory_recall, memory_forget, memory_search | L3246-3374 | 129 | memory | ✅ |
-| 29 | Conversation CRUD (save, update, get, delete, search, process_end) | L3375-3611 | 237 | chat | ✅ |
-| 30 | Activity CRUD (start, stop, get_current, get_log) | L3614-3726 | 113 | tracker | ✅ |
-| 31 | Notes CRUD (create, update, delete, get, get_note) | L3727-3828 | 102 | content | ✅ |
-| 32 | Events + Calendar sync (create_event → sync_google_ics, RRule) | L3829-4329 | 501 | calendar | ✅ |
-| 33 | Projects + Tasks (create, get, update_status) | L4330-4408 | 79 | content | ✅ |
-| 34 | Learning items (create, get) | L4408-4457 | 50 | content | ✅ |
-| 35 | Hobbies (create, get, log_entry, get_entries) | L4457-4521 | 65 | media | ✅ |
-| 36 | Workouts (create, get, stats) | L4520-4564 | 45 | lifestyle | ✅ |
-| 37 | Health + Habits (log_health, get_today, create/check_habit, get_habits_today) | L4564-4676 | 113 | lifestyle | ✅ |
-| 38 | get_dashboard_data | L4675-4736 | 62 | tracker | ✅ |
-| 39 | Memory browser (get_all, delete, update) | L4738-4800 | 63 | memory | ✅ |
-| 40 | Media items + user lists (add → get_media_stats) | L4800-5012 | 213 | media | ✅ |
-| 41 | Food (log_food → get_expiring_products) | L5012-5204 | 193 | lifestyle | ✅ |
-| 42 | Money (add_transaction → delete_debt) | L5204-5468 | 265 | lifestyle | ✅ |
-| 43 | Mindset (journal, mood, principles) | L5468-5612 | 145 | lifestyle | ✅ |
-| 44 | Blocklist CRUD (add, remove, get, toggle) | L5613-5659 | 47 | focus | ✅ |
-| 45 | Goals + App settings | L5660-5741 | 82 | page_framework | ✅ |
-| 46 | Home items (add → toggle_needed) | L5742-5801 | 60 | lifestyle | ✅ |
-| 47 | Contacts (add → toggle_contact_block_active) | L5798-5959 | 162 | lifestyle | ✅ |
-| 48 | Page meta + Properties + View configs | L5959-6384 | 426 | page_framework | ✅ |
-| 49 | ProactiveStyleDef, build_proactive_system_prompt() | L6385-6436 | 52 | proactive | ✅ |
-| 50 | Context gathering + proactive helpers | L6438-6905 | 468 | proactive | ✅ |
-| 51 | TTS functions (edge, remote, adaptive, clean) | L6906-7169 | 264 | voice | ✅ |
-| 52 | TTS/voice commands (speak_text, stop_speaking, etc.) | L7170-7357 | 188 | voice | ✅ |
-| 53 | updater_with_headers(), get_app_version() | L7358-7386 | 29 | core | ✅ |
-| 54 | run() — app entry, state, 190+ commands, proactive loop | L7391-8201 | 811 | core | ✅ |
+| # | Файл | Описание | LOC | Модуль | Статус |
+|---|------|----------|-----|--------|--------|
+| 1 | types.rs | Все struct/enum, constants, static atomics | 423 | core | done |
+| 2 | prompts.rs | System prompts, tool definitions, ChatModeConfig helpers | 700 | core | done |
+| 3 | db.rs | init_db (43 таблицы), migrations, data dir helpers | 763 | core | done |
+| 4 | chat.rs | chat command, streaming, quality_check, file/tracker commands | 677 | chat | done |
+| 5 | memory.rs | Semantic memory, embeddings, reranking, conversation CRUD | 1,153 | memory | done |
+| 6 | voice.rs | Whisper STT, CPAL, call mode, TTS, wake word | 1,232 | voice | done |
+| 7 | proactive.rs | Proactive messages, OS context, TTS pipeline | 1,035 | proactive | done |
+| 8 | macos.rs | Shell, macOS integration, MLX server, idle detection | 617 | system | done |
+| 9 | calendar.rs | Events CRUD, Apple/Google sync, RRULE | 508 | calendar | done |
+| 10 | notes.rs | Notes CRUD, custom pages CRUD | 357 | content | done |
+| 11 | commands_data.rs | Activities, media, sports, health, food, money, mindset, blocklist | 1,945 | lifestyle+tracker+media+focus | done |
+| 12 | commands_meta.rs | Properties, views, integrations, contacts, home, goals, updater, API | 1,502 | page_framework+system+lifestyle | done |
+| 13 | lib.rs | Orchestrator: mod declarations, run(), generate_handler | 913 | core | done |
+| 14 | main.rs | fn main() → tauri entry | 6 | core | done |
 
-### Layer 1b: Backend (Rust — other files)
+### Layer 2: Frontend (JavaScript — 12 модулей, 8,975 LOC)
+
+| # | Файл | Описание | LOC | Модуль | Статус |
+|---|------|----------|-----|--------|--------|
+| 15 | js/state.js | Shared state S, constants, DOM refs, tabLoaders registry | 301 | core+ui | done |
+| 16 | js/utils.js | Markdown, escapeHtml, skeletons, page header | 279 | ui+page_framework | done |
+| 17 | js/tabs.js | Tab bar, navigation, router, goals, keyboard shortcuts | 572 | ui | done |
+| 18 | js/conversations.js | Conversation list, load, save, search | 164 | chat | done |
+| 19 | js/chat.js | Send, addMsg, streaming, settings, proactive listeners | 1,574 | chat | done |
+| 20 | js/actions.js | parseAndExecuteActions, 40+ action handlers | 469 | chat | done |
+| 21 | js/voice.js | Recording, call mode UI, wake word SSE | 876 | voice | done |
+| 22 | js/tab-calendar.js | Calendar views (month/week/day/list/integrations) | 612 | calendar | done |
+| 23 | js/tab-focus.js | Focus timer, widget, pomodoro | 562 | focus | done |
+| 24 | js/tab-notes.js | Notes views, database view, kanban, property/filter system | 1,529 | content+page_framework | done |
+| 25 | js/tab-data.js | Home, mindset, food, money, people, memory, work, dev, hobbies, sports, health | 1,857 | lifestyle+media+tracker+memory | done |
+| 26 | main.js | Entry point: imports, tabLoaders registration, init | 180 | core | done |
+
+### Layer 3: Frontend (CSS — 7 модулей + barrel, 5,763 LOC)
+
+| # | Файл | Описание | LOC | Модуль | Статус |
+|---|------|----------|-----|--------|--------|
+| 27 | styles.css | Barrel: @import statements | 8 | ui | done |
+| 28 | css/base.css | Variables, reset, base components | 532 | ui | done |
+| 29 | css/layout.css | Tab bar, sidebar, content area layout | 455 | ui | done |
+| 30 | css/chat.css | Chat interface styles | 1,025 | ui | done |
+| 31 | css/settings.css | Settings pages styles | 714 | ui | done |
+| 32 | css/tabs-main.css | Focus, notes, kanban, database view | 1,545 | ui | done |
+| 33 | css/tabs-data.css | Calendar, dashboard, lifestyle tabs | 953 | ui | done |
+| 34 | css/call.css | Call mode overlay, focus widget | 531 | ui | done |
+
+### Layer 3b: Frontend (HTML)
 
 | # | Файл | LOC | Модуль | Статус |
 |---|------|-----|--------|--------|
-| 55 | main.rs | 6 | core | ✅ |
-| 56 | build.rs | 3 | core | ✅ |
-
-### Layer 2: Frontend (JavaScript — main.js 6658 LOC, was 5376 at v0.13.9)
-
-| # | Секция | Строки (от-до) | LOC | Модуль | Статус |
-|---|--------|----------------|-----|--------|--------|
-| 57 | Imports, DOM, global state | L1-38 | 38 | ui | ✅ |
-| 58 | PROACTIVE_STYLE_DEFINITIONS | L41-56 | 16 | proactive | ✅ |
-| 59 | Icons, TAB_REGISTRY, TAB_DESCRIPTIONS | L59-115 | 57 | ui | ✅ |
-| 60 | renderPageHeader() | L117-130 | 14 | page_framework | ✅ |
-| 61 | Tab state, init, saveTabs(), update-available | L132-162 | 31 | ui | ✅ |
-| 62 | Proactive events, typing signal | L164-198 | 35 | proactive | ✅ |
-| 63 | Voice recording button | L204-257 | 54 | voice | ✅ |
-| 64 | focus-ended event | L261-267 | 7 | focus | ✅ |
-| 65 | Conversation management (list, load, save) | L271-390 | 120 | chat | ✅ |
-| 66 | escapeHtml(), skeleton loaders | L392-428 | 37 | ui | ✅ |
-| 67 | New chat, conversation search | L431-446 | 16 | chat | ✅ |
-| 68 | renderTabBar(), renderSubSidebar() | L450-530 | 81 | ui | ✅ |
-| 69 | Goals widget, add goal modal | L532-599 | 68 | page_framework | ✅ |
-| 70 | Tab navigation (open, close, switch, activate, loadSubTab) | L602-667 | 66 | ui | ✅ |
-| 71 | Tab dropdown, keyboard shortcuts | L669-700 | 32 | ui | ✅ |
-| 72 | Chat settings (proactive, TTS, voice selection) | L704-963 | 260 | chat | ✅ |
-| 73 | scrollDown() | L964-976 | 13 | ui | ✅ |
-| 74 | addMsg(), addFeedbackButtons(), file handlers | L978-1104 | 127 | chat | ✅ |
-| 75 | executeAction() (20+ types) | L1105-1382 | 278 | chat | ✅ |
-| 76 | parseAndExecuteActions(), repairJson() | L1383-1419 | 37 | chat | ✅ |
-| 77 | streamChat(), showAgentIndicator(), TTS toggle | L1421-1518 | 98 | chat | ✅ |
-| 78 | send(), newChat(), event listeners | L1520-1696 | 177 | chat | ✅ |
-| 79 | Home (supplies, shopping list) | L1699-1801 | 103 | lifestyle | ✅ |
-| 80 | Mindset (journal, mood, principles) | L1802-1909 | 108 | lifestyle | ✅ |
-| 81 | Food (log, recipes, products) | L1910-2119 | 210 | lifestyle | ✅ |
-| 82 | Money (transactions, budgets, savings, subscriptions, debts) | L2120-2339 | 220 | lifestyle | ✅ |
-| 83 | People (contacts, blocks, favorites) | L2340-2497 | 158 | lifestyle | ✅ |
-| 84 | Memory (tab, facts, search, settings) | L2498-2773 | 276 | memory | ✅ |
-| 85 | Settings, integrations, blocklist, about | L2774-2985 | 212 | page_framework | ✅ |
-| 86 | Dashboard | L2986-3055 | 70 | tracker | ✅ |
-| 87 | Focus mode UI | L3056-3161 | 106 | focus | ✅ |
-| 88 | Notes (list, editor, auto-save) | L3162-3287 | 126 | content | ✅ |
-| 89 | Calendar (month, week, day, list, integrations) | L3288-3814 | 527 | calendar | ✅ |
-| 90 | Work (projects, tasks) | L3815-3889 | 75 | content | ✅ |
-| 91 | Development (learning items) | L3890-3975 | 86 | content | ✅ |
-| 92 | Database view framework | L3976-4597 | 622 | page_framework | ✅ |
-| 93 | Hobbies / media collections | L4594-4773 | 180 | media | ✅ |
-| 94 | Sports (workouts, martial arts, stats) | L4774-4924 | 151 | lifestyle | ✅ |
-| 95 | Health (metrics, habits) | L4925-5058 | 134 | lifestyle | ✅ |
-| 96 | Call mode UI (overlay, TTS stream, shortcuts) | L5059-5376 | 318 | voice | ✅ |
-
-### Layer 3: Frontend (CSS + HTML)
-
-| # | Файл | LOC | Модуль | Статус |
-|---|------|-----|--------|--------|
-| 97 | styles.css | 3563 | ui | ✅ |
-| 98 | index.html | 116 | ui | ✅ |
+| 35 | index.html | 151 | ui | done |
 
 ### Layer 4: Scripts & Config
 
 | # | Файл | LOC | Модуль | Статус |
 |---|------|-----|--------|--------|
-| 99 | pc/tts_server.py | 120 | voice | ✅ |
-| 100 | scripts/generate_training_data.py | 497 | ml_devops | ✅ |
-| 101 | scripts/claude_distill.sh | 274 | ml_devops | ✅ |
-| 102 | scripts/nightly_train.sh | 217 | ml_devops | ✅ |
-| 103 | scripts/com.hanni.nightly-train.plist | ~30 | ml_devops | ✅ |
-| 104 | .github/workflows/release.yml | 65 | ml_devops | ✅ |
-| 105 | Cargo.toml | 40 | core | ✅ |
-| 106 | tauri.conf.json | 50 | core | ✅ |
-| 107 | capabilities/default.json | 37 | core | ✅ |
-| 108 | build.rs | 3 | core | ✅ |
-| 109 | package.json | 12 | core | ✅ |
-| 110 | Entitlements.plist | 8 | core | ✅ |
-| 111 | Info.plist | 12 | core | ✅ |
+| 36 | pc/tts_server.py | 120 | voice | done |
+| 37 | scripts/generate_training_data.py | 497 | ml_devops | done |
+| 38 | scripts/claude_distill.sh | 274 | ml_devops | done |
+| 39 | scripts/nightly_train.sh | 217 | ml_devops | done |
+| 40 | scripts/com.hanni.nightly-train.plist | ~30 | ml_devops | done |
+| 41 | .github/workflows/release.yml | 65 | ml_devops | done |
+| 42 | Cargo.toml | 40 | core | done |
+| 43 | tauri.conf.json | 50 | core | done |
+| 44 | capabilities/default.json | 37 | core | done |
+| 45 | build.rs | 3 | core | done |
+| 46 | package.json | 12 | core | done |
+| 47 | Entitlements.plist | 8 | core | done |
+| 48 | Info.plist | 12 | core | done |
+| 49 | desktop/finetune.py | 143 | ml_devops | done |
+| 50 | desktop/finetune_data/prepare_data.py | 309 | ml_devops | done |
+| 51 | desktop/finetune_data/synthetic_examples.jsonl | 73 | ml_devops | done |
+| 52 | desktop/hanni-mcp/server.py | 321 | ml_devops | done |
+| 53 | desktop/dev-server.py | 4 | ml_devops | done |
 
 ### Тестовые / Справочные
 
 | # | Файл | LOC | Назначение | Статус |
 |---|------|-----|------------|--------|
-| T1 | design-system.html | 1110 | Дизайн-система (справочник) | ❓ |
-| T2 | desktop/src/tauri-mock.js | 300 | Мок Tauri API | ❓ |
-| T3 | desktop/src/test.html | 98 | Тестовая страница | ❓ |
+| T1 | design-system.html | 1,110 | Дизайн-система (справочник) | n/a |
+| T2 | desktop/src/tauri-mock.js | 479 | Мок Tauri API | n/a |
+| T3 | desktop/src/test.html | 132 | Тестовая страница | n/a |
 
 ---
 
 ## Контрольная сумма
 
 ```
-v0.19.0 актуальные LOC:
-Файл                     v0.13.9   v0.19.0   Δ
-lib.rs                   8,201     10,788    +2,587 (+31.5%)
-main.js                  5,376     6,658     +1,282 (+23.8%)
-styles.css               3,563     3,956     +393   (+11.0%)
-index.html               116       126       +10
-voice_server.py          611       778       +167
-finetune.py              95        143       +48
-prepare_data.py          —         309       NEW
-synthetic_examples.jsonl —         73        NEW
-hanni-mcp/server.py      —         321       NEW
-dev-server.py            —         4         NEW
-tauri-mock.js            300       479       +179
-test.html                98        132       +34
-tts_server.py            120       120       =
-scripts                  ~1,018    ~1,018    =
-configs                  ~235      ~235      =
-design-system.html       1,110     1,110     =
+v0.25.0 LOC (после модуляризации):
 
-Итого: ~23,420 total LOC (was ~20,348)
+Backend (Rust):     11,831 LOC (14 файлов)
+Frontend (JS):       8,975 LOC (12 файлов)
+Frontend (CSS):      5,763 LOC (8 файлов)
+Frontend (HTML):       151 LOC (1 файл)
+Voice Server:          778 LOC (1 файл)
+Scripts:            ~1,083 LOC (5 файлов)
+Config:               ~212 LOC (7 файлов)
+Test/ref:           ~1,721 LOC (3 файла)
+─────────────────────────────
+Total:             ~30,514 LOC (51 файлов)
+Source only:       ~26,569 LOC (36 файлов)
 
-⚠️ Диапазоны строк в таблице Layer 1 / Layer 2 ниже сохранены от v0.13.9.
-Полный пересчёт требуется при следующем Phase 1 аудите.
+История:
+v0.13.9: ~20,348 LOC (2 монолитных файла)
+v0.19.0: ~23,420 LOC (2 монолитных файла)
+v0.25.0: ~26,569 LOC (36 модулей)
 ```
 
 ## Статусы
 
-- ✅ — распределён в модуль
-- ⬜ — известен, ещё не обработан (Phase 2)
-- ❓ — не ясно какому модулю принадлежит (→ DISPUTED.md)
-- 🔴 — orphan (кандидат на удаление)
+- done — распределён в модуль, все фазы завершены
+- n/a — тестовый/справочный файл, не в модулях
