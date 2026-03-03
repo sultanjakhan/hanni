@@ -1,0 +1,700 @@
+// prompts.rs — System prompts, tool definitions, keyword matching
+
+pub const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, который искренне заботится. Отвечай кратко, но выразительно. На "ты", по-русски.
+
+ИНСТРУМЕНТЫ:
+- Когда пользователь просит СДЕЛАТЬ что-то — ВСЕГДА вызывай инструмент через ```action блок.
+- ФОРМАТ ВЫЗОВА (обязательно!):
+```action
+{"action":"имя_действия", "параметр":"значение"}
+```
+- БЕЗ ```action блока действие НЕ выполнится! Просто слова "записала/создала" — НЕ работают.
+- "запомни", "запиши", "добавь", "потратил", "создай задачу" → ```action блок. НИКОГДА не говори "ок" без блока!
+- Можно вызывать несколько ```action блоков за раз.
+- Даты: считай от [Current context] Today. "завтра"=Today+1, "послезавтра"=Today+2. Формат YYYY-MM-DD.
+- Целодневные события: create_event с time="" и duration=0.
+- Запоминай важные факты (имя, предпочтения, привычки, люди) через remember.
+- Память уже в контексте — search_memory только для конкретных запросов.
+- После результатов инструмента — резюмируй естественно. НЕ повторяй сырой вывод.
+- web_search для актуальной информации: факты, рецепты, цены, погода, новости.
+- read_url для чтения конкретной страницы по ссылке (после web_search или по прямой ссылке).
+
+СТИЛЬ:
+- Тёплый тон: лёгкий юмор, любопытство, игривый сарказм (по-доброму).
+- Разнообразь формат: иногда вопрос, иногда шутка, иногда наблюдение. НЕ начинай каждый ответ одинаково.
+- Из памяти вплетай естественно: "Ты же вроде говорил, что..." а не "Согласно моей памяти..."
+
+КАЧЕСТВО:
+- Сложный вопрос → продумай пошагово, потом отвечай.
+- Эмоция → сначала отреагируй на чувство, потом совет.
+- Неясный запрос → задай ОДИН уточняющий вопрос.
+- Простой вопрос = 1-2 предложения. Сложный = 3-6, со структурой.
+- Каждое сообщение — отдельная тема. НЕ связывай текущий вопрос с предыдущими разговорами/темами если пользователь сам не просит. Отвечай ТОЛЬКО на то, что спрашивают.
+
+СТРОГИЕ ЗАПРЕТЫ (нарушение = критическая ошибка):
+- ЗАПРЕЩЕНО выдумывать факты, события, привычки, предпочтения которых нет в памяти. Если не знаешь — скажи: "Не помню", "Не знаю", "Расскажи".
+- ЗАПРЕЩЕНО упоминать еду, напитки, чай, кофе, чайник, перекусы — если пользователь НЕ спрашивает о еде.
+- ЗАПРЕЩЕНО придумывать что пользователь делал, говорил или любит — если этого нет в [Релевантные факты].
+- ЗАПРЕЩЕНО выдумывать свой возраст, год создания, историю. Ты — Ханни, AI-компаньон. Без фантазий о себе.
+- ЗАПРЕЩЕНО грубить, оскорблять, унижать пользователя. Никаких "халява", "тупой", "лентяй". Ты — друг, не хам.
+- Используй факты из памяти ТОЛЬКО если релевантны текущему вопросу. НЕ перечисляй всё подряд.
+- [Недавние разговоры] и [Недавние решения] — ТОЛЬКО для справки. НЕ упоминай их, НЕ ссылайся на прошлые темы, НЕ связывай с текущим вопросом.
+- На "привет" — ответь коротко и тепло. Без придуманных подробностей.
+- НЕ повторяй сообщение пользователя.
+- Если в истории есть "[Автономное сообщение Ханни]:" — это твоё предыдущее сообщение. НЕ повторяй его, НЕ ссылайся на него, НЕ развивай его тему. Просто ответь на то, что написал пользователь.
+
+ПРИМЕРЫ (ВСЕГДА используй ```action блок!):
+
+User: "купил колу за 500"
+```action
+{"action":"add_transaction","amount":500,"category":"food","description":"кола"}
+```
+Записала — 500₸ на колу.
+
+User: "создай задачу купить молоко на завтра"
+```action
+{"action":"create_task","title":"Купить молоко","due_date":"2026-03-03"}
+```
+Готово! Задача на завтра.
+
+User: "запусти помодоро"
+```action
+{"action":"start_pomodoro","title":"Работа","category":"work"}
+```
+Поехали! 25 минут фокуса 🍅
+
+User: "начни трекать работу"
+```action
+{"action":"start_activity","name":"Работа","category":"work"}
+```
+Трекаю! Удачи.
+
+User: "стоп" / "заверши"
+```action
+{"action":"stop_activity"}
+```
+Остановила.
+
+User: "какие у меня задачи?"
+```action
+{"action":"get_tasks"}
+```
+(резюмируй список)
+
+User: "открой календарь"
+```action
+{"action":"open_tab","tab":"calendar"}
+```
+
+User: "найди рецепт плова"
+```action
+{"action":"web_search","query":"рецепт плова"}
+```
+(резюме результатов)
+
+User: "запомни что я люблю зелёный чай"
+```action
+{"action":"remember","category":"user","key":"любимый напиток","value":"зелёный чай"}
+```
+Запомнила!
+
+ПРИМЕРЫ ТОНА (подражай этому стилю — кратко, тепло, с характером):
+
+User: "привет" → "Привет! Как дела?"
+User: "здарова" → "О, здарова! Чем занимаешься?"
+User: "доброе утро" → "Доброе! Как спалось?"
+
+User: "устал жесть" → "Ох, понимаю. Тяжёлый день? Если хочешь — просто отдыхай, не гони себя."
+User: "бесит всё" → "Блин, неприятно. Хочешь выговориться — я тут."
+User: "мне грустно" → "Эй, бывает. Хочешь поговорить об этом? Или может отвлечься на что-нибудь?"
+
+User: "когда у меня дедлайн?" (нет в памяти) → "Хм, не помню чтобы ты говорил про дедлайн. Расскажи — какой проект?"
+User: "какой мой любимый фильм?" (нет в памяти) → "Ты мне пока не говорил. Расскажи — какой любишь? Запомню."
+
+User: "ты крутая" → "Ой, спасибо! Стараюсь. Ты тоже ничего так."
+User: "спасибо!" → "Не за что! Обращайся."
+User: "ладно пока" → "Пока! Если что — пиши."
+User: "а" → "Хм?"
+User: "..." → "Всё ок?"
+
+User: "объясни что такое async await простыми словами"
+→ "Представь, что ты заказал еду. Вместо того чтобы стоять и ждать курьера — ты идёшь делать другие дела, а когда еда приедет — тебя уведомят. async — 'эта функция может ждать'. await — 'подожди результат, но не блокируй всё остальное'."
+
+User: "помоги выбрать ноутбук"
+→ "С радостью! Для начала — какой бюджет? И для чего: учёба, работа, игры?""#;
+
+pub const SYSTEM_PROMPT_LITE: &str = r#"Ты — Ханни, тёплый и любопытный AI-компаньон на Mac. Близкий друг, на "ты", по-русском.
+- 1-3 предложения. Тёплый тон: юмор, любопытство, лёгкий сарказм.
+- Разнообразь: иногда вопрос, иногда комментарий, иногда юмор. НЕ начинай каждый ответ одинаково.
+- Факты из памяти — ТОЛЬКО если релевантны. НЕ перечисляй всё подряд.
+- Эмоции → сначала отреагируй на чувство.
+- Отвечай ТОЛЬКО на текущий вопрос. НЕ связывай с предыдущими разговорами/темами.
+
+СТРОГИЕ ЗАПРЕТЫ (нарушение = ошибка):
+- ЗАПРЕЩЕНО упоминать еду, напитки, чай, кофе, чайник, перекусы — если пользователь НЕ спрашивает о еде.
+- ЗАПРЕЩЕНО выдумывать факты. Не знаешь — скажи "не знаю" или "расскажи".
+- ЗАПРЕЩЕНО придумывать хобби, привычки или предпочтения которых нет в памяти.
+- ЗАПРЕЩЕНО выдумывать свой возраст, год создания. Ты — Ханни, AI-компаньон. Точка.
+- ЗАПРЕЩЕНО грубить или оскорблять. Ты — тёплый друг, не хам.
+- [Недавние разговоры] — ТОЛЬКО для справки. НЕ упоминай и НЕ ссылайся на прошлые темы.
+- На "привет/здарова/как дела" — ответь коротко и тепло. БЕЗ придуманных подробностей о жизни пользователя.
+
+ПРИМЕРЫ ТОНА:
+"привет" → "Привет! Как дела?"
+"устал жесть" → "Ох, понимаю. Не гони себя."
+"бесит всё" → "Блин. Хочешь выговориться — я тут."
+"ты крутая" → "Спасибо! Ты тоже ничего так."
+"а" → "Хм?"
+"..." → "Всё ок?""#;
+
+pub const ACTION_KEYWORDS: &[&str] = &[
+    "запомни", "запиши", "заметк", "заблокируй", "добавь", "потратил", "настроен",
+    "трекай", "таймер", "стоп ", "событи", "встреч", "задач", "цел", "тренировк",
+    "здоровь", "спал", "выпил", "фокус", "открой", "отправь", "установи", "буфер",
+    "календар", "музык", "аниме", "манга", "фильм", "сериал", "книг", "рецепт",
+    "продукт", "расход", "доход", "бюджет", "подписк", "блокируй", "разблокируй",
+    "напомни", "удали", "создай", "action", "```", "покажи стат", "сколько",
+    "log_", "add_", "start_", "stop_", "get_", "run_", "open_", "set_",
+    "купил", "поел", "ел ", "завтрак", "обед", "ужин", "перекус",
+    "вес ", "шаг", "вод", "сон",
+    "загугли", "найди в интернете", "поищи", "погугли", "search", "web_search", "read_url", "прочитай страницу", "содержимое сайта",
+    "запусти", "закрой", "переключ", "приложен",
+    "поставь на паузу", "следующ", "предыдущ", "play", "pause", "next track",
+    "через час", "через минут", "будильник",
+    "помодоро", "pomodoro", "трекай", "начни трекать", "заверши", "останови",
+    "открой вкладк", "открой календарь", "открой заметк", "открой фокус",
+    "покажи задач", "какие задач", "мои задач",
+];
+
+pub fn needs_full_prompt(user_msg: &str) -> bool {
+    let lower = user_msg.to_lowercase();
+    if lower.len() > 200 {
+        return true;
+    }
+    ACTION_KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
+pub fn is_complex_query(user_msg: &str) -> bool {
+    let lower = user_msg.to_lowercase();
+    if lower.len() > 100 {
+        return true;
+    }
+    const COMPLEX_MARKERS: &[&str] = &[
+        "почему", "как лучше", "объясни", "сравни", "что думаешь",
+        "помоги выбрать", "расскажи подробн", "в чём разница", "что лучше",
+        "как правильно", "посоветуй", "проанализируй", "зачем",
+    ];
+    COMPLEX_MARKERS.iter().any(|m| lower.contains(m))
+}
+
+fn tool(name: &str, desc: &str, params: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": params
+        }
+    })
+}
+
+pub fn build_tool_definitions() -> Vec<serde_json::Value> {
+    vec![
+        // Memory
+        tool("remember", "Save a personal fact (name, preferences, habits, people). Do NOT use for purchases, events, or tasks — use the specific tool instead.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "enum": ["user","preferences","world","tasks","people","habits"], "description": "Fact category"},
+                "key": {"type": "string", "description": "Short key, e.g. 'university'"},
+                "value": {"type": "string", "description": "The fact to remember"}
+            },
+            "required": ["category","key","value"]
+        })),
+        tool("recall", "Recall stored facts by category", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Category to recall"},
+                "key": {"type": "string", "description": "Optional specific key"}
+            },
+            "required": ["category"]
+        })),
+        tool("forget", "Remove a stored fact", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "key": {"type": "string"}
+            },
+            "required": ["category","key"]
+        })),
+        tool("search_memory", "Search stored memories by text query", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer"}
+            },
+            "required": ["query"]
+        })),
+        // Notes & Life Tracker
+        tool("create_note", "Создать заметку или задачу", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+                "tags": {"type": "string", "description": "Comma-separated tags"},
+                "due_date": {"type": "string", "description": "ISO date YYYY-MM-DD"},
+                "tab": {"type": "string", "description": "Tab name to link to"},
+                "remind_at": {"type": "string", "description": "ISO datetime for reminder"},
+                "status": {"type": "string", "enum": ["note", "task"]}
+            },
+            "required": ["title"]
+        })),
+        tool("search_notes", "Найти заметки по запросу, тегу или табу", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "tag": {"type": "string"},
+                "tab": {"type": "string"}
+            }
+        })),
+        tool("complete_task", "Отметить задачу как выполненную", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"}
+            },
+            "required": ["id"]
+        })),
+        tool("add_time", "Log time spent on an activity", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "activity": {"type": "string"},
+                "duration": {"type": "number", "description": "Minutes"},
+                "category": {"type": "string"},
+                "productive": {"type": "boolean"}
+            },
+            "required": ["activity","duration"]
+        })),
+        tool("add_goal", "Add a simple goal", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "category": {"type": "string"}
+            },
+            "required": ["title"]
+        })),
+        tool("get_stats", "Get life tracker statistics", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // Calendar & Events
+        tool("create_event", "Create a calendar event. For dates use YYYY-MM-DD. For all-day events set time='' and duration=0.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "time": {"type": "string", "description": "HH:MM or empty for all-day"},
+                "duration": {"type": "integer", "description": "Duration in minutes, 0 for all-day"},
+                "description": {"type": "string"},
+                "category": {"type": "string"},
+                "color": {"type": "string"}
+            },
+            "required": ["title","date"]
+        })),
+        tool("delete_event", "Delete a calendar event by ID", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"}
+            },
+            "required": ["id"]
+        })),
+        tool("sync_calendar", "Sync with Apple Calendar", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "month": {"type": "integer"},
+                "year": {"type": "integer"}
+            }
+        })),
+        // Time Tracking
+        tool("start_activity", "Start tracking time on an activity", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"}
+            },
+            "required": ["name"]
+        })),
+        tool("stop_activity", "Stop current time-tracked activity", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_current_activity", "Check what activity is being tracked", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // Tasks
+        tool("create_task", "Create a task", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "project_id": {"type": "integer"},
+                "description": {"type": "string"},
+                "priority": {"type": "string", "enum": ["low","medium","high"]},
+                "due_date": {"type": "string"}
+            },
+            "required": ["title"]
+        })),
+        // Focus
+        tool("start_focus", "Start focus mode — block distracting sites/apps", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "duration": {"type": "integer", "description": "Minutes"},
+                "apps": {"type": "array", "items": {"type": "string"}},
+                "sites": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["duration"]
+        })),
+        tool("stop_focus", "Stop focus mode", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // System
+        tool("run_shell", "Run a shell command on macOS", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"}
+            },
+            "required": ["command"]
+        })),
+        tool("open_url", "Open a URL in the browser", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"}
+            },
+            "required": ["url"]
+        })),
+        tool("send_notification", "Send a macOS notification", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "body": {"type": "string"}
+            },
+            "required": ["body"]
+        })),
+        tool("set_volume", "Set system volume (0-100)", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "level": {"type": "integer"}
+            },
+            "required": ["level"]
+        })),
+        tool("get_clipboard", "Get clipboard contents", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("set_clipboard", "Set clipboard contents", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"}
+            },
+            "required": ["text"]
+        })),
+        tool("web_search", "Search the web and return top results. Use for current info, facts, recipes, prices, weather, news.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"}
+            },
+            "required": ["query"]
+        })),
+        tool("read_url", "Fetch and read a web page, returning plain text content. Use after web_search to read a specific result page.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"}
+            },
+            "required": ["url"]
+        })),
+        // macOS Info
+        tool("get_activity", "Get current user activity summary (active app, idle time)", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_calendar", "Get upcoming calendar events", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_music", "Get currently playing music", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        tool("get_browser", "Get active browser tab URL and title", serde_json::json!({
+            "type": "object", "properties": {}
+        })),
+        // Media
+        tool("add_media", "Add a media item to collection", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "media_type": {"type": "string", "enum": ["music","anime","manga","movie","series","cartoon","game","book","podcast"]},
+                "title": {"type": "string"},
+                "status": {"type": "string", "enum": ["planned","watching","completed","dropped","on_hold"]},
+                "rating": {"type": "number"},
+                "progress": {"type": "integer"},
+                "total_episodes": {"type": "integer"},
+                "original_title": {"type": "string"},
+                "year": {"type": "integer"},
+                "description": {"type": "string"},
+                "notes": {"type": "string"}
+            },
+            "required": ["media_type","title"]
+        })),
+        // Food
+        tool("log_food", "Log a meal with optional nutrition info", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "meal_type": {"type": "string", "enum": ["breakfast","lunch","dinner","snack"]},
+                "name": {"type": "string"},
+                "calories": {"type": "number"},
+                "protein": {"type": "number"},
+                "carbs": {"type": "number"},
+                "fat": {"type": "number"},
+                "date": {"type": "string"},
+                "notes": {"type": "string"}
+            },
+            "required": ["meal_type","name"]
+        })),
+        tool("add_product", "Add a product with optional expiry tracking", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "quantity": {"type": "number"},
+                "unit": {"type": "string"},
+                "expiry_date": {"type": "string"},
+                "location": {"type": "string", "enum": ["fridge","pantry","freezer","other"]}
+            },
+            "required": ["name"]
+        })),
+        // Money
+        tool("add_transaction", "Record an expense or income", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "transaction_type": {"type": "string", "enum": ["expense","income"]},
+                "amount": {"type": "number"},
+                "category": {"type": "string"},
+                "description": {"type": "string"},
+                "currency": {"type": "string", "default": "KZT"},
+                "date": {"type": "string"},
+                "recurring": {"type": "boolean"},
+                "recurring_period": {"type": "string"}
+            },
+            "required": ["transaction_type","amount","category"]
+        })),
+        // Mindset
+        tool("log_mood", "Log current mood (1-5 scale)", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "mood": {"type": "integer", "minimum": 1, "maximum": 5},
+                "note": {"type": "string"},
+                "trigger": {"type": "string"}
+            },
+            "required": ["mood"]
+        })),
+        tool("save_journal", "Save a journal entry with mood, energy, stress", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "mood": {"type": "integer", "minimum": 1, "maximum": 5},
+                "energy": {"type": "integer", "minimum": 1, "maximum": 5},
+                "stress": {"type": "integer", "minimum": 1, "maximum": 5},
+                "gratitude": {"type": "string"},
+                "reflection": {"type": "string"},
+                "wins": {"type": "string"},
+                "struggles": {"type": "string"}
+            },
+            "required": ["mood","energy","stress"]
+        })),
+        // Home
+        tool("add_home_item", "Track a home supply item", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "quantity": {"type": "number"},
+                "unit": {"type": "string"},
+                "location": {"type": "string"},
+                "notes": {"type": "string"}
+            },
+            "required": ["name"]
+        })),
+        // Health
+        tool("log_health", "Log daily health metrics (sleep hours, water glasses, steps, weight)", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "sleep": {"type": "number", "description": "Hours slept"},
+                "water": {"type": "number", "description": "Glasses of water"},
+                "steps": {"type": "integer"},
+                "weight": {"type": "number", "description": "kg"},
+                "notes": {"type": "string"}
+            }
+        })),
+        // Fitness
+        tool("add_workout", "Log a workout session", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["cardio","strength","yoga","stretching","swimming","running","cycling","martial_arts","other"]},
+                "title": {"type": "string"},
+                "duration": {"type": "integer", "description": "Minutes"},
+                "calories": {"type": "integer"},
+                "notes": {"type": "string"}
+            },
+            "required": ["type","title"]
+        })),
+        // Goals
+        tool("create_goal", "Create a goal with target value", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "tab": {"type": "string", "description": "Tab name for the goal"},
+                "title": {"type": "string"},
+                "target": {"type": "number"},
+                "unit": {"type": "string"},
+                "deadline": {"type": "string"}
+            },
+            "required": ["title","target"]
+        })),
+        tool("update_goal", "Update goal progress", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": {"type": "integer"},
+                "current": {"type": "number"},
+                "status": {"type": "string"}
+            },
+            "required": ["id"]
+        })),
+        // App control
+        tool("open_app", "Open/switch to a macOS app", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "App name, e.g. Safari, Telegram, Notes"}
+            },
+            "required": ["name"]
+        })),
+        tool("close_app", "Quit a macOS app", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "App name to quit"}
+            },
+            "required": ["name"]
+        })),
+        // Reminders
+        tool("set_reminder", "Set a reminder/timer at a specific time", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "What to remind about"},
+                "remind_at": {"type": "string", "description": "ISO datetime when to fire, e.g. 2026-02-23T15:00:00"},
+                "repeat": {"type": "string", "description": "Optional repeat: daily, weekly, monthly"}
+            },
+            "required": ["title", "remind_at"]
+        })),
+        // Music control
+        tool("music_control", "Control Apple Music playback", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "enum": ["play","pause","next","previous","toggle"], "description": "Playback command"}
+            },
+            "required": ["command"]
+        })),
+    ]
+}
+
+/// Select a small set of relevant tools based on message keywords (max ~5-8).
+pub fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
+    let all = build_tool_definitions();
+    let lower = user_msg.to_lowercase();
+
+    let rules: &[(&[&str], &[&str])] = &[
+        (&["потратил", "купил", "расход", "доход", "заплатил", "стоил", "цена", "транзакц"],
+         &["add_transaction"]),
+        (&["запомни", "помни", "забудь", "вспомни", "запиши факт"],
+         &["remember", "recall", "forget", "search_memory"]),
+        (&["заметк", "запиши", "напомни", "заметку", "записку", "note", "задач", "дедлайн", "todo", "задачу"],
+         &["create_note", "search_notes", "complete_task"]),
+        (&["встреч", "событи", "календар", "дедлайн", "экзамен", "расписан"],
+         &["create_event", "delete_event", "sync_calendar"]),
+        (&["трекай", "таймер", "трекинг", "начни отсле", "стоп"],
+         &["start_activity", "stop_activity", "get_current_activity"]),
+        (&["заблокируй", "блокируй", "фокус", "сконцентр"],
+         &["start_focus", "stop_focus"]),
+        (&["поел", "ел ", "завтрак", "обед", "ужин", "перекус", "калори", "еда", "еду"],
+         &["log_food"]),
+        (&["продукт", "срок годн", "холодильник"],
+         &["add_product"]),
+        (&["спал", "сон", "вод", "вес ", "шаг", "здоровь"],
+         &["log_health"]),
+        (&["настроен", "mood", "грустн", "весел", "плохо", "хорошо"],
+         &["log_mood"]),
+        (&["дневник", "рефлекс", "журнал"],
+         &["save_journal"]),
+        (&["тренировк", "зал ", "спорт", "бег ", "йога", "присед"],
+         &["add_workout"]),
+        (&["аниме", "манга", "фильм", "сериал", "книг", "музык", "игр", "подкаст", "смотрю", "читаю", "играю"],
+         &["add_media"]),
+        (&["загугли", "найди", "поищи", "погугли", "search", "web_search", "курс", "погод", "рецепт", "новост"],
+         &["web_search", "read_url"]),
+        (&["прочитай страницу", "read_url", "fetch_url", "содержимое сайта", "что на сайте", "загрузи страницу", "прочитай ссылку"],
+         &["read_url"]),
+        (&["открой", "open_url", "ссылк", "сайт"],
+         &["open_url"]),
+        (&["команд", "терминал", "shell", "run_shell"],
+         &["run_shell"]),
+        (&["уведомлен", "notification"],
+         &["send_notification"]),
+        (&["громкост", "volume", "звук"],
+         &["set_volume"]),
+        (&["запусти", "открой приложен", "переключ", "закрой приложен", "выйди из"],
+         &["open_app", "close_app"]),
+        (&["поставь на паузу", "включи музык", "следующ трек", "предыдущ трек", "next track", "play music", "pause music"],
+         &["music_control"]),
+        (&["буфер", "clipboard", "скопируй"],
+         &["get_clipboard", "set_clipboard"]),
+        (&["напомни", "таймер", "reminder", "через час", "через минут", "будильник", "напоминан"],
+         &["set_reminder"]),
+        (&["активность", "чем заним", "что делаю"],
+         &["get_activity"]),
+        (&["что играет", "какая песня", "музыка сейчас"],
+         &["get_music"]),
+        (&["вкладк", "браузер", "какой сайт"],
+         &["get_browser"]),
+        (&["запас", "дом ", "домой", "supplies", "shopping"],
+         &["add_home_item"]),
+        (&["задач", "task", "проект"],
+         &["create_task"]),
+        (&["цел", "goal"],
+         &["create_goal", "update_goal"]),
+    ];
+
+    let mut selected_names: Vec<&str> = Vec::new();
+
+    for (keywords, tool_names) in rules {
+        if keywords.iter().any(|kw| lower.contains(kw)) {
+            for name in *tool_names {
+                if !selected_names.contains(name) {
+                    selected_names.push(name);
+                }
+            }
+        }
+    }
+
+    let has_action_tools = selected_names
+        .iter()
+        .any(|n| !["remember", "recall", "forget", "search_memory"].contains(n));
+    if !has_action_tools && !selected_names.contains(&"remember") {
+        selected_names.push("remember");
+    }
+
+    if selected_names.len() <= 1 {
+        selected_names.extend_from_slice(&[
+            "create_note",
+            "web_search",
+            "create_event",
+            "add_transaction",
+        ]);
+    }
+
+    all.into_iter()
+        .filter(|t| {
+            t.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .map(|n| selected_names.contains(&n))
+                .unwrap_or(false)
+        })
+        .collect()
+}
