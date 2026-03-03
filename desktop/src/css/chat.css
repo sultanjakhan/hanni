@@ -141,8 +141,8 @@
 
 .msg.user {
   align-self: flex-end;
-  background: var(--accent-fill);
-  color: var(--bg-page);
+  background: var(--user-msg-bg);
+  color: var(--user-msg-color);
   border-bottom-right-radius: var(--radius-xs);
 }
 
@@ -231,7 +231,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 4px 12px;
-  background: rgba(255,255,255,0.04);
+  background: var(--code-header-bg);
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -379,7 +379,7 @@
   transform: scale(1.15);
 }
 #chip-thinking.active:hover {
-  background: #2f3a4a;
+  background: var(--chip-thinking-hover);
 }
 
 /* Self-refine — green accent */
@@ -392,7 +392,7 @@
   transform: scale(1.15);
 }
 #chip-selfrefine.active:hover {
-  background: #303f36;
+  background: var(--chip-selfrefine-hover);
 }
 
 /* Web search — purple accent */
@@ -405,7 +405,7 @@
   transform: scale(1.15);
 }
 #chip-websearch.active:hover {
-  background: #3a2f4a;
+  background: var(--chip-websearch-hover);
 }
 
 /* Thinking block (collapsible reasoning) */
@@ -474,8 +474,8 @@
   height: 32px;
   border-radius: var(--radius-md);
   border: none;
-  background: var(--accent-fill);
-  color: var(--bg-page);
+  background: var(--user-msg-bg);
+  color: var(--user-msg-color);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -599,7 +599,7 @@
 /* ── Confirmation modal ── */
 .confirm-overlay {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: var(--modal-overlay-bg);
   display: flex; align-items: center; justify-content: center;
   z-index: 9999;
 }
@@ -703,9 +703,9 @@
 }
 
 .pill.active {
-  background: var(--accent-fill);
-  border-color: var(--accent-fill);
-  color: var(--bg-page);
+  background: var(--user-msg-bg);
+  border-color: var(--user-msg-bg);
+  color: var(--user-msg-color);
 }
 
 /* ── Setting pills (per-tab settings) ── */
@@ -733,9 +733,9 @@
 }
 
 .setting-pill.active {
-  background: var(--accent-fill);
-  border-color: var(--accent-fill);
-  color: var(--bg-page);
+  background: var(--user-msg-bg);
+  border-color: var(--user-msg-bg);
+  color: var(--user-msg-color);
 }
 
 /* ── Chat settings mode ── */

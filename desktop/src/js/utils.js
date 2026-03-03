@@ -231,29 +231,76 @@ export async function renderTabSettingsPage(tabId) {
 
 // ── Editor.js block editor helpers ──
 
-export function initBlockEditor(holderId, data, onChange) {
+export function initBlockEditor(holderId, data, onChange, opts = {}) {
+  const { customTools = {}, readOnly = false, placeholder } = opts;
+  const baseTools = {
+    header: { class: Header, config: { levels: [1, 2, 3], defaultLevel: 2 } },
+    list: { class: EditorjsList, inlineToolbar: true },
+    checklist: { class: Checklist, inlineToolbar: true },
+    quote: { class: Quote },
+    code: CodeTool,
+    delimiter: Delimiter,
+    marker: { class: Marker },
+    inlineCode: { class: InlineCode },
+  };
   const editor = new EditorJS({
     holder: holderId,
     data: data || { blocks: [] },
-    placeholder: 'Нажмите / для команд...',
-    tools: {
-      header: { class: Header, config: { levels: [1, 2, 3], defaultLevel: 2 } },
-      list: { class: EditorjsList, inlineToolbar: true },
-      checklist: { class: Checklist, inlineToolbar: true },
-      quote: { class: Quote },
-      code: CodeTool,
-      delimiter: Delimiter,
-      marker: { class: Marker },
-      inlineCode: { class: InlineCode },
-    },
+    placeholder: placeholder || 'Нажмите / для команд или начните писать...',
+    readOnly,
+    tools: { ...baseTools, ...customTools },
     onChange: async (api) => {
+      if (readOnly) return;
       const output = await api.saver.save();
       if (onChange) onChange(output);
     },
     onReady: () => {
-      if (window.DragDrop) new DragDrop(editor);
+      if (!readOnly && window.DragDrop) new DragDrop(editor);
     },
   });
+  return editor;
+}
+
+// ── Tab block editor (shared for all tabs) ──
+
+let _tabBlockSaveTimeouts = {};
+
+export async function loadTabBlockEditor(tabId, subTab, contentEl, defaultBlocks) {
+  const key = `${tabId}::${subTab || ''}`;
+  const holderId = `tab-block-${tabId}-${(subTab || 'main').replace(/\s+/g, '-')}`;
+
+  // Create holder div
+  let holderEl = contentEl.querySelector(`#${holderId}`);
+  if (!holderEl) {
+    holderEl = document.createElement('div');
+    holderEl.id = holderId;
+    holderEl.className = 'tab-block-editor';
+    contentEl.appendChild(holderEl);
+  } else {
+    holderEl.innerHTML = '';
+  }
+
+  // Load saved blocks from DB
+  let data = null;
+  try {
+    const json = await invoke('get_tab_blocks', { tabId, subTab: subTab || '' });
+    if (json) data = JSON.parse(json);
+  } catch (_) {}
+
+  if (!data) data = defaultBlocks || { blocks: [{ type: 'paragraph', data: { text: '' } }] };
+
+  // Init editor with auto-save (500ms debounce)
+  const editor = initBlockEditor(holderId, data, (output) => {
+    clearTimeout(_tabBlockSaveTimeouts[key]);
+    _tabBlockSaveTimeouts[key] = setTimeout(() => {
+      invoke('save_tab_blocks', {
+        tabId,
+        subTab: subTab || '',
+        blocksJson: JSON.stringify(output),
+      }).catch(() => {});
+    }, 500);
+  }, { placeholder: 'Нажмите / для команд или начните писать...' });
+
   return editor;
 }
 

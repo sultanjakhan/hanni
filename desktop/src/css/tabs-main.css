@@ -1376,7 +1376,33 @@
   margin-bottom: var(--space-2);
 }
 
-/* ── Editor.js block editor — dark theme ── */
+/* ── Tab block editor section ── */
+
+.tab-block-section {
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--border-default);
+  padding-top: var(--space-4);
+}
+
+.tab-block-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.tab-block-editor {
+  min-height: 120px;
+}
+
+.tab-block-editor .ce-paragraph[data-placeholder]::before {
+  color: var(--text-faint) !important;
+  font-style: italic;
+}
+
+/* ── Editor.js block editor — themed ── */
 
 .block-editor-container {
   min-height: 200px;
@@ -1522,7 +1548,7 @@
 }
 
 .cdx-marker {
-  background: rgba(255, 199, 0, 0.3);
+  background: var(--marker-bg);
   padding: 2px 0;
 }
 
@@ -1542,4 +1568,59 @@
 .cdx-settings-button:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+/* ── Phase 4: Polish & Enhancements ── */
+
+/* 4.3 Smooth page transitions */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-content {
+  animation: fadeIn 0.15s ease-out;
+}
+
+/* 4.2 Drag handle polish */
+.ce-toolbar__plus {
+  width: 26px; height: 26px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+.ce-toolbar__settings-btn {
+  width: 26px; height: 26px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+/* 4.1 "/" command popover — Notion style */
+.ce-popover {
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12), 0 0 0 1px var(--border-default);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ce-popover-item {
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  margin: 2px 4px;
+  transition: background var(--transition-fast);
+}
+
+.ce-popover-item__icon {
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* 4.4 Empty states */
+.tab-stub {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Block editor drag handle on hover */
+.ce-block:hover .ce-toolbar {
+  opacity: 1;
 }

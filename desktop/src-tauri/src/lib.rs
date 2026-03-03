@@ -26,7 +26,7 @@ use proactive::{
 use macos::run_osascript;
 use commands_meta::{
     spawn_api_server, start_mlx_server, updater_with_headers,
-    ensure_voice_server_launchagent,
+    ensure_voice_server_launchagent, ensure_openclaw_gateway,
 };
 
 // Imports needed by run()
@@ -93,6 +93,11 @@ pub fn run() {
     let mlx_child = start_mlx_server();
     let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
     let mlx_cleanup = mlx_process.clone();
+
+    // Ensure OpenClaw gateway is running (LaunchAgent or fallback subprocess)
+    let openclaw_child = ensure_openclaw_gateway();
+    let openclaw_process = Arc::new(OpenClawProcess(std::sync::Mutex::new(openclaw_child)));
+    let openclaw_cleanup = openclaw_process.clone();
 
     // Install voice server as LaunchAgent (mic permission stays with Python's stable signature)
     // After ensuring the server is running, warm up TTS cache
@@ -429,6 +434,9 @@ pub fn run() {
             notes::delete_custom_page,
             // Focus Overlay
             notes::toggle_focus_overlay,
+            // Tab Page Blocks
+            commands_data::get_tab_blocks,
+            commands_data::save_tab_blocks,
         ])
         .setup(move |app| {
             // Auto-updater
@@ -863,6 +871,13 @@ pub fn run() {
                 // Kill MLX server process on app exit
                 {
                     let mut child = mlx_cleanup.0.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(ref mut proc) = *child {
+                        let _ = proc.kill();
+                    }
+                }
+                // Kill OpenClaw gateway if we started it as subprocess
+                {
+                    let mut child = openclaw_cleanup.0.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(ref mut proc) = *child {
                         let _ = proc.kill();
                     }

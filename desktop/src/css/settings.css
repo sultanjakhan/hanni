@@ -700,9 +700,9 @@
 }
 
 .chat-settings-tab.active {
-  color: var(--bg-page);
-  background: var(--accent-fill);
-  border-color: var(--accent-fill);
+  color: var(--user-msg-color);
+  background: var(--user-msg-bg);
+  border-color: var(--user-msg-bg);
 }
 
 .chat-settings-panel {

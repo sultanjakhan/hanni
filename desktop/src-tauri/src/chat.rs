@@ -1,4 +1,4 @@
-// chat.rs — Chat command, streaming, quality check
+// chat.rs — Chat command, streaming, quality check, OpenClaw proxy
 use futures_util::StreamExt;
 use crate::types::*;
 use crate::prompts::*;
@@ -19,35 +19,51 @@ pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: O
         .map_err(|_| "LLM busy — timeout after 45s".to_string())?
         .map_err(|_| "LLM semaphore closed".to_string())?;
     let is_call = call_mode.unwrap_or(false);
-    let result = chat_inner(&app, messages.clone(), is_call).await?;
 
-    // Self-critique for complex queries (only in CHAT_FULL mode, no tool calls, opt-in)
-    if !is_call && result.tool_calls.is_empty() && result.text.len() > 150 {
-        let last_user_msg = messages.iter().rev()
-            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-            .and_then(|m| m.get("content").and_then(|c| c.as_str()))
-            .unwrap_or("");
+    // Check if OpenClaw mode is enabled
+    let use_openclaw = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key='use_openclaw'",
+            [], |row| row.get::<_, String>(0),
+        ).ok().map(|v| v == "true").unwrap_or(false)
+    };
 
-        if is_complex_query(last_user_msg) {
-            let self_refine_enabled = {
-                let db = app.state::<HanniDb>();
-                let conn = db.conn();
-                conn.query_row(
-                    "SELECT value FROM app_settings WHERE key='enable_self_refine'",
-                    [], |row| row.get::<_, String>(0),
-                ).ok().map(|v| v == "true").unwrap_or(false)
-            };
+    let result = if use_openclaw {
+        chat_openclaw(&app, messages.clone(), is_call).await?
+    } else {
+        let result = chat_inner(&app, messages.clone(), is_call).await?;
 
-            if self_refine_enabled {
-                let client = &app.state::<HttpClient>().0;
-                if let Ok(Some(correction)) = quality_check_response(client, last_user_msg, &result.text).await {
-                    let _ = app.emit("chat-token", TokenPayload {
-                        token: format!("\n\n_{}_", correction),
-                    });
+        // Self-critique for complex queries (only in CHAT_FULL mode, no tool calls, opt-in)
+        if !is_call && result.tool_calls.is_empty() && result.text.len() > 150 {
+            let last_user_msg = messages.iter().rev()
+                .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                .and_then(|m| m.get("content").and_then(|c| c.as_str()))
+                .unwrap_or("");
+
+            if is_complex_query(last_user_msg) {
+                let self_refine_enabled = {
+                    let db = app.state::<HanniDb>();
+                    let conn = db.conn();
+                    conn.query_row(
+                        "SELECT value FROM app_settings WHERE key='enable_self_refine'",
+                        [], |row| row.get::<_, String>(0),
+                    ).ok().map(|v| v == "true").unwrap_or(false)
+                };
+
+                if self_refine_enabled {
+                    let client = &app.state::<HttpClient>().0;
+                    if let Ok(Some(correction)) = quality_check_response(client, last_user_msg, &result.text).await {
+                        let _ = app.emit("chat-token", TokenPayload {
+                            token: format!("\n\n_{}_", correction),
+                        });
+                    }
                 }
             }
         }
-    }
+        result
+    };
 
     serde_json::to_string(&result).map_err(|e| format!("Serialize error: {}", e))
 }
@@ -61,9 +77,97 @@ struct ChatModeConfig {
     include_tools: bool,
 }
 
-const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 6, max_msg_chars: 500, max_tokens: 300, temperature: 0.6, include_tools: true };
-const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 15, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1024, temperature: 0.7, include_tools: true };
-const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: 8, max_msg_chars: 500, max_tokens: 250, temperature: 0.6, include_tools: false };
+const CHAT_CALL: ChatModeConfig = ChatModeConfig { memory_limit: 8, history_limit: 6, max_msg_chars: 500, max_tokens: 400, temperature: 0.6, include_tools: true };
+const CHAT_FULL: ChatModeConfig = ChatModeConfig { memory_limit: 10, history_limit: usize::MAX, max_msg_chars: usize::MAX, max_tokens: 1200, temperature: 0.7, include_tools: true };
+const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 8, history_limit: 8, max_msg_chars: 500, max_tokens: 400, temperature: 0.6, include_tools: false };
+
+/// Thin proxy to OpenClaw Gateway — sends messages, streams response back to UI.
+/// OpenClaw handles: prompt engineering, memory, tools (via MCP), personality (SOUL.md).
+/// Hanni just forwards the conversation and streams tokens.
+pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _call_mode: bool) -> Result<ChatResult, String> {
+    let client = &app.state::<HttpClient>().0;
+
+    // Build simple OpenAI-compatible request — only user/assistant messages, no system prompt
+    // OpenClaw agent adds its own system prompt from SOUL.md/AGENTS.md
+    let chat_messages: Vec<serde_json::Value> = messages.iter()
+        .filter(|m| {
+            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            role == "user" || role == "assistant"
+        })
+        .cloned()
+        .collect();
+
+    let request_body = serde_json::json!({
+        "model": "openclaw:main",
+        "messages": chat_messages,
+        "stream": true,
+        "user": "hanni-app",
+    });
+
+    let response = client.post(OPENCLAW_URL)
+        .header("Authorization", format!("Bearer {}", OPENCLAW_TOKEN))
+        .header("Content-Type", "application/json")
+        .header("x-openclaw-agent-id", "main")
+        .json(&request_body)
+        .timeout(std::time::Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| format!("OpenClaw connection error: {}. Is the gateway running?", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("OpenClaw error {}: {}", status, &body[..body.len().min(200)]));
+    }
+
+    // Stream SSE response — same format as MLX (OpenAI-compatible)
+    let mut stream = response.bytes_stream();
+    let mut full_reply = String::new();
+    let mut buffer = String::new();
+    let mut finish_reason: Option<String> = None;
+
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("Stream error: {}", e))?;
+        buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+        for line in buffer.split('\n').collect::<Vec<_>>() {
+            let line = line.trim();
+            if !line.starts_with("data: ") { continue; }
+            let data = &line[6..];
+            if data == "[DONE]" {
+                let _ = app.emit("chat-done", ());
+                continue;
+            }
+
+            if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
+                if let Some(choice) = chunk.choices.first() {
+                    if let Some(ref fr) = choice.finish_reason {
+                        finish_reason = Some(fr.clone());
+                    }
+                    if let Some(delta) = &choice.delta {
+                        if let Some(token) = &delta.content {
+                            if !token.is_empty() {
+                                full_reply.push_str(token);
+                                let _ = app.emit("chat-token", TokenPayload {
+                                    token: token.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(pos) = buffer.rfind('\n') {
+            buffer = buffer[pos + 1..].to_string();
+        }
+    }
+
+    Ok(ChatResult {
+        text: full_reply,
+        tool_calls: Vec::new(), // OpenClaw handles tool calls internally
+        finish_reason,
+    })
+}
 
 pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_mode: bool) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
@@ -99,12 +203,15 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         if !days_ahead.is_empty() { days_ahead.push_str(", "); }
         days_ahead.push_str(&format!("{} {}", day_abbr[wd], d.format("%Y-%m-%d")));
     }
-    let date_context = format!(
-        "\n\n[Current context]\nToday: {} ({})\nTime: {}\nNext 14 days: {}\nUse YYYY-MM-DD. Deadlines/exams/all-day = create_event with time=\"\" and duration=0.",
+    let date_context_base = format!(
+        "\n\n[Current context]\nToday: {} ({})\nTime: {}",
         now_local.format("%Y-%m-%d"),
         weekday_ru,
         now_local.format("%H:%M"),
-        days_ahead,
+    );
+    let date_context_full = format!(
+        "{}\nNext 14 days: {}",
+        date_context_base, days_ahead,
     );
     // Adaptive prompt: use full prompt only when actions are needed
     let last_user_msg = messages.iter().rev()
@@ -133,11 +240,11 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
 - "запомни что я люблю кофе" → remember
 - "завтра встреча в 15:00" → create_event
 После инструмента — кратко подтверди."#,
-            date_ctx = date_context)
+            date_ctx = date_context_full)
     } else if use_full {
-        format!("{}{}", SYSTEM_PROMPT, date_context)
+        format!("{}{}", SYSTEM_PROMPT, date_context_full)
     } else {
-        format!("{}{}", SYSTEM_PROMPT_LITE, date_context)
+        format!("{}{}", SYSTEM_PROMPT_LITE, date_context_base)
     };
 
     // C1: Inject user name into system prompt if available
@@ -275,7 +382,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         if let Ok(mut stmt) = conn.prepare(
             "SELECT summary, started_at FROM conversations
              WHERE summary IS NOT NULL AND summary != ''
-             ORDER BY started_at DESC LIMIT 3"
+             ORDER BY started_at DESC LIMIT 2"
         ) {
             if let Ok(rows) = stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -292,7 +399,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         if let Ok(mut istmt) = conn.prepare(
             "SELECT insight_type, content, created_at FROM conversation_insights
              WHERE insight_type IN ('decision', 'open_question')
-             ORDER BY created_at DESC LIMIT 4"
+             ORDER BY created_at DESC LIMIT 2"
         ) {
             if let Ok(rows) = istmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
@@ -425,7 +532,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
             .collect();
         if user_lengths.len() >= 2 {
             let avg = user_lengths.iter().sum::<usize>() / user_lengths.len();
-            if avg < 30 { mode.max_tokens.min(400) }      // short messages → concise replies
+            if avg < 30 { mode.max_tokens.min(600) }      // short messages → concise replies
             else if avg > 200 { mode.max_tokens.max(1200) } // long messages → detailed replies
             else { mode.max_tokens }
         } else { mode.max_tokens }
@@ -445,7 +552,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         max_tokens: adaptive_max_tokens,
         stream: true,
         temperature: adaptive_temp,
-        repetition_penalty: Some(1.2),
+        repetition_penalty: None,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: thinking_enabled },
         tools: tools_param,
     };

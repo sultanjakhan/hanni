@@ -1,10 +1,120 @@
 /* ══════════════════════════════════════════════
-   Hanni Design System — v3 (Notion Dark)
-   Warm grays, minimal radii, colored badges,
+   Hanni Design System — v4 (Notion Dual Theme)
+   Light default, dark option. Warm palette,
+   minimal radii, colored badges,
    fast transitions, shadows on floating elements
    ══════════════════════════════════════════════ */
 
+/* ── Shared tokens (theme-independent) ── */
 :root {
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-pill: 20px;
+
+  /* Transitions */
+  --transition-fast: 80ms ease;
+  --transition-normal: 150ms ease;
+  --transition-slow: 200ms ease-out;
+
+  /* Spacing (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Button padding */
+  --btn-padding-sm: 5px 12px;
+  --btn-padding-md: 8px 16px;
+  --btn-padding-lg: 10px 20px;
+}
+
+/* ── Light Theme (default) ── */
+:root,
+[data-theme="light"] {
+  /* Backgrounds */
+  --bg-page: #ffffff;
+  --bg-sidebar: #f7f7f5;
+  --bg-card: #ffffff;
+  --bg-hover: #efefef;
+  --bg-elevated: #ffffff;
+
+  /* Borders */
+  --border-default: #e3e3e0;
+  --border-hover: #d3d3d0;
+  --border-focus: #b8b8b5;
+  --border-subtle: #ebebea;
+
+  /* Text */
+  --text-primary: #37352f;
+  --text-secondary: #787774;
+  --text-muted: #a4a4a0;
+  --text-faint: #c8c8c4;
+
+  /* Accent */
+  --accent-fill: #37352f;
+  --accent-blue: #2383e2;
+
+  /* Semantic colors */
+  --color-green: #448361;
+  --color-green-bg: #dbeddb;
+  --color-blue: #2383e2;
+  --color-blue-bg: #d3e5ef;
+  --color-red: #d44c47;
+  --color-red-bg: #ffe2dd;
+  --color-yellow: #cb8a05;
+  --color-yellow-bg: #fdecc8;
+  --color-orange: #d9730d;
+  --color-orange-bg: #fadec9;
+  --color-purple: #9065b0;
+  --color-purple-bg: #e8deee;
+  --color-pink: #c14c8a;
+  --color-pink-bg: #f5e0e9;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.1);
+  --shadow-card-hover: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-inset-border: inset 0 0 0 1px rgba(0,0,0,0.03);
+
+  /* Chip active hover (light variants) */
+  --chip-thinking-hover: #c8d8ee;
+  --chip-selfrefine-hover: #cde3cd;
+  --chip-websearch-hover: #dacce6;
+
+  /* Call overlay */
+  --call-overlay-bg: rgba(255, 255, 255, 0.92);
+
+  /* Scrollbar */
+  --scrollbar-thumb: #d4d4d0;
+  --scrollbar-thumb-hover: #b8b8b5;
+
+  /* Font smoothing */
+  --font-smoothing: auto;
+
+  /* User message */
+  --user-msg-bg: #37352f;
+  --user-msg-color: #ffffff;
+
+  /* Code header */
+  --code-header-bg: rgba(0,0,0,0.03);
+
+  /* Marker highlight */
+  --marker-bg: rgba(255, 212, 0, 0.4);
+
+  /* Modal overlay */
+  --modal-overlay-bg: rgba(0,0,0,0.3);
+}
+
+/* ── Dark Theme ── */
+[data-theme="dark"] {
   /* Backgrounds (warm grays, brown undertone) */
   --bg-page: #191919;
   --bg-sidebar: #202020;
@@ -44,19 +154,6 @@
   --color-pink: #BA4A78;
   --color-pink-bg: #3D2B33;
 
-  /* Radius */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-pill: 20px;
-
-  /* Transitions */
-  --transition-fast: 80ms ease;
-  --transition-normal: 150ms ease;
-  --transition-slow: 200ms ease-out;
-
   /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
@@ -64,19 +161,33 @@
   --shadow-card-hover: 0 4px 16px rgba(0,0,0,0.2);
   --shadow-inset-border: inset 0 0 0 1px rgba(255,255,255,0.04);
 
-  /* Spacing (4px base) */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
+  /* Chip active hover (dark variants) */
+  --chip-thinking-hover: #2f3a4a;
+  --chip-selfrefine-hover: #303f36;
+  --chip-websearch-hover: #3a2f4a;
 
-  /* Button padding */
-  --btn-padding-sm: 5px 12px;
-  --btn-padding-md: 8px 16px;
-  --btn-padding-lg: 10px 20px;
+  /* Call overlay */
+  --call-overlay-bg: rgba(10, 10, 10, 0.92);
+
+  /* Scrollbar */
+  --scrollbar-thumb: var(--border-default);
+  --scrollbar-thumb-hover: var(--border-hover);
+
+  /* Font smoothing */
+  --font-smoothing: antialiased;
+
+  /* User message */
+  --user-msg-bg: var(--accent-fill);
+  --user-msg-color: var(--bg-page);
+
+  /* Code header */
+  --code-header-bg: rgba(255,255,255,0.04);
+
+  /* Marker highlight */
+  --marker-bg: rgba(255, 199, 0, 0.3);
+
+  /* Modal overlay */
+  --modal-overlay-bg: rgba(0,0,0,0.6);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -88,7 +199,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: var(--font-smoothing);
   overflow: hidden;
 }
 
@@ -98,8 +209,8 @@ body {
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-xs); }
-::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: var(--radius-xs); }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* ── Drag region (window controls) ── */
 
@@ -258,11 +369,12 @@ body {
 }
 
 .page-header-title {
-  font-size: 28px;
+  font-size: 40px;
   font-weight: 700;
   color: var(--text-primary);
   margin-bottom: var(--space-1);
-  letter-spacing: -0.5px;
+  letter-spacing: -0.8px;
+  line-height: 1.2;
 }
 
 /* Editable description input */

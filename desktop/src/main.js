@@ -4,8 +4,8 @@
 // ══════════════════════════════════════════════
 
 // ── Foundation ──
-import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY } from './js/state.js';
-import { renderPageHeader, setupPageHeaderControls } from './js/utils.js';
+import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY, TAB_DESCRIPTIONS, setTheme, getTabIcon } from './js/state.js';
+import { renderPageHeader, setupPageHeaderControls, loadTabBlockEditor, escapeHtml } from './js/utils.js';
 
 // ── Core modules ──
 import { renderTabBar, renderSubSidebar, openTab, closeTab, switchTab, activateView, ensureViewDiv, loadSubTabContent, showChatSettingsMode, hideChatSettingsMode } from './js/tabs.js';
@@ -64,6 +64,7 @@ tabLoaders.showAgentIndicator = showAgentIndicator;
 tabLoaders.showChatSettingsMode = showChatSettingsMode;
 tabLoaders.hideChatSettingsMode = hideChatSettingsMode;
 tabLoaders.focusInput = () => input.focus();
+tabLoaders.setTheme = setTheme;
 
 // Conversations
 tabLoaders.loadConversationsList = loadConversationsList;
@@ -104,6 +105,9 @@ tabLoaders.updateFocusWidgetVisibility = updateFocusWidgetVisibility;
 tabLoaders.toggleFocusWidgetPopover = toggleFocusWidgetPopover;
 tabLoaders.startPomodoro = startPomodoro;
 
+// Block editor
+tabLoaders.loadTabBlockEditor = loadTabBlockEditor;
+
 // Notes
 tabLoaders.renderDatabaseView = renderDatabaseView;
 tabLoaders.renderNoteEditor = renderNoteEditor;
@@ -117,6 +121,84 @@ tabLoaders.loadNotes = loadNotes;
 // ══════════════════════════════════════════════
 
 window.switchTab = switchTab;
+
+// ══════════════════════════════════════════════
+//  Cmd+K Command Palette
+// ══════════════════════════════════════════════
+
+function showCommandPalette() {
+  if (document.getElementById('cmd-palette')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'cmd-palette';
+  overlay.className = 'cmd-palette-overlay';
+  overlay.innerHTML = `
+    <div class="cmd-palette">
+      <input class="cmd-palette-input" placeholder="Поиск по вкладкам..." autofocus>
+      <div class="cmd-palette-results"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const inp = overlay.querySelector('.cmd-palette-input');
+  const results = overlay.querySelector('.cmd-palette-results');
+  let selectedIdx = 0;
+
+  function getItems(query) {
+    const q = (query || '').toLowerCase();
+    const items = [];
+    for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
+      const label = reg.label || id;
+      const desc = TAB_DESCRIPTIONS[id] || '';
+      if (q && !label.toLowerCase().includes(q) && !desc.toLowerCase().includes(q) && !id.includes(q)) continue;
+      items.push({ id, label, icon: getTabIcon(id), desc });
+    }
+    return items;
+  }
+
+  function render(query) {
+    const items = getItems(query);
+    selectedIdx = Math.min(selectedIdx, Math.max(0, items.length - 1));
+    results.innerHTML = items.length === 0
+      ? '<div class="cmd-palette-empty">Ничего не найдено</div>'
+      : items.map((it, i) => `
+        <div class="cmd-palette-item${i === selectedIdx ? ' selected' : ''}" data-id="${it.id}">
+          <span class="cmd-palette-icon">${it.icon}</span>
+          <div class="cmd-palette-item-text">
+            <span class="cmd-palette-item-label">${escapeHtml(it.label)}</span>
+            ${it.desc ? `<span class="cmd-palette-item-desc">${escapeHtml(it.desc)}</span>` : ''}
+          </div>
+        </div>`).join('');
+    results.querySelectorAll('.cmd-palette-item').forEach(el => {
+      el.addEventListener('click', () => { selectItem(el.dataset.id); });
+    });
+  }
+
+  function selectItem(tabId) {
+    overlay.remove();
+    if (tabId && TAB_REGISTRY[tabId]) {
+      if (!S.openTabs.includes(tabId)) S.openTabs.push(tabId);
+      switchTab(tabId);
+    }
+  }
+
+  inp.addEventListener('input', () => { selectedIdx = 0; render(inp.value); });
+  inp.addEventListener('keydown', (e) => {
+    const items = getItems(inp.value);
+    if (e.key === 'ArrowDown') { e.preventDefault(); selectedIdx = Math.min(selectedIdx + 1, items.length - 1); render(inp.value); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIdx = Math.max(selectedIdx - 1, 0); render(inp.value); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (items[selectedIdx]) selectItem(items[selectedIdx].id); }
+    else if (e.key === 'Escape') { overlay.remove(); }
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  render('');
+  inp.focus();
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    showCommandPalette();
+  }
+});
 
 // ══════════════════════════════════════════════
 //  Initialization

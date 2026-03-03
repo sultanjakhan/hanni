@@ -204,6 +204,7 @@ function renderSubSidebar() {
   const sidebar = document.getElementById('sub-sidebar');
   const items = document.getElementById('sub-sidebar-items');
   const reg = TAB_REGISTRY[S.activeTab];
+  document.title = `Hanni [${S.activeTab}] subs=${reg?.subTabs?.length || 0}`;
 
   if (!reg || !reg.subTabs) {
     sidebar.classList.add('hidden');
@@ -256,14 +257,36 @@ function renderSubSidebar() {
       convListEl.className = 'sub-sidebar-conv-list';
       items.appendChild(convListEl);
     }
+  } else if (reg.subTabs?.length > 0) {
+    // Non-chat tabs with sub-tabs: show sub-sidebar with vertical navigation + goals
+    sidebar.classList.remove('hidden');
+    sidebar.classList.remove('collapsed');
+    const convPanel = document.getElementById('conversations-panel');
+    if (convPanel) convPanel.style.display = '';
+
+    items.innerHTML = '';
+    const currentSub = S.activeSubTab[S.activeTab] ?? reg.subTabs[0];
+    for (const sub of reg.subTabs) {
+      const item = document.createElement('div');
+      item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
+      item.innerHTML = `<span class="sub-sidebar-dot"></span>${escapeHtml(sub)}`;
+      item.addEventListener('click', () => {
+        S.activeSubTab[S.activeTab] = sub;
+        saveTabs();
+        renderSubSidebar();
+        loadSubTabContent(S.activeTab, sub);
+      });
+      items.appendChild(item);
+    }
+
+    // Remove horizontal sub-tab bar if it exists
+    const viewEl = document.getElementById(`view-${S.activeTab}`);
+    viewEl?.querySelector('.sub-tab-bar')?.remove();
   } else {
     sidebar.classList.add('hidden');
     // Restore conversations panel visibility when leaving chat
     const convPanel = document.getElementById('conversations-panel');
     if (convPanel) convPanel.style.display = '';
-
-    // Render horizontal sub-tab pills in content area
-    renderSubTabBar(S.activeTab, reg);
   }
 
   // Bottom: version only (gear is in tab bar)
@@ -311,37 +334,52 @@ function renderSubTabBar(tabId, reg) {
 // ── loadGoalsWidget / showAddGoalModal ──
 
 async function loadGoalsWidget() {
-  // Sub-sidebar goals (keep hidden — moved to content area)
   const section = document.getElementById('sub-sidebar-goals');
-  if (section) section.classList.add('hidden');
+  const goalsList = document.getElementById('goals-list');
+  if (!section || !goalsList) return;
 
-  // Inject goals into content area
-  if (S.activeTab === 'chat') return;
+  // Hide goals for chat tab or when sub-sidebar is hidden
+  if (S.activeTab === 'chat') {
+    section.classList.add('hidden');
+    return;
+  }
+
+  // Remove old inline goals from content area (cleanup from previous version)
   const contentEl = document.getElementById(`${S.activeTab}-content`);
-  if (!contentEl) return;
-
-  let existing = contentEl.querySelector('.goals-inline');
-  if (existing) existing.remove();
+  if (contentEl) {
+    const old = contentEl.querySelector('.goals-inline');
+    if (old) old.remove();
+  }
 
   try {
     const goals = await invoke('get_goals', { tabName: S.activeTab });
-    const wrapper = document.createElement('div');
-    wrapper.className = 'goals-inline';
-    wrapper.innerHTML = `
-      <div class="goals-inline-header">
-        <span class="goals-inline-title">Goals</span>
-        <button class="btn-smallall" id="add-goal-btn">+ Goal</button>
-      </div>
+    section.classList.remove('hidden');
+
+    goalsList.innerHTML = `
       ${goals.length > 0 ? goals.map(g => {
         const pct = g.target_value > 0 ? Math.min(100, Math.round(g.current_value / g.target_value * 100)) : 0;
-        return `<div class="goal-inline-item">
+        return `<div class="goal-item">
           <div class="goal-inline-info"><span>${escapeHtml(g.title)}</span><span class="goal-inline-pct">${pct}%</span></div>
           <div class="goal-progress"><div class="goal-progress-bar" style="width:${pct}%"></div></div>
         </div>`;
-      }).join('') : '<div style="color:var(--text-faint);font-size:12px;">No goals yet</div>'}`;
-    contentEl.insertBefore(wrapper, contentEl.firstChild);
-    wrapper.querySelector('#add-goal-btn')?.addEventListener('click', () => showAddGoalModal());
-  } catch (_) {}
+      }).join('') : '<div class="goal-item" style="color:var(--text-faint);">No goals yet</div>'}
+      <button class="btn-smallall" id="add-goal-btn" style="margin:6px 16px;">+ Goal</button>`;
+
+    // Toggle collapse
+    const toggle = document.getElementById('goals-toggle');
+    if (toggle) {
+      toggle.onclick = () => goalsList.classList.toggle('hidden');
+      // Show count
+      toggle.textContent = `Goals${goals.length > 0 ? ` (${goals.length})` : ''}`;
+    }
+
+    // Default: expanded
+    goalsList.classList.remove('hidden');
+
+    goalsList.querySelector('#add-goal-btn')?.addEventListener('click', () => showAddGoalModal());
+  } catch (_) {
+    section.classList.add('hidden');
+  }
 }
 
 function showAddGoalModal() {
@@ -455,12 +493,12 @@ function loadSubTabContent(tabId, subTab) {
     case 'calendar': tabLoaders.loadCalendar?.(subTab); break;
     case 'focus': tabLoaders.loadFocus?.(subTab); break;
     case 'notes': tabLoaders.loadNotes?.(subTab); break;
-    case 'work': tabLoaders.loadWork?.(); break;
-    case 'development': tabLoaders.loadDevelopment?.(); break;
+    case 'work': tabLoaders.loadWork?.(subTab); break;
+    case 'development': tabLoaders.loadDevelopment?.(subTab); break;
     case 'home': tabLoaders.loadHome?.(subTab); break;
     case 'hobbies': tabLoaders.loadHobbies?.(subTab); break;
     case 'sports': tabLoaders.loadSports?.(subTab); break;
-    case 'health': tabLoaders.loadHealth?.(); break;
+    case 'health': tabLoaders.loadHealth?.(subTab); break;
     case 'mindset': tabLoaders.loadMindset?.(subTab); break;
     case 'food': tabLoaders.loadFood?.(subTab); break;
     case 'money': tabLoaders.loadMoney?.(subTab); break;
