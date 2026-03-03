@@ -1,6 +1,6 @@
 // ── js/chat.js — Chat messages, sending, streaming, input chips, file attachment, drag-drop, proactive/typing listeners, welcome card, chat settings ──
 
-import { S, invoke, listen, emit, chat, input, sendBtn, attachBtn, fileInput, attachPreview, tabLoaders, TAB_REGISTRY, TAB_ICONS, PROACTIVE_STYLE_DEFINITIONS, MEMORY_CATEGORIES, VOICE_SERVER } from './state.js';
+import { S, invoke, listen, emit, chat, input, sendBtn, attachBtn, fileInput, attachPreview, tabLoaders, TAB_REGISTRY, TAB_ICONS, PROACTIVE_STYLE_DEFINITIONS, MEMORY_CATEGORIES, VOICE_SERVER, setTheme } from './state.js';
 import { renderMarkdown, escapeHtml, normalizeHistoryMessage, getRole, getContent, confirmModal, skeletonPage, renderPageHeader } from './utils.js';
 import { autoSaveConversation, loadConversationsList } from './conversations.js';
 import { showChatSettingsMode, hideChatSettingsMode } from './tabs.js';
@@ -128,7 +128,7 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory, useOpenClaw] = await Promise.all([
       invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
@@ -139,6 +139,7 @@ async function loadChatSettings() {
       invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
       invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
       invoke('get_flywheel_history').catch(() => []),
+      invoke('get_app_setting', { key: 'use_openclaw' }).catch(() => null),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -160,6 +161,7 @@ async function loadChatSettings() {
         <button class="chat-settings-tab" data-panel="voice">Голос</button>
         <button class="chat-settings-tab" data-panel="styles">Стили</button>
         <button class="chat-settings-tab" data-panel="data">Данные</button>
+        <button class="chat-settings-tab" data-panel="appearance">Оформление</button>
         <button class="chat-settings-tab" data-panel="about">О Hanni</button>
       </div>
 
@@ -175,6 +177,19 @@ async function loadChatSettings() {
       </div>
 
       <div class="chat-settings-panel" id="cs-panel-general">
+        <div class="settings-section">
+          <div class="settings-section-title">AI движок</div>
+          <div class="settings-row">
+            <span class="settings-label">OpenClaw</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-use-openclaw" ${useOpenClaw === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">Агент, MCP инструменты, Talk Mode, Telegram</span>
+          </div>
+        </div>
         <div class="settings-section">
           <div class="settings-section-title">Автономный режим <span class="proactive-status-badge" id="proactive-status-badge">Активен</span></div>
           <div class="settings-row">
@@ -346,6 +361,21 @@ async function loadChatSettings() {
         </div>
       </div>
 
+      <div class="chat-settings-panel" id="cs-panel-appearance">
+        <div class="settings-section">
+          <div class="settings-section-title">Тема оформления</div>
+          <div class="settings-row">
+            <div>
+              <span class="settings-label">Тёмная тема</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="cs-theme-toggle" ${S.theme === 'dark' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div class="chat-settings-panel" id="cs-panel-about">
         <div class="about-wrapper">
           <div class="about-card">
@@ -407,6 +437,14 @@ async function loadChatSettings() {
     };
     const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
 
+    // ── Theme toggle ──
+    document.getElementById('cs-theme-toggle')?.addEventListener('change', (e) => {
+      setTheme(e.target.checked ? 'dark' : 'light');
+    });
+
+    document.getElementById('chat-use-openclaw')?.addEventListener('change', (e) => {
+      invoke('set_app_setting', { key: 'use_openclaw', value: e.target.checked ? 'true' : 'false' });
+    });
     document.getElementById('chat-proactive-enabled')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-voice-enabled')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);

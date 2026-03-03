@@ -652,6 +652,15 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             sort_order INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+
+        -- v0.26.0: Tab page blocks (block editor per tab/sub-tab)
+        CREATE TABLE IF NOT EXISTS tab_page_blocks (
+            tab_id TEXT NOT NULL,
+            sub_tab TEXT NOT NULL DEFAULT '',
+            blocks_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (tab_id, sub_tab)
         );"
     ).map_err(|e| format!("DB init error: {}", e))
 }

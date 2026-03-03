@@ -83,7 +83,18 @@ export const S = {
   callStartTime: 0,
   ambientWaveFrame: null,
   callWaveObserver: null,
+  theme: localStorage.getItem('hanni_theme') || 'light',
 };
+
+// ── Theme helpers ──
+export function setTheme(theme) {
+  S.theme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('hanni_theme', theme);
+}
+
+// Apply theme immediately on module load
+document.documentElement.setAttribute('data-theme', S.theme);
 
 // Fetch real version from Tauri at startup
 (async () => {

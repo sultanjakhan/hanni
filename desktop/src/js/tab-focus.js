@@ -1,15 +1,22 @@
 // ── js/tab-focus.js — Focus tab + Focus floating widget ──
 
 import { S, invoke, listen, emit, tabLoaders } from './state.js';
-import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage } from './utils.js';
+import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 
 // ── Focus ──
 
 async function loadFocus(subTab) {
   const el = document.getElementById('focus-content');
   if (!el) return;
-  if (subTab === 'History') { renderFocusHistory(el); return; }
-  renderFocusCurrent(el);
+  if (subTab === 'History') { await renderFocusHistory(el); }
+  else { await renderFocusCurrent(el); }
+  // Add block editor for session notes
+  const pc = el.querySelector('.page-content') || el;
+  const section = document.createElement('div');
+  section.className = 'tab-block-section';
+  section.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
+  pc.appendChild(section);
+  loadTabBlockEditor('focus', subTab || 'Current', section);
 }
 
 async function renderFocusCurrent(el) {

@@ -1943,3 +1943,33 @@ pub fn get_message_ratings(db: tauri::State<'_, HanniDb>, conversation_id: i64) 
     .collect();
     Ok(rows)
 }
+
+// ── Tab Page Blocks ──
+
+#[tauri::command]
+pub fn get_tab_blocks(db: tauri::State<'_, HanniDb>, tab_id: String, sub_tab: String) -> Result<Option<String>, String> {
+    let conn = db.conn();
+    let result = conn.query_row(
+        "SELECT blocks_json FROM tab_page_blocks WHERE tab_id = ?1 AND sub_tab = ?2",
+        rusqlite::params![tab_id, sub_tab],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(json) => Ok(Some(json)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("DB error: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub fn save_tab_blocks(db: tauri::State<'_, HanniDb>, tab_id: String, sub_tab: String, blocks_json: String) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO tab_page_blocks (tab_id, sub_tab, blocks_json, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(tab_id, sub_tab) DO UPDATE SET blocks_json = ?3, updated_at = ?4",
+        rusqlite::params![tab_id, sub_tab, blocks_json, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}

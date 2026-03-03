@@ -1,7 +1,7 @@
 // ── js/tab-calendar.js — Calendar tab: month/week/day/list views + integrations ──
 
 import { S, invoke, tabLoaders } from './state.js';
-import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage } from './utils.js';
+import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 
 // ── Calendar ──
 async function loadCalendar(subTab) {
@@ -15,8 +15,24 @@ async function loadCalendar(subTab) {
   }
   const viewEl = document.getElementById('calendar-view-content') || el;
 
-  if (subTab === 'Интеграции') { renderCalendarIntegrations(viewEl); return; }
-  if (subTab === 'Список') { renderCalendarList(viewEl); return; }
+  if (subTab === 'Интеграции') {
+    await renderCalendarIntegrations(viewEl);
+    const sect = document.createElement('div');
+    sect.className = 'tab-block-section';
+    sect.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
+    viewEl.appendChild(sect);
+    loadTabBlockEditor('calendar', subTab, sect);
+    return;
+  }
+  if (subTab === 'Список') {
+    await renderCalendarList(viewEl);
+    const sect = document.createElement('div');
+    sect.className = 'tab-block-section';
+    sect.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
+    viewEl.appendChild(sect);
+    loadTabBlockEditor('calendar', subTab, sect);
+    return;
+  }
 
   // Auto-sync when navigating to a month not yet synced
   const monthKey = `${S.calendarYear}-${S.calendarMonth + 1}`;
@@ -61,6 +77,12 @@ async function loadCalendar(subTab) {
     else if (subTab === 'День') renderDayCalendar(viewEl, []);
     else renderCalendar(viewEl, []);
   }
+  // Add block editor for calendar notes
+  const sect = document.createElement('div');
+  sect.className = 'tab-block-section';
+  sect.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
+  viewEl.appendChild(sect);
+  loadTabBlockEditor('calendar', subTab || 'Месяц', sect);
 }
 
 function renderCalendar(el, events, tasks) {

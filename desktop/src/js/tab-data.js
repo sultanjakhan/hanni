@@ -1,12 +1,21 @@
 // ── js/tab-data.js — Data tab loaders: Home, Mindset, Food, Money, People, Memory, Work, Development, Hobbies, Sports, Health, About, Custom Pages ──
 
 import { S, invoke, tabLoaders, TAB_REGISTRY, TAB_ICONS, MEDIA_TYPES, MEDIA_LABELS, STATUS_LABELS, MEMORY_CATEGORIES, COMMON_EMOJIS } from './state.js';
-import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks } from './utils.js';
+import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks, loadTabBlockEditor } from './utils.js';
 import { renderTabBar, closeTab } from './tabs.js';
 
 // Helper: renderDatabaseView lives in tab-notes.js, access via tabLoaders
 function renderDatabaseView(el, tabId, recordTable, records, options) {
   return tabLoaders.renderDatabaseView?.(el, tabId, recordTable, records, options);
+}
+
+// Helper: append block editor section to a page-content element
+async function appendBlockEditor(pc, tabId, subTab) {
+  const section = document.createElement('div');
+  section.className = 'tab-block-section';
+  section.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
+  pc.appendChild(section);
+  return loadTabBlockEditor(tabId, subTab, section);
 }
 
 // Helper: show stub for empty/error states
@@ -26,8 +35,9 @@ async function loadHome(subTab) {
   if (!el) return;
   el.innerHTML = renderPageHeader('home') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
-  if (subTab === 'Shopping List') loadShoppingList(pc);
-  else loadSupplies(pc);
+  if (subTab === 'Shopping List') await loadShoppingList(pc);
+  else await loadSupplies(pc);
+  appendBlockEditor(pc, 'home', subTab);
 }
 
 async function loadSupplies(el) {
@@ -129,10 +139,11 @@ async function loadMindset(subTab) {
   if (!el) return;
   el.innerHTML = renderPageHeader('mindset') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
-  if (subTab === 'Journal') loadJournal(pc);
-  else if (subTab === 'Mood') loadMoodLog(pc);
-  else if (subTab === 'Principles') loadPrinciples(pc);
-  else loadJournal(pc);
+  if (subTab === 'Journal') await loadJournal(pc);
+  else if (subTab === 'Mood') await loadMoodLog(pc);
+  else if (subTab === 'Principles') await loadPrinciples(pc);
+  else await loadJournal(pc);
+  appendBlockEditor(pc, 'mindset', subTab);
 }
 
 async function loadJournal(el) {
@@ -237,10 +248,11 @@ async function loadFood(subTab) {
   if (!el) return;
   el.innerHTML = renderPageHeader('food') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
-  if (subTab === 'Food Log') loadFoodLog(pc);
-  else if (subTab === 'Recipes') loadRecipes(pc);
-  else if (subTab === 'Products') loadProducts(pc);
-  else loadFoodLog(pc);
+  if (subTab === 'Food Log') await loadFoodLog(pc);
+  else if (subTab === 'Recipes') await loadRecipes(pc);
+  else if (subTab === 'Products') await loadProducts(pc);
+  else await loadFoodLog(pc);
+  appendBlockEditor(pc, 'food', subTab);
 }
 
 async function loadFoodLog(el) {
@@ -447,12 +459,13 @@ async function loadMoney(subTab) {
   if (!el) return;
   el.innerHTML = renderPageHeader('money') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
-  if (subTab === 'Expenses' || subTab === 'Income') loadTransactions(pc, subTab === 'Income' ? 'income' : 'expense');
-  else if (subTab === 'Budget') loadBudgets(pc);
-  else if (subTab === 'Savings') loadSavings(pc);
-  else if (subTab === 'Subscriptions') loadSubscriptions(pc);
-  else if (subTab === 'Debts') loadDebts(pc);
-  else loadTransactions(pc, 'expense');
+  if (subTab === 'Expenses' || subTab === 'Income') await loadTransactions(pc, subTab === 'Income' ? 'income' : 'expense');
+  else if (subTab === 'Budget') await loadBudgets(pc);
+  else if (subTab === 'Savings') await loadSavings(pc);
+  else if (subTab === 'Subscriptions') await loadSubscriptions(pc);
+  else if (subTab === 'Debts') await loadDebts(pc);
+  else await loadTransactions(pc, 'expense');
+  appendBlockEditor(pc, 'money', subTab);
 }
 
 async function loadTransactions(el, txType) {
@@ -717,6 +730,7 @@ async function loadPeople(subTab) {
   } catch (e) {
     pc.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">⚠️</div>${e}</div>`;
   }
+  appendBlockEditor(pc, 'people', subTab);
 }
 
 // Window handlers for People (called from inline onclick)
@@ -1144,10 +1158,11 @@ async function loadWork() {
   const pc = el.querySelector('.page-content');
   try {
     const projects = await invoke('get_projects').catch(() => []);
-    renderWork(pc, projects || []);
+    await renderWork(pc, projects || []);
   } catch (e) {
     pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">💼</div><div class="tab-stub-title">Работа</div><div class="tab-stub-desc">Проекты и задачи</div><span class="tab-stub-badge">Скоро</span></div>';
   }
+  appendBlockEditor(pc, 'work', 'default');
 }
 
 async function renderWork(el, projects) {
@@ -1223,6 +1238,7 @@ async function loadDevelopment() {
   } catch (e) {
     pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">🚀</div><div class="tab-stub-title">Развитие</div><div class="tab-stub-desc">Обучение и саморазвитие</div><span class="tab-stub-badge">Скоро</span></div>';
   }
+  appendBlockEditor(pc, 'development', 'default');
 }
 
 function renderDevelopment(el, items) {
@@ -1303,11 +1319,12 @@ async function loadHobbies(subTab) {
   el.innerHTML = renderPageHeader('hobbies') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
   if (!subTab || subTab === 'Overview') {
-    loadHobbiesOverview(pc);
+    await loadHobbiesOverview(pc);
   } else {
     const mediaType = Object.entries(MEDIA_LABELS).find(([k,v]) => v === subTab)?.[0];
-    if (mediaType) loadMediaList(pc, mediaType);
+    if (mediaType) await loadMediaList(pc, mediaType);
   }
+  appendBlockEditor(pc, 'hobbies', subTab || 'Overview');
 }
 
 async function loadHobbiesOverview(el) {
@@ -1479,20 +1496,19 @@ async function loadSports(subTab) {
   el.innerHTML = renderPageHeader('sports') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
   if (subTab === 'Martial Arts') {
-    loadMartialArts(pc);
-    return;
+    await loadMartialArts(pc);
+  } else if (subTab === 'Stats') {
+    await loadSportsStats(pc);
+  } else {
+    try {
+      const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
+      const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
+      renderSports(pc, workouts || [], stats);
+    } catch (e) {
+      showStub('sports-content', '💪', 'Спорт', 'Тренировки и физическая активность');
+    }
   }
-  if (subTab === 'Stats') {
-    loadSportsStats(pc);
-    return;
-  }
-  try {
-    const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
-    const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
-    renderSports(pc, workouts || [], stats);
-  } catch (e) {
-    showStub('sports-content', '💪', 'Спорт', 'Тренировки и физическая активность');
-  }
+  appendBlockEditor(pc, 'sports', subTab || 'Workouts');
 }
 
 async function loadMartialArts(el) {
@@ -1636,6 +1652,7 @@ async function loadHealth() {
   } catch (e) {
     pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">❤️</div><div class="tab-stub-title">Здоровье</div><div class="tab-stub-desc">Метрики здоровья и привычки</div><span class="tab-stub-badge">Скоро</span></div>';
   }
+  appendBlockEditor(pc, 'health', 'default');
 }
 
 function renderHealth(el, today, habits) {

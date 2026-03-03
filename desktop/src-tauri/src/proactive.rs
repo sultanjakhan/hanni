@@ -551,7 +551,7 @@ pub async fn proactive_llm_call(
         max_tokens: 200,
         stream: false,
         temperature: 0.6,
-        repetition_penalty: Some(1.2),
+        repetition_penalty: None,
         chat_template_kwargs: ChatTemplateKwargs { enable_thinking: false },
         tools: None,
     };
