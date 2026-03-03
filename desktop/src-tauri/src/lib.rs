@@ -1622,6 +1622,12 @@ fn migrate_notes_v2(conn: &rusqlite::Connection) {
     ).ok();
 }
 
+fn migrate_content_blocks(conn: &rusqlite::Connection) {
+    // Editor.js block editor: JSON storage for structured content
+    conn.execute("ALTER TABLE notes ADD COLUMN content_blocks TEXT", []).ok();
+    conn.execute("ALTER TABLE custom_pages ADD COLUMN content_blocks TEXT", []).ok();
+}
+
 // ── Semantic memory helpers (sqlite-vec + fastembed) ──
 
 async fn embed_texts(client: &reqwest::Client, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
@@ -6457,23 +6463,25 @@ fn update_note(
     pinned: Option<bool>, archived: Option<bool>,
     tab_name: Option<String>, status: Option<String>,
     due_date: Option<String>, reminder_at: Option<String>,
+    content_blocks: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    let (cur_pinned, cur_archived, cur_tab, cur_status, cur_due, cur_reminder): (i32, i32, Option<String>, String, Option<String>, Option<String>) = conn.query_row(
-        "SELECT pinned, archived, tab_name, status, due_date, reminder_at FROM notes WHERE id=?1", rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3).unwrap_or_else(|_| "note".into()), row.get(4)?, row.get(5)?)),
-    ).unwrap_or((0, 0, None, "note".into(), None, None));
+    let (cur_pinned, cur_archived, cur_tab, cur_status, cur_due, cur_reminder, cur_blocks): (i32, i32, Option<String>, String, Option<String>, Option<String>, Option<String>) = conn.query_row(
+        "SELECT pinned, archived, tab_name, status, due_date, reminder_at, content_blocks FROM notes WHERE id=?1", rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3).unwrap_or_else(|_| "note".into()), row.get(4)?, row.get(5)?, row.get(6)?)),
+    ).unwrap_or((0, 0, None, "note".into(), None, None, None));
     let p = pinned.map(|v| v as i32).unwrap_or(cur_pinned);
     let a = archived.map(|v| v as i32).unwrap_or(cur_archived);
     let tn = if tab_name.is_some() { tab_name } else { cur_tab };
     let st = status.unwrap_or(cur_status);
     let dd = if due_date.is_some() { due_date } else { cur_due };
     let ra = if reminder_at.is_some() { reminder_at } else { cur_reminder };
+    let cb = if content_blocks.is_some() { content_blocks } else { cur_blocks };
     conn.execute(
-        "UPDATE notes SET title=?1, content=?2, tags=?3, pinned=?4, archived=?5, tab_name=?6, status=?7, due_date=?8, reminder_at=?9, updated_at=?10 WHERE id=?11",
-        rusqlite::params![title, content, tags, p, a, tn, st, dd, ra, now, id],
+        "UPDATE notes SET title=?1, content=?2, tags=?3, pinned=?4, archived=?5, tab_name=?6, status=?7, due_date=?8, reminder_at=?9, updated_at=?10, content_blocks=?11 WHERE id=?12",
+        rusqlite::params![title, content, tags, p, a, tn, st, dd, ra, now, cb, id],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -6519,7 +6527,7 @@ fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::State<'_
             else {
                 let fts_query = words.join(" OR ");
                 let mut stmt = conn.prepare(
-                    "SELECT n.id, n.title, n.content, n.tags, n.pinned, n.archived, n.created_at, n.updated_at, n.tab_name, n.status, n.due_date, n.reminder_at, n.sort_order
+                    "SELECT n.id, n.title, n.content, n.tags, n.pinned, n.archived, n.created_at, n.updated_at, n.tab_name, n.status, n.due_date, n.reminder_at, n.sort_order, n.content_blocks
                      FROM notes_fts fts JOIN notes n ON n.id = fts.rowid
                      WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT 50"
                 ).map_err(|e| format!("DB error: {}", e))?;
@@ -6531,14 +6539,14 @@ fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::State<'_
     } else if let Some(ref f) = filter {
         if f == "tasks" {
             let mut stmt = conn.prepare(
-                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
                  WHERE status IN ('task','done') AND archived=0 ORDER BY CASE WHEN status='done' THEN 1 ELSE 0 END, due_date ASC NULLS LAST, updated_at DESC LIMIT 200"
             ).map_err(|e| format!("DB error: {}", e))?;
             let result: Vec<serde_json::Value> = stmt.query_map([], |row| note_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
             result
         } else if let Some(tab) = f.strip_prefix("tab:") {
             let mut stmt = conn.prepare(
-                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
                  WHERE tab_name=?1 AND archived=0 ORDER BY pinned DESC, sort_order ASC, updated_at DESC LIMIT 200"
             ).map_err(|e| format!("DB error: {}", e))?;
             let result: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![tab], |row| note_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
@@ -6554,7 +6562,7 @@ fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::State<'_
 
 fn get_notes_all(conn: &rusqlite::Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
          ORDER BY pinned DESC, updated_at DESC LIMIT 200"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| note_from_row(row))
@@ -6577,6 +6585,7 @@ fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Err
         "due_date": row.get::<_, Option<String>>(10)?,
         "reminder_at": row.get::<_, Option<String>>(11)?,
         "sort_order": row.get::<_, i32>(12)?,
+        "content_blocks": row.get::<_, Option<String>>(13)?,
     }))
 }
 
@@ -6584,7 +6593,7 @@ fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::Err
 fn get_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
     conn.query_row(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes WHERE id=?1",
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes WHERE id=?1",
         rusqlite::params![id],
         |row| note_from_row(row),
     ).map_err(|e| format!("Not found: {}", e))
@@ -6641,7 +6650,7 @@ fn set_note_tag_color(name: String, color: String, db: tauri::State<'_, HanniDb>
 fn get_notes_for_tab(tab_name: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order FROM notes
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
          WHERE tab_name=?1 AND archived=0 ORDER BY pinned DESC, sort_order ASC, updated_at DESC LIMIT 100"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map(rusqlite::params![tab_name], |row| note_from_row(row))
@@ -6681,7 +6690,7 @@ fn create_custom_page(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value
 fn get_custom_pages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at FROM custom_pages ORDER BY sort_order"
+        "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at, content_blocks FROM custom_pages ORDER BY sort_order"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| {
         Ok(serde_json::json!({
@@ -6694,6 +6703,7 @@ fn get_custom_pages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Val
             "sort_order": row.get::<_, i32>(6)?,
             "created_at": row.get::<_, String>(7)?,
             "updated_at": row.get::<_, String>(8)?,
+            "content_blocks": row.get::<_, Option<String>>(9)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -6703,7 +6713,7 @@ fn get_custom_pages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Val
 fn get_custom_page(id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
     conn.query_row(
-        "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at FROM custom_pages WHERE id=?1",
+        "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at, content_blocks FROM custom_pages WHERE id=?1",
         rusqlite::params![id],
         |row| Ok(serde_json::json!({
             "id": row.get::<_, String>(0)?,
@@ -6715,6 +6725,7 @@ fn get_custom_page(id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_js
             "sort_order": row.get::<_, i32>(6)?,
             "created_at": row.get::<_, String>(7)?,
             "updated_at": row.get::<_, String>(8)?,
+            "content_blocks": row.get::<_, Option<String>>(9)?,
         })),
     ).map_err(|e| format!("Not found: {}", e))
 }
@@ -6723,24 +6734,26 @@ fn get_custom_page(id: String, db: tauri::State<'_, HanniDb>) -> Result<serde_js
 fn update_custom_page(
     id: String, title: Option<String>, icon: Option<String>,
     description: Option<String>, content: Option<String>,
+    content_blocks: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     // Get current values for fields not provided
-    let (cur_title, cur_icon, cur_desc, cur_content): (String, String, String, String) = conn.query_row(
-        "SELECT title, icon, description, content FROM custom_pages WHERE id=?1",
+    let (cur_title, cur_icon, cur_desc, cur_content, cur_blocks): (String, String, String, String, Option<String>) = conn.query_row(
+        "SELECT title, icon, description, content, content_blocks FROM custom_pages WHERE id=?1",
         rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     ).map_err(|e| format!("Not found: {}", e))?;
+    let cb = if content_blocks.is_some() { content_blocks } else { cur_blocks };
     conn.execute(
-        "UPDATE custom_pages SET title=?1, icon=?2, description=?3, content=?4, updated_at=?5 WHERE id=?6",
+        "UPDATE custom_pages SET title=?1, icon=?2, description=?3, content=?4, updated_at=?5, content_blocks=?7 WHERE id=?6",
         rusqlite::params![
             title.unwrap_or(cur_title),
             icon.unwrap_or(cur_icon),
             description.unwrap_or(cur_desc),
             content.unwrap_or(cur_content),
-            now, id
+            now, id, cb
         ],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
@@ -10522,6 +10535,7 @@ pub fn run() {
     migrate_conversations_category(&conn);
     migrate_proactive_history_v2(&conn);
     migrate_notes_v2(&conn);
+    migrate_content_blocks(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",

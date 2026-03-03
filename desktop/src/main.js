@@ -100,6 +100,8 @@ let focusWidgetTimerInterval = null;
 let focusWidgetPollInterval = null;
 let currentNoteId = null;
 let noteAutoSaveTimeout = null;
+let currentNoteEditor = null;
+let currentCpEditor = null;
 let tagColorMap = {};
 let noteTagFilter = null;
 let notesView = localStorage.getItem('hanni_notes_view') || 'all';
@@ -4742,36 +4744,54 @@ async function loadCustomPage(tabId) {
         <input class="page-description-input" id="cp-desc" value="${escapeHtml(page.description || '')}" placeholder="Добавить описание...">
       </div>
       <div class="custom-page-content">
-        <textarea class="custom-page-body" id="cp-body" placeholder="Начните писать...">${escapeHtml(page.content || '')}</textarea>
+        <div id="cp-editor" class="block-editor-container"></div>
       </div>
       <div class="custom-page-emoji-picker hidden" id="cp-emoji-picker">
         ${COMMON_EMOJIS.map(e => `<button class="emoji-pick-btn">${e}</button>`).join('')}
       </div>`;
 
-    // Auto-save helper
-    const autoSave = (field, value) => {
+    // Auto-save for metadata fields
+    const autoSaveMeta = (field, value) => {
       clearTimeout(customPageAutoSave);
       customPageAutoSave = setTimeout(async () => {
         const args = { id: reg.pageId };
         args[field] = value;
         await invoke('update_custom_page', args).catch(() => {});
-        // Sync title/icon to tab bar
         if (field === 'title') { reg.label = value || 'Без названия'; renderTabBar(); }
         if (field === 'icon') { reg.icon = value; renderTabBar(); }
       }, 500);
     };
 
-    document.getElementById('cp-title')?.addEventListener('input', (e) => autoSave('title', e.target.value));
-    document.getElementById('cp-desc')?.addEventListener('input', (e) => autoSave('description', e.target.value));
-    document.getElementById('cp-body')?.addEventListener('input', (e) => autoSave('content', e.target.value));
+    // Auto-save for Editor.js content
+    const autoSaveContent = () => {
+      clearTimeout(customPageAutoSave);
+      customPageAutoSave = setTimeout(async () => {
+        if (!currentCpEditor) return;
+        try {
+          const output = await currentCpEditor.save();
+          const contentBlocks = JSON.stringify(output);
+          const content = blocksToPlainText(output);
+          await invoke('update_custom_page', { id: reg.pageId, content, contentBlocks }).catch(() => {});
+        } catch (e) { console.error('cp editor save error:', e); }
+      }, 500);
+    };
 
-    // Auto-resize textarea
-    const body = document.getElementById('cp-body');
-    if (body) {
-      const resize = () => { body.style.height = 'auto'; body.style.height = body.scrollHeight + 'px'; };
-      body.addEventListener('input', resize);
-      setTimeout(resize, 0);
+    document.getElementById('cp-title')?.addEventListener('input', (e) => autoSaveMeta('title', e.target.value));
+    document.getElementById('cp-desc')?.addEventListener('input', (e) => autoSaveMeta('description', e.target.value));
+
+    // Initialize Editor.js for custom page
+    let editorData = null;
+    if (page.content_blocks) {
+      try { editorData = JSON.parse(page.content_blocks); } catch (e) { console.error('parse cp content_blocks:', e); }
     }
+    if (!editorData && page.content) {
+      editorData = migrateTextToBlocks(page.content);
+    }
+    if (currentCpEditor) {
+      try { currentCpEditor.destroy(); } catch (e) {}
+      currentCpEditor = null;
+    }
+    currentCpEditor = initBlockEditor('cp-editor', editorData, () => autoSaveContent());
 
     // Emoji picker
     const emojiPicker = document.getElementById('cp-emoji-picker');
@@ -4785,7 +4805,7 @@ async function loadCustomPage(tabId) {
         const emoji = btn.textContent;
         document.getElementById('cp-icon-btn').textContent = emoji;
         emojiPicker?.classList.add('hidden');
-        autoSave('icon', emoji);
+        autoSaveMeta('icon', emoji);
       });
     });
     // Close emoji picker on outside click
@@ -4799,6 +4819,10 @@ async function loadCustomPage(tabId) {
     // Delete page
     document.getElementById('cp-delete-btn')?.addEventListener('click', async () => {
       if (!(await confirmModal('Удалить страницу?'))) return;
+      if (currentCpEditor) {
+        try { currentCpEditor.destroy(); } catch (e) {}
+        currentCpEditor = null;
+      }
       await invoke('delete_custom_page', { id: reg.pageId }).catch(() => {});
       closeTab(tabId);
       delete TAB_REGISTRY[tabId];
@@ -5492,22 +5516,78 @@ async function createAndOpenNote() {
   } catch (err) { console.error('create_note error:', err); }
 }
 
-function saveCurrentNote(id) {
+// ── Editor.js block editor helpers ──
+
+function initBlockEditor(holderId, data, onChange) {
+  const editor = new EditorJS({
+    holder: holderId,
+    data: data || { blocks: [] },
+    placeholder: 'Нажмите / для команд...',
+    tools: {
+      header: { class: Header, config: { levels: [1, 2, 3], defaultLevel: 2 } },
+      list: { class: EditorjsList, inlineToolbar: true },
+      checklist: { class: Checklist, inlineToolbar: true },
+      quote: { class: Quote },
+      code: CodeTool,
+      delimiter: Delimiter,
+      marker: { class: Marker },
+      inlineCode: { class: InlineCode },
+    },
+    onChange: async (api) => {
+      const output = await api.saver.save();
+      if (onChange) onChange(output);
+    },
+    onReady: () => {
+      if (window.DragDrop) new DragDrop(editor);
+    },
+  });
+  return editor;
+}
+
+function blocksToPlainText(data) {
+  return (data?.blocks || []).map(b => {
+    if (b.type === 'checklist') return (b.data.items || []).map(i => i.text).join('\n');
+    if (b.type === 'list') {
+      const extractItems = (items) => (items || []).map(i => typeof i === 'string' ? i : i.content || i.text || '').join('\n');
+      return extractItems(b.data.items);
+    }
+    return b.data?.text || '';
+  }).join('\n');
+}
+
+function migrateTextToBlocks(text) {
+  if (!text) return { blocks: [] };
+  return {
+    blocks: text.split('\n\n').filter(Boolean).map(p => ({
+      type: 'paragraph',
+      data: { text: p.replace(/\n/g, '<br>') }
+    }))
+  };
+}
+
+async function saveCurrentNote(id) {
   clearTimeout(noteAutoSaveTimeout);
   const title = document.getElementById('note-title')?.value || '';
-  const content = document.getElementById('note-body')?.value || '';
   const tags = document.getElementById('note-tags-input')?.value || '';
   const tabName = document.getElementById('note-tab-select')?.value || null;
   const status = document.getElementById('note-status-select')?.value || null;
   const dueDate = document.getElementById('note-due-date')?.value || null;
   const reminderAt = document.getElementById('note-reminder')?.value || null;
-  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null, tabName, status, dueDate, reminderAt });
+  let content = '';
+  let contentBlocks = null;
+  if (currentNoteEditor) {
+    try {
+      const output = await currentNoteEditor.save();
+      contentBlocks = JSON.stringify(output);
+      content = blocksToPlainText(output);
+    } catch (e) { console.error('Editor.js save error:', e); }
+  }
+  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null, tabName, status, dueDate, reminderAt, contentBlocks });
 }
 
 async function renderNoteEditor(el, id) {
   try {
     const note = await invoke('get_note', { id });
-    notePreviewMode = false;
 
     // Build tab options
     const tabKeys = Object.keys(TAB_REGISTRY).filter(k => k !== 'chat' && !k.startsWith('page_'));
@@ -5524,7 +5604,6 @@ async function renderNoteEditor(el, id) {
       <div class="note-edit-topbar">
         <div class="note-breadcrumb" id="note-back-btn">← Notes</div>
         <div class="note-edit-actions">
-          <button class="note-action-btn" id="note-preview-btn" title="Markdown">👁</button>
           <button class="note-action-btn ${note.pinned ? 'active' : ''}" id="note-pin-btn" title="${note.pinned ? 'Открепить' : 'Закрепить'}">📌</button>
           <button class="note-action-btn" id="note-archive-btn" title="${note.archived ? 'Разархивировать' : 'В архив'}">📦</button>
           <button class="note-action-btn note-action-btn-danger" id="note-delete-btn" title="Удалить">🗑</button>
@@ -5552,53 +5631,40 @@ async function renderNoteEditor(el, id) {
         <input class="note-tag-input" id="note-tag-add" placeholder="+ тег" autocomplete="off">
       </div>
 
-      <textarea class="custom-page-body" id="note-body" placeholder="Начните писать...">${escapeHtml(note.content || '')}</textarea>
-      <div class="note-preview markdown-body" id="note-preview" style="display:none"></div>
+      <div id="note-editor" class="block-editor-container"></div>
       <input type="hidden" id="note-tags-input" value="${escapeHtml(note.tags || '')}">
     </div>`;
 
-    // Auto-resize textarea
-    const body = document.getElementById('note-body');
-    if (body) {
-      const resize = () => { body.style.height = 'auto'; body.style.height = Math.max(200, body.scrollHeight) + 'px'; };
-      body.addEventListener('input', resize);
-      setTimeout(resize, 0);
+    // Initialize Editor.js
+    let editorData = null;
+    if (note.content_blocks) {
+      try { editorData = JSON.parse(note.content_blocks); } catch (e) { console.error('parse content_blocks:', e); }
+    }
+    if (!editorData && note.content) {
+      editorData = migrateTextToBlocks(note.content);
     }
 
-    if (!note.title) document.getElementById('note-title')?.focus();
-    else document.getElementById('note-body')?.focus();
-
-    // Auto-save on typing
     const autoSave = () => {
       clearTimeout(noteAutoSaveTimeout);
       noteAutoSaveTimeout = setTimeout(() => {
         saveCurrentNote(id).catch(e => console.error('note autosave error:', e));
       }, 800);
     };
+
+    // Destroy previous editor instance
+    if (currentNoteEditor) {
+      try { currentNoteEditor.destroy(); } catch (e) {}
+      currentNoteEditor = null;
+    }
+    currentNoteEditor = initBlockEditor('note-editor', editorData, () => autoSave());
+
+    if (!note.title) document.getElementById('note-title')?.focus();
+
     document.getElementById('note-title')?.addEventListener('input', autoSave);
-    document.getElementById('note-body')?.addEventListener('input', autoSave);
     document.getElementById('note-status-select')?.addEventListener('change', autoSave);
     document.getElementById('note-due-date')?.addEventListener('change', autoSave);
     document.getElementById('note-reminder')?.addEventListener('change', autoSave);
     document.getElementById('note-tab-select')?.addEventListener('change', autoSave);
-
-    // Markdown preview toggle
-    document.getElementById('note-preview-btn')?.addEventListener('click', () => {
-      notePreviewMode = !notePreviewMode;
-      const ta = document.getElementById('note-body');
-      const pv = document.getElementById('note-preview');
-      const btn = document.getElementById('note-preview-btn');
-      if (notePreviewMode) {
-        pv.innerHTML = renderMarkdown(ta.value || '');
-        ta.style.display = 'none';
-        pv.style.display = 'block';
-        btn.classList.add('active');
-      } else {
-        ta.style.display = '';
-        pv.style.display = 'none';
-        btn.classList.remove('active');
-      }
-    });
 
     // Tag input
     const tagInput = document.getElementById('note-tag-add');
@@ -5644,8 +5710,12 @@ async function renderNoteEditor(el, id) {
     });
 
     // Back
-    document.getElementById('note-back-btn')?.addEventListener('click', () => {
-      saveCurrentNote(id).catch(() => {});
+    document.getElementById('note-back-btn')?.addEventListener('click', async () => {
+      await saveCurrentNote(id).catch(() => {});
+      if (currentNoteEditor) {
+        try { currentNoteEditor.destroy(); } catch (e) {}
+        currentNoteEditor = null;
+      }
       currentNoteId = null;
       notesViewMode = 'list';
       loadNotes();
