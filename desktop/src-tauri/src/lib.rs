@@ -281,6 +281,7 @@ pub fn run() {
             // Learning Items (Development)
             commands_data::create_learning_item,
             commands_data::get_learning_items,
+            commands_data::update_learning_item_status,
             // Hobbies
             commands_data::create_hobby,
             commands_data::get_hobbies,
@@ -856,6 +857,61 @@ pub fn run() {
             });
 
             // Proactive messaging background loop
+            // OpenClaw cron → Hanni chat bridge: poll openclaw_proactive table
+            let openclaw_poll_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Wait for app startup
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // Ensure table exists
+                {
+                    let db = openclaw_poll_handle.state::<HanniDb>();
+                    let conn = db.conn();
+                    let _ = conn.execute_batch(
+                        "CREATE TABLE IF NOT EXISTS openclaw_proactive (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            message TEXT NOT NULL,
+                            style TEXT DEFAULT 'observation',
+                            created_at TEXT NOT NULL,
+                            delivered INTEGER DEFAULT 0
+                        )"
+                    );
+                }
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let pending: Vec<(i64, String, String)> = {
+                        let db = openclaw_poll_handle.state::<HanniDb>();
+                        let conn = db.conn();
+                        let mut stmt = match conn.prepare(
+                            "SELECT id, message, style FROM openclaw_proactive WHERE delivered = 0 ORDER BY id LIMIT 5"
+                        ) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        stmt.query_map([], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                        }).ok().map(|rows| rows.flatten().collect()).unwrap_or_default()
+                    };
+                    for (id, message, style) in &pending {
+                        // Mark delivered
+                        {
+                            let db = openclaw_poll_handle.state::<HanniDb>();
+                            let conn = db.conn();
+                            let _ = conn.execute("UPDATE openclaw_proactive SET delivered = 1 WHERE id = ?", [id]);
+                            // Also save to proactive_history for continuity
+                            let _ = conn.execute(
+                                "INSERT INTO proactive_history (sent_at, message, style) VALUES (?1, ?2, ?3)",
+                                rusqlite::params![chrono::Local::now().to_rfc3339(), message, style],
+                            );
+                        }
+                        // Emit to frontend — same event as native proactive
+                        let _ = openclaw_poll_handle.emit("proactive-message", serde_json::json!({
+                            "text": message,
+                            "id": id,
+                        }));
+                    }
+                }
+            });
+
             let proactive_handle = app.handle().clone();
             let proactive_state_ref = proactive_state.clone();
             tauri::async_runtime::spawn(async move {

@@ -801,6 +801,19 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
             continue;
         }
 
+        // Skip proactive when OpenClaw is active — it has its own proactive system
+        let openclaw_active: bool = {
+            let db = proactive_handle.state::<HanniDb>();
+            let conn = db.conn();
+            conn.query_row(
+                "SELECT value FROM app_settings WHERE key='use_openclaw'",
+                [], |row| row.get::<_, String>(0),
+            ).map(|v| v == "true" || v == "1").unwrap_or(false)
+        };
+        if openclaw_active {
+            continue;
+        }
+
         // ── Smart Adaptive Timing (Step 8) ──
         let base_interval_secs = interval * 60;
         let elapsed = last_check.elapsed().as_secs();
