@@ -94,7 +94,9 @@ export async function loadConversation(id) {
     // Render all messages
     for (let i = 0; i < S.history.length; i++) {
       const role = getRole(S.history[i]);
-      const content = getContent(S.history[i]);
+      const content = getContent(S.history[i]) || '';
+      // Skip assistant messages with no content (tool_call-only messages)
+      if (role === 'assistant' && !content) continue;
       // Skip tool result messages in UI
       if (role === 'tool') {
         const div = document.createElement('div');
