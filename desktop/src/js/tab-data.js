@@ -3,8 +3,9 @@
 import { S, invoke, tabLoaders, TAB_REGISTRY, TAB_ICONS, MEDIA_TYPES, MEDIA_LABELS, STATUS_LABELS, MEMORY_CATEGORIES, COMMON_EMOJIS } from './state.js';
 import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks, loadTabBlockEditor } from './utils.js';
 import { renderTabBar, closeTab } from './tabs.js';
+import { DatabaseView } from './db-view/db-view.js';
 
-// Helper: renderDatabaseView lives in tab-notes.js, access via tabLoaders
+// Legacy helper: backward-compat wrapper (still used by Recipes, Products)
 function renderDatabaseView(el, tabId, recordTable, records, options) {
   return tabLoaders.renderDatabaseView?.(el, tabId, recordTable, records, options);
 }
@@ -459,76 +460,109 @@ async function loadMoney(subTab) {
   if (!el) return;
   el.innerHTML = renderPageHeader('money') + '<div class="page-content"></div>';
   const pc = el.querySelector('.page-content');
-  if (subTab === 'Expenses' || subTab === 'Income') await loadTransactions(pc, subTab === 'Income' ? 'income' : 'expense');
+  if (subTab === 'Transactions') await loadTransactions(pc);
   else if (subTab === 'Budget') await loadBudgets(pc);
   else if (subTab === 'Savings') await loadSavings(pc);
   else if (subTab === 'Subscriptions') await loadSubscriptions(pc);
   else if (subTab === 'Debts') await loadDebts(pc);
-  else await loadTransactions(pc, 'expense');
+  else await loadTransactions(pc);
   appendBlockEditor(pc, 'money', subTab);
 }
 
-async function loadTransactions(el, txType) {
+async function loadTransactions(el) {
   try {
+    const txFilter = S.moneyTxFilter;
+    const txType = txFilter === 'all' ? null : txFilter;
     const items = await invoke('get_transactions', { txType, category: null, days: 30 }).catch(() => []);
     const stats = await invoke('get_transaction_stats', { days: 30 }).catch(() => ({}));
-    const isExpense = txType === 'expense';
-    el.innerHTML = `
-      <div class="module-header"><h2>${isExpense ? 'Expenses' : 'Income'}</h2><button class="btn-primary" id="tx-add-btn">+ Add</button></div>
-      <div class="dashboard-stats">
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${isExpense ? (stats.total_expenses||0) : (stats.total_income||0)}</div><div class="dashboard-stat-label">Total (30d)</div></div>
-      </div>
-      <div id="tx-list">
-        ${items.map(t => `<div class="focus-log-item">
-          <span class="focus-log-time">${t.date}</span>
-          <span class="focus-log-title">${escapeHtml(t.description||t.category)}</span>
-          <span class="badge badge-gray">${t.category}</span>
-          <span class="focus-log-duration" style="color:${isExpense?'var(--text-muted)':'var(--text-primary)'}">${isExpense?'-':'+'} ${t.amount} ${t.currency||'KZT'}</span>
-          <button class="memory-item-btn" data-txdel="${t.id}">&times;</button>
-        </div>`).join('')}
-      </div>`;
-    el.querySelectorAll('[data-txdel]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        await invoke('delete_transaction', { id: parseInt(btn.dataset.txdel) }).catch(()=>{});
-        loadTransactions(el, txType);
-      });
+
+    // Type filter chips (expense/income/all)
+    const typeFilterBar = `<div class="dev-filters" style="margin-bottom:var(--space-2);">
+      ${['all','expense','income'].map(f =>
+        `<button class="pill${S.moneyTxFilter === f ? ' active' : ''}" data-txfilter="${f}">${f === 'all' ? 'All' : f === 'expense' ? 'Expenses' : 'Income'}</button>`
+      ).join('')}
+    </div>`;
+
+    // Stats summary
+    const statsHtml = `<div class="dashboard-stats" style="margin-bottom:var(--space-3);">
+      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_expenses || 0}</div><div class="dashboard-stat-label">Expenses (30d)</div></div>
+      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_income || 0}</div><div class="dashboard-stat-label">Income (30d)</div></div>
+      <div class="dashboard-stat"><div class="dashboard-stat-value">${(stats.total_income || 0) - (stats.total_expenses || 0)}</div><div class="dashboard-stat-label">Balance</div></div>
+    </div>`;
+
+    const fixedColumns = [
+      { key: 'date', label: 'Date', render: r => `<span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;">${r.date}</span>` },
+      { key: 'description', label: 'Description', render: r => `<span class="data-table-title">${escapeHtml(r.description || r.category)}</span>` },
+      { key: 'category', label: 'Category', render: r => `<span class="badge badge-gray">${escapeHtml(r.category)}</span>` },
+      { key: 'tx_type', label: 'Type', render: r => `<span class="badge ${r.tx_type === 'income' ? 'badge-green' : 'badge-purple'}">${r.tx_type === 'income' ? 'Income' : 'Expense'}</span>` },
+      { key: 'amount', label: 'Amount', render: r => {
+        const isIncome = r.tx_type === 'income';
+        return `<span style="color:${isIncome ? 'var(--color-green)' : 'var(--text-secondary)'};font-variant-numeric:tabular-nums;font-weight:500;">${isIncome ? '+' : '-'} ${r.amount} ${r.currency || 'KZT'}</span>`;
+      }},
+    ];
+
+    el.innerHTML = typeFilterBar + statsHtml + '<div id="tx-dbv"></div>';
+    const dbvEl = document.getElementById('tx-dbv');
+
+    const dbv = new DatabaseView(dbvEl, {
+      tabId: 'money',
+      recordTable: 'transactions',
+      records: items,
+      fixedColumns,
+      idField: 'id',
+      availableViews: ['table', 'list'],
+      defaultView: 'table',
+      addButton: '+ Add',
+      onAdd: () => showAddTransactionModal(el),
+      reloadFn: () => loadTransactions(el),
     });
-    document.getElementById('tx-add-btn')?.addEventListener('click', () => {
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.innerHTML = `<div class="modal">
-        <div class="modal-title">Add ${isExpense ? 'Expense' : 'Income'}</div>
-        <div class="form-group"><label class="form-label">Amount</label><input class="form-input" id="tx-amount" type="number" step="0.01"></div>
-        <div class="form-group"><label class="form-label">Category</label><input class="form-input" id="tx-category" placeholder="food, transport, salary..."></div>
-        <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="tx-desc"></div>
-        <div class="form-group"><label class="form-label">Currency</label>
-          <select class="form-select" id="tx-currency" style="width:100%;">
-            <option value="KZT">KZT</option><option value="USD">USD</option><option value="RUB">RUB</option>
-          </select></div>
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-          <button class="btn-primary" id="tx-save">Save</button>
-        </div>
-      </div>`;
-      document.body.appendChild(overlay);
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-      document.getElementById('tx-save')?.addEventListener('click', async () => {
-        const amount = parseFloat(document.getElementById('tx-amount')?.value);
-        if (!amount) return;
-        try {
-          await invoke('add_transaction', {
-            date: null, txType, amount,
-            currency: document.getElementById('tx-currency')?.value||'KZT',
-            category: document.getElementById('tx-category')?.value||'other',
-            description: document.getElementById('tx-desc')?.value||'',
-            recurring: false, recurringPeriod: null,
-          });
-          overlay.remove();
-          loadTransactions(el, txType);
-        } catch (err) { alert('Error: ' + err); }
-      });
+    S.dbViews.transactions = dbv;
+    await dbv.render();
+
+    el.querySelectorAll('[data-txfilter]').forEach(btn => {
+      btn.addEventListener('click', () => { S.moneyTxFilter = btn.dataset.txfilter; loadTransactions(el); });
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
+}
+
+function showAddTransactionModal(parentEl) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Add Transaction</div>
+    <div class="form-group"><label class="form-label">Type</label>
+      <select class="form-select" id="tx-type" style="width:100%;">
+        <option value="expense">Expense</option><option value="income">Income</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Amount</label><input class="form-input" id="tx-amount" type="number" step="0.01"></div>
+    <div class="form-group"><label class="form-label">Category</label><input class="form-input" id="tx-category" placeholder="food, transport, salary..."></div>
+    <div class="form-group"><label class="form-label">Description</label><input class="form-input" id="tx-desc"></div>
+    <div class="form-group"><label class="form-label">Currency</label>
+      <select class="form-select" id="tx-currency" style="width:100%;">
+        <option value="KZT">KZT</option><option value="USD">USD</option><option value="RUB">RUB</option>
+      </select></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-primary" id="tx-save">Save</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('tx-save')?.addEventListener('click', async () => {
+    const amount = parseFloat(document.getElementById('tx-amount')?.value);
+    if (!amount) return;
+    try {
+      await invoke('add_transaction', {
+        date: null, txType: document.getElementById('tx-type')?.value || 'expense', amount,
+        currency: document.getElementById('tx-currency')?.value || 'KZT',
+        category: document.getElementById('tx-category')?.value || 'other',
+        description: document.getElementById('tx-desc')?.value || '',
+        recurring: false, recurringPeriod: null,
+      });
+      overlay.remove();
+      loadTransactions(parentEl);
+    } catch (err) { alert('Error: ' + err); }
+  });
 }
 
 async function loadBudgets(el) {
@@ -1261,15 +1295,34 @@ function renderDevelopment(el, items) {
   el.innerHTML = filterBar + '<div id="dev-dbv"></div>';
   const dbvEl = document.getElementById('dev-dbv');
 
-  renderDatabaseView(dbvEl, 'development', 'learning_items', items, {
+  const dbv = new DatabaseView(dbvEl, {
+    tabId: 'development',
+    recordTable: 'learning_items',
+    records: items,
     fixedColumns,
     idField: 'id',
+    availableViews: ['table', 'kanban', 'list'],
+    defaultView: 'table',
     addButton: '+ Добавить',
     onAdd: () => showAddLearningModal(),
     reloadFn: () => loadDevelopment(),
-    _tabId: 'development',
-    _recordTable: 'learning_items',
+    kanban: {
+      groupByField: 'status',
+      columns: [
+        { key: 'planned', label: 'Запланировано', icon: '\ud83d\udccb' },
+        { key: 'in_progress', label: 'В процессе', icon: '\u25b6' },
+        { key: 'completed', label: 'Завершено', icon: '\u2705' },
+      ],
+    },
+    onDrop: async (recordId, field, newValue) => {
+      try {
+        await invoke('update_learning_item_status', { id: parseInt(recordId), status: newValue });
+        loadDevelopment();
+      } catch (err) { console.error('kanban drop:', err); }
+    },
   });
+  S.dbViews.development = dbv;
+  dbv.render();
 
   el.querySelectorAll('.dev-filters .pill').forEach(btn => {
     btn.addEventListener('click', () => { S.devFilter = btn.dataset.filter; loadDevelopment(); });
@@ -1354,17 +1407,15 @@ async function loadHobbiesOverview(el) {
 async function loadMediaList(el, mediaType) {
   try {
     const items = await invoke('get_media_items', { mediaType, status: S.mediaStatusFilter === 'all' ? null : S.mediaStatusFilter, hidden: false });
-    const label = MEDIA_LABELS[mediaType];
     const hasEp = ['anime','series','cartoon','manga','podcast'].includes(mediaType);
 
-    // Status filter bar
+    // Status filter bar (domain filter — above DatabaseView)
     const filterBar = `<div class="dev-filters">
       ${['all','planned','in_progress','completed','on_hold','dropped'].map(s =>
         `<button class="pill${S.mediaStatusFilter === s ? ' active' : ''}" data-filter="${s}">${s === 'all' ? 'All' : STATUS_LABELS[s]}</button>`
       ).join('')}
     </div>`;
 
-    // Fixed columns from existing schema
     const fixedColumns = [
       { key: 'title', label: 'Title', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
       { key: 'status', label: 'Status', render: r => `<span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>` },
@@ -1376,20 +1427,55 @@ async function loadMediaList(el, mediaType) {
       { key: 'year', label: 'Year', render: r => `<span style="color:var(--text-muted);font-size:12px;">${r.year || '\u2014'}</span>` },
     ];
 
-    // Render filter bar + database view container
     el.innerHTML = filterBar + '<div id="media-dbv"></div>';
     const dbvEl = document.getElementById('media-dbv');
 
-    await renderDatabaseView(dbvEl, 'hobbies', 'media_items', items, {
+    const dbv = new DatabaseView(dbvEl, {
+      tabId: 'hobbies',
+      recordTable: 'media_items',
+      records: items,
       fixedColumns,
       idField: 'id',
+      availableViews: ['table', 'kanban', 'gallery'],
+      defaultView: 'table',
       addButton: '+ Add',
       onAdd: () => showAddMediaModal(mediaType),
       onRowClick: (record) => showMediaDetail(record, mediaType),
       reloadFn: () => loadMediaList(el, mediaType),
-      _tabId: 'hobbies',
-      _recordTable: 'media_items',
+      kanban: {
+        groupByField: 'status',
+        columns: [
+          { key: 'planned', label: 'Planned', icon: '\ud83d\udccb' },
+          { key: 'in_progress', label: 'In Progress', icon: '\u25b6' },
+          { key: 'completed', label: 'Completed', icon: '\u2705' },
+          { key: 'on_hold', label: 'On Hold', icon: '\u23f8' },
+          { key: 'dropped', label: 'Dropped', icon: '\u274c' },
+        ],
+      },
+      gallery: {
+        minCardWidth: 200,
+        renderCard: (r) => {
+          const stars = r.rating ? '\u2605'.repeat(Math.round(r.rating / 2)) + '\u2606'.repeat(5 - Math.round(r.rating / 2)) : '';
+          return `<div class="dbv-gallery-card-title">${escapeHtml(r.title)}</div>
+            <div class="dbv-gallery-card-badges">
+              <span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>
+              ${r.year ? `<span style="font-size:11px;color:var(--text-muted);">${r.year}</span>` : ''}
+            </div>
+            ${stars ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:auto;">${stars}</div>` : ''}`;
+        },
+      },
+      onDrop: async (recordId, field, newValue) => {
+        try {
+          await invoke('update_media_item', {
+            id: parseInt(recordId), status: newValue,
+            rating: null, progress: null, notes: null, title: null, description: null, coverUrl: null, totalEpisodes: null,
+          });
+          loadMediaList(el, mediaType);
+        } catch (err) { console.error('kanban drop:', err); }
+      },
     });
+    S.dbViews[`hobbies_${mediaType}`] = dbv;
+    await dbv.render();
 
     el.querySelectorAll('.dev-filters .pill').forEach(btn => {
       btn.addEventListener('click', () => { S.mediaStatusFilter = btn.dataset.filter; loadMediaList(el, mediaType); });

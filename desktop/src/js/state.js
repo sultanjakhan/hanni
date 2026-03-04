@@ -54,6 +54,7 @@ export const S = {
   currentProjectId: null,
   devFilter: 'all',
   mediaStatusFilter: 'all',
+  moneyTxFilter: 'all',
   lastProactiveTime: 0,
   typingTimeout: null,
   openTabs: ['chat'],
@@ -73,6 +74,7 @@ export const S = {
   syncedMonths: new Set(),
   calDayDate: null,
   dbvFilters: {},
+  dbViews: {},
   _scrollRAF: null,
   _wakeWordSSE: null,
   callModeActive: false,
@@ -161,7 +163,7 @@ export const TAB_REGISTRY = {
   health:      { label: 'Health',      icon: TAB_ICONS.health,  closable: true,  subTabs: ['Today', 'Habits'] },
   mindset:     { label: 'Mindset',     icon: TAB_ICONS.mindset, closable: true,  subTabs: ['Journal', 'Mood', 'Principles'] },
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: ['Food Log', 'Recipes', 'Products'] },
-  money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Expenses', 'Income', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
+  money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: ['Transactions', 'Budget', 'Savings', 'Subscriptions', 'Debts'] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: ['All', 'Blocked', 'Favorites'] },
 };
 

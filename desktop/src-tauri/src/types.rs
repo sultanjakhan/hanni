@@ -10,7 +10,6 @@ use std::sync::Arc;
 pub const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 pub const MODEL: &str = "NexVeridian/Qwen3.5-35B-A3B-4bit";
 pub const VOICE_SERVER_URL: &str = "http://127.0.0.1:8237";
-pub const MAX_TTS_TEXT_LEN: usize = 2000;
 
 // OpenClaw Gateway
 pub const OPENCLAW_URL: &str = "http://127.0.0.1:18789/v1/chat/completions";

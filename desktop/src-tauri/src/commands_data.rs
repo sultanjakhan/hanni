@@ -390,6 +390,17 @@ pub fn learning_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusql
     }))
 }
 
+#[tauri::command]
+pub fn update_learning_item_status(id: i64, status: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "UPDATE learning_items SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![status, now, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
 // ── v0.7.0: Hobbies commands ──
 
 #[tauri::command]
