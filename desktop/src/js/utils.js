@@ -29,7 +29,7 @@ markedInstance.use({
 });
 
 export function renderMarkdown(text) {
-  return markedInstance.parse(text);
+  return markedInstance.parse(text || '');
 }
 
 export function escapeHtml(text) {
