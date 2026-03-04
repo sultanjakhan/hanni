@@ -1231,6 +1231,8 @@ async function send() {
   input.value = '';
   input.style.height = 'auto';
 
+  try {
+
   // Report user chat activity for adaptive timing
   invoke('report_user_chat_activity').catch(() => {});
   // If user replies within 10 min of a proactive message, report engagement
@@ -1431,9 +1433,14 @@ async function send() {
     } catch (_) {}
   })();
 
-  S.busy = false;
-  sendBtn.disabled = false;
-  input.focus();
+  } catch (err) {
+    console.error('send() error:', err);
+    addMsg('bot', 'Ошибка: ' + (err.message || err));
+  } finally {
+    S.busy = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
 }
 
 // ── New Chat ──
