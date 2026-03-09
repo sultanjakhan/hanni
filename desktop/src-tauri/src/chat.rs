@@ -9,7 +9,7 @@ use std::collections::HashMap;
 // ── Chat command ──
 
 #[tauri::command]
-pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Option<bool>, conversation_id: Option<String>) -> Result<String, String> {
+pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Option<bool>, conversation_id: Option<serde_json::Value>) -> Result<String, String> {
     let llm_state = app.state::<LlmBusy>();
     // Wait for any in-flight LLM call (e.g. proactive) to finish — MLX is single-threaded
     let _permit = tokio::time::timeout(
@@ -32,7 +32,12 @@ pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: O
 
     // Call mode always uses direct MLX (fast ~3s vs 30s+ through OpenClaw)
     let result = if use_openclaw && !is_call {
-        chat_openclaw(&app, messages.clone(), is_call, conversation_id.as_deref()).await?
+        let conv_id_str = conversation_id.as_ref().map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            other => other.to_string(),
+        });
+        chat_openclaw(&app, messages.clone(), is_call, conv_id_str.as_deref()).await?
     } else {
         let result = chat_inner(&app, messages.clone(), is_call).await?;
 
