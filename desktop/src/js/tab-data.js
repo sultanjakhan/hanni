@@ -50,7 +50,22 @@ async function loadHome(subTab) {
         </div>`;
     },
     renderTable: async (paneEl) => {
-      await loadSupplies(paneEl);
+      const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
+      const categories = { cleaning: 'Уборка', hygiene: 'Гигиена', household: 'Дом', electronics: 'Техника', tools: 'Инструменты', other: 'Другое' };
+      const dbv = new DatabaseView(paneEl, {
+        tabId: 'home', recordTable: 'home_items', records: items,
+        fixedColumns: [
+          { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+          { key: 'category', label: 'Категория', render: r => `<span class="badge badge-gray">${categories[r.category] || r.category}</span>` },
+          { key: 'quantity', label: 'Кол-во', render: r => r.quantity != null ? `${r.quantity} ${r.unit || ''}` : '—' },
+          { key: 'location', label: 'Место', render: r => r.location || '—' },
+          { key: 'needed', label: 'Статус', render: r => r.needed ? '<span class="badge badge-red">Нужно</span>' : '<span class="badge badge-green">Есть</span>' },
+        ],
+        addButton: '+ Добавить',
+        onAdd: () => { showHomeAddModal(); },
+        reloadFn: () => loadHome(),
+      });
+      await dbv.render();
     },
   });
 }
@@ -264,24 +279,32 @@ async function loadMoodLog(el) {
 async function loadPrinciples(el) {
   try {
     const principles = await invoke('get_principles').catch(() => []);
-    el.innerHTML = `
-      <div class="module-header"><h2>Principles</h2><button class="btn-primary" id="add-principle-btn">+ Add</button></div>
-      <div id="principles-list">
-        ${principles.map(p => `<div class="habit-item">
-          <div class="habit-check${p.active ? ' checked' : ''}" data-id="${p.id}">${p.active ? '&#10003;' : ''}</div>
-          <span class="habit-name">${escapeHtml(p.title)}</span>
-          <span style="color:var(--text-faint);font-size:11px;">${p.category||''}</span>
-          <button class="memory-item-btn" data-del="${p.id}" style="margin-left:auto;">&times;</button>
-        </div>`).join('')}
-      </div>`;
-    el.querySelectorAll('[data-del]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (await confirmModal('Удалить?')) { await invoke('delete_principle', { id: parseInt(btn.dataset.del) }).catch(()=>{}); loadPrinciples(el); }
-      });
+    const dbv = new DatabaseView(el, {
+      tabId: 'mindset',
+      recordTable: 'principles',
+      records: principles,
+      fixedColumns: [
+        { key: 'active', label: '', render: r => `<div class="habit-check${r.active ? ' checked' : ''}" style="cursor:pointer;" data-pid="${r.id}">${r.active ? '&#10003;' : ''}</div>` },
+        { key: 'title', label: 'Принцип', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+        { key: 'category', label: 'Категория', render: r => `<span class="badge badge-gray">${r.category || '—'}</span>` },
+        { key: 'actions', label: '', render: r => `<button class="btn-secondary" style="padding:4px 8px;font-size:11px;color:var(--color-red);" data-pdel="${r.id}">✕</button>` },
+      ],
+      idField: 'id',
+      addButton: '+ Принцип',
+      onAdd: () => {
+        const title = prompt('Принцип:');
+        if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
+      },
+      reloadFn: () => loadPrinciples(el),
     });
-    document.getElementById('add-principle-btn')?.addEventListener('click', () => {
-      const title = prompt('Principle:');
-      if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
+    await dbv.render();
+
+    // Delegate delete clicks
+    el.addEventListener('click', async (e) => {
+      const del = e.target.closest('[data-pdel]');
+      if (del) {
+        if (await confirmModal('Удалить?')) { await invoke('delete_principle', { id: parseInt(del.dataset.pdel) }).catch(()=>{}); loadPrinciples(el); }
+      }
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
@@ -331,34 +354,26 @@ async function loadFoodLog(el) {
   try {
     const today = new Date().toISOString().split('T')[0];
     const log = await invoke('get_food_log', { date: today }).catch(() => []);
-    const stats = await invoke('get_food_stats', { days: 1 }).catch(() => ({}));
-    const mealLabels = { breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snack:'Snack' };
-    el.innerHTML = `
-      <div class="module-header"><h2>Food Log</h2><button class="btn-primary" id="food-add-btn">+ Log Food</button></div>
-      <div class="dashboard-stats">
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_calories||0}</div><div class="dashboard-stat-label">Calories</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_protein||0}g</div><div class="dashboard-stat-label">Protein</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_carbs||0}g</div><div class="dashboard-stat-label">Carbs</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.avg_fat||0}g</div><div class="dashboard-stat-label">Fat</div></div>
-      </div>
-      <div id="food-log-list">
-        ${['breakfast','lunch','dinner','snack'].map(meal => {
-          const items = log.filter(l => l.meal_type === meal);
-          return items.length > 0 ? `<div class="module-card-title">${mealLabels[meal]}</div>
-            ${items.map(i => `<div class="focus-log-item">
-              <span class="focus-log-title">${escapeHtml(i.name)}</span>
-              <span class="focus-log-duration">${i.calories||0} kcal</span>
-              <button class="memory-item-btn" data-fdel="${i.id}">&times;</button>
-            </div>`).join('')}` : '';
-        }).join('')}
-      </div>`;
-    el.querySelectorAll('[data-fdel]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        await invoke('delete_food_entry', { id: parseInt(btn.dataset.fdel) }).catch(()=>{});
-        loadFoodLog(el);
-      });
+    const mealLabels = { breakfast:'Завтрак', lunch:'Обед', dinner:'Ужин', snack:'Перекус' };
+
+    const dbv = new DatabaseView(el, {
+      tabId: 'food',
+      recordTable: 'food_log',
+      records: log,
+      fixedColumns: [
+        { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'meal_type', label: 'Приём', render: r => `<span class="badge badge-gray">${mealLabels[r.meal_type] || r.meal_type}</span>` },
+        { key: 'calories', label: 'Калории', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.calories || 0} kcal</span>` },
+        { key: 'protein', label: 'Белок', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.protein || '—'}g</span>` },
+        { key: 'carbs', label: 'Углев.', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.carbs || '—'}g</span>` },
+        { key: 'fat', label: 'Жиры', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.fat || '—'}g</span>` },
+      ],
+      idField: 'id',
+      addButton: '+ Записать',
+      onAdd: () => showAddFoodModal(el),
+      reloadFn: () => loadFoodLog(el),
     });
-    document.getElementById('food-add-btn')?.addEventListener('click', () => showAddFoodModal(el));
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -413,13 +428,14 @@ async function loadRecipes(el) {
     ];
     el.innerHTML = '<div id="recipes-dbv"></div>';
     const dbvEl = document.getElementById('recipes-dbv');
-    await renderDatabaseView(dbvEl, 'food', 'recipes', recipes, {
+    const dbv = new DatabaseView(dbvEl, {
+      tabId: 'food', recordTable: 'recipes', records: recipes,
       fixedColumns, idField: 'id',
-      addButton: '+ Add Recipe',
+      addButton: '+ Рецепт',
       onAdd: () => showAddRecipeModal(el),
       reloadFn: () => loadRecipes(el),
-      _tabId: 'food', _recordTable: 'recipes',
     });
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -476,13 +492,14 @@ async function loadProducts(el) {
     ];
     el.innerHTML = '<div id="products-dbv"></div>';
     const dbvEl = document.getElementById('products-dbv');
-    await renderDatabaseView(dbvEl, 'food', 'products', products, {
+    const dbv = new DatabaseView(dbvEl, {
+      tabId: 'food', recordTable: 'products', records: products,
       fixedColumns, idField: 'id',
-      addButton: '+ Add Product',
+      addButton: '+ Продукт',
       onAdd: () => showAddProductModal(el),
       reloadFn: () => loadProducts(el),
-      _tabId: 'food', _recordTable: 'products',
     });
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -671,64 +688,79 @@ function showAddTransactionModal(parentEl) {
 async function loadBudgets(el) {
   try {
     const budgets = await invoke('get_budgets').catch(() => []);
-    el.innerHTML = `
-      <div class="module-header"><h2>Budgets</h2><button class="btn-primary" id="budget-add-btn">+ Add Budget</button></div>
-      <div id="budgets-list">
-        ${budgets.map(b => {
-          const pct = b.amount > 0 ? Math.min(100, Math.round((b.spent||0) / b.amount * 100)) : 0;
+    const dbv = new DatabaseView(el, {
+      tabId: 'money',
+      recordTable: 'budgets',
+      records: budgets,
+      fixedColumns: [
+        { key: 'category', label: 'Категория', render: r => `<span class="data-table-title">${escapeHtml(r.category)}</span>` },
+        { key: 'amount', label: 'Бюджет', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount}</span>` },
+        { key: 'spent', label: 'Потрачено', render: r => {
+          const pct = r.amount > 0 ? Math.min(100, Math.round((r.spent||0) / r.amount * 100)) : 0;
           const warn = pct > 80;
-          return `<div class="settings-section" style="margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="color:var(--text-primary);font-size:14px;">${escapeHtml(b.category)}</span>
-              <span style="color:${warn?'var(--color-yellow)':'var(--text-secondary)'};font-size:12px;">${b.spent||0} / ${b.amount} (${b.period})</span>
-            </div>
-            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'var(--color-yellow)':'var(--accent-blue)'}"></div></div>
-          </div>`;
-        }).join('')}
-      </div>`;
-    document.getElementById('budget-add-btn')?.addEventListener('click', () => {
-      const cat = prompt('Category:');
-      const amt = prompt('Amount:');
-      if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
+          return `<span style="color:${warn?'var(--color-yellow)':'var(--text-secondary)'};font-size:12px;">${r.spent||0}</span>`;
+        }},
+        { key: 'progress', label: 'Прогресс', render: r => {
+          const pct = r.amount > 0 ? Math.min(100, Math.round((r.spent||0) / r.amount * 100)) : 0;
+          const warn = pct > 80;
+          return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'var(--color-yellow)':'var(--accent-blue)'}"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
+        }},
+        { key: 'period', label: 'Период', render: r => `<span class="badge badge-gray">${r.period || 'monthly'}</span>` },
+      ],
+      idField: 'id',
+      addButton: '+ Бюджет',
+      onAdd: () => {
+        const cat = prompt('Категория:');
+        const amt = prompt('Сумма:');
+        if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
+      },
+      reloadFn: () => loadBudgets(el),
     });
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
 async function loadSavings(el) {
   try {
     const goals = await invoke('get_savings_goals').catch(() => []);
-    el.innerHTML = `
-      <div class="module-header"><h2>Savings Goals</h2><button class="btn-primary" id="savings-add-btn">+ Add Goal</button></div>
-      <div id="savings-list">
-        ${goals.map(g => {
-          const pct = g.target_amount > 0 ? Math.min(100, Math.round(g.current_amount / g.target_amount * 100)) : 0;
-          return `<div class="settings-section" style="margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="color:var(--text-primary);font-size:14px;">${escapeHtml(g.name)}</span>
-              <span style="color:var(--text-secondary);font-size:12px;">${g.current_amount} / ${g.target_amount}</span>
-            </div>
-            <div class="dev-progress" style="margin-top:6px;"><div class="dev-progress-bar" style="width:${pct}%"></div></div>
-            ${g.deadline ? `<div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Deadline: ${g.deadline}</div>` : ''}
-            <button class="btn-secondary" style="margin-top:6px;font-size:11px;padding:4px 10px;" data-sadd="${g.id}">+ Add funds</button>
-          </div>`;
-        }).join('')}
-      </div>`;
-    el.querySelectorAll('[data-sadd]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const amount = prompt('Amount to add:');
-        if (amount) {
-          const goal = goals.find(g => g.id === parseInt(btn.dataset.sadd));
-          if (goal) {
-            await invoke('update_savings_goal', { id: goal.id, currentAmount: (goal.current_amount||0) + parseFloat(amount), name: null, targetAmount: null, deadline: null }).catch(e => alert(e));
-            loadSavings(el);
-          }
-        }
-      });
+    const dbv = new DatabaseView(el, {
+      tabId: 'money',
+      recordTable: 'savings_goals',
+      records: goals,
+      fixedColumns: [
+        { key: 'name', label: 'Цель', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'current_amount', label: 'Накоплено', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.current_amount || 0}</span>` },
+        { key: 'target_amount', label: 'Цель', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.target_amount || 0}</span>` },
+        { key: 'progress', label: 'Прогресс', render: r => {
+          const pct = r.target_amount > 0 ? Math.min(100, Math.round(r.current_amount / r.target_amount * 100)) : 0;
+          return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
+        }},
+        { key: 'deadline', label: 'Дедлайн', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.deadline || '—'}</span>` },
+        { key: 'actions', label: '', render: r => `<button class="btn-secondary" style="padding:4px 8px;font-size:11px;" data-sadd="${r.id}">+ Пополнить</button>` },
+      ],
+      idField: 'id',
+      addButton: '+ Цель',
+      onAdd: () => {
+        const name = prompt('Название цели:');
+        const target = prompt('Целевая сумма:');
+        if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#9B9B9B' }).then(() => loadSavings(el)).catch(e => alert(e));
+      },
+      reloadFn: () => loadSavings(el),
     });
-    document.getElementById('savings-add-btn')?.addEventListener('click', () => {
-      const name = prompt('Goal name:');
-      const target = prompt('Target amount:');
-      if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#9B9B9B' }).then(() => loadSavings(el)).catch(e => alert(e));
+    await dbv.render();
+
+    // Add funds buttons (delegated)
+    el.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-sadd]');
+      if (!btn) return;
+      const amount = prompt('Сумма пополнения:');
+      if (amount) {
+        const goal = goals.find(g => g.id === parseInt(btn.dataset.sadd));
+        if (goal) {
+          await invoke('update_savings_goal', { id: goal.id, currentAmount: (goal.current_amount||0) + parseFloat(amount), name: null, targetAmount: null, deadline: null }).catch(e => alert(e));
+          loadSavings(el);
+        }
+      }
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
@@ -736,78 +768,86 @@ async function loadSavings(el) {
 async function loadSubscriptions(el) {
   try {
     const subs = await invoke('get_subscriptions').catch(() => []);
-    const monthly = subs.filter(s => s.active).reduce((sum, s) => sum + (s.period === 'yearly' ? s.amount/12 : s.amount), 0);
-    el.innerHTML = `
-      <div class="module-header"><h2>Subscriptions</h2><button class="btn-primary" id="sub-add-btn">+ Add</button></div>
-      <div class="dashboard-stats">
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${Math.round(monthly)}</div><div class="dashboard-stat-label">/month</div></div>
-      </div>
-      <div id="subs-list">
-        ${subs.map(s => `<div class="focus-log-item">
-          <span class="focus-log-title">${escapeHtml(s.name)}</span>
-          <span class="badge ${s.active?'badge-green':'badge-gray'}">${s.active?'Active':'Paused'}</span>
-          <span class="focus-log-duration">${s.amount} ${s.currency||'KZT'}/${s.period}</span>
-          ${s.next_payment ? `<span style="color:var(--text-faint);font-size:11px;">Next: ${s.next_payment}</span>` : ''}
-        </div>`).join('')}
-      </div>`;
-    document.getElementById('sub-add-btn')?.addEventListener('click', () => {
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.innerHTML = `<div class="modal">
-        <div class="modal-title">Add Subscription</div>
-        <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="sub-name"></div>
-        <div class="form-group"><label class="form-label">Amount</label><input class="form-input" id="sub-amount" type="number"></div>
-        <div class="form-group"><label class="form-label">Period</label>
-          <select class="form-select" id="sub-period" style="width:100%;"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
-        <div class="form-group"><label class="form-label">Category</label><input class="form-input" id="sub-cat" placeholder="entertainment, tools..."></div>
-        <div class="modal-actions">
-          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-          <button class="btn-primary" id="sub-save">Save</button>
-        </div>
-      </div>`;
-      document.body.appendChild(overlay);
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-      document.getElementById('sub-save')?.addEventListener('click', async () => {
-        const name = document.getElementById('sub-name')?.value?.trim();
-        if (!name) return;
-        try {
-          await invoke('add_subscription', {
-            name, amount: parseFloat(document.getElementById('sub-amount')?.value)||0,
-            currency: 'KZT', period: document.getElementById('sub-period')?.value||'monthly',
-            nextPayment: null, category: document.getElementById('sub-cat')?.value||'other', active: true,
-          });
-          overlay.remove();
-          loadSubscriptions(el);
-        } catch (err) { alert('Error: ' + err); }
-      });
+    const dbv = new DatabaseView(el, {
+      tabId: 'money',
+      recordTable: 'subscriptions',
+      records: subs,
+      fixedColumns: [
+        { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'amount', label: 'Сумма', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount} ${r.currency || 'KZT'}</span>` },
+        { key: 'period', label: 'Период', render: r => `<span class="badge badge-gray">${r.period === 'yearly' ? 'Годовая' : 'Месячная'}</span>` },
+        { key: 'active', label: 'Статус', render: r => r.active ? '<span class="badge badge-green">Активна</span>' : '<span class="badge badge-gray">Пауза</span>' },
+        { key: 'next_payment', label: 'Следующий платеж', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.next_payment || '—'}</span>` },
+      ],
+      idField: 'id',
+      addButton: '+ Добавить',
+      onAdd: () => showAddSubscriptionModal(el),
+      reloadFn: () => loadSubscriptions(el),
     });
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
+}
+
+function showAddSubscriptionModal(parentEl) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Добавить подписку</div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="sub-name"></div>
+    <div class="form-group"><label class="form-label">Сумма</label><input class="form-input" id="sub-amount" type="number"></div>
+    <div class="form-group"><label class="form-label">Период</label>
+      <select class="form-select" id="sub-period" style="width:100%;"><option value="monthly">Месячная</option><option value="yearly">Годовая</option></select></div>
+    <div class="form-group"><label class="form-label">Категория</label><input class="form-input" id="sub-cat" placeholder="entertainment, tools..."></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="sub-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('sub-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('sub-name')?.value?.trim();
+    if (!name) return;
+    try {
+      await invoke('add_subscription', {
+        name, amount: parseFloat(document.getElementById('sub-amount')?.value)||0,
+        currency: 'KZT', period: document.getElementById('sub-period')?.value||'monthly',
+        nextPayment: null, category: document.getElementById('sub-cat')?.value||'other', active: true,
+      });
+      overlay.remove();
+      loadSubscriptions(parentEl);
+    } catch (err) { alert('Error: ' + err); }
+  });
 }
 
 async function loadDebts(el) {
   try {
     const debts = await invoke('get_debts').catch(() => []);
-    el.innerHTML = `
-      <div class="module-header"><h2>Debts</h2><button class="btn-primary" id="debt-add-btn">+ Add</button></div>
-      <div id="debts-list">
-        ${debts.map(d => {
-          const pct = d.amount > 0 ? Math.min(100, Math.round((d.amount - d.remaining) / d.amount * 100)) : 0;
-          return `<div class="settings-section" style="margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="color:var(--text-primary);font-size:14px;">${escapeHtml(d.name)}</span>
-              <span class="badge ${d.type==='owe'?'badge-purple':'badge-green'}">${d.type==='owe'?'I owe':'Owed to me'}</span>
-            </div>
-            <div style="color:var(--text-secondary);font-size:12px;margin-top:4px;">Remaining: ${d.remaining} / ${d.amount}</div>
-            <div class="dev-progress" style="margin-top:4px;"><div class="dev-progress-bar" style="width:${pct}%"></div></div>
-          </div>`;
-        }).join('')}
-      </div>`;
-    document.getElementById('debt-add-btn')?.addEventListener('click', () => {
-      const name = prompt('Name:');
-      const type = prompt('Type (owe/owed):') || 'owe';
-      const amount = prompt('Amount:');
-      if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
+    const dbv = new DatabaseView(el, {
+      tabId: 'money',
+      recordTable: 'debts',
+      records: debts,
+      fixedColumns: [
+        { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'type', label: 'Тип', render: r => `<span class="badge ${r.type === 'owe' ? 'badge-purple' : 'badge-green'}">${r.type === 'owe' ? 'Я должен' : 'Мне должны'}</span>` },
+        { key: 'remaining', label: 'Остаток', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.remaining || 0}</span>` },
+        { key: 'amount', label: 'Сумма', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;color:var(--text-muted);">${r.amount || 0}</span>` },
+        { key: 'progress', label: 'Прогресс', render: r => {
+          const pct = r.amount > 0 ? Math.min(100, Math.round((r.amount - r.remaining) / r.amount * 100)) : 0;
+          return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
+        }},
+      ],
+      idField: 'id',
+      addButton: '+ Долг',
+      onAdd: () => {
+        const name = prompt('Название:');
+        const type = prompt('Тип (owe/owed):') || 'owe';
+        const amount = prompt('Сумма:');
+        if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
+      },
+      reloadFn: () => loadDebts(el),
     });
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -840,49 +880,41 @@ async function loadPeople(subTab) {
         const items = await invoke('get_contacts', filter);
         let contacts = Array.isArray(items) ? items : [];
         if (activeInner === 'favorites') contacts = contacts.filter(c => c.favorite);
-        for (const c of contacts) {
-          try { c._blocks = await invoke('get_contact_blocks', { contactId: c.id }); } catch { c._blocks = []; }
-        }
+
         paneEl.innerHTML = `
           <div class="dev-filters" style="margin-bottom:var(--space-3);">
             <button class="pill${activeInner === 'all' ? ' active' : ''}" data-inner="all">Все</button>
             <button class="pill${activeInner === 'favorites' ? ' active' : ''}" data-inner="favorites">Избранные</button>
             <button class="pill${activeInner === 'blocked' ? ' active' : ''}" data-inner="blocked">Заблокированные</button>
           </div>
-          <div class="module-header"><button class="btn-primary" id="add-contact-btn">+ Добавить</button></div>
-          <div class="contacts-list">
-            ${contacts.length === 0 ? '<div class="uni-empty">Нет контактов</div>' :
-              contacts.map(c => `
-                <div class="contact-item${c.blocked ? ' blocked' : ''}${c.favorite ? ' favorite' : ''}">
-                  <div class="contact-avatar">${c.name.charAt(0).toUpperCase()}</div>
-                  <div class="contact-info">
-                    <div class="contact-name">${c.name}${c.favorite ? ' ★' : ''}</div>
-                    <div class="contact-detail">${c.relationship || c.category || ''}${c.phone ? ' · ' + c.phone : ''}${c.email ? ' · ' + c.email : ''}</div>
-                    ${c.blocked ? '<span class="badge badge-red">Blocked</span>' : ''}
-                    ${c.block_reason ? '<div class="contact-detail" style="color:var(--text-muted)">' + c.block_reason + '</div>' : ''}
-                    ${c.notes ? '<div class="contact-detail">' + c.notes + '</div>' : ''}
-                    ${c._blocks && c._blocks.length > 0 ? `
-                      <div class="contact-blocks-list">
-                        ${c._blocks.map(b => `
-                          <div class="contact-block-item">
-                            <span class="contact-block-type">${b.block_type === 'app' ? 'App' : 'Site'}</span>
-                            <span class="contact-block-value">${b.value}</span>
-                            ${b.reason ? '<span class="contact-block-reason">' + b.reason + '</span>' : ''}
-                            <button class="contact-block-del" onclick="deleteContactBlock(${b.id})">✕</button>
-                          </div>
-                        `).join('')}
-                      </div>` : ''}
-                  </div>
-                  <div class="contact-actions">
-                    <button class="btn-secondary" onclick="showContactBlockModal(${c.id}, '${c.name.replace(/'/g, "\\'")}')" title="Block sites/apps">🔗</button>
-                    <button class="btn-secondary" onclick="toggleContactFav(${c.id})" title="${c.favorite ? 'Unfavorite' : 'Favorite'}">${c.favorite ? '★' : '☆'}</button>
-                    <button class="btn-secondary" onclick="toggleContactBlock(${c.id})" title="${c.blocked ? 'Unblock' : 'Block'}">${c.blocked ? '🔓' : '🚫'}</button>
-                    <button class="btn-danger" onclick="deleteContact(${c.id})" style="padding:8px 12px">✕</button>
-                  </div>
-                </div>
-              `).join('')}
-          </div>`;
-        document.getElementById('add-contact-btn')?.addEventListener('click', showAddContactModal);
+          <div id="people-dbv"></div>`;
+
+        const dbvEl = paneEl.querySelector('#people-dbv');
+        const dbv = new DatabaseView(dbvEl, {
+          tabId: 'people',
+          recordTable: 'contacts',
+          records: contacts,
+          fixedColumns: [
+            { key: 'name', label: 'Имя', render: r => `<span class="data-table-title">${escapeHtml(r.name)}${r.favorite ? ' ★' : ''}</span>` },
+            { key: 'category', label: 'Категория', render: r => `<span class="badge badge-gray">${r.category || r.relationship || '—'}</span>` },
+            { key: 'phone', label: 'Телефон', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.phone || '—'}</span>` },
+            { key: 'email', label: 'Email', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.email || '—'}</span>` },
+            { key: 'status', label: 'Статус', render: r => r.blocked ? '<span class="badge badge-red">Blocked</span>' : '<span class="badge badge-green">OK</span>' },
+            { key: 'actions', label: '', render: r => `
+              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="toggleContactFav(${r.id})">${r.favorite ? '★' : '☆'}</button>
+              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="toggleContactBlock(${r.id})">${r.blocked ? '🔓' : '🚫'}</button>
+              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;color:var(--color-red);" onclick="deleteContact(${r.id})">✕</button>
+            ` },
+          ],
+          idField: 'id',
+          availableViews: ['table', 'list'],
+          defaultView: 'table',
+          addButton: '+ Добавить',
+          onAdd: () => showAddContactModal(),
+          reloadFn: () => loadPeople(),
+        });
+        await dbv.render();
+
         paneEl.querySelectorAll('[data-inner]').forEach(btn => {
           btn.addEventListener('click', () => { S._peopleInner = btn.dataset.inner; loadPeople(); });
         });
@@ -1441,83 +1473,86 @@ function renderWorkTasks(el, tasks, projects) {
   const statusColors = { todo: 'badge-gray', in_progress: 'badge-blue', done: 'badge-green' };
   const priorityColors = { high: 'badge-red', normal: 'badge-gray', low: 'badge-gray' };
 
-  el.innerHTML = `
-    <div class="module-header">
-      <h2 style="font-size:16px;color:var(--text-primary);">Задачи</h2>
-      <button class="btn-primary" id="work-add-task-btn">+ Задача</button>
-    </div>
-    ${tasks.length > 0 ? `<div style="overflow-x:auto;">
-      <table class="cal-list-table">
-        <thead><tr>
-          <th></th>
-          <th>Задача</th>
-          <th>Проект</th>
-          <th>Приоритет</th>
-          <th>Статус</th>
-        </tr></thead>
-        <tbody>
-          ${tasks.map(t => {
-            const isDone = t.status === 'done';
-            return `<tr data-task-id="${t.id}">
-              <td><div class="work-task-check${isDone ? ' done' : ''}" data-tid="${t.id}" style="cursor:pointer;"></div></td>
-              <td style="color:var(--text-primary);${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${escapeHtml(t.title)}</td>
-              <td><span style="color:${t.projectColor || 'var(--text-secondary)'};font-size:12px;">${escapeHtml(t.projectName || '')}</span></td>
-              <td><span class="badge ${priorityColors[t.priority] || 'badge-gray'}">${t.priority || 'normal'}</span></td>
-              <td><span class="badge ${statusColors[t.status] || 'badge-gray'}">${statusLabels[t.status] || t.status}</span></td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>` : '<div style="color:var(--text-muted);padding:24px;text-align:center;">Нет задач</div>'}`;
-
-  el.querySelectorAll('[data-tid]').forEach(check => {
-    check.addEventListener('click', async () => {
-      const id = parseInt(check.dataset.tid);
-      const task = tasks.find(t => t.id === id);
-      const newStatus = task?.status === 'done' ? 'todo' : 'done';
-      await invoke('update_task_status', { id, status: newStatus }).catch(() => {});
+  const dbv = new DatabaseView(el, {
+    tabId: 'work',
+    recordTable: 'tasks',
+    records: tasks,
+    fixedColumns: [
+      { key: 'done', label: '', render: r => `<div class="work-task-check${r.status === 'done' ? ' done' : ''}" data-tid="${r.id}" style="cursor:pointer;"></div>` },
+      { key: 'title', label: 'Задача', render: r => `<span class="data-table-title" style="${r.status === 'done' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${escapeHtml(r.title)}</span>` },
+      { key: 'projectName', label: 'Проект', render: r => `<span style="color:${r.projectColor || 'var(--text-secondary)'};font-size:12px;">${escapeHtml(r.projectName || '')}</span>` },
+      { key: 'priority', label: 'Приоритет', render: r => `<span class="badge ${priorityColors[r.priority] || 'badge-gray'}">${r.priority || 'normal'}</span>` },
+      { key: 'status', label: 'Статус', render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
+    ],
+    idField: 'id',
+    availableViews: ['table', 'kanban', 'list'],
+    defaultView: 'table',
+    addButton: '+ Задача',
+    onAdd: () => showAddTaskModal(projects),
+    reloadFn: () => loadWork(),
+    kanban: {
+      groupByField: 'status',
+      columns: [
+        { key: 'todo', label: 'To Do', icon: '📋' },
+        { key: 'in_progress', label: 'В работе', icon: '▶' },
+        { key: 'done', label: 'Готово', icon: '✅' },
+      ],
+    },
+    onDrop: async (recordId, field, newValue) => {
+      await invoke('update_task_status', { id: parseInt(recordId), status: newValue }).catch(() => {});
       loadWork();
-    });
+    },
   });
+  dbv.render();
 
-  document.getElementById('work-add-task-btn')?.addEventListener('click', () => {
-    // Show modal to add task
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `<div class="modal modal-compact">
-      <div class="modal-title">Новая задача</div>
-      <div class="form-group"><label class="form-label">Задача</label><input class="form-input" id="wt-title" placeholder="Название задачи"></div>
-      <div class="form-group"><label class="form-label">Проект</label>
-        <select class="form-input" id="wt-project">
-          ${projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
-          ${projects.length === 0 ? '<option value="">Нет проектов</option>' : ''}
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Приоритет</label>
-        <select class="form-input" id="wt-priority">
-          <option value="normal">Normal</option>
-          <option value="high">High</option>
-          <option value="low">Low</option>
-        </select>
-      </div>
-      <div class="modal-actions">
-        <button class="btn-secondary" id="wt-cancel">Отмена</button>
-        <button class="btn-primary" id="wt-save">Создать</button>
-      </div>
-    </div>`;
-    document.body.appendChild(overlay);
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    document.getElementById('wt-cancel')?.addEventListener('click', () => overlay.remove());
-    document.getElementById('wt-save')?.addEventListener('click', async () => {
-      const title = document.getElementById('wt-title')?.value?.trim();
-      if (!title) return;
-      const projectId = parseInt(document.getElementById('wt-project')?.value);
-      const priority = document.getElementById('wt-priority')?.value || 'normal';
-      if (!projectId) { alert('Сначала создайте проект'); return; }
-      await invoke('create_task', { projectId, title, description: '', priority, dueDate: null }).catch(e => alert(e));
-      overlay.remove();
-      loadWork();
-    });
+  // Delegate click for task checkboxes
+  el.addEventListener('click', async (e) => {
+    const check = e.target.closest('[data-tid]');
+    if (!check) return;
+    const id = parseInt(check.dataset.tid);
+    const task = tasks.find(t => t.id === id);
+    const newStatus = task?.status === 'done' ? 'todo' : 'done';
+    await invoke('update_task_status', { id, status: newStatus }).catch(() => {});
+    loadWork();
+  });
+}
+
+function showAddTaskModal(projects) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-compact">
+    <div class="modal-title">Новая задача</div>
+    <div class="form-group"><label class="form-label">Задача</label><input class="form-input" id="wt-title" placeholder="Название задачи"></div>
+    <div class="form-group"><label class="form-label">Проект</label>
+      <select class="form-input" id="wt-project">
+        ${projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+        ${projects.length === 0 ? '<option value="">Нет проектов</option>' : ''}
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">Приоритет</label>
+      <select class="form-input" id="wt-priority">
+        <option value="normal">Normal</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="wt-cancel">Отмена</button>
+      <button class="btn-primary" id="wt-save">Создать</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('wt-cancel')?.addEventListener('click', () => overlay.remove());
+  document.getElementById('wt-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('wt-title')?.value?.trim();
+    if (!title) return;
+    const projectId = parseInt(document.getElementById('wt-project')?.value);
+    const priority = document.getElementById('wt-priority')?.value || 'normal';
+    if (!projectId) { alert('Сначала создайте проект'); return; }
+    await invoke('create_task', { projectId, title, description: '', priority, dueDate: null }).catch(e => alert(e));
+    overlay.remove();
+    loadWork();
   });
 }
 
@@ -1914,27 +1949,25 @@ async function loadMartialArts(el) {
   try {
     const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
     const ma = (workouts || []).filter(w => w.type === 'martial_arts');
-    el.innerHTML = `
-      <div class="module-header"><h2>Единоборства</h2><button class="btn-primary" id="new-ma-btn">+ Тренировка</button></div>
-      <table class="data-table">
-        <thead><tr><th>Дата</th><th>Название</th><th>Время</th><th>Калории</th></tr></thead>
-        <tbody id="ma-tbody"></tbody>
-      </table>`;
-    const tbody = document.getElementById('ma-tbody');
-    if (ma.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px;">Нет тренировок</td></tr>';
-    } else {
-      for (const w of ma) {
-        const row = document.createElement('tr');
-        row.className = 'data-table-row';
-        row.innerHTML = `<td>${w.date || '\u2014'}</td><td class="data-table-title">${escapeHtml(w.title || 'Единоборства')}</td><td>${w.duration_minutes || 0} мин</td><td>${w.calories || '\u2014'}</td>`;
-        tbody.appendChild(row);
-      }
-    }
-    document.getElementById('new-ma-btn')?.addEventListener('click', () => {
-      showAddWorkoutModal();
-      setTimeout(() => { const sel = document.getElementById('workout-type'); if (sel) sel.value = 'martial_arts'; }, 50);
+    const dbv = new DatabaseView(el, {
+      tabId: 'sports',
+      recordTable: 'workouts',
+      records: ma,
+      fixedColumns: [
+        { key: 'date', label: 'Дата', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.date || '—'}</span>` },
+        { key: 'title', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.title || 'Единоборства')}</span>` },
+        { key: 'duration_minutes', label: 'Время', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
+        { key: 'calories', label: 'Калории', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
+      ],
+      idField: 'id',
+      addButton: '+ Тренировка',
+      onAdd: () => {
+        showAddWorkoutModal();
+        setTimeout(() => { const sel = document.getElementById('workout-type'); if (sel) sel.value = 'martial_arts'; }, 50);
+      },
+      reloadFn: () => loadSports(),
     });
+    await dbv.render();
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);">Error: ${e}</div>`; }
 }
 
@@ -1966,33 +1999,25 @@ async function loadSportsStats(el) {
 function renderSports(el, workouts, stats) {
   const typeLabels = { gym: 'Зал', cardio: 'Кардио', yoga: 'Йога', swimming: 'Плавание', martial_arts: 'Единоборства', other: 'Другое' };
 
-  el.innerHTML = `
-    <div class="module-header"><h2>Спорт</h2><button class="btn-primary" id="new-workout-btn">+ Тренировка</button></div>
-    <div class="sports-stats">
-      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.count || 0}</div><div class="dashboard-stat-label">Тренировок</div></div>
-      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_minutes || 0}м</div><div class="dashboard-stat-label">Общее время</div></div>
-      <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_calories || 0}</div><div class="dashboard-stat-label">Калории</div></div>
-    </div>
-    <div id="workouts-list"></div>`;
-
-  const list = document.getElementById('workouts-list');
-  for (const w of workouts) {
-    const card = document.createElement('div');
-    card.className = 'workout-card';
-    card.innerHTML = `
-      <div class="workout-card-header">
-        <span class="workout-card-title">${escapeHtml(w.title || typeLabels[w.type] || w.type)}</span>
-        <span class="workout-card-date">${w.date || ''}</span>
-      </div>
-      <div class="workout-card-meta">
-        <span class="badge badge-purple">${typeLabels[w.type] || w.type}</span>
-        <span>${w.duration_minutes || 0} мин</span>
-        ${w.calories ? `<span>${w.calories} ккал</span>` : ''}
-      </div>`;
-    list.appendChild(card);
-  }
-
-  document.getElementById('new-workout-btn')?.addEventListener('click', () => showAddWorkoutModal());
+  const dbv = new DatabaseView(el, {
+    tabId: 'sports',
+    recordTable: 'workouts',
+    records: workouts,
+    fixedColumns: [
+      { key: 'date', label: 'Дата', render: r => `<span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;">${r.date || '—'}</span>` },
+      { key: 'title', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.title || typeLabels[r.type] || r.type)}</span>` },
+      { key: 'type', label: 'Тип', render: r => `<span class="badge badge-purple">${typeLabels[r.type] || r.type}</span>` },
+      { key: 'duration_minutes', label: 'Время', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
+      { key: 'calories', label: 'Калории', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
+    ],
+    idField: 'id',
+    availableViews: ['table', 'list'],
+    defaultView: 'table',
+    addButton: '+ Тренировка',
+    onAdd: () => showAddWorkoutModal(),
+    reloadFn: () => loadSports(),
+  });
+  dbv.render();
 }
 
 function showAddWorkoutModal() {
@@ -2084,9 +2109,9 @@ function renderHealth(el, today, habits) {
     return '';
   }
 
+  // Health metrics (clickable cards) + habits table via DatabaseView
   el.innerHTML = `
-    <div class="module-header"><h2>Здоровье</h2><button class="btn-primary" id="health-log-btn">+ Записать</button></div>
-    <div class="health-metrics">
+    <div class="health-metrics" style="margin-bottom:var(--space-4);">
       <div class="health-metric ${metricClass('sleep', sleep)}" data-type="sleep">
         <div class="health-metric-icon">&#x1F634;</div>
         <div class="health-metric-value">${sleep !== null ? sleep + 'ч' : '\u2014'}</div>
@@ -2108,28 +2133,29 @@ function renderHealth(el, today, habits) {
         <div class="health-metric-label">Вес</div>
       </div>
     </div>
-    <div class="habits-section">
-      <div class="module-card-title" style="display:flex;justify-content:space-between;align-items:center;">
-        Привычки
-        <button class="btn-secondary" id="add-habit-btn" style="padding:4px 10px;font-size:11px;">+ Добавить</button>
-      </div>
-      <div id="habits-list"></div>
-    </div>`;
+    <div id="habits-dbv"></div>`;
 
-  const habitsList = document.getElementById('habits-list');
-  for (const h of habits) {
-    const item = document.createElement('div');
-    item.className = 'habit-item';
-    item.innerHTML = `
-      <div class="habit-check${h.completed ? ' checked' : ''}" data-id="${h.id}">${h.completed ? '&#10003;' : ''}</div>
-      <span class="habit-name">${escapeHtml(h.name)}</span>
-      ${h.streak > 0 ? `<span class="habit-streak">${h.streak} дн.</span>` : ''}`;
-    item.querySelector('.habit-check').addEventListener('click', async () => {
-      await invoke('check_habit', { habitId: h.id, date: null }).catch(() => {});
-      loadHealth();
-    });
-    habitsList.appendChild(item);
-  }
+  // Habits as DatabaseView
+  const dbvEl = el.querySelector('#habits-dbv');
+  const dbv = new DatabaseView(dbvEl, {
+    tabId: 'health',
+    recordTable: 'habits',
+    records: habits,
+    fixedColumns: [
+      { key: 'done', label: '', render: r => `<div class="habit-check${r.completed ? ' checked' : ''}" style="cursor:pointer;" data-hid="${r.id}">${r.completed ? '&#10003;' : ''}</div>` },
+      { key: 'name', label: 'Привычка', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+      { key: 'frequency', label: 'Частота', render: r => `<span class="badge badge-gray">${r.frequency || 'daily'}</span>` },
+      { key: 'streak', label: 'Серия', render: r => r.streak > 0 ? `<span class="badge badge-green">${r.streak} дн.</span>` : '<span style="color:var(--text-faint);font-size:12px;">—</span>' },
+    ],
+    idField: 'id',
+    addButton: '+ Привычка',
+    onAdd: () => {
+      const name = prompt('Название привычки:');
+      if (name) invoke('create_habit', { name, icon: '', frequency: 'daily' }).then(() => loadHealth()).catch(e => alert(e));
+    },
+    reloadFn: () => loadHealth(),
+  });
+  dbv.render();
 
   // Click on metric to log
   el.querySelectorAll('.health-metric').forEach(m => {
@@ -2143,16 +2169,12 @@ function renderHealth(el, today, habits) {
     });
   });
 
-  document.getElementById('health-log-btn')?.addEventListener('click', () => {
-    const type = prompt('Тип (sleep/water/mood/weight):');
-    if (!type) return;
-    const val = prompt('Значение:');
-    if (val) invoke('log_health', { healthType: type, value: parseFloat(val), notes: null }).then(() => loadHealth()).catch(e => alert(e));
-  });
-
-  document.getElementById('add-habit-btn')?.addEventListener('click', () => {
-    const name = prompt('Название привычки:');
-    if (name) invoke('create_habit', { name, icon: '', frequency: 'daily' }).then(() => loadHealth()).catch(e => alert(e));
+  // Delegate habit check clicks
+  el.addEventListener('click', async (e) => {
+    const check = e.target.closest('[data-hid]');
+    if (!check) return;
+    await invoke('check_habit', { habitId: parseInt(check.dataset.hid), date: null }).catch(() => {});
+    loadHealth();
   });
 }
 
