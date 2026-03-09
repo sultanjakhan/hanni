@@ -75,11 +75,11 @@ async function renderGoalsPane(el, tabId, config) {
   if (config.renderGoals) { await config.renderGoals(el); return; }
 
   let goals = [];
-  try { goals = await invoke('get_goals', { tabId }); } catch {}
+  try { goals = await invoke('get_goals', { tabName: tabId }); } catch {}
 
   const goalsHtml = goals.length > 0
     ? goals.map(g => {
-        const pct = g.target > 0 ? Math.min(100, Math.round((g.current / g.target) * 100)) : 0;
+        const pct = g.target_value > 0 ? Math.min(100, Math.round((g.current_value / g.target_value) * 100)) : 0;
         const color = pct >= 75 ? 'var(--color-green)' : pct >= 40 ? 'var(--color-yellow)' : 'var(--accent-blue)';
         return `<div class="uni-goal">
           <div class="uni-goal-header">
@@ -87,7 +87,7 @@ async function renderGoalsPane(el, tabId, config) {
             <div class="uni-goal-pct" style="color:${color}">${pct}%</div>
           </div>
           <div class="uni-goal-bar"><div class="uni-goal-fill" style="width:${pct}%;background:${color}"></div></div>
-          ${g.note ? `<div class="uni-goal-meta">${escapeHtml(g.note)}</div>` : ''}
+          <div class="uni-goal-meta">${g.unit ? escapeHtml(g.current_value + '/' + g.target_value + ' ' + g.unit) : ''}${g.deadline ? ' · до ' + g.deadline : ''}</div>
         </div>`;
       }).join('')
     : '<div class="uni-empty">Пока нет целей</div>';
@@ -95,7 +95,40 @@ async function renderGoalsPane(el, tabId, config) {
   el.innerHTML = `<div class="uni-goals-list">${goalsHtml}<div class="uni-goal-add" id="uni-add-goal-${tabId}">+ Добавить цель</div></div>`;
 
   el.querySelector(`#uni-add-goal-${tabId}`)?.addEventListener('click', () => {
-    // TODO: show add goal modal
+    showAddGoalModal(el, tabId, config);
+  });
+}
+
+function showAddGoalModal(parentEl, tabId, config) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Новая цель</div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="goal-title" placeholder="Например: Пробежать 100 км"></div>
+    <div class="form-group"><label class="form-label">Целевое значение</label><input class="form-input" id="goal-target" type="number" placeholder="100"></div>
+    <div class="form-group"><label class="form-label">Единица измерения</label><input class="form-input" id="goal-unit" placeholder="км, книг, часов..."></div>
+    <div class="form-group"><label class="form-label">Дедлайн</label><input class="form-input" id="goal-deadline" type="date"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="goal-save">Создать</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('goal-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('goal-title')?.value?.trim();
+    if (!title) return;
+    try {
+      await invoke('create_goal', {
+        tabName: tabId,
+        title,
+        targetValue: parseFloat(document.getElementById('goal-target')?.value) || 1,
+        unit: document.getElementById('goal-unit')?.value || null,
+        deadline: document.getElementById('goal-deadline')?.value || null,
+      });
+      overlay.remove();
+      renderGoalsPane(parentEl, tabId, config);
+    } catch (err) { alert('Ошибка: ' + err); }
   });
 }
 
@@ -104,12 +137,12 @@ async function renderNotesPane(el, tabId, config) {
   if (config.renderNotes) { await config.renderNotes(el); return; }
 
   let notes = [];
-  try { notes = await invoke('get_notes_by_tag', { tag: tabId }); } catch {}
-  // Fallback: try getting all notes and filtering
+  try { notes = await invoke('get_notes_for_tab', { tabName: tabId }); } catch {}
+  // Fallback: try getting all notes and filtering by tag
   if (notes.length === 0) {
     try {
-      const all = await invoke('get_notes', {});
-      notes = all.filter(n => (n.tags || '').toLowerCase().includes(tabId));
+      const all = await invoke('get_notes', { filter: null, search: null });
+      notes = (all || []).filter(n => (n.tags || '').toLowerCase().includes(tabId));
     } catch {}
   }
 
@@ -125,11 +158,11 @@ async function renderNotesPane(el, tabId, config) {
           </div>
         </div>
         <div class="uni-note-actions">
-          <div class="uni-note-action" title="Редактировать">✏️</div>
-          <div class="uni-note-action" title="Архивировать">📥</div>
+          <div class="uni-note-action uni-note-edit" data-id="${n.id}" title="Редактировать">✏️</div>
+          <div class="uni-note-action uni-note-archive" data-id="${n.id}" title="Архивировать">📥</div>
         </div>
       </div>`).join('')
-    : '<div class="uni-empty">Нет заметок с тегом «' + escapeHtml(tabId) + '»</div>';
+    : `<div class="uni-empty">Нет заметок для «${escapeHtml(tabId)}»</div>`;
 
   el.innerHTML = `<div class="uni-notes-container">
     <div class="uni-notes-toolbar">
@@ -138,6 +171,101 @@ async function renderNotesPane(el, tabId, config) {
     </div>
     <div class="uni-notes-grid">${notesHtml}</div>
   </div>`;
+
+  // Add note
+  el.querySelector(`#uni-add-note-${tabId}`)?.addEventListener('click', () => {
+    showAddNoteModal(el, tabId, config);
+  });
+
+  // Edit note
+  el.querySelectorAll('.uni-note-edit').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const note = notes.find(n => n.id === parseInt(btn.dataset.id));
+      if (note) showEditNoteModal(el, tabId, config, note);
+    });
+  });
+
+  // Archive note
+  el.querySelectorAll('.uni-note-archive').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await invoke('update_note', { id: parseInt(btn.dataset.id), title: '', content: '', tags: '', archived: true });
+        renderNotesPane(el, tabId, config);
+      } catch {}
+    });
+  });
+
+  // Search filter
+  el.querySelector('.uni-notes-search')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    el.querySelectorAll('.uni-note-card').forEach(card => {
+      card.style.display = card.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+}
+
+function showAddNoteModal(parentEl, tabId, config) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Новая заметка</div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="note-title"></div>
+    <div class="form-group"><label class="form-label">Содержимое</label><textarea class="form-textarea" id="note-content" rows="5"></textarea></div>
+    <div class="form-group"><label class="form-label">Теги</label><input class="form-input" id="note-tags" value="${tabId}" placeholder="через запятую"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="note-save">Создать</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('note-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('note-title')?.value?.trim();
+    if (!title) return;
+    try {
+      await invoke('create_note', {
+        title,
+        content: document.getElementById('note-content')?.value || '',
+        tags: document.getElementById('note-tags')?.value || tabId,
+        tabName: tabId,
+        status: null, dueDate: null, reminderAt: null,
+      });
+      overlay.remove();
+      renderNotesPane(parentEl, tabId, config);
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+function showEditNoteModal(parentEl, tabId, config, note) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Редактировать заметку</div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="note-title" value="${escapeHtml(note.title || '')}"></div>
+    <div class="form-group"><label class="form-label">Содержимое</label><textarea class="form-textarea" id="note-content" rows="5">${escapeHtml(note.content || '')}</textarea></div>
+    <div class="form-group"><label class="form-label">Теги</label><input class="form-input" id="note-tags" value="${escapeHtml(note.tags || '')}"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="note-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('note-save')?.addEventListener('click', async () => {
+    try {
+      await invoke('update_note', {
+        id: note.id,
+        title: document.getElementById('note-title')?.value || '',
+        content: document.getElementById('note-content')?.value || '',
+        tags: document.getElementById('note-tags')?.value || '',
+        pinned: null, archived: null, tabName: null, status: null, dueDate: null, reminderAt: null, contentBlocks: null,
+      });
+      overlay.remove();
+      renderNotesPane(parentEl, tabId, config);
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
 }
 
 // ── Store (Memory) Pane ──
