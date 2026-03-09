@@ -9,7 +9,7 @@ use std::collections::HashMap;
 // ── Chat command ──
 
 #[tauri::command]
-pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Option<bool>) -> Result<String, String> {
+pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: Option<bool>, conversation_id: Option<String>) -> Result<String, String> {
     let llm_state = app.state::<LlmBusy>();
     // Wait for any in-flight LLM call (e.g. proactive) to finish — MLX is single-threaded
     let _permit = tokio::time::timeout(
@@ -32,7 +32,7 @@ pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: O
 
     // Call mode always uses direct MLX (fast ~3s vs 30s+ through OpenClaw)
     let result = if use_openclaw && !is_call {
-        chat_openclaw(&app, messages.clone(), is_call).await?
+        chat_openclaw(&app, messages.clone(), is_call, conversation_id.as_deref()).await?
     } else {
         let result = chat_inner(&app, messages.clone(), is_call).await?;
 
@@ -85,7 +85,7 @@ const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 8, history_limi
 /// Thin proxy to OpenClaw Gateway — sends messages, streams response back to UI.
 /// OpenClaw handles: prompt engineering, memory, tools (via MCP), personality (SOUL.md).
 /// Hanni just forwards the conversation and streams tokens.
-pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _call_mode: bool) -> Result<ChatResult, String> {
+pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _call_mode: bool, conversation_id: Option<&str>) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
 
     // Build simple OpenAI-compatible request — only user/assistant messages, no system prompt
@@ -98,11 +98,18 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
         .cloned()
         .collect();
 
+    // Use conversation_id as user field so OpenClaw creates separate sessions per conversation
+    // This prevents session history from one conversation bleeding into another
+    let user_id = match conversation_id {
+        Some(id) => format!("hanni-{}", id),
+        None => "hanni-app".to_string(),
+    };
+
     let request_body = serde_json::json!({
         "model": "openclaw:main",
         "messages": chat_messages,
         "stream": true,
-        "user": "hanni-app",
+        "user": user_id,
     });
 
     // OpenClaw agent may do multiple tool-call round-trips before responding (~30-60s),
