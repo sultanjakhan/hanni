@@ -105,12 +105,14 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
         "user": "hanni-app",
     });
 
+    // OpenClaw agent may do multiple tool-call round-trips before responding (~30-60s),
+    // so use a generous timeout. The 'break stream on [DONE] ensures we don't wait after completion.
     let response = client.post(OPENCLAW_URL)
         .header("Authorization", format!("Bearer {}", OPENCLAW_TOKEN))
         .header("Content-Type", "application/json")
         .header("x-openclaw-agent-id", "main")
         .json(&request_body)
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(300))
         .send()
         .await
         .map_err(|e| format!("OpenClaw connection error: {}. Is the gateway running?", e))?;
