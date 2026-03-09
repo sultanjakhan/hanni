@@ -1,50 +1,55 @@
-/* ── database-view.css — DatabaseView component styles (dbv- prefix) ── */
+/* ══════════════════════════════════════════════
+   DatabaseView — Notion-style component (dbv-)
+   ══════════════════════════════════════════════ */
 
-/* ── Toolbar ── */
+/* ── Toolbar / View Switcher ── */
 .dbv-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .dbv-view-bar {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border-default);
-  padding: 0;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-subtle);
+  width: 100%;
 }
 
 .dbv-view-btn {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: var(--space-2) var(--space-3);
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color var(--transition-normal), border-color var(--transition-normal), background var(--transition-normal);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--transition-normal);
   white-space: nowrap;
-  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .dbv-view-btn:hover {
   color: var(--text-secondary);
-  background: var(--bg-hover);
 }
 
 .dbv-view-btn.active {
   color: var(--text-primary);
-  border-bottom-color: var(--accent-blue);
+  border-bottom-color: var(--text-primary);
 }
 
 .dbv-view-icon {
-  font-size: 14px;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.dbv-view-btn.active .dbv-view-icon {
+  opacity: 1;
 }
 
 /* ── Header (add button row) ── */
@@ -61,10 +66,10 @@
 
 /* ── Content wrapper ── */
 .dbv-content {
-  min-height: 100px;
+  min-height: 80px;
 }
 
-/* ── Filter bar (dbv-prefixed) ── */
+/* ── Filter bar ── */
 .dbv-filter-bar {
   display: flex;
   align-items: center;
@@ -82,17 +87,18 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 3px 10px;
+  padding: 2px 8px;
   font-size: 12px;
   color: var(--text-secondary);
-  background: var(--bg-card);
-  border: 1px solid var(--border-default);
+  background: var(--bg-hover);
+  border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background var(--transition-fast);
 }
 
 .dbv-filter-chip:hover {
-  background: var(--bg-hover);
+  background: var(--border-default);
 }
 
 .dbv-filter-chip-remove {
@@ -100,37 +106,80 @@
   cursor: pointer;
   color: var(--text-muted);
   margin-left: 2px;
+  line-height: 1;
 }
 
 .dbv-filter-chip-remove:hover {
   color: var(--color-red);
 }
 
-/* ── Kanban (dbv-prefixed) ── */
+/* ══════════════════════════════════════════════
+   Kanban
+   ══════════════════════════════════════════════ */
 .dbv-kanban-board {
   display: flex;
   gap: var(--space-3);
-  min-height: 400px;
+  min-height: 300px;
   overflow-x: auto;
+  padding-bottom: var(--space-2);
 }
 
 .dbv-kanban-column {
   flex: 1;
+  min-width: 220px;
+  max-width: 320px;
   display: flex;
   flex-direction: column;
-  min-width: 200px;
-  background: var(--bg-sidebar);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
+}
+
+.dbv-kanban-col-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.dbv-kanban-col-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.dbv-col-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dbv-col-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.dbv-kanban-col-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  line-height: 18px;
+  margin-left: auto;
+  font-weight: 500;
 }
 
 .dbv-kanban-cards {
   flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-height: 60px;
+  min-height: 40px;
   padding: var(--space-1);
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
@@ -141,13 +190,16 @@
 }
 
 .dbv-kanban-card {
-  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   padding: var(--space-3);
-  transition: all var(--transition-fast);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .dbv-kanban-card:hover {
-  border-color: var(--border-default);
+  border-color: var(--border-hover);
   box-shadow: var(--shadow-card-hover);
 }
 
@@ -156,44 +208,47 @@
 }
 
 .dbv-kanban-card-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: var(--space-1);
-}
-
-.dbv-kanban-card-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-top: var(--space-1);
+  line-height: 1.4;
+  margin-bottom: 2px;
 }
 
 .dbv-kanban-card-meta {
-  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-2);
 }
 
-/* ── List (dbv-prefixed) ── */
+.dbv-kanban-empty {
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  padding: var(--space-4) 0;
+}
+
+/* ══════════════════════════════════════════════
+   List
+   ══════════════════════════════════════════════ */
 .dbv-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .dbv-list-item {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+  padding: 10px var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background var(--transition-fast);
 }
 
 .dbv-list-item:hover {
-  border-color: var(--border-hover);
   background: var(--bg-hover);
 }
 
@@ -208,35 +263,36 @@
   text-overflow: ellipsis;
 }
 
-.dbv-list-meta-row {
+.dbv-list-meta {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
 }
 
-.dbv-list-meta {
-  font-size: 12px;
-}
-
-/* ── Gallery (dbv-prefixed) ── */
+/* ══════════════════════════════════════════════
+   Gallery
+   ══════════════════════════════════════════════ */
 .dbv-gallery-grid {
   display: grid;
   gap: var(--space-3);
 }
 
 .dbv-gallery-card {
-  cursor: pointer;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   padding: var(--space-4);
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  min-height: 100px;
-  transition: all var(--transition-fast);
+  min-height: 80px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .dbv-gallery-card:hover {
-  border-color: var(--border-default);
+  border-color: var(--border-hover);
   box-shadow: var(--shadow-card-hover);
 }
 
@@ -251,13 +307,22 @@
   overflow: hidden;
 }
 
-.dbv-gallery-card-badges {
+.dbv-gallery-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
+  gap: 4px;
   margin-top: auto;
 }
 
-.dbv-gallery-badge {
-  font-size: 12px;
+/* ══════════════════════════════════════════════
+   Shared — card badges
+   ══════════════════════════════════════════════ */
+.dbv-card-badge {
+  display: inline-flex;
+  align-items: center;
+}
+
+.dbv-card-badge .badge {
+  font-size: 11px;
+  padding: 2px 8px;
 }

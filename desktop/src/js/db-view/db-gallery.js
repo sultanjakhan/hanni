@@ -1,12 +1,12 @@
-// ── db-view/db-gallery.js — Gallery view renderer ──
+// ── db-view/db-gallery.js — Notion-style gallery view ──
 
 import { escapeHtml } from '../utils.js';
 
 /**
- * Render a gallery view into a container element.
+ * Render a gallery grid.
  *
- * @param {HTMLElement} el - Container element
- * @param {object} ctx - Context: { records, idField, fixedColumns, onRowClick, onAdd, addButton, gallery }
+ * @param {HTMLElement} el - Container
+ * @param {object} ctx - { records, idField, fixedColumns, onRowClick, onAdd, addButton, gallery }
  *   gallery: { renderCard?, minCardWidth? }
  */
 export function renderGalleryView(el, ctx) {
@@ -16,12 +16,12 @@ export function renderGalleryView(el, ctx) {
     gallery = {},
   } = ctx;
 
-  const { renderCard, minCardWidth = 220 } = gallery;
+  const { renderCard, minCardWidth = 200 } = gallery;
 
   if (records.length === 0) {
     el.innerHTML = `${addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : ''}
       <div class="empty-state">
-        <div class="empty-state-icon">\ud83d\uddbc</div>
+        <div class="empty-state-icon">🖼</div>
         <div class="empty-state-text">Пока пусто</div>
       </div>`;
     if (addButton && onAdd) el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
@@ -30,7 +30,7 @@ export function renderGalleryView(el, ctx) {
 
   const cardsHtml = records.map(rec => {
     if (renderCard) {
-      return `<div class="dbv-gallery-card card" data-id="${rec[idField]}">${renderCard(rec)}</div>`;
+      return `<div class="dbv-gallery-card" data-id="${rec[idField]}">${renderCard(rec)}</div>`;
     }
     return renderDefaultCard(rec, fixedColumns, idField);
   }).join('');
@@ -38,7 +38,6 @@ export function renderGalleryView(el, ctx) {
   el.innerHTML = `${addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : ''}
     <div class="dbv-gallery-grid" style="grid-template-columns:repeat(auto-fill,minmax(${minCardWidth}px,1fr));">${cardsHtml}</div>`;
 
-  // Card click
   if (onRowClick) {
     el.querySelectorAll('.dbv-gallery-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -49,7 +48,6 @@ export function renderGalleryView(el, ctx) {
     });
   }
 
-  // Add button
   if (addButton && onAdd) {
     el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
   }
@@ -61,13 +59,15 @@ function renderDefaultCard(rec, fixedColumns, idField) {
     ? (titleCol.render ? titleCol.render(rec) : escapeHtml(String(rec[titleCol.key] ?? '')))
     : escapeHtml(String(rec.title || rec.name || rec[idField]));
 
-  const badges = fixedColumns.slice(1, 3).map(c => {
+  const badges = fixedColumns.slice(1, 4).map(c => {
     const val = c.render ? c.render(rec) : escapeHtml(String(rec[c.key] ?? ''));
-    return val ? `<span class="dbv-gallery-badge">${val}</span>` : '';
-  }).join('');
+    if (!val) return '';
+    if (val.includes('class=')) return `<span class="dbv-card-badge">${val}</span>`;
+    return `<span class="dbv-card-badge badge badge-gray">${val}</span>`;
+  }).filter(Boolean).join('');
 
-  return `<div class="dbv-gallery-card card" data-id="${rec[idField]}">
+  return `<div class="dbv-gallery-card" data-id="${rec[idField]}">
     <div class="dbv-gallery-card-title">${title}</div>
-    ${badges ? `<div class="dbv-gallery-card-badges">${badges}</div>` : ''}
+    ${badges ? `<div class="dbv-gallery-card-meta">${badges}</div>` : ''}
   </div>`;
 }
