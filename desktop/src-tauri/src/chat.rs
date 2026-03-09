@@ -3,6 +3,8 @@ use futures_util::StreamExt;
 use crate::types::*;
 use crate::prompts::*;
 use crate::memory::{build_memory_context_from_db, embed_texts, rerank_facts, search_similar_facts, gather_memory_candidates};
+use crate::proactive::{get_frontmost_app, get_browser_url, get_now_playing_sync};
+use crate::macos::get_macos_idle_seconds;
 use tauri::{AppHandle, Emitter, Manager};
 use std::collections::HashMap;
 
@@ -93,15 +95,50 @@ const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 8, history_limi
 pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _call_mode: bool, conversation_id: Option<&str>) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
 
-    // Build simple OpenAI-compatible request — only user/assistant messages, no system prompt
-    // OpenClaw agent adds its own system prompt from SOUL.md/AGENTS.md
-    let chat_messages: Vec<serde_json::Value> = messages.iter()
-        .filter(|m| {
-            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
-            role == "user" || role == "assistant"
-        })
-        .cloned()
-        .collect();
+    // Gather lightweight macOS context (fast: ~1-2s via osascript)
+    // This gives OpenClaw awareness of what the user is doing
+    let context = tokio::task::spawn_blocking(|| {
+        let mut parts: Vec<String> = Vec::new();
+        let now = chrono::Local::now();
+        parts.push(format!("Сейчас: {}", now.format("%H:%M, %A %d.%m.%Y")));
+
+        let idle = get_macos_idle_seconds();
+        if idle > 300.0 {
+            parts.push(format!("Пользователь неактивен {:.0} мин", idle / 60.0));
+        }
+
+        let app = get_frontmost_app();
+        if !app.is_empty() && app != "Hanni" {
+            parts.push(format!("Активное приложение: {}", app));
+        }
+
+        let browser = get_browser_url();
+        if !browser.is_empty() {
+            parts.push(format!("Браузер: {}", browser));
+        }
+
+        let music = get_now_playing_sync();
+        if !music.is_empty() {
+            parts.push(format!("Музыка: {}", music));
+        }
+
+        parts.join("\n")
+    }).await.unwrap_or_default();
+
+    // Build messages: inject context as system message, then user/assistant history
+    let mut chat_messages: Vec<serde_json::Value> = Vec::new();
+    if !context.is_empty() {
+        chat_messages.push(serde_json::json!({
+            "role": "system",
+            "content": format!("[Контекст пользователя]\n{}", context)
+        }));
+    }
+    for m in messages.iter() {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if role == "user" || role == "assistant" {
+            chat_messages.push(m.clone());
+        }
+    }
 
     // Use conversation_id as user field so OpenClaw creates separate sessions per conversation
     // This prevents session history from one conversation bleeding into another

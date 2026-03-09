@@ -679,6 +679,36 @@ pub fn run() {
                             state.pending_triggers.push((t, now_inst));
                         }
                     }
+
+                    // Update OpenClaw HEARTBEAT.md with current activity context
+                    // so OpenClaw cron jobs can see what the user is doing
+                    let heartbeat_path = dirs::home_dir()
+                        .map(|h| h.join("clawd/HEARTBEAT.md"));
+                    if let Some(path) = heartbeat_path {
+                        let idle_secs = macos::get_macos_idle_seconds();
+                        let mut lines = vec![
+                            "# Текущий контекст".to_string(),
+                            format!("Время: {}", now.format("%H:%M %d.%m.%Y")),
+                        ];
+                        if idle_secs > 300.0 {
+                            lines.push(format!("Статус: неактивен ({:.0} мин)", idle_secs / 60.0));
+                        } else {
+                            lines.push("Статус: активен".to_string());
+                        }
+                        if !app_name.is_empty() && app_name != "Hanni" {
+                            lines.push(format!("Приложение: {}", app_name));
+                        }
+                        if !browser.is_empty() {
+                            lines.push(format!("Браузер: {}", browser));
+                        }
+                        if !music.is_empty() {
+                            lines.push(format!("Музыка: {}", music));
+                        }
+                        lines.push(String::new());
+                        lines.push("# Задачи".to_string());
+                        lines.push("Нет активных задач. Если нечего делать — HEARTBEAT_OK.".to_string());
+                        let _ = std::fs::write(&path, lines.join("\n"));
+                    }
                 }
             });
 
