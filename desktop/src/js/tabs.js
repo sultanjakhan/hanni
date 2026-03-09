@@ -451,6 +451,7 @@ function switchTab(tabId) {
   renderTabBar();
   activateView();
   tabLoaders.updateFocusWidgetVisibility?.();
+  tabLoaders.updateChatOverlayVisibility?.();
 }
 
 function ensureViewDiv(tabId) {
@@ -574,6 +575,7 @@ document.addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
   if (!e.metaKey && !e.ctrlKey) return;
   if (e.shiftKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); tabLoaders.toggleFocusWidgetPopover?.(); return; }
+  if (e.shiftKey && (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С')) { e.preventDefault(); tabLoaders.toggleChatOverlay?.(); return; }
   if (e.key === 'w') { e.preventDefault(); if (TAB_REGISTRY[S.activeTab]?.closable) closeTab(S.activeTab); return; }
   if (e.key === 't') { e.preventDefault(); document.getElementById('tab-add')?.click(); return; }
   const num = parseInt(e.key);

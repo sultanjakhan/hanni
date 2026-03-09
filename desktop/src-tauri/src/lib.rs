@@ -67,6 +67,7 @@ pub fn run() {
     migrate_proactive_history_v2(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
+    migrate_activity_tracking(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -299,6 +300,9 @@ pub fn run() {
             commands_data::get_habits_today,
             // Dashboard
             commands_data::get_dashboard_data,
+            // Activity tracking
+            commands_data::get_activity_timeline,
+            commands_data::get_activity_weekly,
             // Memory browser
             commands_data::get_all_memories,
             commands_data::delete_memory,
@@ -597,29 +601,45 @@ pub fn run() {
                 }
             });
 
-            // Activity snapshot collector — lightweight OS data every 10 min
+            // Activity snapshot collector — OS data every 30 sec for activity tracking
             let snapshot_handle = app.handle().clone();
             let snapshot_proactive_ref = proactive_state.clone();
             tauri::async_runtime::spawn(async move {
                 // Initial delay
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                let mut trigger_counter: u32 = 0; // check triggers every 20th iteration (10 min)
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(600)).await; // 10 min
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
                     // Collect OS data in blocking thread
-                    let (app_name, browser, music) = tokio::task::spawn_blocking(|| {
-                        (get_frontmost_app(), get_browser_url(), get_now_playing_sync())
+                    let (app_name, browser, music, window_title, idle_secs) = tokio::task::spawn_blocking(|| {
+                        (
+                            get_frontmost_app(),
+                            get_browser_url(),
+                            get_now_playing_sync(),
+                            proactive::get_window_title(),
+                            macos::get_macos_idle_seconds(),
+                        )
                     }).await.unwrap_or_default();
+
+                    // Skip recording if idle > 10 min (AFK, saves DB space)
+                    if idle_secs > 600.0 {
+                        trigger_counter += 1;
+                        continue;
+                    }
 
                     let now = chrono::Local::now();
                     let hour = now.hour() as i64;
                     let weekday = now.weekday().num_days_from_monday() as i64;
 
-                    // Compute productive vs distraction minutes from Screen Time
-                    let (prod_min, dist_min) = {
-                        let distracting_apps = ["YouTube", "Reddit", "Twitter", "TikTok", "Instagram", "Telegram", "Discord", "VK"];
-                        let is_distracting = distracting_apps.iter().any(|d| app_name.contains(d) || browser.contains(d));
-                        if is_distracting { (0.0_f64, 10.0_f64) } else { (10.0_f64, 0.0_f64) }
+                    // Classify activity category
+                    let category = proactive::classify_activity(&app_name, &browser, &window_title);
+
+                    // Compute productive vs distraction (0.5 min per 30-sec snapshot)
+                    let (prod_min, dist_min) = match category {
+                        "coding" | "writing" | "learning" => (0.5_f64, 0.0_f64),
+                        "social" | "media" => (0.0_f64, 0.5_f64),
+                        _ => (0.25_f64, 0.0_f64),
                     };
 
                     // Write to DB
@@ -627,7 +647,7 @@ pub fn run() {
                     {
                         let conn = db.conn();
                         let _ = conn.execute(
-                            "INSERT INTO activity_snapshots (captured_at, hour, weekday, frontmost_app, browser_url, music_playing, productive_min, distraction_min) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            "INSERT INTO activity_snapshots (captured_at, hour, weekday, frontmost_app, browser_url, music_playing, productive_min, distraction_min, idle_secs, window_title, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                             rusqlite::params![
                                 now.to_rfc3339(),
                                 hour,
@@ -637,51 +657,59 @@ pub fn run() {
                                 &music,
                                 prod_min,
                                 dist_min,
+                                idle_secs,
+                                &window_title,
+                                category,
                             ],
                         );
 
-                        // Auto-cleanup: remove snapshots older than 30 days
-                        let _ = conn.execute(
-                            "DELETE FROM activity_snapshots WHERE captured_at < datetime('now', '-30 days')",
-                            [],
-                        );
-                    }
-
-                    // Check triggers and push to ProactiveState
-                    let mut triggers: Vec<String> = Vec::new();
-
-                    // Trigger: distraction >30 min
-                    {
-                        let db = snapshot_handle.state::<HanniDb>();
-                        let conn = db.conn();
-                        let dist_total: f64 = conn.query_row(
-                            "SELECT COALESCE(SUM(distraction_min), 0) FROM activity_snapshots WHERE captured_at > datetime('now', '-30 minutes')",
-                            [], |row| row.get(0),
-                        ).unwrap_or(0.0);
-                        if dist_total >= 30.0 {
-                            triggers.push(format!("Дистракция: пользователь отвлекается уже {:.0} мин", dist_total));
+                        // Auto-cleanup: remove snapshots older than 30 days (run once per hour)
+                        if trigger_counter % 120 == 0 {
+                            let _ = conn.execute(
+                                "DELETE FROM activity_snapshots WHERE captured_at < datetime('now', '-30 days')",
+                                [],
+                            );
                         }
                     }
 
-                    // Trigger: upcoming event within 15 min
-                    if let Ok(upcoming) = get_upcoming_events_soon() {
-                        if !upcoming.is_empty() {
-                            triggers.push(format!("Скоро событие: {}", upcoming.lines().next().unwrap_or("")));
+                    trigger_counter += 1;
+
+                    // Check triggers every ~10 min (20 iterations × 30 sec)
+                    if trigger_counter % 20 == 0 {
+                        let mut triggers: Vec<String> = Vec::new();
+
+                        // Trigger: distraction >30 min
+                        {
+                            let db = snapshot_handle.state::<HanniDb>();
+                            let conn = db.conn();
+                            let dist_total: f64 = conn.query_row(
+                                "SELECT COALESCE(SUM(distraction_min), 0) FROM activity_snapshots WHERE captured_at > datetime('now', '-30 minutes')",
+                                [], |row| row.get(0),
+                            ).unwrap_or(0.0);
+                            if dist_total >= 30.0 {
+                                triggers.push(format!("Дистракция: пользователь отвлекается уже {:.0} мин", dist_total));
+                            }
+                        }
+
+                        // Trigger: upcoming event within 15 min
+                        if let Ok(upcoming) = get_upcoming_events_soon() {
+                            if !upcoming.is_empty() {
+                                triggers.push(format!("Скоро событие: {}", upcoming.lines().next().unwrap_or("")));
+                            }
+                        }
+
+                        if !triggers.is_empty() {
+                            let mut state = snapshot_proactive_ref.lock().await;
+                            let now_inst = std::time::Instant::now();
+                            state.pending_triggers.retain(|(_, created)| created.elapsed().as_secs() < 600);
+                            for t in triggers {
+                                state.pending_triggers.push((t, now_inst));
+                            }
                         }
                     }
 
-                    if !triggers.is_empty() {
-                        let mut state = snapshot_proactive_ref.lock().await;
-                        let now_inst = std::time::Instant::now();
-                        // Append new triggers (keep existing that haven't expired)
-                        state.pending_triggers.retain(|(_, created)| created.elapsed().as_secs() < 600);
-                        for t in triggers {
-                            state.pending_triggers.push((t, now_inst));
-                        }
-                    }
-
-                    // Update OpenClaw HEARTBEAT.md with current activity context
-                    // so OpenClaw cron jobs can see what the user is doing
+                    // Update OpenClaw HEARTBEAT.md every ~10 min (not every 30 sec)
+                    if trigger_counter % 20 != 0 { continue; }
                     let heartbeat_path = dirs::home_dir()
                         .map(|h| h.join("clawd/HEARTBEAT.md"));
                     if let Some(path) = heartbeat_path {
