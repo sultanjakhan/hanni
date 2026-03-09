@@ -15,6 +15,7 @@ import {
   renderChatWelcomeCard, removeChatWelcomeCard,
   loadChatSettings, addFeedbackButtons, addProactiveFeedbackButtons,
   showStub, streamChat, toggleTTS, stopAllTTS, showAgentIndicator,
+  createChatOverlay, toggleChatOverlay, updateChatOverlayVisibility, refreshOverlayMessages,
 } from './js/chat.js';
 import { parseAndExecuteActions, executeAction } from './js/actions.js';
 import { checkVoiceServer, startRecording, stopRecordingAndSend, cancelRecording, toggleCallMode, startCallMode, endCallMode, startWakeWordSSE, stopWakeWordSSE } from './js/voice.js';
@@ -104,6 +105,12 @@ tabLoaders.updateFocusWidget = updateFocusWidget;
 tabLoaders.updateFocusWidgetVisibility = updateFocusWidgetVisibility;
 tabLoaders.toggleFocusWidgetPopover = toggleFocusWidgetPopover;
 tabLoaders.startPomodoro = startPomodoro;
+
+// Chat overlay
+tabLoaders.createChatOverlay = createChatOverlay;
+tabLoaders.toggleChatOverlay = toggleChatOverlay;
+tabLoaders.updateChatOverlayVisibility = updateChatOverlayVisibility;
+tabLoaders.refreshOverlayMessages = refreshOverlayMessages;
 
 // Block editor
 tabLoaders.loadTabBlockEditor = loadTabBlockEditor;
@@ -233,6 +240,10 @@ document.addEventListener('keydown', (e) => {
   createFocusWidget();
   updateFocusWidget();
   S.focusWidgetPollInterval = setInterval(() => updateFocusWidget(), 3000);
+
+  // Chat floating overlay
+  createChatOverlay();
+  updateChatOverlayVisibility();
 
   // Auto-restore last conversation
   try {

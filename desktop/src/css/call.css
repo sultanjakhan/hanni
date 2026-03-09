@@ -518,6 +518,257 @@
 .fw-popout-btn svg { width: 12px; height: 12px; }
 .fw-popout-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(68,122,203,0.1); }
 
+/* ── Chat Floating Overlay ── */
+
+.chat-overlay-fab {
+  position: absolute;
+  bottom: 20px;
+  right: 16px;
+  z-index: 910;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--user-msg-bg, var(--accent-blue));
+  color: var(--user-msg-color, #fff);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: all 0.15s ease;
+}
+.chat-overlay-fab:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+.chat-overlay-fab.hidden { display: none; }
+.chat-overlay-fab svg { width: 18px; height: 18px; }
+
+.chat-overlay {
+  position: absolute;
+  bottom: 72px;
+  right: 16px;
+  width: 380px;
+  max-height: 520px;
+  z-index: 920;
+  background: var(--bg-page);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  animation: co-slideUp 0.18s ease;
+  overflow: hidden;
+}
+.chat-overlay.hidden { display: none; }
+
+@keyframes co-slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.co-header {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.co-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.co-conv-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+  max-width: 200px;
+  overflow: hidden;
+}
+.co-conv-selector:hover { background: var(--bg-hover); }
+.co-conv-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.co-new-chat-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+}
+.co-new-chat-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.co-header-actions {
+  display: flex;
+  gap: 4px;
+}
+.co-header-actions button {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+.co-header-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.co-conv-dropdown {
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+.co-conv-dropdown.hidden { display: none; }
+.co-conv-item {
+  padding: 7px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.co-conv-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.co-conv-item.active { color: var(--accent-blue); font-weight: 500; }
+.co-conv-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
+}
+.co-conv-empty:hover { background: transparent; }
+
+.co-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 120px;
+  max-height: 360px;
+}
+
+.co-msg {
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  max-width: 90%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.co-msg.user {
+  align-self: flex-end;
+  background: var(--user-msg-bg, var(--accent-blue));
+  color: var(--user-msg-color, #fff);
+}
+.co-msg.bot {
+  align-self: flex-start;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+.co-msg.bot.markdown-body { font-size: 13px; }
+.co-msg.bot.markdown-body p { margin: 0 0 4px 0; }
+.co-msg.bot.markdown-body p:last-child { margin: 0; }
+.co-msg.bot.markdown-body ul,
+.co-msg.bot.markdown-body ol { margin: 2px 0; padding-left: 16px; }
+.co-msg.bot.markdown-body code { font-size: 12px; }
+.co-msg.bot.markdown-body pre { margin: 4px 0; padding: 6px 8px; }
+
+.co-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.co-input-area {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.co-input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 4px 6px;
+  transition: border-color 0.12s ease;
+}
+.co-input-wrapper:focus-within {
+  border-color: var(--border-hover);
+}
+.co-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  max-height: 80px;
+  line-height: 1.4;
+  padding: 4px 2px;
+}
+.co-input::placeholder { color: var(--text-muted); }
+.co-send {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--user-msg-bg, var(--accent-blue));
+  color: var(--user-msg-color, #fff);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.12s ease;
+}
+.co-send:hover { opacity: 0.85; }
+.co-send svg { width: 14px; height: 14px; }
+
+.co-typing {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .tab-focus-dot {
   position: absolute;
   top: 4px;

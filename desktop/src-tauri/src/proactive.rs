@@ -130,6 +130,67 @@ pub fn get_browser_url() -> String {
     String::new()
 }
 
+pub fn get_window_title() -> String {
+    run_osascript(
+        "tell application \"System Events\" to return name of front window of first application process whose frontmost is true"
+    ).unwrap_or_default().trim().to_string()
+}
+
+pub fn classify_activity(app: &str, url: &str, title: &str) -> &'static str {
+    let app_l = app.to_lowercase();
+    let url_l = url.to_lowercase();
+    let title_l = title.to_lowercase();
+
+    // Coding
+    if ["code", "cursor", "xcode", "iterm", "terminal", "warp", "neovim", "vim", "jetbrains", "intellij", "pycharm", "webstorm"]
+        .iter().any(|k| app_l.contains(k)) {
+        return "coding";
+    }
+    if url_l.contains("github.com") || url_l.contains("stackoverflow.com") || url_l.contains("gitlab.com") {
+        return "coding";
+    }
+
+    // Social media / distraction
+    if ["twitter", "x.com", "reddit.com", "tiktok", "instagram", "vk.com", "facebook"]
+        .iter().any(|k| url_l.contains(k) || app_l.contains(k)) {
+        return "social";
+    }
+
+    // Media / entertainment
+    if ["youtube", "netflix", "twitch", "crunchyroll", "kinopoisk", "spotify"]
+        .iter().any(|k| url_l.contains(k) || app_l.contains(k) || title_l.contains(k)) {
+        return "media";
+    }
+    if app_l == "music" || app_l == "spotify" || app_l == "vlc" || app_l == "iina" {
+        return "media";
+    }
+
+    // Communication
+    if ["telegram", "discord", "slack", "zoom", "facetime", "whatsapp", "mail", "messages"]
+        .iter().any(|k| app_l.contains(k)) {
+        return "communication";
+    }
+
+    // Writing / productivity
+    if ["notion", "obsidian", "notes", "pages", "word", "google docs"]
+        .iter().any(|k| app_l.contains(k) || title_l.contains(k)) {
+        return "writing";
+    }
+
+    // Browsing (browser but not matched above)
+    if ["safari", "chrome", "arc", "firefox", "brave", "edge"]
+        .iter().any(|k| app_l.contains(k)) {
+        return "browsing";
+    }
+
+    // Reading (specific patterns)
+    if url_l.contains("chatgpt.com") || url_l.contains("claude.ai") || url_l.contains("docs.") {
+        return "learning";
+    }
+
+    "other"
+}
+
 pub fn get_now_playing_sync() -> String {
     let music_check = run_osascript(
         "tell application \"System Events\" to (name of processes) contains \"Music\""

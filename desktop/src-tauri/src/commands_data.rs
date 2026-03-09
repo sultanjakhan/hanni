@@ -1984,3 +1984,108 @@ pub fn save_tab_blocks(db: tauri::State<'_, HanniDb>, tab_id: String, sub_tab: S
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
+
+// ── Activity Tracking ──
+
+#[tauri::command]
+pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let target_date = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+
+    // Get all snapshots for the day
+    let mut stmt = conn.prepare(
+        "SELECT captured_at, frontmost_app, browser_url, window_title, category, idle_secs, music_playing, productive_min, distraction_min
+         FROM activity_snapshots
+         WHERE captured_at LIKE ?1
+         ORDER BY captured_at ASC"
+    ).map_err(|e| e.to_string())?;
+
+    let snapshots: Vec<serde_json::Value> = stmt.query_map(
+        [format!("{}%", target_date)],
+        |row| {
+            Ok(serde_json::json!({
+                "time": row.get::<_, String>(0).unwrap_or_default(),
+                "app": row.get::<_, String>(1).unwrap_or_default(),
+                "url": row.get::<_, String>(2).unwrap_or_default(),
+                "title": row.get::<_, String>(3).unwrap_or_default(),
+                "category": row.get::<_, String>(4).unwrap_or("other".into()),
+                "idle": row.get::<_, f64>(5).unwrap_or(0.0),
+                "music": row.get::<_, String>(6).unwrap_or_default(),
+                "productive": row.get::<_, f64>(7).unwrap_or(0.0),
+                "distraction": row.get::<_, f64>(8).unwrap_or(0.0),
+            }))
+        }
+    ).map_err(|e| e.to_string())?.flatten().collect();
+
+    // Aggregate by category and app
+    let mut by_category: HashMap<String, f64> = HashMap::new();
+    let mut by_app: HashMap<String, f64> = HashMap::new();
+
+    // Calculate per-snapshot interval: use productive+distraction sum to detect old (10min) vs new (0.5min)
+    let prod_min: f64 = snapshots.iter().map(|s| s["productive"].as_f64().unwrap_or(0.0)).sum();
+    let dist_min: f64 = snapshots.iter().map(|s| s["distraction"].as_f64().unwrap_or(0.0)).sum();
+    let total_min = prod_min + dist_min;
+    // Estimate per-snapshot interval from data (handles mixed old 10min + new 0.5min rows)
+    let interval_min = if snapshots.is_empty() { 0.5 } else { total_min / snapshots.len() as f64 };
+
+    for s in &snapshots {
+        let cat = s["category"].as_str().unwrap_or("other").to_string();
+        let app = s["app"].as_str().unwrap_or("").to_string();
+        *by_category.entry(cat).or_insert(0.0) += interval_min;
+        if !app.is_empty() {
+            *by_app.entry(app).or_insert(0.0) += interval_min;
+        }
+    }
+
+    // Sort apps by time descending
+    let mut top_apps: Vec<(String, f64)> = by_app.into_iter().collect();
+    top_apps.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    top_apps.truncate(10);
+
+    Ok(serde_json::json!({
+        "date": target_date,
+        "total_minutes": total_min,
+        "productive_minutes": prod_min,
+        "distraction_minutes": dist_min,
+        "snapshots_count": snapshots.len(),
+        "categories": by_category,
+        "top_apps": top_apps.iter().map(|(app, min)| serde_json::json!({"app": app, "minutes": min})).collect::<Vec<_>>(),
+        "timeline": snapshots,
+    }))
+}
+
+#[tauri::command]
+pub fn get_activity_weekly(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let mut days = Vec::new();
+
+    for i in 0..7 {
+        let date = (chrono::Local::now() - chrono::Duration::days(i)).format("%Y-%m-%d").to_string();
+        let (prod, dist, count): (f64, f64, i64) = conn.query_row(
+            "SELECT COALESCE(SUM(productive_min), 0), COALESCE(SUM(distraction_min), 0), COUNT(*)
+             FROM activity_snapshots WHERE captured_at LIKE ?1",
+            [format!("{}%", date)],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap_or((0.0, 0.0, 0));
+        let total = prod + dist;
+
+        // Top category for the day
+        let top_cat: String = conn.query_row(
+            "SELECT category FROM activity_snapshots WHERE captured_at LIKE ?1
+             GROUP BY category ORDER BY COUNT(*) DESC LIMIT 1",
+            [format!("{}%", date)],
+            |row| row.get(0),
+        ).unwrap_or_else(|_| "none".into());
+
+        days.push(serde_json::json!({
+            "date": date,
+            "total_minutes": total,
+            "productive_minutes": prod,
+            "distraction_minutes": dist,
+            "snapshots": count,
+            "top_category": top_cat,
+        }));
+    }
+
+    Ok(serde_json::json!({ "days": days }))
+}

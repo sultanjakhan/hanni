@@ -770,3 +770,12 @@ pub fn migrate_content_blocks(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE notes ADD COLUMN content_blocks TEXT", []).ok();
     conn.execute("ALTER TABLE custom_pages ADD COLUMN content_blocks TEXT", []).ok();
 }
+
+pub fn migrate_activity_tracking(conn: &rusqlite::Connection) {
+    // v0.27: Enhanced activity tracking — idle, window title, category
+    conn.execute("ALTER TABLE activity_snapshots ADD COLUMN idle_secs REAL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE activity_snapshots ADD COLUMN window_title TEXT DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE activity_snapshots ADD COLUMN category TEXT DEFAULT 'other'", []).ok();
+    // Index for daily queries
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON activity_snapshots(captured_at)", []).ok();
+}
