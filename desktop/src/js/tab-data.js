@@ -1332,18 +1332,49 @@ async function loadWork() {
         </div>`;
     },
     renderTable: async (paneEl) => {
-      // Existing projects + tasks view
+      // Simple tasks table (all tasks across projects)
       try {
         const projects = await invoke('get_projects').catch(() => []);
-        await renderWork(paneEl, projects || []);
+        let allTasks = [];
+        for (const p of projects) {
+          const tasks = await invoke('get_tasks', { projectId: p.id }).catch(() => []);
+          allTasks.push(...tasks.map(t => ({ ...t, projectName: p.name, projectColor: p.color })));
+        }
+        renderWorkTasks(paneEl, allTasks, projects);
       } catch (e) {
-        paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить проекты</div>';
+        paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить задачи</div>';
       }
     },
   });
 }
 
-async function renderWork(el, projects) {
+// ── Projects tab ──
+async function loadProjects() {
+  const el = document.getElementById('projects-content');
+  if (!el) return;
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'projects', {
+    title: 'Projects',
+    subtitle: 'Проекты и их задачи',
+    icon: '📁',
+    renderDash: async (paneEl) => {
+      const projects = await invoke('get_projects').catch(() => []);
+      const totalTasks = projects.reduce((sum, p) => sum + (p.task_count || 0), 0);
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${projects.length}</div><div class="uni-dash-label">Проекты</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${totalTasks}</div><div class="uni-dash-label">Всего задач</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const projects = await invoke('get_projects').catch(() => []);
+      await renderProjectsView(paneEl, projects || []);
+    },
+  });
+}
+
+async function renderProjectsView(el, projects) {
   if (!S.currentProjectId && projects.length > 0) S.currentProjectId = projects[0].id;
   const tasks = S.currentProjectId ? await invoke('get_tasks', { projectId: S.currentProjectId }).catch(() => []) : [];
 
@@ -1371,7 +1402,7 @@ async function renderWork(el, projects) {
     item.innerHTML = `<span class="work-project-dot" style="background:${p.color || 'var(--accent-blue)'}"></span>
       <span class="work-project-name">${escapeHtml(p.name)}</span>
       <span class="work-project-count">${taskCount}</span>`;
-    item.addEventListener('click', () => { S.currentProjectId = p.id; loadWork(); });
+    item.addEventListener('click', () => { S.currentProjectId = p.id; loadProjects(); });
     projectList.appendChild(item);
   }
 
@@ -1388,19 +1419,105 @@ async function renderWork(el, projects) {
     item.querySelector('.work-task-check').addEventListener('click', async () => {
       const newStatus = isDone ? 'todo' : 'done';
       await invoke('update_task_status', { id: t.id, status: newStatus }).catch(() => {});
-      loadWork();
+      loadProjects();
     });
     taskList.appendChild(item);
   }
 
   document.getElementById('new-project-btn')?.addEventListener('click', () => {
     const name = prompt('Название проекта:');
-    if (name) invoke('create_project', { name, description: '', color: '#9B9B9B' }).then(() => loadWork()).catch(e => alert(e));
+    if (name) invoke('create_project', { name, description: '', color: '#9B9B9B' }).then(() => loadProjects()).catch(e => alert(e));
   });
 
   document.getElementById('new-task-btn')?.addEventListener('click', () => {
     const title = prompt('Задача:');
-    if (title) invoke('create_task', { projectId: S.currentProjectId, title, description: '', priority: 'normal', dueDate: null }).then(() => loadWork()).catch(e => alert(e));
+    if (title) invoke('create_task', { projectId: S.currentProjectId, title, description: '', priority: 'normal', dueDate: null }).then(() => loadProjects()).catch(e => alert(e));
+  });
+}
+
+// ── Work: simple tasks table ──
+function renderWorkTasks(el, tasks, projects) {
+  const statusLabels = { todo: 'To Do', in_progress: 'В работе', done: 'Готово' };
+  const statusColors = { todo: 'badge-gray', in_progress: 'badge-blue', done: 'badge-green' };
+  const priorityColors = { high: 'badge-red', normal: 'badge-gray', low: 'badge-gray' };
+
+  el.innerHTML = `
+    <div class="module-header">
+      <h2 style="font-size:16px;color:var(--text-primary);">Задачи</h2>
+      <button class="btn-primary" id="work-add-task-btn">+ Задача</button>
+    </div>
+    ${tasks.length > 0 ? `<div style="overflow-x:auto;">
+      <table class="cal-list-table">
+        <thead><tr>
+          <th></th>
+          <th>Задача</th>
+          <th>Проект</th>
+          <th>Приоритет</th>
+          <th>Статус</th>
+        </tr></thead>
+        <tbody>
+          ${tasks.map(t => {
+            const isDone = t.status === 'done';
+            return `<tr data-task-id="${t.id}">
+              <td><div class="work-task-check${isDone ? ' done' : ''}" data-tid="${t.id}" style="cursor:pointer;"></div></td>
+              <td style="color:var(--text-primary);${isDone ? 'text-decoration:line-through;opacity:0.5;' : ''}">${escapeHtml(t.title)}</td>
+              <td><span style="color:${t.projectColor || 'var(--text-secondary)'};font-size:12px;">${escapeHtml(t.projectName || '')}</span></td>
+              <td><span class="badge ${priorityColors[t.priority] || 'badge-gray'}">${t.priority || 'normal'}</span></td>
+              <td><span class="badge ${statusColors[t.status] || 'badge-gray'}">${statusLabels[t.status] || t.status}</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div style="color:var(--text-muted);padding:24px;text-align:center;">Нет задач</div>'}`;
+
+  el.querySelectorAll('[data-tid]').forEach(check => {
+    check.addEventListener('click', async () => {
+      const id = parseInt(check.dataset.tid);
+      const task = tasks.find(t => t.id === id);
+      const newStatus = task?.status === 'done' ? 'todo' : 'done';
+      await invoke('update_task_status', { id, status: newStatus }).catch(() => {});
+      loadWork();
+    });
+  });
+
+  document.getElementById('work-add-task-btn')?.addEventListener('click', () => {
+    // Show modal to add task
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal modal-compact">
+      <div class="modal-title">Новая задача</div>
+      <div class="form-group"><label class="form-label">Задача</label><input class="form-input" id="wt-title" placeholder="Название задачи"></div>
+      <div class="form-group"><label class="form-label">Проект</label>
+        <select class="form-input" id="wt-project">
+          ${projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+          ${projects.length === 0 ? '<option value="">Нет проектов</option>' : ''}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Приоритет</label>
+        <select class="form-input" id="wt-priority">
+          <option value="normal">Normal</option>
+          <option value="high">High</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="wt-cancel">Отмена</button>
+        <button class="btn-primary" id="wt-save">Создать</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('wt-cancel')?.addEventListener('click', () => overlay.remove());
+    document.getElementById('wt-save')?.addEventListener('click', async () => {
+      const title = document.getElementById('wt-title')?.value?.trim();
+      if (!title) return;
+      const projectId = parseInt(document.getElementById('wt-project')?.value);
+      const priority = document.getElementById('wt-priority')?.value || 'normal';
+      if (!projectId) { alert('Сначала создайте проект'); return; }
+      await invoke('create_task', { projectId, title, description: '', priority, dueDate: null }).catch(e => alert(e));
+      overlay.remove();
+      loadWork();
+    });
   });
 }
 
@@ -2163,6 +2280,7 @@ export {
   renderMemoryList,
   loadAbout,
   loadWork,
+  loadProjects,
   loadDevelopment,
   loadHobbies,
   loadSports,

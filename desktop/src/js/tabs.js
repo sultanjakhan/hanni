@@ -495,6 +495,7 @@ function loadSubTabContent(tabId, subTab) {
     case 'focus': tabLoaders.loadFocus?.(subTab); break;
     case 'notes': tabLoaders.loadNotes?.(subTab); break;
     case 'work': tabLoaders.loadWork?.(subTab); break;
+    case 'projects': tabLoaders.loadProjects?.(subTab); break;
     case 'development': tabLoaders.loadDevelopment?.(subTab); break;
     case 'home': tabLoaders.loadHome?.(subTab); break;
     case 'hobbies': tabLoaders.loadHobbies?.(subTab); break;

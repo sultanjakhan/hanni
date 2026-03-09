@@ -26,7 +26,7 @@ import { loadFocus, createFocusWidget, updateFocusWidget, updateFocusWidgetVisib
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
-  loadMemoryTab, loadAbout, loadWork, loadDevelopment,
+  loadMemoryTab, loadAbout, loadWork, loadProjects, loadDevelopment,
   loadHobbies, loadSports, loadHealth, loadCustomPage,
 } from './js/tab-data.js';
 
@@ -88,6 +88,7 @@ tabLoaders.loadCalendar = loadCalendar;
 tabLoaders.loadFocus = loadFocus;
 tabLoaders.loadNotes = loadNotes;
 tabLoaders.loadWork = loadWork;
+tabLoaders.loadProjects = loadProjects;
 tabLoaders.loadDevelopment = loadDevelopment;
 tabLoaders.loadHome = loadHome;
 tabLoaders.loadHobbies = loadHobbies;

@@ -1,7 +1,7 @@
 // ── db-view/unified-layout.js — Unified tab layout with sub-panes ──
-// Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память] + ⚙️
+// Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память] [⚙️]
 
-import { S, invoke } from '../state.js';
+import { S, invoke, TAB_REGISTRY, TAB_SETTINGS_DEFS, loadTabSetting, saveTabSetting } from '../state.js';
 import { escapeHtml } from '../utils.js';
 
 const SUB_PANES = [
@@ -12,18 +12,39 @@ const SUB_PANES = [
   { id: 'store', icon: '🧠', label: 'Память' },
 ];
 
+const TAB_LABELS = {
+  work: { name: 'Работа', icon: '💼' },
+  development: { name: 'Развитие', icon: '🚀' },
+  home: { name: 'Дом', icon: '🏠' },
+  hobbies: { name: 'Хобби', icon: '🎮' },
+  sports: { name: 'Спорт', icon: '⚽' },
+  health: { name: 'Здоровье', icon: '❤️' },
+  mindset: { name: 'Мышление', icon: '🧠' },
+  food: { name: 'Питание', icon: '🍔' },
+  money: { name: 'Финансы', icon: '💰' },
+  people: { name: 'Люди', icon: '👥' },
+  calendar: { name: 'Календарь', icon: '📅' },
+  focus: { name: 'Фокус', icon: '🎯' },
+  projects: { name: 'Проекты', icon: '📁' },
+};
+
 /**
  * Render the unified tab layout into a container.
- *
- * @param {HTMLElement} el - Container element (e.g. #work-content)
- * @param {string} tabId - Tab identifier (e.g. 'work')
- * @param {object} config - { title, subtitle, icon, counts?, renderDash, renderTable, renderGoals, renderNotes, renderStore }
  */
 export async function renderUnifiedLayout(el, tabId, config) {
   const activePane = S._unifiedPane?.[tabId] || 'dash';
 
-  // Build sub-tab bar
-  const tabsHtml = SUB_PANES.map(p => {
+  // Build panes list — add settings if tab has settings defs
+  const panes = [...SUB_PANES];
+  const hasSettings = !!TAB_SETTINGS_DEFS[tabId]?.length;
+  if (hasSettings) {
+    panes.push({ id: 'settings', icon: '⚙️', label: 'Настройки' });
+  }
+
+  // Tab title header
+  const tabLabel = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '' };
+
+  const tabsHtml = panes.map(p => {
     const count = config.counts?.[p.id];
     const countHtml = count != null ? `<span class="uni-tab-count">(${count})</span>` : '';
     const cls = p.id === activePane ? ' active' : '';
@@ -31,6 +52,10 @@ export async function renderUnifiedLayout(el, tabId, config) {
   }).join('');
 
   el.innerHTML = `
+    <div class="uni-header">
+      <span class="uni-header-icon">${tabLabel.icon}</span>
+      <span class="uni-header-name">${escapeHtml(tabLabel.name)}</span>
+    </div>
     <div class="uni-tabs">${tabsHtml}</div>
     <div class="uni-content">
       <div class="uni-pane" id="uni-pane-${tabId}"></div>
@@ -66,6 +91,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
       break;
     case 'store':
       await renderStorePane(paneEl, tabId, config);
+      break;
+    case 'settings':
+      await renderSettingsPane(paneEl, tabId);
       break;
   }
 }
@@ -138,7 +166,6 @@ async function renderNotesPane(el, tabId, config) {
 
   let notes = [];
   try { notes = await invoke('get_notes_for_tab', { tabName: tabId }); } catch {}
-  // Fallback: try getting all notes and filtering by tag
   if (notes.length === 0) {
     try {
       const all = await invoke('get_notes', { filter: null, search: null });
@@ -172,12 +199,10 @@ async function renderNotesPane(el, tabId, config) {
     <div class="uni-notes-grid">${notesHtml}</div>
   </div>`;
 
-  // Add note
   el.querySelector(`#uni-add-note-${tabId}`)?.addEventListener('click', () => {
     showAddNoteModal(el, tabId, config);
   });
 
-  // Edit note
   el.querySelectorAll('.uni-note-edit').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -186,7 +211,6 @@ async function renderNotesPane(el, tabId, config) {
     });
   });
 
-  // Archive note
   el.querySelectorAll('.uni-note-archive').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -197,7 +221,6 @@ async function renderNotesPane(el, tabId, config) {
     });
   });
 
-  // Search filter
   el.querySelector('.uni-notes-search')?.addEventListener('input', (e) => {
     const q = e.target.value.toLowerCase();
     el.querySelectorAll('.uni-note-card').forEach(card => {
@@ -269,7 +292,6 @@ function showEditNoteModal(parentEl, tabId, config, note) {
 }
 
 // ── Store (Memory) Pane ──
-// Per-tab contextual memory: documents, key-value data, files
 const STORE_HINTS = {
   work: { examples: ['Резюме', 'Портфолио', 'Навыки', 'Сопроводительное письмо'], placeholder: 'резюме, навыки...' },
   health: { examples: ['Лекарства', 'Анализы', 'Диагнозы', 'Врачи'], placeholder: 'лекарства, анализы...' },
@@ -281,12 +303,13 @@ const STORE_HINTS = {
   home: { examples: ['Адреса', 'Контакты ЖКХ', 'Инвентарь'], placeholder: 'адреса, контакты...' },
   hobbies: { examples: ['Вишлист', 'Коллекции', 'Рекомендации'], placeholder: 'вишлист, рекомендации...' },
   people: { examples: ['Дни рождения', 'Подарки', 'Заметки о людях'], placeholder: 'дни рождения, подарки...' },
+  calendar: { examples: ['Праздники', 'Расписание', 'Повторяющиеся'], placeholder: 'праздники, расписание...' },
+  focus: { examples: ['Правила', 'Блоклист', 'Ритуалы'], placeholder: 'правила, ритуалы...' },
 };
 
 async function renderStorePane(el, tabId, config) {
   if (config.renderStore) { await config.renderStore(el); return; }
 
-  // Load facts for this tab from memory
   let entries = [];
   try {
     entries = await invoke('memory_list', { category: tabId, limit: 100 });
@@ -295,25 +318,27 @@ async function renderStorePane(el, tabId, config) {
   const hints = STORE_HINTS[tabId] || { examples: ['Ключ', 'Значение'], placeholder: 'поиск...' };
   const viewMode = S._storeView?.[tabId] || 'table';
 
-  // Cards view (visual)
-  const cardsHtml = entries.length > 0
-    ? entries.map(e => `<div class="uni-store-card">
-        <div class="uni-store-card-key">${escapeHtml(e.key)}</div>
-        ${e.category ? `<span class="uni-store-tag">${escapeHtml(e.category)}</span>` : ''}
-        <div class="uni-store-card-value">${escapeHtml((e.value || '').substring(0, 200))}</div>
-        ${e.updated_at ? `<div class="uni-store-card-date">${new Date(e.updated_at).toLocaleDateString('ru')}</div>` : ''}
-      </div>`).join('')
-    : '';
+  // Cards view
+  const cardsHtml = entries.map(e => `<div class="uni-store-card" data-store-id="${e.id}">
+      <div class="uni-store-card-key">${escapeHtml(e.key)}</div>
+      <div class="uni-store-card-value">${escapeHtml((e.value || '').substring(0, 200))}</div>
+      ${e.updated_at ? `<div class="uni-store-card-date">${new Date(e.updated_at).toLocaleDateString('ru')}</div>` : ''}
+      <div class="uni-store-card-actions">
+        <button class="uni-store-edit-btn" data-store-id="${e.id}" title="Редактировать">✏️</button>
+        <button class="uni-store-del-btn" data-store-id="${e.id}" title="Удалить">🗑</button>
+      </div>
+    </div>`).join('');
 
   // Table view
-  const rowsHtml = entries.length > 0
-    ? entries.map(e => `<tr>
-        <td class="uni-store-key">${escapeHtml(e.key)}</td>
-        <td><span class="uni-store-tag">${escapeHtml(e.category || '')}</span></td>
-        <td>${escapeHtml((e.value || '').substring(0, 150))}</td>
-        <td class="uni-store-date">${e.updated_at ? new Date(e.updated_at).toLocaleDateString('ru') : ''}</td>
-      </tr>`).join('')
-    : '';
+  const rowsHtml = entries.map(e => `<tr data-store-id="${e.id}">
+      <td class="uni-store-cell-key">${escapeHtml(e.key)}</td>
+      <td class="uni-store-cell-value">${escapeHtml((e.value || '').substring(0, 200))}</td>
+      <td class="uni-store-cell-date">${e.updated_at ? new Date(e.updated_at).toLocaleDateString('ru') : ''}</td>
+      <td class="uni-store-cell-actions">
+        <button class="uni-store-edit-btn" data-store-id="${e.id}" title="Редактировать">✏️</button>
+        <button class="uni-store-del-btn" data-store-id="${e.id}" title="Удалить">🗑</button>
+      </td>
+    </tr>`).join('');
 
   const emptyHtml = entries.length === 0
     ? `<div class="uni-store-empty">
@@ -335,10 +360,12 @@ async function renderStorePane(el, tabId, config) {
     </div>
     ${emptyHtml}
     ${entries.length > 0 && viewMode === 'cards' ? `<div class="uni-store-cards">${cardsHtml}</div>` : ''}
-    ${entries.length > 0 && viewMode === 'table' ? `<table class="uni-store-table">
-      <thead><tr><th>Ключ</th><th>Категория</th><th>Значение</th><th>Обновлено</th></tr></thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>` : ''}
+    ${entries.length > 0 && viewMode === 'table' ? `<div style="overflow-x:auto;">
+      <table class="uni-store-table">
+        <thead><tr><th>Ключ</th><th>Значение</th><th>Обновлено</th><th></th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>` : ''}
   </div>`;
 
   // View toggle
@@ -353,6 +380,29 @@ async function renderStorePane(el, tabId, config) {
   // Add entry
   el.querySelector(`#uni-add-store-${tabId}`)?.addEventListener('click', () => {
     showAddStoreModal(el, tabId, config);
+  });
+
+  // Edit entry
+  el.querySelectorAll('.uni-store-edit-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const entry = entries.find(en => en.id === parseInt(btn.dataset.storeId));
+      if (entry) showEditStoreModal(el, tabId, config, entry);
+    });
+  });
+
+  // Delete entry
+  el.querySelectorAll('.uni-store-del-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const entry = entries.find(en => en.id === parseInt(btn.dataset.storeId));
+      if (!entry) return;
+      if (!confirm(`Удалить «${entry.key}»?`)) return;
+      try {
+        await invoke('memory_forget', { category: tabId, key: entry.key });
+        renderStorePane(el, tabId, config);
+      } catch (err) { alert('Ошибка: ' + err); }
+    });
   });
 
   // Search filter
@@ -377,7 +427,6 @@ function showAddStoreModal(parentEl, tabId, config) {
   overlay.innerHTML = `<div class="modal">
     <div class="modal-title">Добавить в память</div>
     <div class="form-group"><label class="form-label">Ключ</label><input class="form-input" id="store-key" placeholder="${hints.examples[0] || 'Название'}"></div>
-    <div class="form-group"><label class="form-label">Категория</label><input class="form-input" id="store-cat" placeholder="Опционально"></div>
     <div class="form-group"><label class="form-label">Значение</label><textarea class="form-textarea" id="store-val" rows="4" placeholder="Содержимое..."></textarea></div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
@@ -398,6 +447,73 @@ function showAddStoreModal(parentEl, tabId, config) {
       overlay.remove();
       renderStorePane(parentEl, tabId, config);
     } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+function showEditStoreModal(parentEl, tabId, config, entry) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Редактировать запись</div>
+    <div class="form-group"><label class="form-label">Ключ</label><input class="form-input" id="store-key" value="${escapeHtml(entry.key)}" readonly style="opacity:0.6"></div>
+    <div class="form-group"><label class="form-label">Значение</label><textarea class="form-textarea" id="store-val" rows="4">${escapeHtml(entry.value || '')}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="store-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('store-save')?.addEventListener('click', async () => {
+    try {
+      await invoke('memory_remember', {
+        category: tabId,
+        key: entry.key,
+        value: document.getElementById('store-val')?.value || '',
+      });
+      overlay.remove();
+      renderStorePane(parentEl, tabId, config);
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+// ── Settings Pane ──
+async function renderSettingsPane(el, tabId) {
+  const defs = TAB_SETTINGS_DEFS[tabId] || [];
+  if (defs.length === 0) {
+    el.innerHTML = '<div class="uni-empty">Нет настроек для этой вкладки</div>';
+    return;
+  }
+
+  let rowsHtml = '';
+  for (const def of defs) {
+    const val = await loadTabSetting(tabId, def.key) ?? def.default;
+    let controlHtml = '';
+    if (def.type === 'toggle') {
+      controlHtml = `<label class="toggle"><input type="checkbox" data-setting-key="${def.key}" ${val === 'true' || val === true ? 'checked' : ''}><span class="toggle-track"></span></label>`;
+    } else if (def.type === 'select') {
+      controlHtml = `<select class="form-input" data-setting-key="${def.key}" style="max-width:200px;">
+        ${def.options.map(o => `<option value="${o.value}" ${val === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+      </select>`;
+    } else if (def.type === 'number') {
+      controlHtml = `<input class="form-input" type="number" data-setting-key="${def.key}" value="${escapeHtml(String(val || ''))}" style="max-width:120px;">`;
+    } else {
+      controlHtml = `<input class="form-input" type="text" data-setting-key="${def.key}" value="${escapeHtml(String(val || ''))}">`;
+    }
+    rowsHtml += `<div class="settings-row"><span class="settings-label">${def.label}</span><span class="settings-value">${controlHtml}</span></div>`;
+  }
+
+  const reg = TAB_REGISTRY[tabId];
+  el.innerHTML = `<div class="settings-section">
+    <div class="settings-section-title">Настройки — ${reg?.label || tabId}</div>
+    ${rowsHtml}
+  </div>`;
+
+  el.querySelectorAll('input[data-setting-key], select[data-setting-key]').forEach(ctrl => {
+    ctrl.addEventListener('change', () => {
+      const v = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
+      saveTabSetting(tabId, ctrl.dataset.settingKey, v);
+    });
   });
 }
 
