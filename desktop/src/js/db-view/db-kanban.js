@@ -1,12 +1,12 @@
-// ── db-view/db-kanban.js — Generic kanban view renderer ──
+// ── db-view/db-kanban.js — Notion-style kanban view ──
 
 import { escapeHtml } from '../utils.js';
 
 /**
- * Render a kanban view into a container element.
+ * Render a kanban board.
  *
- * @param {HTMLElement} el - Container element
- * @param {object} ctx - Context: { records, idField, kanban, fixedColumns, onRowClick, onAdd, addButton, onDrop }
+ * @param {HTMLElement} el - Container
+ * @param {object} ctx - { records, idField, kanban, fixedColumns, onRowClick, onAdd, addButton, onDrop }
  *   kanban: { groupByField, columns: [{ key, label, icon?, color? }] }
  */
 export function renderKanbanView(el, ctx) {
@@ -18,11 +18,11 @@ export function renderKanbanView(el, ctx) {
   const { groupByField = 'status', columns = [] } = kanban;
 
   if (columns.length === 0) {
-    el.innerHTML = '<div style="color:var(--text-faint);padding:24px;text-align:center;">Kanban requires column config</div>';
+    el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">Канбан не настроен</div></div>';
     return;
   }
 
-  // Group records
+  // Group records by column
   const grouped = {};
   for (const col of columns) grouped[col.key] = [];
   for (const rec of records) {
@@ -31,16 +31,18 @@ export function renderKanbanView(el, ctx) {
     if (grouped[colKey]) grouped[colKey].push(rec);
   }
 
-  // Render columns
   const boardHtml = columns.map(col => {
     const items = grouped[col.key] || [];
-    const icon = col.icon || '';
-    const cardsHtml = items.map(rec => renderKanbanCard(rec, fixedColumns, idField)).join('');
+    const colorDot = col.color ? `<span class="dbv-col-dot" style="background:var(--color-${col.color}, ${col.color})"></span>` : '';
+    const icon = col.icon ? `<span class="dbv-col-icon">${col.icon}</span>` : '';
+    const cardsHtml = items.length > 0
+      ? items.map(rec => renderCard(rec, fixedColumns, idField)).join('')
+      : '<div class="dbv-kanban-empty">Нет записей</div>';
 
     return `<div class="dbv-kanban-column" data-group="${escapeHtml(col.key)}">
-      <div class="kanban-column-header">
-        <span>${icon ? icon + ' ' : ''}${escapeHtml(col.label)}</span>
-        <span class="kanban-column-count">${items.length}</span>
+      <div class="dbv-kanban-col-header">
+        <div class="dbv-kanban-col-title">${colorDot}${icon}${escapeHtml(col.label)}</div>
+        <span class="dbv-kanban-col-count">${items.length}</span>
       </div>
       <div class="dbv-kanban-cards" data-group="${escapeHtml(col.key)}">
         ${cardsHtml}
@@ -49,7 +51,7 @@ export function renderKanbanView(el, ctx) {
   }).join('');
 
   el.innerHTML = `${addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : ''}
-    <div class="kanban-board dbv-kanban-board">${boardHtml}</div>`;
+    <div class="dbv-kanban-board">${boardHtml}</div>`;
 
   // Card clicks
   if (onRowClick) {
@@ -67,11 +69,11 @@ export function renderKanbanView(el, ctx) {
     el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
   }
 
-  // Drag & drop between columns
+  // Drag & drop
   setupKanbanDnD(el, records, idField, groupByField, onDrop);
 }
 
-function renderKanbanCard(rec, fixedColumns, idField) {
+function renderCard(rec, fixedColumns, idField) {
   const titleCol = fixedColumns[0];
   const title = titleCol
     ? (titleCol.render ? titleCol.render(rec) : escapeHtml(String(rec[titleCol.key] ?? '')))
@@ -79,17 +81,19 @@ function renderKanbanCard(rec, fixedColumns, idField) {
 
   const badges = fixedColumns.slice(1).map(c => {
     const val = c.render ? c.render(rec) : escapeHtml(String(rec[c.key] ?? ''));
-    return val ? `<span class="dbv-kanban-card-meta">${val}</span>` : '';
-  }).join('');
+    if (!val) return '';
+    // If the render already returns HTML with classes, use as-is; otherwise wrap in a badge
+    if (val.includes('class=')) return `<span class="dbv-card-badge">${val}</span>`;
+    return `<span class="dbv-card-badge badge badge-gray">${val}</span>`;
+  }).filter(Boolean).join('');
 
-  return `<div class="dbv-kanban-card card" data-id="${rec[idField]}" draggable="true">
+  return `<div class="dbv-kanban-card" data-id="${rec[idField]}" draggable="true">
     <div class="dbv-kanban-card-title">${title}</div>
-    ${badges ? `<div class="dbv-kanban-card-badges">${badges}</div>` : ''}
+    ${badges ? `<div class="dbv-kanban-card-meta">${badges}</div>` : ''}
   </div>`;
 }
 
 function setupKanbanDnD(el, records, idField, groupByField, onDrop) {
-  // Card drag start
   el.querySelectorAll('.dbv-kanban-card').forEach(card => {
     card.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/plain', card.dataset.id);
@@ -98,7 +102,6 @@ function setupKanbanDnD(el, records, idField, groupByField, onDrop) {
     card.addEventListener('dragend', () => card.classList.remove('dragging'));
   });
 
-  // Column drop zones
   el.querySelectorAll('.dbv-kanban-cards').forEach(col => {
     col.addEventListener('dragover', (e) => {
       e.preventDefault();

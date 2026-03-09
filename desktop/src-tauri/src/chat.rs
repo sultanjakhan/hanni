@@ -127,7 +127,7 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
     let mut buffer = String::new();
     let mut finish_reason: Option<String> = None;
 
-    while let Some(chunk) = stream.next().await {
+    'stream: while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| format!("Stream error: {}", e))?;
         buffer.push_str(&String::from_utf8_lossy(&bytes));
 
@@ -137,7 +137,7 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
             let data = &line[6..];
             if data == "[DONE]" {
                 let _ = app.emit("chat-done", ());
-                continue;
+                break 'stream;
             }
 
             if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
@@ -601,7 +601,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
     let mut tc_names: HashMap<usize, String> = HashMap::new();
     let mut tc_args: HashMap<usize, String> = HashMap::new();
 
-    while let Some(chunk) = stream.next().await {
+    'stream: while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| format!("Stream error: {}", e))?;
         buffer.push_str(&String::from_utf8_lossy(&bytes));
 
@@ -613,7 +613,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
             let data = &line[6..];
             if data == "[DONE]" {
                 let _ = app.emit("chat-done", ());
-                continue;
+                break 'stream;
             }
 
             if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
