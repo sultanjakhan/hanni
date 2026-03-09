@@ -15,6 +15,7 @@ export async function loadConversationsList(searchQuery) {
     } else {
       convs = await invoke('get_conversations', { limit: 50 });
     }
+    if (!convs) return;  // fetch failed — don't wipe sidebar
     convList.innerHTML = '';
 
     // Group by date (Today / Yesterday / This Week / Earlier)
@@ -68,14 +69,21 @@ export async function loadConversationsList(searchQuery) {
         convList.appendChild(item);
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    console.error('loadConversationsList failed:', e);
+    // Don't clear sidebar on error — keep existing list visible
+  }
 }
 
 // ── Load a single conversation ──
 
 export async function loadConversation(id) {
-  if (S.busy) return;
   try {
+    // Allow switching even during active LLM stream — save & reset busy state
+    const wasBusy = S.busy;
+    if (wasBusy) {
+      S.busy = false;
+    }
     // Save current conversation before switching
     await autoSaveConversation();
     const conv = await invoke('get_conversation', { id });

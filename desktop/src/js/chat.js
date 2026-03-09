@@ -1446,7 +1446,7 @@ async function send() {
 // ── New Chat ──
 
 async function newChat() {
-  if (S.busy) return;
+  if (S.busy) S.busy = false;  // allow new chat even during active stream
   // Save current conversation before clearing
   await autoSaveConversation();
   S.currentConversationId = null;
