@@ -453,6 +453,45 @@ pub fn memory_forget(
 }
 
 #[tauri::command]
+pub fn memory_list(
+    category: Option<String>,
+    limit: Option<usize>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let max = limit.unwrap_or(100) as i64;
+    let mut stmt = if let Some(ref cat) = category {
+        let mut s = conn.prepare(
+            "SELECT id, category, key, value, updated_at FROM facts WHERE category=?1 ORDER BY updated_at DESC LIMIT ?2"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let rows: Vec<serde_json::Value> = s.query_map(rusqlite::params![cat, max], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "category": row.get::<_, String>(1).unwrap_or_default(),
+                "key": row.get::<_, String>(2).unwrap_or_default(),
+                "value": row.get::<_, String>(3).unwrap_or_default(),
+                "updated_at": row.get::<_, String>(4).unwrap_or_default(),
+            }))
+        }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        return Ok(rows);
+    } else {
+        conn.prepare(
+            "SELECT id, category, key, value, updated_at FROM facts ORDER BY updated_at DESC LIMIT ?1"
+        ).map_err(|e| format!("DB error: {}", e))?
+    };
+    let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![max], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "category": row.get::<_, String>(1).unwrap_or_default(),
+            "key": row.get::<_, String>(2).unwrap_or_default(),
+            "value": row.get::<_, String>(3).unwrap_or_default(),
+            "updated_at": row.get::<_, String>(4).unwrap_or_default(),
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
 pub fn memory_search(
     query: String,
     limit: Option<usize>,

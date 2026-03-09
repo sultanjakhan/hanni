@@ -286,16 +286,11 @@ const STORE_HINTS = {
 async function renderStorePane(el, tabId, config) {
   if (config.renderStore) { await config.renderStore(el); return; }
 
-  // Try loading memories for this tab
+  // Load facts for this tab from memory
   let entries = [];
-  try { entries = await invoke('get_memory_entries', { tabId }); } catch {}
-  // Fallback: try memories by category
-  if (entries.length === 0) {
-    try {
-      const all = await invoke('get_memories', { category: tabId, limit: 50 });
-      entries = (all || []).map(m => ({ key: m.key || m.content?.substring(0, 40) || '', category: m.category || '', value: m.content || m.value || '', updated_at: m.updated_at }));
-    } catch {}
-  }
+  try {
+    entries = await invoke('memory_list', { category: tabId, limit: 100 });
+  } catch {}
 
   const hints = STORE_HINTS[tabId] || { examples: ['Ключ', 'Значение'], placeholder: 'поиск...' };
   const viewMode = S._storeView?.[tabId] || 'table';
@@ -395,26 +390,14 @@ function showAddStoreModal(parentEl, tabId, config) {
     const key = document.getElementById('store-key')?.value?.trim();
     if (!key) return;
     try {
-      await invoke('add_memory_entry', {
-        tabId,
+      await invoke('memory_remember', {
+        category: tabId,
         key,
-        category: document.getElementById('store-cat')?.value || '',
         value: document.getElementById('store-val')?.value || '',
       });
       overlay.remove();
       renderStorePane(parentEl, tabId, config);
-    } catch (err) {
-      // Fallback: try saving as regular memory
-      try {
-        await invoke('store_memory', {
-          content: `${key}: ${document.getElementById('store-val')?.value || ''}`,
-          category: tabId,
-          importance: 5,
-        });
-        overlay.remove();
-        renderStorePane(parentEl, tabId, config);
-      } catch (e2) { alert('Ошибка: ' + e2); }
-    }
+    } catch (err) { alert('Ошибка: ' + err); }
   });
 }
 

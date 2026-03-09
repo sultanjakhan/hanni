@@ -204,6 +204,7 @@ pub fn run() {
             memory::memory_remember,
             memory::memory_recall,
             memory::memory_forget,
+            memory::memory_list,
             memory::memory_search,
             memory::save_conversation,
             memory::update_conversation,
