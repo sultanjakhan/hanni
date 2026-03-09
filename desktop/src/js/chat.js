@@ -1176,7 +1176,7 @@ async function streamChat(botDiv, t0, callMode = false) {
 
   try {
     const msgs = S.history.slice(-20).map(normalizeHistoryMessage);
-    const resultJson = await invoke('chat', { messages: msgs, callMode });
+    const resultJson = await invoke('chat', { messages: msgs, callMode, conversationId: S.currentConversationId });
     // Parse ChatResult JSON from Rust
     try {
       const chatResult = JSON.parse(resultJson);
