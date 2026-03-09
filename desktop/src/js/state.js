@@ -152,10 +152,11 @@ export const TAB_ICONS = {
 // ── Tab Registry ──
 export const TAB_REGISTRY = {
   chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: [], subIcons: {} },
-  calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: ['Месяц', 'Неделя', 'День', 'Список', 'Интеграции'] },
-  focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: ['Current', 'History'] },
+  calendar:    { label: 'Calendar',    icon: TAB_ICONS.calendar, closable: true,  subTabs: [] },
+  focus:       { label: 'Focus',       icon: TAB_ICONS.focus, closable: true,  subTabs: [] },
   notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: [] },
   work:        { label: 'Work',        icon: TAB_ICONS.work, closable: true,  subTabs: [] },
+  projects:    { label: 'Projects',   icon: '📁', closable: true,  subTabs: [] },
   development: { label: 'Development', icon: TAB_ICONS.development, closable: true,  subTabs: [] },
   home:        { label: 'Home',        icon: TAB_ICONS.home, closable: true,  subTabs: [] },
   hobbies:     { label: 'Hobbies',     icon: TAB_ICONS.hobbies, closable: true,  subTabs: [] },
@@ -171,7 +172,8 @@ export const TAB_DESCRIPTIONS = {
   calendar: 'Events, schedules, and calendar integrations',
   focus: 'Deep work sessions and activity tracking',
   notes: 'Quick notes, ideas, and thoughts',
-  work: 'Projects and tasks management',
+  work: 'Tasks and daily work',
+  projects: 'Project management',
   development: 'Courses, skills, and learning resources',
   home: 'Household supplies and shopping lists',
   hobbies: 'Media collections — track what you watch, read, play',

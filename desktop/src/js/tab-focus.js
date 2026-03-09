@@ -1,22 +1,60 @@
-// ── js/tab-focus.js — Focus tab + Focus floating widget ──
+// ── js/tab-focus.js — Focus tab (unified layout) + Focus floating widget ──
 
 import { S, invoke, listen, emit, tabLoaders } from './state.js';
 import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 
-// ── Focus ──
+// ── Focus (unified layout) ──
 
 async function loadFocus(subTab) {
   const el = document.getElementById('focus-content');
   if (!el) return;
-  if (subTab === 'History') { await renderFocusHistory(el); }
-  else { await renderFocusCurrent(el); }
-  // Add block editor for session notes
-  const pc = el.querySelector('.page-content') || el;
-  const section = document.createElement('div');
-  section.className = 'tab-block-section';
-  section.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
-  pc.appendChild(section);
-  loadTabBlockEditor('focus', subTab || 'Current', section);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'focus', {
+    title: 'Focus',
+    subtitle: 'Глубокая работа',
+    icon: '🎯',
+    renderDash: async (paneEl) => {
+      // Dashboard: today's stats
+      const log = await invoke('get_activity_log', { date: null }).catch(() => []);
+      const current = await invoke('get_current_activity').catch(() => null);
+      const totalMin = log.reduce((sum, item) => {
+        const match = (item.duration || '').match(/(\d+)ч\s*(\d+)м|(\d+)м/);
+        if (match) return sum + (parseInt(match[1] || 0) * 60) + parseInt(match[2] || match[3] || 0);
+        return sum;
+      }, 0);
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${Math.floor(totalMin / 60)}ч ${totalMin % 60}м</div><div class="uni-dash-label">Всего сегодня</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${log.length}</div><div class="uni-dash-label">Сессий</div></div>
+          <div class="uni-dash-card ${current ? 'yellow' : 'red'}"><div class="uni-dash-value">${current ? '🔥' : '—'}</div><div class="uni-dash-label">${current ? escapeHtml(current.title) : 'Нет активности'}</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      // Inner pill navigation: Текущая / История
+      const views = [
+        { id: 'current', label: 'Текущая' },
+        { id: 'history', label: 'История' },
+      ];
+      const activeView = S._focusInner || 'current';
+      paneEl.innerHTML = `
+        <div class="dev-filters">
+          ${views.map(v => `<button class="dev-filter-btn${v.id === activeView ? ' active' : ''}" data-focusview="${v.id}">${v.label}</button>`).join('')}
+        </div>
+        <div id="focus-inner-content"></div>`;
+
+      paneEl.querySelectorAll('[data-focusview]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          S._focusInner = btn.dataset.focusview;
+          loadFocus();
+        });
+      });
+
+      const innerEl = paneEl.querySelector('#focus-inner-content');
+      if (activeView === 'history') await renderFocusHistory(innerEl);
+      else await renderFocusCurrent(innerEl);
+    },
+  });
 }
 
 async function renderFocusCurrent(el) {
@@ -124,7 +162,7 @@ async function renderFocusCurrent(el) {
         </div>`).join('')}
       </div>` : '';
 
-    el.innerHTML = renderPageHeader('focus') + `<div class="page-content">${timerHtml}${statsHtml}${logHtml}</div>`;
+    el.innerHTML = `<div class="page-content">${timerHtml}${statsHtml}${logHtml}</div>`;
 
     // Bind events
     let selectedCategory = 'other';
@@ -345,7 +383,7 @@ async function renderFocusHistory(el) {
       </div>`;
     }).join('');
 
-    el.innerHTML = renderPageHeader('focus') + `<div class="page-content">${chartHtml}${breakdownHtml}${logsHtml || '<div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">Нет данных за неделю</div></div>'}</div>`;
+    el.innerHTML = `<div class="page-content">${chartHtml}${breakdownHtml}${logsHtml || '<div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">Нет данных за неделю</div></div>'}</div>`;
 
   } catch (e) {
     tabLoaders.showStub?.('focus-content', '📊', 'История', 'История активностей');

@@ -1,88 +1,128 @@
-// ── js/tab-calendar.js — Calendar tab: month/week/day/list views + integrations ──
+// ── js/tab-calendar.js — Calendar tab: unified layout with sub-views ──
 
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 
-// ── Calendar ──
+// ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
 
-  // Ensure page header exists
-  if (!el.querySelector('.page-header')) {
-    el.innerHTML = renderPageHeader('calendar') + '<div id="calendar-view-content" class="page-content calendar-full-width"></div>';
-    setupPageHeaderControls('calendar');
-  }
-  const viewEl = document.getElementById('calendar-view-content') || el;
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'calendar', {
+    title: 'Calendar',
+    subtitle: 'Расписание и события',
+    icon: '📅',
+    renderDash: async (paneEl) => {
+      // Dashboard: today's agenda + focus activities + upcoming events
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      const events = await invoke('get_events', { month: today.getMonth() + 1, year: today.getFullYear() }).catch(() => []);
+      const todayEvents = events.filter(e => e.date === todayStr).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+      const upcoming = events.filter(e => e.date > todayStr).sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || '')).slice(0, 5);
+      const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
+      const todayTasks = tasks.filter(t => t.due_date === todayStr);
 
-  if (subTab === 'Интеграции') {
-    await renderCalendarIntegrations(viewEl);
-    const sect = document.createElement('div');
-    sect.className = 'tab-block-section';
-    sect.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
-    viewEl.appendChild(sect);
-    loadTabBlockEditor('calendar', subTab, sect);
-    return;
-  }
-  if (subTab === 'Список') {
-    await renderCalendarList(viewEl);
-    const sect = document.createElement('div');
-    sect.className = 'tab-block-section';
-    sect.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
-    viewEl.appendChild(sect);
-    loadTabBlockEditor('calendar', subTab, sect);
-    return;
-  }
+      // Focus: today's activity log
+      const focusLog = await invoke('get_activity_log', { date: null }).catch(() => []);
+      const catLabels = { work: 'Работа', study: 'Учёба', sport: 'Спорт', rest: 'Отдых', hobby: 'Хобби', other: 'Другое' };
+      const current = await invoke('get_current_activity').catch(() => null);
 
-  // Auto-sync when navigating to a month not yet synced
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${todayEvents.length}</div><div class="uni-dash-label">Событий сегодня</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${todayTasks.length}</div><div class="uni-dash-label">Задач на сегодня</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${focusLog.length}</div><div class="uni-dash-label">Сессий фокуса</div></div>
+        </div>
+
+        ${current ? `<div style="margin-top:16px;padding:10px 14px;background:var(--bg-card);border-radius:var(--radius-md);border-left:3px solid var(--color-green);">
+          <div style="font-size:12px;color:var(--color-green);font-weight:600;">🔥 Сейчас</div>
+          <div style="font-size:14px;color:var(--text-primary);margin-top:4px;">${escapeHtml(current.title)} <span style="color:var(--text-muted);font-size:12px;">${catLabels[current.category] || current.category || ''}</span></div>
+        </div>` : ''}
+
+        <div style="margin-top:16px;">
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">📅 События · ${todayStr}</div>
+          ${todayEvents.length > 0 ? todayEvents.map(e => `<div class="focus-log-item">
+            <span class="focus-log-time">${e.time || 'Весь день'}</span>
+            <span class="focus-log-title">${escapeHtml(e.title)}</span>
+            ${e.source && e.source !== 'manual' ? `<span class="badge badge-gray">${e.source === 'apple' ? '🍎' : '📅'}</span>` : ''}
+          </div>`).join('') : '<div style="color:var(--text-muted);font-size:13px;padding:4px 0;">Нет событий</div>'}
+        </div>
+
+        ${focusLog.length > 0 ? `<div style="margin-top:16px;">
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">🎯 Чем занимался сегодня</div>
+          ${focusLog.map(a => `<div class="focus-log-item">
+            <span class="focus-log-time">${a.time || ''}</span>
+            <span class="focus-log-title">${escapeHtml(a.title)}</span>
+            <span class="focus-log-category">${catLabels[a.category] || a.category || ''}</span>
+            <span class="focus-log-duration">${a.duration || ''}</span>
+          </div>`).join('')}
+        </div>` : ''}
+
+        ${upcoming.length > 0 ? `<div style="margin-top:16px;">
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">📆 Ближайшие</div>
+          ${upcoming.map(e => `<div class="focus-log-item">
+            <span class="focus-log-time">${e.date} ${e.time || ''}</span>
+            <span class="focus-log-title">${escapeHtml(e.title)}</span>
+          </div>`).join('')}
+        </div>` : ''}`;
+    },
+    renderTable: async (paneEl) => {
+      // Inner pill navigation: Месяц / Неделя / День / Список / Интеграции
+      const views = [
+        { id: 'month', label: 'Месяц' },
+        { id: 'week', label: 'Неделя' },
+        { id: 'day', label: 'День' },
+        { id: 'list', label: 'Список' },
+        { id: 'integrations', label: 'Интеграции' },
+      ];
+      const activeView = S._calendarInner || 'month';
+      paneEl.innerHTML = `
+        <div class="dev-filters">
+          ${views.map(v => `<button class="dev-filter-btn${v.id === activeView ? ' active' : ''}" data-calview="${v.id}">${v.label}</button>`).join('')}
+        </div>
+        <div id="calendar-inner-content" class="calendar-full-width"></div>`;
+
+      paneEl.querySelectorAll('[data-calview]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          S._calendarInner = btn.dataset.calview;
+          loadCalendar();
+        });
+      });
+
+      const innerEl = paneEl.querySelector('#calendar-inner-content');
+      await autoSyncCalendar(activeView);
+
+      if (activeView === 'integrations') {
+        await renderCalendarIntegrations(innerEl);
+      } else if (activeView === 'list') {
+        await renderCalendarList(innerEl);
+      } else {
+        const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
+        const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
+        if (activeView === 'week') renderWeekCalendar(innerEl, events || []);
+        else if (activeView === 'day') renderDayCalendar(innerEl, events || []);
+        else renderCalendar(innerEl, events || [], tasks || []);
+      }
+    },
+  });
+}
+
+async function autoSyncCalendar(viewName) {
   const monthKey = `${S.calendarYear}-${S.calendarMonth + 1}`;
-  if (!S.syncedMonths.has(monthKey)) {
-    S.syncedMonths.add(monthKey);
-    const autoSync = await invoke('get_app_setting', { key: 'calendar_autosync' }).catch(() => 'false');
-    if (autoSync === 'true') {
-      const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
-      const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
-      const syncAndRefresh = async () => {
-        try {
-          if (appleEnabled !== 'false') {
-            const r = await invoke('sync_apple_calendar', { month: S.calendarMonth + 1, year: S.calendarYear });
-            if (r.error) console.warn('Apple Calendar:', r.error);
-          }
-          if (googleUrl) await invoke('sync_google_ics', { url: googleUrl, month: S.calendarMonth + 1, year: S.calendarYear });
-          // Refresh view after background sync completes
-          const freshEvents = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
-          const calViewEl = document.getElementById('calendar-view-content');
-          if (calViewEl && subTab === 'Список') renderCalendarList(calViewEl);
-          else if (calViewEl && !subTab || subTab === 'Месяц') renderCalendar(calViewEl, freshEvents || []);
-          else if (calViewEl && subTab === 'Неделя') renderWeekCalendar(calViewEl, freshEvents || []);
-          else if (calViewEl && subTab === 'День') renderDayCalendar(calViewEl, freshEvents || []);
-        } catch (e) { console.error('Auto-sync error:', e); }
-      };
-      syncAndRefresh(); // fire and forget — non-blocking
-    }
-  }
-
+  if (S.syncedMonths.has(monthKey)) return;
+  S.syncedMonths.add(monthKey);
+  const autoSync = await invoke('get_app_setting', { key: 'calendar_autosync' }).catch(() => 'false');
+  if (autoSync !== 'true') return;
+  const appleEnabled = await invoke('get_app_setting', { key: 'apple_calendar_enabled' }).catch(() => 'true');
+  const googleUrl = await invoke('get_app_setting', { key: 'google_calendar_ics_url' }).catch(() => '');
   try {
-    const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
-    const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
-    if (subTab === 'Неделя') {
-      renderWeekCalendar(viewEl, events || []);
-    } else if (subTab === 'День') {
-      renderDayCalendar(viewEl, events || []);
-    } else {
-      renderCalendar(viewEl, events || [], tasks || []);
+    if (appleEnabled !== 'false') {
+      const r = await invoke('sync_apple_calendar', { month: S.calendarMonth + 1, year: S.calendarYear });
+      if (r.error) console.warn('Apple Calendar:', r.error);
     }
-  } catch (e) {
-    if (subTab === 'Неделя') renderWeekCalendar(viewEl, []);
-    else if (subTab === 'День') renderDayCalendar(viewEl, []);
-    else renderCalendar(viewEl, []);
-  }
-  // Add block editor for calendar notes
-  const sect = document.createElement('div');
-  sect.className = 'tab-block-section';
-  sect.innerHTML = '<div class="tab-block-section-header">Заметки</div>';
-  viewEl.appendChild(sect);
-  loadTabBlockEditor('calendar', subTab || 'Месяц', sect);
+    if (googleUrl) await invoke('sync_google_ics', { url: googleUrl, month: S.calendarMonth + 1, year: S.calendarYear });
+  } catch (e) { console.error('Auto-sync error:', e); }
 }
 
 function renderCalendar(el, events, tasks) {

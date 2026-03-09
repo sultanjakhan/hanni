@@ -344,6 +344,20 @@
 .uni-bc-sep { color: var(--text-faint); }
 .uni-bc-sub { color: var(--text-secondary); }
 
+/* ── Tab header ── */
+.uni-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-3) var(--space-5) 0;
+}
+.uni-header-icon { font-size: 20px; }
+.uni-header-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 /* ── Sub-tab bar ── */
 .uni-tabs {
   display: flex;
@@ -812,3 +826,33 @@
   font-size: 12px;
 }
 .uni-store-empty-desc { font-size: 12px; color: var(--text-faint); }
+
+/* ── Store: card actions ── */
+.uni-store-card { position: relative; }
+.uni-store-card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: none;
+  gap: 4px;
+}
+.uni-store-card:hover .uni-store-card-actions { display: flex; }
+.uni-store-edit-btn,
+.uni-store-del-btn {
+  all: unset;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  opacity: 0.6;
+}
+.uni-store-edit-btn:hover,
+.uni-store-del-btn:hover { opacity: 1; background: var(--bg-hover); }
+
+/* ── Store: table cell actions ── */
+.uni-store-cell-key { font-weight: 500; color: var(--text-primary); }
+.uni-store-cell-value { color: var(--text-secondary); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uni-store-cell-date { color: var(--text-faint); font-size: 12px; white-space: nowrap; }
+.uni-store-cell-actions { white-space: nowrap; }
+.uni-store-table tbody tr:hover .uni-store-cell-actions { opacity: 1; }
+.uni-store-cell-actions { opacity: 0; transition: opacity var(--transition-fast); }
