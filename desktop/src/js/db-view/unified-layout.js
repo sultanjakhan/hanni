@@ -1,0 +1,300 @@
+// ── db-view/unified-layout.js — Unified tab layout with sub-panes ──
+// Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память] + ⚙️
+
+import { S, invoke } from '../state.js';
+import { escapeHtml } from '../utils.js';
+
+const SUB_PANES = [
+  { id: 'dash',  icon: '📊', label: 'Дашборд' },
+  { id: 'table', icon: '📋', label: 'Таблица' },
+  { id: 'goals', icon: '🎯', label: 'Цели' },
+  { id: 'notes', icon: '📝', label: 'Заметки' },
+  { id: 'store', icon: '🧠', label: 'Память' },
+];
+
+/**
+ * Render the unified tab layout into a container.
+ *
+ * @param {HTMLElement} el - Container element (e.g. #work-content)
+ * @param {string} tabId - Tab identifier (e.g. 'work')
+ * @param {object} config - { title, subtitle, icon, counts?, renderDash, renderTable, renderGoals, renderNotes, renderStore }
+ */
+export async function renderUnifiedLayout(el, tabId, config) {
+  const activePane = S._unifiedPane?.[tabId] || 'dash';
+
+  // Build sub-tab bar
+  const tabsHtml = SUB_PANES.map(p => {
+    const count = config.counts?.[p.id];
+    const countHtml = count != null ? `<span class="uni-tab-count">(${count})</span>` : '';
+    const cls = p.id === activePane ? ' active' : '';
+    return `<div class="uni-tab${cls}" data-pane="${p.id}"><span class="uni-tab-icon">${p.icon}</span>${p.label}${countHtml}</div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="uni-tabs">${tabsHtml}</div>
+    <div class="uni-content">
+      <div class="uni-pane" id="uni-pane-${tabId}"></div>
+    </div>`;
+
+  // Wire sub-tab clicks
+  el.querySelectorAll('.uni-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      if (!S._unifiedPane) S._unifiedPane = {};
+      S._unifiedPane[tabId] = tab.dataset.pane;
+      renderUnifiedLayout(el, tabId, config);
+    });
+  });
+
+  // Render active pane
+  const paneEl = el.querySelector(`#uni-pane-${tabId}`);
+  if (!paneEl) return;
+
+  switch (activePane) {
+    case 'dash':
+      if (config.renderDash) await config.renderDash(paneEl);
+      else paneEl.innerHTML = renderEmptyState('Дашборд', 'Настройте скиллы и триггеры, чтобы Ханни начала заполнять данные');
+      break;
+    case 'table':
+      if (config.renderTable) await config.renderTable(paneEl);
+      else paneEl.innerHTML = renderEmptyState('Таблица', 'Пока нет записей');
+      break;
+    case 'goals':
+      await renderGoalsPane(paneEl, tabId, config);
+      break;
+    case 'notes':
+      await renderNotesPane(paneEl, tabId, config);
+      break;
+    case 'store':
+      await renderStorePane(paneEl, tabId, config);
+      break;
+  }
+}
+
+// ── Goals Pane ──
+async function renderGoalsPane(el, tabId, config) {
+  if (config.renderGoals) { await config.renderGoals(el); return; }
+
+  let goals = [];
+  try { goals = await invoke('get_goals', { tabId }); } catch {}
+
+  const goalsHtml = goals.length > 0
+    ? goals.map(g => {
+        const pct = g.target > 0 ? Math.min(100, Math.round((g.current / g.target) * 100)) : 0;
+        const color = pct >= 75 ? 'var(--color-green)' : pct >= 40 ? 'var(--color-yellow)' : 'var(--accent-blue)';
+        return `<div class="uni-goal">
+          <div class="uni-goal-header">
+            <div class="uni-goal-title">${escapeHtml(g.title)}</div>
+            <div class="uni-goal-pct" style="color:${color}">${pct}%</div>
+          </div>
+          <div class="uni-goal-bar"><div class="uni-goal-fill" style="width:${pct}%;background:${color}"></div></div>
+          ${g.note ? `<div class="uni-goal-meta">${escapeHtml(g.note)}</div>` : ''}
+        </div>`;
+      }).join('')
+    : '<div class="uni-empty">Пока нет целей</div>';
+
+  el.innerHTML = `<div class="uni-goals-list">${goalsHtml}<div class="uni-goal-add" id="uni-add-goal-${tabId}">+ Добавить цель</div></div>`;
+
+  el.querySelector(`#uni-add-goal-${tabId}`)?.addEventListener('click', () => {
+    // TODO: show add goal modal
+  });
+}
+
+// ── Notes Pane ──
+async function renderNotesPane(el, tabId, config) {
+  if (config.renderNotes) { await config.renderNotes(el); return; }
+
+  let notes = [];
+  try { notes = await invoke('get_notes_by_tag', { tag: tabId }); } catch {}
+  // Fallback: try getting all notes and filtering
+  if (notes.length === 0) {
+    try {
+      const all = await invoke('get_notes', {});
+      notes = all.filter(n => (n.tags || '').toLowerCase().includes(tabId));
+    } catch {}
+  }
+
+  const notesHtml = notes.length > 0
+    ? notes.map(n => `<div class="uni-note-card" data-id="${n.id}">
+        ${n.pinned ? '<div class="uni-note-pin">📌</div>' : ''}
+        <div class="uni-note-body" ${!n.pinned ? 'style="padding-left:24px"' : ''}>
+          <div class="uni-note-title">${escapeHtml(n.title || 'Без названия')}</div>
+          ${n.content ? `<div class="uni-note-preview">${escapeHtml(n.content.substring(0, 120))}</div>` : ''}
+          <div class="uni-note-meta">
+            ${(n.tags || '').split(',').filter(Boolean).map(t => `<span class="uni-note-tag">${escapeHtml(t.trim())}</span>`).join('')}
+            <span class="uni-note-date">${n.updated_at ? new Date(n.updated_at).toLocaleDateString('ru') : ''}</span>
+          </div>
+        </div>
+        <div class="uni-note-actions">
+          <div class="uni-note-action" title="Редактировать">✏️</div>
+          <div class="uni-note-action" title="Архивировать">📥</div>
+        </div>
+      </div>`).join('')
+    : '<div class="uni-empty">Нет заметок с тегом «' + escapeHtml(tabId) + '»</div>';
+
+  el.innerHTML = `<div class="uni-notes-container">
+    <div class="uni-notes-toolbar">
+      <input class="uni-notes-search" placeholder="Поиск заметок...">
+      <button class="uni-notes-add" id="uni-add-note-${tabId}">+ Заметка</button>
+    </div>
+    <div class="uni-notes-grid">${notesHtml}</div>
+  </div>`;
+}
+
+// ── Store (Memory) Pane ──
+// Per-tab contextual memory: documents, key-value data, files
+const STORE_HINTS = {
+  work: { examples: ['Резюме', 'Портфолио', 'Навыки', 'Сопроводительное письмо'], placeholder: 'резюме, навыки...' },
+  health: { examples: ['Лекарства', 'Анализы', 'Диагнозы', 'Врачи'], placeholder: 'лекарства, анализы...' },
+  food: { examples: ['Что есть дома', 'Аллергии', 'Любимые продукты'], placeholder: 'продукты, аллергии...' },
+  sports: { examples: ['Личные рекорды', 'Программа тренировок', 'Замеры'], placeholder: 'рекорды, замеры...' },
+  money: { examples: ['Реквизиты', 'Карты', 'Инвестиции'], placeholder: 'реквизиты, карты...' },
+  development: { examples: ['Стек технологий', 'Сертификаты', 'GitHub проекты'], placeholder: 'стек, сертификаты...' },
+  mindset: { examples: ['Аффирмации', 'Книги к прочтению', 'Цитаты'], placeholder: 'цитаты, книги...' },
+  home: { examples: ['Адреса', 'Контакты ЖКХ', 'Инвентарь'], placeholder: 'адреса, контакты...' },
+  hobbies: { examples: ['Вишлист', 'Коллекции', 'Рекомендации'], placeholder: 'вишлист, рекомендации...' },
+  people: { examples: ['Дни рождения', 'Подарки', 'Заметки о людях'], placeholder: 'дни рождения, подарки...' },
+};
+
+async function renderStorePane(el, tabId, config) {
+  if (config.renderStore) { await config.renderStore(el); return; }
+
+  // Try loading memories for this tab
+  let entries = [];
+  try { entries = await invoke('get_memory_entries', { tabId }); } catch {}
+  // Fallback: try memories by category
+  if (entries.length === 0) {
+    try {
+      const all = await invoke('get_memories', { category: tabId, limit: 50 });
+      entries = (all || []).map(m => ({ key: m.key || m.content?.substring(0, 40) || '', category: m.category || '', value: m.content || m.value || '', updated_at: m.updated_at }));
+    } catch {}
+  }
+
+  const hints = STORE_HINTS[tabId] || { examples: ['Ключ', 'Значение'], placeholder: 'поиск...' };
+  const viewMode = S._storeView?.[tabId] || 'table';
+
+  // Cards view (visual)
+  const cardsHtml = entries.length > 0
+    ? entries.map(e => `<div class="uni-store-card">
+        <div class="uni-store-card-key">${escapeHtml(e.key)}</div>
+        ${e.category ? `<span class="uni-store-tag">${escapeHtml(e.category)}</span>` : ''}
+        <div class="uni-store-card-value">${escapeHtml((e.value || '').substring(0, 200))}</div>
+        ${e.updated_at ? `<div class="uni-store-card-date">${new Date(e.updated_at).toLocaleDateString('ru')}</div>` : ''}
+      </div>`).join('')
+    : '';
+
+  // Table view
+  const rowsHtml = entries.length > 0
+    ? entries.map(e => `<tr>
+        <td class="uni-store-key">${escapeHtml(e.key)}</td>
+        <td><span class="uni-store-tag">${escapeHtml(e.category || '')}</span></td>
+        <td>${escapeHtml((e.value || '').substring(0, 150))}</td>
+        <td class="uni-store-date">${e.updated_at ? new Date(e.updated_at).toLocaleDateString('ru') : ''}</td>
+      </tr>`).join('')
+    : '';
+
+  const emptyHtml = entries.length === 0
+    ? `<div class="uni-store-empty">
+        <div class="uni-store-empty-icon">🧠</div>
+        <div class="uni-store-empty-title">Память пуста</div>
+        <div class="uni-store-empty-hints">Примеры: ${hints.examples.map(h => `<span class="uni-store-hint">${h}</span>`).join('')}</div>
+        <div class="uni-store-empty-desc">Добавьте записи вручную или Ханни заполнит автоматически</div>
+      </div>`
+    : '';
+
+  el.innerHTML = `<div class="uni-store-container">
+    <div class="uni-store-toolbar">
+      <input class="uni-store-search" placeholder="Поиск ${hints.placeholder}">
+      <div class="uni-store-view-toggle">
+        <button class="uni-store-view-btn${viewMode === 'cards' ? ' active' : ''}" data-view="cards" title="Карточки">▦</button>
+        <button class="uni-store-view-btn${viewMode === 'table' ? ' active' : ''}" data-view="table" title="Таблица">☰</button>
+      </div>
+      <button class="uni-store-add" id="uni-add-store-${tabId}">+ Запись</button>
+    </div>
+    ${emptyHtml}
+    ${entries.length > 0 && viewMode === 'cards' ? `<div class="uni-store-cards">${cardsHtml}</div>` : ''}
+    ${entries.length > 0 && viewMode === 'table' ? `<table class="uni-store-table">
+      <thead><tr><th>Ключ</th><th>Категория</th><th>Значение</th><th>Обновлено</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>` : ''}
+  </div>`;
+
+  // View toggle
+  el.querySelectorAll('.uni-store-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!S._storeView) S._storeView = {};
+      S._storeView[tabId] = btn.dataset.view;
+      renderStorePane(el, tabId, config);
+    });
+  });
+
+  // Add entry
+  el.querySelector(`#uni-add-store-${tabId}`)?.addEventListener('click', () => {
+    showAddStoreModal(el, tabId, config);
+  });
+
+  // Search filter
+  el.querySelector('.uni-store-search')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    if (viewMode === 'table') {
+      el.querySelectorAll('.uni-store-table tbody tr').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    } else {
+      el.querySelectorAll('.uni-store-card').forEach(card => {
+        card.style.display = card.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+  });
+}
+
+function showAddStoreModal(parentEl, tabId, config) {
+  const hints = STORE_HINTS[tabId] || { examples: [] };
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Добавить в память</div>
+    <div class="form-group"><label class="form-label">Ключ</label><input class="form-input" id="store-key" placeholder="${hints.examples[0] || 'Название'}"></div>
+    <div class="form-group"><label class="form-label">Категория</label><input class="form-input" id="store-cat" placeholder="Опционально"></div>
+    <div class="form-group"><label class="form-label">Значение</label><textarea class="form-textarea" id="store-val" rows="4" placeholder="Содержимое..."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="store-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('store-save')?.addEventListener('click', async () => {
+    const key = document.getElementById('store-key')?.value?.trim();
+    if (!key) return;
+    try {
+      await invoke('add_memory_entry', {
+        tabId,
+        key,
+        category: document.getElementById('store-cat')?.value || '',
+        value: document.getElementById('store-val')?.value || '',
+      });
+      overlay.remove();
+      renderStorePane(parentEl, tabId, config);
+    } catch (err) {
+      // Fallback: try saving as regular memory
+      try {
+        await invoke('store_memory', {
+          content: `${key}: ${document.getElementById('store-val')?.value || ''}`,
+          category: tabId,
+          importance: 5,
+        });
+        overlay.remove();
+        renderStorePane(parentEl, tabId, config);
+      } catch (e2) { alert('Ошибка: ' + e2); }
+    }
+  });
+}
+
+// ── Empty state helper ──
+function renderEmptyState(title, desc) {
+  return `<div class="uni-empty-state">
+    <div class="uni-empty-icon">📭</div>
+    <div class="uni-empty-title">${escapeHtml(title)}</div>
+    <div class="uni-empty-desc">${escapeHtml(desc)}</div>
+  </div>`;
+}
