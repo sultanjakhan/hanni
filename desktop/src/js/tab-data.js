@@ -34,11 +34,25 @@ function showStub(containerId, icon, label, desc) {
 async function loadHome(subTab) {
   const el = document.getElementById('home-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('home') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  if (subTab === 'Shopping List') await loadShoppingList(pc);
-  else await loadSupplies(pc);
-  appendBlockEditor(pc, 'home', subTab);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'home', {
+    title: 'Home',
+    subtitle: 'Дом и хозяйство',
+    icon: '🏠',
+    renderDash: async (paneEl) => {
+      const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
+      const needed = items.filter(i => i.needed).length;
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${items.length}</div><div class="uni-dash-label">Предметов</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${needed}</div><div class="uni-dash-label">Нужно купить</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      await loadSupplies(paneEl);
+    },
+  });
 }
 
 async function loadSupplies(el) {
@@ -138,13 +152,42 @@ async function loadShoppingList(el) {
 async function loadMindset(subTab) {
   const el = document.getElementById('mindset-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('mindset') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  if (subTab === 'Journal') await loadJournal(pc);
-  else if (subTab === 'Mood') await loadMoodLog(pc);
-  else if (subTab === 'Principles') await loadPrinciples(pc);
-  else await loadJournal(pc);
-  appendBlockEditor(pc, 'mindset', subTab);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'mindset', {
+    title: 'Mindset',
+    subtitle: 'Дневник, настроение, принципы',
+    icon: '🧠',
+    renderDash: async (paneEl) => {
+      const today = await invoke('get_journal_entry', { date: null }).catch(() => null);
+      const history = await invoke('get_mood_history', { days: 7 }).catch(() => []);
+      const avgMood = history.length > 0 ? (history.reduce((s, m) => s + (m.mood || 3), 0) / history.length).toFixed(1) : '—';
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${today ? today.mood + '/5' : '—'}</div><div class="uni-dash-label">Настроение сегодня</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${avgMood}</div><div class="uni-dash-label">Ср. за неделю</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${today?.energy || '—'}</div><div class="uni-dash-label">Энергия</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      // Internal sub-navigation for Journal / Mood / Principles
+      const activeInner = S._mindsetInner || 'journal';
+      paneEl.innerHTML = `
+        <div class="dev-filters" style="margin-bottom:var(--space-3);">
+          <button class="pill${activeInner === 'journal' ? ' active' : ''}" data-inner="journal">Дневник</button>
+          <button class="pill${activeInner === 'mood' ? ' active' : ''}" data-inner="mood">Настроение</button>
+          <button class="pill${activeInner === 'principles' ? ' active' : ''}" data-inner="principles">Принципы</button>
+        </div>
+        <div id="mindset-inner-content"></div>`;
+      const innerEl = paneEl.querySelector('#mindset-inner-content');
+      if (activeInner === 'mood') await loadMoodLog(innerEl);
+      else if (activeInner === 'principles') await loadPrinciples(innerEl);
+      else await loadJournal(innerEl);
+      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
+        btn.addEventListener('click', () => { S._mindsetInner = btn.dataset.inner; loadMindset(); });
+      });
+    },
+  });
 }
 
 async function loadJournal(el) {
@@ -247,13 +290,41 @@ async function loadPrinciples(el) {
 async function loadFood(subTab) {
   const el = document.getElementById('food-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('food') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  if (subTab === 'Food Log') await loadFoodLog(pc);
-  else if (subTab === 'Recipes') await loadRecipes(pc);
-  else if (subTab === 'Products') await loadProducts(pc);
-  else await loadFoodLog(pc);
-  appendBlockEditor(pc, 'food', subTab);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'food', {
+    title: 'Food',
+    subtitle: 'Питание и продукты',
+    icon: '🍔',
+    renderDash: async (paneEl) => {
+      const today = new Date().toISOString().split('T')[0];
+      const stats = await invoke('get_food_stats', { days: 1 }).catch(() => ({}));
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.avg_calories || 0}</div><div class="uni-dash-label">Калории</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.avg_protein || 0}g</div><div class="uni-dash-label">Белок</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.avg_carbs || 0}g</div><div class="uni-dash-label">Углеводы</div></div>
+          <div class="uni-dash-card purple"><div class="uni-dash-value">${stats.avg_fat || 0}g</div><div class="uni-dash-label">Жиры</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const activeInner = S._foodInner || 'log';
+      paneEl.innerHTML = `
+        <div class="dev-filters" style="margin-bottom:var(--space-3);">
+          <button class="pill${activeInner === 'log' ? ' active' : ''}" data-inner="log">Дневник</button>
+          <button class="pill${activeInner === 'recipes' ? ' active' : ''}" data-inner="recipes">Рецепты</button>
+          <button class="pill${activeInner === 'products' ? ' active' : ''}" data-inner="products">Продукты</button>
+        </div>
+        <div id="food-inner-content"></div>`;
+      const innerEl = paneEl.querySelector('#food-inner-content');
+      if (activeInner === 'recipes') await loadRecipes(innerEl);
+      else if (activeInner === 'products') await loadProducts(innerEl);
+      else await loadFoodLog(innerEl);
+      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
+        btn.addEventListener('click', () => { S._foodInner = btn.dataset.inner; loadFood(); });
+      });
+    },
+  });
 }
 
 async function loadFoodLog(el) {
@@ -458,15 +529,47 @@ function showAddProductModal(el) {
 async function loadMoney(subTab) {
   const el = document.getElementById('money-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('money') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  if (subTab === 'Transactions') await loadTransactions(pc);
-  else if (subTab === 'Budget') await loadBudgets(pc);
-  else if (subTab === 'Savings') await loadSavings(pc);
-  else if (subTab === 'Subscriptions') await loadSubscriptions(pc);
-  else if (subTab === 'Debts') await loadDebts(pc);
-  else await loadTransactions(pc);
-  appendBlockEditor(pc, 'money', subTab);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'money', {
+    title: 'Money',
+    subtitle: 'Финансы и бюджет',
+    icon: '💰',
+    renderDash: async (paneEl) => {
+      const stats = await invoke('get_transaction_stats', { days: 30 }).catch(() => ({}));
+      const balance = (stats.total_income || 0) - (stats.total_expenses || 0);
+      const subs = await invoke('get_subscriptions').catch(() => []);
+      const monthly = subs.filter(s => s.active).reduce((sum, s) => sum + (s.period === 'yearly' ? s.amount / 12 : s.amount), 0);
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card ${balance >= 0 ? 'green' : 'red'}"><div class="uni-dash-value">${balance}</div><div class="uni-dash-label">Баланс (30д)</div></div>
+          <div class="uni-dash-card purple"><div class="uni-dash-value">${stats.total_expenses || 0}</div><div class="uni-dash-label">Расходы</div></div>
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.total_income || 0}</div><div class="uni-dash-label">Доходы</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${Math.round(monthly)}</div><div class="uni-dash-label">Подписки/мес</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const activeInner = S._moneyInner || 'transactions';
+      paneEl.innerHTML = `
+        <div class="dev-filters" style="margin-bottom:var(--space-3);">
+          <button class="pill${activeInner === 'transactions' ? ' active' : ''}" data-inner="transactions">Транзакции</button>
+          <button class="pill${activeInner === 'budgets' ? ' active' : ''}" data-inner="budgets">Бюджет</button>
+          <button class="pill${activeInner === 'savings' ? ' active' : ''}" data-inner="savings">Накопления</button>
+          <button class="pill${activeInner === 'subscriptions' ? ' active' : ''}" data-inner="subscriptions">Подписки</button>
+          <button class="pill${activeInner === 'debts' ? ' active' : ''}" data-inner="debts">Долги</button>
+        </div>
+        <div id="money-inner-content"></div>`;
+      const innerEl = paneEl.querySelector('#money-inner-content');
+      if (activeInner === 'budgets') await loadBudgets(innerEl);
+      else if (activeInner === 'savings') await loadSavings(innerEl);
+      else if (activeInner === 'subscriptions') await loadSubscriptions(innerEl);
+      else if (activeInner === 'debts') await loadDebts(innerEl);
+      else await loadTransactions(innerEl);
+      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
+        btn.addEventListener('click', () => { S._moneyInner = btn.dataset.inner; loadMoney(); });
+      });
+    },
+  });
 }
 
 async function loadTransactions(el) {
@@ -712,59 +815,82 @@ async function loadDebts(el) {
 async function loadPeople(subTab) {
   const el = document.getElementById('people-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('people') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  const filter = subTab === 'Blocked' ? { blocked: true } : subTab === 'Favorites' ? {} : {};
-  try {
-    const items = await invoke('get_contacts', filter);
-    let contacts = Array.isArray(items) ? items : [];
-    if (subTab === 'Favorites') contacts = contacts.filter(c => c.favorite);
-    // Load blocks for each contact
-    for (const c of contacts) {
-      try { c._blocks = await invoke('get_contact_blocks', { contactId: c.id }); } catch { c._blocks = []; }
-    }
-    pc.innerHTML = `
-      <div class="module-header">
-        <h2>${subTab === 'Blocked' ? 'Blocked' : subTab === 'Favorites' ? 'Favorites' : 'All Contacts'}</h2>
-        <button class="btn-primary" id="add-contact-btn">+ Add</button>
-      </div>
-      <div class="contacts-list">
-        ${contacts.length === 0 ? '<div class="tab-stub"><div class="tab-stub-icon">👤</div>No contacts yet</div>' :
-          contacts.map(c => `
-            <div class="contact-item${c.blocked ? ' blocked' : ''}${c.favorite ? ' favorite' : ''}">
-              <div class="contact-avatar">${c.name.charAt(0).toUpperCase()}</div>
-              <div class="contact-info">
-                <div class="contact-name">${c.name}${c.favorite ? ' ★' : ''}</div>
-                <div class="contact-detail">${c.relationship || c.category || ''}${c.phone ? ' · ' + c.phone : ''}${c.email ? ' · ' + c.email : ''}</div>
-                ${c.blocked ? '<span class="badge badge-red">Blocked</span>' : ''}
-                ${c.block_reason ? '<div class="contact-detail" style="color:var(--text-muted)">' + c.block_reason + '</div>' : ''}
-                ${c.notes ? '<div class="contact-detail">' + c.notes + '</div>' : ''}
-                ${c._blocks && c._blocks.length > 0 ? `
-                  <div class="contact-blocks-list">
-                    ${c._blocks.map(b => `
-                      <div class="contact-block-item">
-                        <span class="contact-block-type">${b.block_type === 'app' ? 'App' : 'Site'}</span>
-                        <span class="contact-block-value">${b.value}</span>
-                        ${b.reason ? '<span class="contact-block-reason">' + b.reason + '</span>' : ''}
-                        <button class="contact-block-del" onclick="deleteContactBlock(${b.id})">✕</button>
-                      </div>
-                    `).join('')}
-                  </div>` : ''}
-              </div>
-              <div class="contact-actions">
-                <button class="btn-secondary" onclick="showContactBlockModal(${c.id}, '${c.name.replace(/'/g, "\\'")}')" title="Block sites/apps">🔗</button>
-                <button class="btn-secondary" onclick="toggleContactFav(${c.id})" title="${c.favorite ? 'Unfavorite' : 'Favorite'}">${c.favorite ? '★' : '☆'}</button>
-                <button class="btn-secondary" onclick="toggleContactBlock(${c.id})" title="${c.blocked ? 'Unblock' : 'Block'}">${c.blocked ? '🔓' : '🚫'}</button>
-                <button class="btn-danger" onclick="deleteContact(${c.id})" style="padding:8px 12px">✕</button>
-              </div>
-            </div>
-          `).join('')}
-      </div>`;
-    document.getElementById('add-contact-btn')?.addEventListener('click', showAddContactModal);
-  } catch (e) {
-    pc.innerHTML = `<div class="tab-stub"><div class="tab-stub-icon">⚠️</div>${e}</div>`;
-  }
-  appendBlockEditor(pc, 'people', subTab);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'people', {
+    title: 'People',
+    subtitle: 'Контакты и связи',
+    icon: '👥',
+    renderDash: async (paneEl) => {
+      const items = await invoke('get_contacts', {}).catch(() => []);
+      const contacts = Array.isArray(items) ? items : [];
+      const favs = contacts.filter(c => c.favorite).length;
+      const blocked = contacts.filter(c => c.blocked).length;
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${contacts.length}</div><div class="uni-dash-label">Контактов</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${favs}</div><div class="uni-dash-label">Избранных</div></div>
+          <div class="uni-dash-card purple"><div class="uni-dash-value">${blocked}</div><div class="uni-dash-label">Заблокировано</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const activeInner = S._peopleInner || 'all';
+      const filter = activeInner === 'blocked' ? { blocked: true } : {};
+      try {
+        const items = await invoke('get_contacts', filter);
+        let contacts = Array.isArray(items) ? items : [];
+        if (activeInner === 'favorites') contacts = contacts.filter(c => c.favorite);
+        for (const c of contacts) {
+          try { c._blocks = await invoke('get_contact_blocks', { contactId: c.id }); } catch { c._blocks = []; }
+        }
+        paneEl.innerHTML = `
+          <div class="dev-filters" style="margin-bottom:var(--space-3);">
+            <button class="pill${activeInner === 'all' ? ' active' : ''}" data-inner="all">Все</button>
+            <button class="pill${activeInner === 'favorites' ? ' active' : ''}" data-inner="favorites">Избранные</button>
+            <button class="pill${activeInner === 'blocked' ? ' active' : ''}" data-inner="blocked">Заблокированные</button>
+          </div>
+          <div class="module-header"><button class="btn-primary" id="add-contact-btn">+ Добавить</button></div>
+          <div class="contacts-list">
+            ${contacts.length === 0 ? '<div class="uni-empty">Нет контактов</div>' :
+              contacts.map(c => `
+                <div class="contact-item${c.blocked ? ' blocked' : ''}${c.favorite ? ' favorite' : ''}">
+                  <div class="contact-avatar">${c.name.charAt(0).toUpperCase()}</div>
+                  <div class="contact-info">
+                    <div class="contact-name">${c.name}${c.favorite ? ' ★' : ''}</div>
+                    <div class="contact-detail">${c.relationship || c.category || ''}${c.phone ? ' · ' + c.phone : ''}${c.email ? ' · ' + c.email : ''}</div>
+                    ${c.blocked ? '<span class="badge badge-red">Blocked</span>' : ''}
+                    ${c.block_reason ? '<div class="contact-detail" style="color:var(--text-muted)">' + c.block_reason + '</div>' : ''}
+                    ${c.notes ? '<div class="contact-detail">' + c.notes + '</div>' : ''}
+                    ${c._blocks && c._blocks.length > 0 ? `
+                      <div class="contact-blocks-list">
+                        ${c._blocks.map(b => `
+                          <div class="contact-block-item">
+                            <span class="contact-block-type">${b.block_type === 'app' ? 'App' : 'Site'}</span>
+                            <span class="contact-block-value">${b.value}</span>
+                            ${b.reason ? '<span class="contact-block-reason">' + b.reason + '</span>' : ''}
+                            <button class="contact-block-del" onclick="deleteContactBlock(${b.id})">✕</button>
+                          </div>
+                        `).join('')}
+                      </div>` : ''}
+                  </div>
+                  <div class="contact-actions">
+                    <button class="btn-secondary" onclick="showContactBlockModal(${c.id}, '${c.name.replace(/'/g, "\\'")}')" title="Block sites/apps">🔗</button>
+                    <button class="btn-secondary" onclick="toggleContactFav(${c.id})" title="${c.favorite ? 'Unfavorite' : 'Favorite'}">${c.favorite ? '★' : '☆'}</button>
+                    <button class="btn-secondary" onclick="toggleContactBlock(${c.id})" title="${c.blocked ? 'Unblock' : 'Block'}">${c.blocked ? '🔓' : '🚫'}</button>
+                    <button class="btn-danger" onclick="deleteContact(${c.id})" style="padding:8px 12px">✕</button>
+                  </div>
+                </div>
+              `).join('')}
+          </div>`;
+        document.getElementById('add-contact-btn')?.addEventListener('click', showAddContactModal);
+        paneEl.querySelectorAll('[data-inner]').forEach(btn => {
+          btn.addEventListener('click', () => { S._peopleInner = btn.dataset.inner; loadPeople(); });
+        });
+      } catch (e) {
+        paneEl.innerHTML = `<div class="uni-empty">Ошибка: ${e}</div>`;
+      }
+    },
+  });
 }
 
 // Window handlers for People (called from inline onclick)
@@ -1188,15 +1314,33 @@ async function loadAbout(el) {
 async function loadWork() {
   const el = document.getElementById('work-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('work') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  try {
-    const projects = await invoke('get_projects').catch(() => []);
-    await renderWork(pc, projects || []);
-  } catch (e) {
-    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">💼</div><div class="tab-stub-title">Работа</div><div class="tab-stub-desc">Проекты и задачи</div><span class="tab-stub-badge">Скоро</span></div>';
-  }
-  appendBlockEditor(pc, 'work', 'default');
+
+  // Use unified layout
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'work', {
+    title: 'Work',
+    subtitle: 'Проекты и задачи',
+    icon: '💼',
+    renderDash: async (paneEl) => {
+      // Dashboard with stats
+      const projects = await invoke('get_projects').catch(() => []);
+      const totalTasks = projects.reduce((sum, p) => sum + (p.task_count || 0), 0);
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${projects.length}</div><div class="uni-dash-label">Проекты</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${totalTasks}</div><div class="uni-dash-label">Всего задач</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      // Existing projects + tasks view
+      try {
+        const projects = await invoke('get_projects').catch(() => []);
+        await renderWork(paneEl, projects || []);
+      } catch (e) {
+        paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить проекты</div>';
+      }
+    },
+  });
 }
 
 async function renderWork(el, projects) {
@@ -1264,15 +1408,32 @@ async function renderWork(el, projects) {
 async function loadDevelopment() {
   const el = document.getElementById('development-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('development') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  try {
-    const items = await invoke('get_learning_items', { typeFilter: S.devFilter === 'all' ? null : S.devFilter }).catch(() => []);
-    renderDevelopment(pc, items || []);
-  } catch (e) {
-    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">🚀</div><div class="tab-stub-title">Развитие</div><div class="tab-stub-desc">Обучение и саморазвитие</div><span class="tab-stub-badge">Скоро</span></div>';
-  }
-  appendBlockEditor(pc, 'development', 'default');
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'development', {
+    title: 'Development',
+    subtitle: 'Обучение и навыки',
+    icon: '🚀',
+    renderDash: async (paneEl) => {
+      const items = await invoke('get_learning_items', { typeFilter: null }).catch(() => []);
+      const inProgress = items.filter(i => i.status === 'in_progress').length;
+      const completed = items.filter(i => i.status === 'completed').length;
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${items.length}</div><div class="uni-dash-label">Всего</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${inProgress}</div><div class="uni-dash-label">В процессе</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${completed}</div><div class="uni-dash-label">Завершено</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      try {
+        const items = await invoke('get_learning_items', { typeFilter: S.devFilter === 'all' ? null : S.devFilter }).catch(() => []);
+        renderDevelopment(paneEl, items || []);
+      } catch (e) {
+        paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить</div>';
+      }
+    },
+  });
 }
 
 function renderDevelopment(el, items) {
@@ -1369,15 +1530,29 @@ function showAddLearningModal() {
 async function loadHobbies(subTab) {
   const el = document.getElementById('hobbies-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('hobbies') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  if (!subTab || subTab === 'Overview') {
-    await loadHobbiesOverview(pc);
-  } else {
-    const mediaType = Object.entries(MEDIA_LABELS).find(([k,v]) => v === subTab)?.[0];
-    if (mediaType) await loadMediaList(pc, mediaType);
-  }
-  appendBlockEditor(pc, 'hobbies', subTab || 'Overview');
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'hobbies', {
+    title: 'Hobbies',
+    subtitle: 'Медиа-коллекции',
+    icon: '🎮',
+    renderDash: async (paneEl) => {
+      await loadHobbiesOverview(paneEl);
+    },
+    renderTable: async (paneEl) => {
+      const activeMedia = S._hobbiesMedia || 'music';
+      paneEl.innerHTML = `
+        <div class="dev-filters" style="margin-bottom:var(--space-3);flex-wrap:wrap;">
+          ${MEDIA_TYPES.map(t => `<button class="pill${activeMedia === t ? ' active' : ''}" data-media="${t}">${MEDIA_LABELS[t]}</button>`).join('')}
+        </div>
+        <div id="hobbies-inner-content"></div>`;
+      const innerEl = paneEl.querySelector('#hobbies-inner-content');
+      await loadMediaList(innerEl, activeMedia);
+      paneEl.querySelectorAll('[data-media]').forEach(btn => {
+        btn.addEventListener('click', () => { S._hobbiesMedia = btn.dataset.media; loadHobbies(); });
+      });
+    },
+  });
 }
 
 async function loadHobbiesOverview(el) {
@@ -1579,22 +1754,43 @@ function showMediaDetail(item, mediaType) {
 async function loadSports(subTab) {
   const el = document.getElementById('sports-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('sports') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  if (subTab === 'Martial Arts') {
-    await loadMartialArts(pc);
-  } else if (subTab === 'Stats') {
-    await loadSportsStats(pc);
-  } else {
-    try {
-      const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'sports', {
+    title: 'Sports',
+    subtitle: 'Тренировки и физическая активность',
+    icon: '💪',
+    renderDash: async (paneEl) => {
       const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
-      renderSports(pc, workouts || [], stats);
-    } catch (e) {
-      showStub('sports-content', '💪', 'Спорт', 'Тренировки и физическая активность');
-    }
-  }
-  appendBlockEditor(pc, 'sports', subTab || 'Workouts');
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.count || 0}</div><div class="uni-dash-label">Тренировок</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.total_minutes || 0}м</div><div class="uni-dash-label">Общее время</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.total_calories || 0}</div><div class="uni-dash-label">Калории</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const activeInner = S._sportsInner || 'workouts';
+      paneEl.innerHTML = `
+        <div class="dev-filters" style="margin-bottom:var(--space-3);">
+          <button class="pill${activeInner === 'workouts' ? ' active' : ''}" data-inner="workouts">Тренировки</button>
+          <button class="pill${activeInner === 'martial_arts' ? ' active' : ''}" data-inner="martial_arts">Единоборства</button>
+          <button class="pill${activeInner === 'stats' ? ' active' : ''}" data-inner="stats">Статистика</button>
+        </div>
+        <div id="sports-inner-content"></div>`;
+      const innerEl = paneEl.querySelector('#sports-inner-content');
+      if (activeInner === 'martial_arts') await loadMartialArts(innerEl);
+      else if (activeInner === 'stats') await loadSportsStats(innerEl);
+      else {
+        const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
+        const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
+        renderSports(innerEl, workouts || [], stats);
+      }
+      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
+        btn.addEventListener('click', () => { S._sportsInner = btn.dataset.inner; loadSports(); });
+      });
+    },
+  });
 }
 
 async function loadMartialArts(el) {
@@ -1729,16 +1925,32 @@ function showAddWorkoutModal() {
 async function loadHealth() {
   const el = document.getElementById('health-content');
   if (!el) return;
-  el.innerHTML = renderPageHeader('health') + '<div class="page-content"></div>';
-  const pc = el.querySelector('.page-content');
-  try {
-    const today = await invoke('get_health_today').catch(() => ({}));
-    const habits = await invoke('get_habits_today').catch(() => []);
-    renderHealth(pc, today, habits);
-  } catch (e) {
-    pc.innerHTML = '<div class="tab-stub"><div class="tab-stub-icon">❤️</div><div class="tab-stub-title">Здоровье</div><div class="tab-stub-desc">Метрики здоровья и привычки</div><span class="tab-stub-badge">Скоро</span></div>';
-  }
-  appendBlockEditor(pc, 'health', 'default');
+
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'health', {
+    title: 'Health',
+    subtitle: 'Здоровье и привычки',
+    icon: '❤️',
+    renderDash: async (paneEl) => {
+      const today = await invoke('get_health_today').catch(() => ({}));
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${today.sleep ? today.sleep + 'ч' : '—'}</div><div class="uni-dash-label">Сон</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${today.water || '—'}</div><div class="uni-dash-label">Вода (стаканов)</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${today.mood ? today.mood + '/5' : '—'}</div><div class="uni-dash-label">Настроение</div></div>
+          <div class="uni-dash-card purple"><div class="uni-dash-value">${today.weight ? today.weight + 'кг' : '—'}</div><div class="uni-dash-label">Вес</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      try {
+        const today = await invoke('get_health_today').catch(() => ({}));
+        const habits = await invoke('get_habits_today').catch(() => []);
+        renderHealth(paneEl, today, habits);
+      } catch (e) {
+        paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить данные здоровья</div>';
+      }
+    },
+  });
 }
 
 function renderHealth(el, today, habits) {
