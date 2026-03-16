@@ -120,6 +120,10 @@ pub struct ProactiveState {
     pub engagement_rate: f64,
     pub last_user_chat_time: Option<chrono::DateTime<chrono::Local>>,
     pub pending_triggers: Vec<(String, std::time::Instant)>,
+    /// Track which time period already got a voiced message today: "morning"/"day"/"evening"
+    pub voiced_periods_today: Vec<String>,
+    /// Date of last voiced_periods reset (to reset daily)
+    pub voiced_periods_date: String,
 }
 
 impl ProactiveState {
@@ -138,6 +142,8 @@ impl ProactiveState {
             engagement_rate: 0.5,
             last_user_chat_time: None,
             pending_triggers: Vec::new(),
+            voiced_periods_today: Vec::new(),
+            voiced_periods_date: String::new(),
         }
     }
 }

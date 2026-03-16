@@ -709,12 +709,13 @@ pub fn get_recent_proactive_styles(conn: &rusqlite::Connection, count: usize) ->
 }
 
 pub fn get_todays_proactive_messages(conn: &rusqlite::Connection) -> Vec<(String, String)> {
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    // Include yesterday's messages for cross-day anti-repetition
+    let yesterday = (chrono::Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
     let mut msgs = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT message, sent_at FROM proactive_history WHERE sent_at >= ?1 ORDER BY id ASC"
     ) {
-        if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![yesterday], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }) {
             for pair in rows.flatten() {
@@ -1316,8 +1317,29 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
                     "text": &message,
                     "id": proactive_id,
                 }));
+                // Voice: once per period (morning 8-11, day 12-19, evening 20-23)
                 if voice_enabled {
-                    speak_tts(&message, &voice_name);
+                    let vh = chrono::Local::now().hour();
+                    let period = match vh {
+                        8..=11 => "morning",
+                        12..=19 => "day",
+                        20..=23 => "evening",
+                        _ => "",
+                    };
+                    let mut state = proactive_state_ref.lock().await;
+                    // Reset periods on new day
+                    let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    if state.voiced_periods_date != today_str {
+                        state.voiced_periods_today.clear();
+                        state.voiced_periods_date = today_str;
+                    }
+                    if !period.is_empty() && !state.voiced_periods_today.contains(&period.to_string()) {
+                        state.voiced_periods_today.push(period.to_string());
+                        drop(state);
+                        speak_tts(&message, &voice_name);
+                    } else {
+                        drop(state);
+                    }
                 }
 
                 let mut state = proactive_state_ref.lock().await;
