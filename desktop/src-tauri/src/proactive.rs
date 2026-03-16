@@ -326,7 +326,7 @@ pub fn gather_evening_context() -> Result<String, String> {
 
     // Tasks completed today
     let completed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM notes WHERE status = 'task' AND date(completed_at) = ?1",
+        "SELECT COUNT(*) FROM tasks WHERE date(completed_at) = ?1",
         rusqlite::params![&today], |row| row.get(0),
     ).unwrap_or(0);
     if completed > 0 {
@@ -335,16 +335,14 @@ pub fn gather_evening_context() -> Result<String, String> {
 
     // Mood logged today?
     let mood_logged: bool = conn.query_row(
-        "SELECT COUNT(*) FROM mood_log WHERE date(created_at) = ?1",
+        "SELECT COUNT(*) FROM mood_log WHERE date = ?1",
         rusqlite::params![&today], |row| row.get::<_, i64>(0),
     ).unwrap_or(0) > 0;
     ctx.push_str(&format!("Mood logged today: {}\n", if mood_logged { "yes" } else { "no" }));
 
-    // Screen time summary already in context, skip
-
     // Workouts today
     let workouts: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM workouts WHERE date(created_at) = ?1",
+        "SELECT COUNT(*) FROM workouts WHERE date = ?1",
         rusqlite::params![&today], |row| row.get(0),
     ).unwrap_or(0);
     if workouts > 0 {
@@ -353,7 +351,7 @@ pub fn gather_evening_context() -> Result<String, String> {
 
     // Journal entry today?
     let journal: bool = conn.query_row(
-        "SELECT COUNT(*) FROM journal WHERE date(created_at) = ?1",
+        "SELECT COUNT(*) FROM journal_entries WHERE date = ?1",
         rusqlite::params![&today], |row| row.get::<_, i64>(0),
     ).unwrap_or(0) > 0;
     ctx.push_str(&format!("Journal today: {}\n", if journal { "yes" } else { "no" }));
@@ -419,9 +417,21 @@ pub fn gather_smart_triggers() -> Vec<String> {
     let mut triggers = Vec::new();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    // 1. Overdue tasks (due_date < today, not completed)
+    // 1. Overdue tasks (due_date < today, not completed) — from both notes and tasks tables
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT title, due_date FROM notes WHERE status = 'task' AND due_date < ?1 AND due_date != '' AND completed_at IS NULL ORDER BY due_date DESC LIMIT 3"
+        "SELECT title, due_date FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done' ORDER BY due_date DESC LIMIT 3"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for r in rows.flatten() {
+                triggers.push(format!("Просроченная задача: \"{}\" (дедлайн {})", r.0, r.1));
+            }
+        }
+    }
+    // Also check notes with task status
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title, due_date FROM notes WHERE status = 'task' AND due_date < ?1 AND due_date != '' AND archived = 0 ORDER BY due_date DESC LIMIT 3"
     ) {
         if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -435,7 +445,7 @@ pub fn gather_smart_triggers() -> Vec<String> {
     // 2. Goals near deadline (<3 days, progress < target)
     let soon = (chrono::Local::now() + chrono::Duration::days(3)).format("%Y-%m-%d").to_string();
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT title, progress, target, deadline FROM goals WHERE deadline != '' AND deadline <= ?1 AND deadline >= ?2 AND progress < target LIMIT 3"
+        "SELECT title, current_value, target_value, deadline FROM tab_goals WHERE deadline IS NOT NULL AND deadline != '' AND deadline <= ?1 AND deadline >= ?2 AND current_value < target_value AND status = 'active' LIMIT 3"
     ) {
         if let Ok(rows) = stmt.query_map(rusqlite::params![&soon, &today], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, f64>(2)?, row.get::<_, String>(3)?))
@@ -450,7 +460,7 @@ pub fn gather_smart_triggers() -> Vec<String> {
     let hour = chrono::Local::now().hour();
     if hour >= 20 {
         let mood_today: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM mood_log WHERE date(created_at) = ?1",
+            "SELECT COUNT(*) FROM mood_log WHERE date = ?1",
             rusqlite::params![&today], |row| row.get(0),
         ).unwrap_or(0);
         if mood_today == 0 {
@@ -460,11 +470,11 @@ pub fn gather_smart_triggers() -> Vec<String> {
 
     // 4. No water logged today (after 14:00)
     if hour >= 14 {
-        let water_today: f64 = conn.query_row(
-            "SELECT COALESCE(SUM(water_glasses), 0) FROM health_log WHERE date(logged_at) = ?1",
+        let water_today: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM health_log WHERE date = ?1 AND type = 'water'",
             rusqlite::params![&today], |row| row.get(0),
-        ).unwrap_or(0.0);
-        if water_today < 1.0 {
+        ).unwrap_or(0);
+        if water_today == 0 {
             triggers.push("Вода сегодня не записана".to_string());
         }
     }
@@ -512,7 +522,7 @@ pub fn gather_morning_digest() -> Result<String, String> {
 
     // Active goals with progress
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT title, progress, target, unit, deadline FROM goals WHERE progress < target ORDER BY deadline ASC LIMIT 5"
+        "SELECT title, current_value, target_value, unit, deadline FROM tab_goals WHERE current_value < target_value AND status = 'active' ORDER BY deadline ASC LIMIT 5"
     ) {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
@@ -526,35 +536,48 @@ pub fn gather_morning_digest() -> Result<String, String> {
             let goals: Vec<_> = rows.flatten().collect();
             if !goals.is_empty() {
                 digest.push_str(&format!("Active goals: {}\n", goals.len()));
-                for (title, progress, target, unit, deadline) in &goals {
+                for (title, current, target, unit, deadline) in &goals {
                     let u = unit.as_deref().unwrap_or("");
                     let dl = deadline.as_deref().unwrap_or("no deadline");
-                    digest.push_str(&format!("  - {} ({:.0}/{:.0}{}, {})\n", title, progress, target, u, dl));
+                    digest.push_str(&format!("  - {} ({:.0}/{:.0}{}, {})\n", title, current, target, u, dl));
                 }
             }
         }
     }
 
-    // Overdue tasks
-    if let Ok(overdue) = conn.query_row(
-        "SELECT COUNT(*) FROM notes WHERE status = 'task' AND due_date < ?1 AND due_date != '' AND completed_at IS NULL",
-        rusqlite::params![today], |row| row.get::<_, i64>(0),
-    ) {
-        if overdue > 0 {
-            digest.push_str(&format!("Overdue tasks: {}\n", overdue));
-        }
+    // Overdue tasks (from tasks table)
+    let overdue_tasks: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done'",
+        rusqlite::params![today], |row| row.get(0),
+    ).unwrap_or(0);
+    // Also from notes table
+    let overdue_notes: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM notes WHERE status = 'task' AND due_date < ?1 AND due_date != '' AND archived = 0",
+        rusqlite::params![today], |row| row.get(0),
+    ).unwrap_or(0);
+    let overdue = overdue_tasks + overdue_notes;
+    if overdue > 0 {
+        digest.push_str(&format!("Overdue tasks: {}\n", overdue));
     }
 
     // Today's tasks
+    let mut today_tasks: Vec<String> = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT title FROM notes WHERE status = 'task' AND due_date = ?1 AND completed_at IS NULL LIMIT 5"
+        "SELECT title FROM tasks WHERE due_date = ?1 AND completed_at IS NULL AND status != 'done' LIMIT 5"
     ) {
         if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| row.get::<_, String>(0)) {
-            let tasks: Vec<_> = rows.flatten().collect();
-            if !tasks.is_empty() {
-                digest.push_str(&format!("Today's tasks: {}\n", tasks.join(", ")));
-            }
+            today_tasks.extend(rows.flatten());
         }
+    }
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title FROM notes WHERE status = 'task' AND due_date = ?1 AND archived = 0 LIMIT 5"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| row.get::<_, String>(0)) {
+            today_tasks.extend(rows.flatten());
+        }
+    }
+    if !today_tasks.is_empty() {
+        digest.push_str(&format!("Today's tasks: {}\n", today_tasks.join(", ")));
     }
 
     Ok(digest)
