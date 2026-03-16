@@ -794,10 +794,11 @@ pub async fn proactive_llm_call(
         }
     }
 
-    // Engagement-adaptive guidance
-    if engagement_rate < 0.2 {
+    // Engagement-adaptive guidance (skip penalty for new users with <5 messages)
+    let has_enough_history = todays_messages.len() >= 3;
+    if has_enough_history && engagement_rate < 0.2 {
         user_content.push_str("\nВовлечённость очень низкая — только [SKIP] или критичный триггер.\n");
-    } else if engagement_rate < 0.4 {
+    } else if has_enough_history && engagement_rate < 0.4 {
         user_content.push_str("\nВовлечённость низкая — пиши только если есть триггер или полезное действие.\n");
     }
 
@@ -1136,9 +1137,16 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
             // Engagement-adaptive: high engagement → slightly more proactive
             if engagement > 0.6 { score += 0.1; }
             if engagement > 0.8 { score += 0.05; }
-            // Low engagement → harder to fire
-            if engagement < 0.2 { score -= 0.2; }
-            else if engagement < 0.4 { score -= 0.1; }
+            // Low engagement → harder to fire (but only with enough history)
+            let total_msgs = {
+                let db = proactive_handle.state::<HanniDb>();
+                let conn = db.conn();
+                conn.query_row("SELECT COUNT(*) FROM proactive_history", [], |r| r.get::<_, i64>(0)).unwrap_or(0)
+            };
+            if total_msgs > 10 {
+                if engagement < 0.2 { score -= 0.2; }
+                else if engagement < 0.4 { score -= 0.1; }
+            }
 
             // deep work hours penalty (10-12, 14-17)
             let hour = chrono::Local::now().hour();
