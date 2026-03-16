@@ -15,48 +15,68 @@ const PROACTIVE_PROMPT_HEADER: &str = r#"Ты — Ханни, тёплый AI-к
 
 Задача: написать ОДНО короткое сообщение (1-2 предложения). По-русски, на "ты".
 
+ДЕЙСТВИЯ (опционально):
+Если нужно СДЕЛАТЬ что-то (напомнить, создать задачу, уведомить) — добавь блок после текста:
+```action
+{"action":"set_reminder","title":"текст","remind_at":"YYYY-MM-DDTHH:MM:SS"}
+```
+Разрешённые действия: set_reminder, create_task, send_notification, log_health, create_event.
+НЕ используй действия без причины. Текст ОБЯЗАТЕЛЕН, действие — дополнение.
+
 Выбери ОДИН стиль:
 "#;
 
 const PROACTIVE_PROMPT_FOOTER: &str = r#"
 ПРИОРИТЕТЫ:
-1. Есть триггер (событие скоро / дистракция) → пиши про него
+1. Есть триггер (событие/дистракция/просроченная задача/цель) → пиши про него
 2. Есть свежий разговор → продолжи тему с новой стороны
-3. Утро (8-10) → краткий дайджест дня
-4. Иначе → любопытство, забота, юмор (без привязки к приложению)
+3. Утро (8-10) → дайджест: план дня, задачи, цели
+4. Вечер (21-23) → рефлексия: что получилось, что нет
+5. Есть данные о здоровье/привычках → мягкое напоминание
+6. Иначе → любопытство, забота, юмор (без привязки к приложению)
 
 СТРОГИЕ ЗАПРЕТЫ:
-- ЗАПРЕЩЕНО писать "ты уже X часов/минут в [приложение]" — модель НЕ должна комментировать экранное время кроме триггера дистракции (YouTube/Reddit 30+ мин)
-- ЗАПРЕЩЕНО упоминать еду/напитки (чай, кофе, перекус) если контекст НЕ про еду
-- ЗАПРЕЩЕНО выдумывать то, чего НЕТ в контексте (НЕ приписывай пользователю привычки, отношения, предпочтения если их нет в [Память])
+- ЗАПРЕЩЕНО писать "ты уже X часов/минут в [приложение]" — НЕ комментируй экранное время кроме триггера дистракции (YouTube/Reddit 30+ мин)
+- ЗАПРЕЩЕНО упоминать еду/напитки если контекст НЕ про еду
+- ЗАПРЕЩЕНО выдумывать то, чего НЕТ в контексте. НЕ приписывай привычки, предпочтения если их нет в [Память]
 - ЗАПРЕЩЕНО повторять темы из [Уже сказано сегодня]
 - Если нечего сказать — ответь [SKIP]. Лучше [SKIP] чем банальщина
 
 СТИЛЬ:
-- Коротко, 1-2 предложения
+- Коротко, 1-2 предложения + опциональное действие
 - Разнообразно: не повторяй формат предыдущих сообщений
 - Привязывай к контексту, но НЕ к названию приложения (кроме дистракций)
+- Утром — бодрый и конкретный. Вечером — тёплый и рефлексивный. Днём — ненавязчивый
 
 ПРИМЕРЫ:
-Контекст: Музыка: Radiohead — Creep | Screen Time: работа 3ч
-Хорошо: "Creep от Radiohead — настроение такое или просто зашла?"
-Плохо: "Ты уже 3 часа работаешь — может перерыв?" (банально, комментирует время)
+Контекст: Музыка: Radiohead — Creep
+Хорошо: [style:observation] Creep от Radiohead — настроение такое или просто зашла?
 
-Контекст: Триггер: дистракция YouTube 45 мин
-Хорошо: "Залип на YouTube? 45 минут — может хватит? 😄"
-Плохо: "Ты уже 45 минут в YouTube, может сделать чайный перерыв?" (чай, шаблонная фраза)
+Контекст: Триггер: просроченная задача "Купить молоко" (вчера)
+Хорошо: [style:accountability] Задача "Купить молоко" висит со вчера — актуально ещё?
 
-Контекст: Событие через 20 мин: Встреча с командой
-Хорошо: "Через 20 минут встреча — подготовился?"
+Контекст: Триггер: цель "Прочитать 12 книг" — 3/12, осталось 14 дней
+Хорошо: [style:accountability] До дедлайна по книгам 2 недели, а прочитано 3 из 12 — может пересмотреть план?
 
-Контекст: Последний разговор про новый проект
-Хорошо: "Как там проект — сдвинулось что-нибудь?"
+Контекст: Утро, 3 события сегодня, 2 активные цели
+Хорошо: [style:digest] Доброе утро! Сегодня 3 события, 2 цели в работе. Начнёшь с чего?
+
+Контекст: Вечер, настроение не записано
+Хорошо: [style:journal] Как день? Запишем настроение?
+```action
+{"action":"log_mood","mood":3,"note":"вечерний чекин"}
+```
+
+Контекст: Событие через 15 мин: Созвон
+Хорошо: [style:calendar] Через 15 минут созвон — готов?
+```action
+{"action":"send_notification","title":"Ханни","body":"Созвон через 15 минут!"}
+```
 
 Контекст: Вечер, ничего особенного
 Хорошо: [SKIP]
-Плохо: "Как прошёл день?" (пустое, без контекста)
 
-Формат ответа: [style:ID] текст сообщения (например [style:humor] Шутка тут), или [SKIP]."#;
+Формат: [style:ID] текст (+ опциональный ```action блок), или [SKIP]."#;
 
 pub fn build_proactive_system_prompt(enabled_styles: &[String], recent_styles: &[String]) -> String {
     let hour = chrono::Local::now().hour();
@@ -279,7 +299,7 @@ pub fn gather_context_blocking() -> String {
         }
     }
 
-    // Morning digest context: yesterday's mood, sleep, today's event count
+    // Morning digest context: yesterday's mood, sleep, today's event count, goals
     let hour = now.hour();
     if hour >= 8 && hour <= 10 {
         if let Ok(digest) = gather_morning_digest() {
@@ -287,7 +307,58 @@ pub fn gather_context_blocking() -> String {
         }
     }
 
+    // Evening reflection context (21-23)
+    if hour >= 21 && hour <= 23 {
+        if let Ok(evening) = gather_evening_context() {
+            ctx.push_str(&format!("\n--- Evening Reflection Data ---\n{}\n", evening));
+        }
+    }
+
     ctx
+}
+
+pub fn gather_evening_context() -> Result<String, String> {
+    let db_path = hanni_db_path();
+    if !db_path.exists() { return Ok(String::new()); }
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let mut ctx = String::new();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    // Tasks completed today
+    let completed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM notes WHERE status = 'task' AND date(completed_at) = ?1",
+        rusqlite::params![&today], |row| row.get(0),
+    ).unwrap_or(0);
+    if completed > 0 {
+        ctx.push_str(&format!("Tasks completed today: {}\n", completed));
+    }
+
+    // Mood logged today?
+    let mood_logged: bool = conn.query_row(
+        "SELECT COUNT(*) FROM mood_log WHERE date(created_at) = ?1",
+        rusqlite::params![&today], |row| row.get::<_, i64>(0),
+    ).unwrap_or(0) > 0;
+    ctx.push_str(&format!("Mood logged today: {}\n", if mood_logged { "yes" } else { "no" }));
+
+    // Screen time summary already in context, skip
+
+    // Workouts today
+    let workouts: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM workouts WHERE date(created_at) = ?1",
+        rusqlite::params![&today], |row| row.get(0),
+    ).unwrap_or(0);
+    if workouts > 0 {
+        ctx.push_str(&format!("Workouts today: {}\n", workouts));
+    }
+
+    // Journal entry today?
+    let journal: bool = conn.query_row(
+        "SELECT COUNT(*) FROM journal WHERE date(created_at) = ?1",
+        rusqlite::params![&today], |row| row.get::<_, i64>(0),
+    ).unwrap_or(0) > 0;
+    ctx.push_str(&format!("Journal today: {}\n", if journal { "yes" } else { "no" }));
+
+    Ok(ctx)
 }
 
 pub fn get_app_focus_minutes(app_name: &str) -> Result<f64, String> {
@@ -337,6 +408,70 @@ pub fn get_upcoming_events_soon() -> Result<String, String> {
     Ok(events.join("\n"))
 }
 
+/// Smart triggers from DB: overdue tasks, near-deadline goals, health gaps
+pub fn gather_smart_triggers() -> Vec<String> {
+    let db_path = hanni_db_path();
+    if !db_path.exists() { return Vec::new(); }
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let mut triggers = Vec::new();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    // 1. Overdue tasks (due_date < today, not completed)
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title, due_date FROM notes WHERE status = 'task' AND due_date < ?1 AND due_date != '' AND completed_at IS NULL ORDER BY due_date DESC LIMIT 3"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for r in rows.flatten() {
+                triggers.push(format!("Просроченная задача: \"{}\" (дедлайн {})", r.0, r.1));
+            }
+        }
+    }
+
+    // 2. Goals near deadline (<3 days, progress < target)
+    let soon = (chrono::Local::now() + chrono::Duration::days(3)).format("%Y-%m-%d").to_string();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title, progress, target, deadline FROM goals WHERE deadline != '' AND deadline <= ?1 AND deadline >= ?2 AND progress < target LIMIT 3"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![&soon, &today], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, f64>(2)?, row.get::<_, String>(3)?))
+        }) {
+            for r in rows.flatten() {
+                triggers.push(format!("Цель на грани дедлайна: \"{}\" — {:.0}/{:.0}, дедлайн {}", r.0, r.1, r.2, r.3));
+            }
+        }
+    }
+
+    // 3. No mood logged today (after 20:00)
+    let hour = chrono::Local::now().hour();
+    if hour >= 20 {
+        let mood_today: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM mood_log WHERE date(created_at) = ?1",
+            rusqlite::params![&today], |row| row.get(0),
+        ).unwrap_or(0);
+        if mood_today == 0 {
+            triggers.push("Настроение сегодня не записано".to_string());
+        }
+    }
+
+    // 4. No water logged today (after 14:00)
+    if hour >= 14 {
+        let water_today: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(water_glasses), 0) FROM health_log WHERE date(logged_at) = ?1",
+            rusqlite::params![&today], |row| row.get(0),
+        ).unwrap_or(0.0);
+        if water_today < 1.0 {
+            triggers.push("Вода сегодня не записана".to_string());
+        }
+    }
+
+    triggers
+}
+
 pub fn gather_morning_digest() -> Result<String, String> {
     let db_path = hanni_db_path();
     if !db_path.exists() { return Ok(String::new()); }
@@ -375,14 +510,51 @@ pub fn gather_morning_digest() -> Result<String, String> {
         }
     }
 
-    // Active goals count
-    let goals_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM goals WHERE progress < target",
-        [],
-        |row| row.get(0),
-    ).unwrap_or(0);
-    if goals_count > 0 {
-        digest.push_str(&format!("Active goals: {}\n", goals_count));
+    // Active goals with progress
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title, progress, target, unit, deadline FROM goals WHERE progress < target ORDER BY deadline ASC LIMIT 5"
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        }) {
+            let goals: Vec<_> = rows.flatten().collect();
+            if !goals.is_empty() {
+                digest.push_str(&format!("Active goals: {}\n", goals.len()));
+                for (title, progress, target, unit, deadline) in &goals {
+                    let u = unit.as_deref().unwrap_or("");
+                    let dl = deadline.as_deref().unwrap_or("no deadline");
+                    digest.push_str(&format!("  - {} ({:.0}/{:.0}{}, {})\n", title, progress, target, u, dl));
+                }
+            }
+        }
+    }
+
+    // Overdue tasks
+    if let Ok(overdue) = conn.query_row(
+        "SELECT COUNT(*) FROM notes WHERE status = 'task' AND due_date < ?1 AND due_date != '' AND completed_at IS NULL",
+        rusqlite::params![today], |row| row.get::<_, i64>(0),
+    ) {
+        if overdue > 0 {
+            digest.push_str(&format!("Overdue tasks: {}\n", overdue));
+        }
+    }
+
+    // Today's tasks
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title FROM notes WHERE status = 'task' AND due_date = ?1 AND completed_at IS NULL LIMIT 5"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| row.get::<_, String>(0)) {
+            let tasks: Vec<_> = rows.flatten().collect();
+            if !tasks.is_empty() {
+                digest.push_str(&format!("Today's tasks: {}\n", tasks.join(", ")));
+            }
+        }
     }
 
     Ok(digest)
@@ -599,8 +771,21 @@ pub async fn proactive_llm_call(
         }
     }
 
-    if engagement_rate < 0.3 {
-        user_content.push_str("\nВовлечённость низкая — пиши только если есть что-то реально полезное.\n");
+    // Engagement-adaptive guidance
+    if engagement_rate < 0.2 {
+        user_content.push_str("\nВовлечённость очень низкая — только [SKIP] или критичный триггер.\n");
+    } else if engagement_rate < 0.4 {
+        user_content.push_str("\nВовлечённость низкая — пиши только если есть триггер или полезное действие.\n");
+    }
+
+    // Time-of-day tone hint
+    let hour = chrono::Local::now().hour();
+    if hour >= 8 && hour <= 10 {
+        user_content.push_str("\n[Тон: бодрый, конкретный — утренний план]\n");
+    } else if hour >= 21 && hour <= 23 {
+        user_content.push_str("\n[Тон: тёплый, рефлексивный — вечерний чекин]\n");
+    } else if hour >= 12 && hour <= 14 {
+        user_content.push_str("\n[Тон: ненавязчивый, лёгкий]\n");
     }
 
     let request = ChatRequest {
@@ -609,7 +794,7 @@ pub async fn proactive_llm_call(
             ChatMessage::text("system", &sys_prompt),
             ChatMessage::text("user", &user_content),
         ],
-        max_tokens: 200,
+        max_tokens: 350,
         stream: false,
         temperature: 0.6,
         repetition_penalty: None,
@@ -897,10 +1082,20 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
                 score += 0.25;
             }
 
-            // pending trigger (generic)
+            // pending trigger (generic — includes smart triggers from DB)
             if !triggers.is_empty() {
                 score += 0.4_f64.min(score + 0.4) - score; // ensure at least +0.15
                 score += 0.15;
+            }
+
+            // Smart triggers from DB (overdue tasks, goals) — checked before LLM call
+            // These are lower priority than real-time triggers but still boost score
+            // We check DB triggers at LLM call time, but hint the score here based on time
+            let hour = chrono::Local::now().hour();
+            // Morning & evening are prime times for smart triggers
+            if (8..=10).contains(&hour) || (20..=22).contains(&hour) {
+                // Will be populated with smart_triggers later; give a small bonus
+                // to increase chance of firing during ritual times
             }
 
             // Block proactive while user is actively chatting
@@ -915,9 +1110,12 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
                 score += 0.1; // no chat at all — consider idle
             }
 
-            // high engagement bonus
+            // Engagement-adaptive: high engagement → slightly more proactive
             if engagement > 0.6 { score += 0.1; }
             if engagement > 0.8 { score += 0.05; }
+            // Low engagement → harder to fire
+            if engagement < 0.2 { score -= 0.2; }
+            else if engagement < 0.4 { score -= 0.1; }
 
             // deep work hours penalty (10-12, 14-17)
             let hour = chrono::Local::now().hour();
@@ -925,8 +1123,14 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
                 score -= 0.1;
             }
 
+            // Morning/evening bonus (ritual times)
+            if (8..=10).contains(&hour) || (21..=23).contains(&hour) {
+                score += 0.1;
+            }
+
             // many skips penalty
             if skips > 3 { score -= 0.15; }
+            if skips > 6 { score -= 0.15; } // progressive backoff
 
             // Minimum floor: 3 minutes
             if elapsed < 180 {
@@ -1006,6 +1210,17 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
             String::new()
         };
 
+        // Gather smart triggers from DB (overdue tasks, goals, health)
+        let smart_triggers: Vec<String> = tokio::task::spawn_blocking(gather_smart_triggers)
+            .await.unwrap_or_default();
+        // Merge with pending triggers (event/distraction triggers from snapshot loop)
+        let mut all_triggers = triggers.clone();
+        for st in &smart_triggers {
+            if !all_triggers.contains(st) {
+                all_triggers.push(st.clone());
+            }
+        }
+
         // Build memory context (8 core facts — better personalization)
         let (mem_ctx, chat_snippet, user_name, todays_msgs, recent_styles) = {
             let db = proactive_handle.state::<HanniDb>();
@@ -1037,7 +1252,7 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
             Ok(p) => p,
             Err(_) => continue,
         };
-        let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles, &recent_styles).await;
+        let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &all_triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles, &recent_styles).await;
         drop(_proactive_permit);
 
         // P4: Re-check typing after LLM call — discard proactive if user started chatting
