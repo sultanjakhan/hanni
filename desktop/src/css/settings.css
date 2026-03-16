@@ -712,3 +712,8 @@
 .chat-settings-panel.active {
   display: block;
 }
+
+/* Hide horizontal tabs when sidebar settings nav is active */
+#sub-sidebar.settings-mode ~ #content-area .chat-settings-tabs {
+  display: none;
+}

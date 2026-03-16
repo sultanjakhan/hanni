@@ -73,6 +73,7 @@ export const S = {
   notePreviewMode: false,
   syncedMonths: new Set(),
   calDayDate: null,
+  settingsSection: null,
   dbvFilters: {},
   dbViews: {},
   _scrollRAF: null,
@@ -233,6 +234,17 @@ export const TAB_SETTINGS_DEFS = {
       { value: 'День', label: 'День' }, { value: 'Список', label: 'Список' },
     ], default: 'Месяц' },
   ],
+  work: [],
+  projects: [],
+  development: [],
+  home: [],
+  hobbies: [],
+  sports: [],
+  health: [],
+  mindset: [],
+  food: [],
+  money: [],
+  people: [],
 };
 
 // ── Tab setting helpers ──

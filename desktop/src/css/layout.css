@@ -528,3 +528,56 @@
   padding: 24px; text-align: center;
   color: var(--text-faint); font-size: 14px;
 }
+
+/* ── Sub-sidebar settings mode ── */
+
+#sub-sidebar.settings-mode {
+  width: 190px;
+  min-width: 190px;
+}
+
+.sidebar-settings-title {
+  padding: 8px 16px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-faint);
+}
+
+/* ── Settings page (content area) ── */
+
+.settings-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-8);
+  max-width: 700px;
+}
+
+.settings-page-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.settings-page-icon {
+  color: var(--text-muted);
+}
+
+.settings-page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.settings-empty-hint {
+  color: var(--text-faint);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.settings-page-content .settings-section {
+  margin-bottom: var(--space-5);
+}

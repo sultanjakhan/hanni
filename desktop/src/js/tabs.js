@@ -1,7 +1,29 @@
 // ── js/tabs.js — Tab navigation, sub-sidebar, sub-tab bar, goals, dropdown, shortcuts, router ──
 
-import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders } from './state.js';
+import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders, loadTabSetting, saveTabSetting } from './state.js';
 import { escapeHtml, renderTabSettingsPage, setupPageHeaderControls, renderPageHeader } from './utils.js';
+
+// ── Settings sections per tab ──
+const SETTINGS_SECTIONS = {
+  chat: [
+    { id: 'memory', label: 'Память' },
+    { id: 'general', label: 'Автономный' },
+    { id: 'voice', label: 'Голос' },
+    { id: 'styles', label: 'Стили' },
+    { id: 'tools', label: 'Инструменты' },
+    { id: 'data', label: 'Данные' },
+    { id: 'appearance', label: 'Оформление' },
+    { id: 'about', label: 'О Hanni' },
+  ],
+  _default: [
+    { id: 'general', label: 'Основные' },
+    { id: 'mode', label: 'Режим работы' },
+    { id: 'skills', label: 'Скиллы' },
+    { id: 'integrations', label: 'Интеграции' },
+    { id: 'blocklist', label: 'Блок-лист' },
+    { id: 'mcp', label: 'MCP серверы' },
+  ],
+};
 
 // ── renderTabBar ──
 
@@ -111,7 +133,6 @@ function renderTabBar() {
           S.activeSubTab.chat = 'Настройки';
         }
       } else {
-        if (!TAB_SETTINGS_DEFS[S.activeTab]?.length) return; // no settings for this tab
         if (S.activeSubTab[S.activeTab] === 'Настройки') {
           S.activeSubTab[S.activeTab] = TAB_REGISTRY[S.activeTab]?.subTabs?.[0] || null;
         } else {
@@ -206,13 +227,65 @@ function renderSubSidebar() {
   const reg = TAB_REGISTRY[S.activeTab];
   document.title = `Hanni [${S.activeTab}] subs=${reg?.subTabs?.length || 0}`;
 
+  // ── Settings mode: render settings in sub-sidebar ──
+  const isSettingsMode = (S.activeTab === 'chat' && S.activeSubTab.chat === 'Настройки') ||
+                         (S.activeTab !== 'chat' && S.activeSubTab[S.activeTab] === 'Настройки');
+
+  if (isSettingsMode) {
+    sidebar.classList.remove('hidden', 'collapsed');
+    sidebar.classList.add('settings-mode');
+    items.innerHTML = '';
+    const convPanel = document.getElementById('conversations-panel');
+    if (convPanel) convPanel.style.display = S.activeTab === 'chat' ? 'none' : '';
+
+    const sections = SETTINGS_SECTIONS[S.activeTab] || SETTINGS_SECTIONS._default;
+    if (!S.settingsSection || !sections.find(s => s.id === S.settingsSection)) {
+      S.settingsSection = sections[0]?.id || 'general';
+    }
+
+    // Title
+    const title = document.createElement('div');
+    title.className = 'sidebar-settings-title';
+    title.textContent = 'Настройки';
+    items.appendChild(title);
+
+    // Section nav items
+    for (const sec of sections) {
+      const item = document.createElement('div');
+      item.className = 'sub-sidebar-item' + (sec.id === S.settingsSection ? ' active' : '');
+      item.innerHTML = `<span class="sub-sidebar-dot"></span>${sec.label}`;
+      item.addEventListener('click', () => {
+        S.settingsSection = sec.id;
+        renderSubSidebar();
+        renderSettingsPage(S.activeTab, sec.id);
+      });
+      items.appendChild(item);
+    }
+
+    // Bottom: version
+    const settingsBottom = document.getElementById('sub-sidebar-settings');
+    if (settingsBottom) {
+      settingsBottom.innerHTML = '';
+      const ver = document.createElement('div');
+      ver.className = 'version-label';
+      ver.textContent = `v${S.APP_VERSION}`;
+      settingsBottom.appendChild(ver);
+    }
+    // Hide goals in settings mode
+    const goalsSection = document.getElementById('sub-sidebar-goals');
+    if (goalsSection) goalsSection.classList.add('hidden');
+    return;
+  }
+
+  sidebar.classList.remove('settings-mode');
+
   if (!reg || !reg.subTabs) {
     sidebar.classList.add('hidden');
     return;
   }
 
-  // Chat tab: conversations live in the sub-sidebar (hidden during settings)
-  if (S.activeTab === 'chat' && S.activeSubTab.chat !== 'Настройки') {
+  // Chat tab: conversations live in the sub-sidebar
+  if (S.activeTab === 'chat') {
     sidebar.classList.remove('hidden');
     sidebar.classList.toggle('collapsed', !!S.chatSidebarCollapsed);
     const convPanel = document.getElementById('conversations-panel');
@@ -481,15 +554,20 @@ function activateView() {
 // ── loadSubTabContent (router) ──
 
 function loadSubTabContent(tabId, subTab) {
-  // Per-tab settings page (gear button)
-  if (subTab === 'Настройки' && tabId !== 'chat') {
-    renderTabSettingsPage(tabId);
+  // Settings page — render in content area with sidebar nav
+  if (subTab === 'Настройки') {
+    if (tabId === 'chat') {
+      showChatSettingsMode();
+      tabLoaders.loadChatSettings?.();
+    } else {
+      const sec = S.settingsSection || 'general';
+      renderSettingsPage(tabId, sec);
+    }
     return;
   }
   switch (tabId) {
     case 'chat':
-      if (subTab === 'Настройки') { showChatSettingsMode(); tabLoaders.loadChatSettings?.(); }
-      else { hideChatSettingsMode(); renderSubSidebar(); tabLoaders.loadConversationsList?.(); tabLoaders.focusInput?.(); }
+      hideChatSettingsMode(); renderSubSidebar(); tabLoaders.loadConversationsList?.(); tabLoaders.focusInput?.();
       break;
     case 'calendar': tabLoaders.loadCalendar?.(subTab); break;
     case 'focus': tabLoaders.loadFocus?.(subTab); break;
@@ -593,6 +671,106 @@ function showChatSettingsMode() {
 function hideChatSettingsMode() {
   const view = document.getElementById('view-chat');
   view.classList.remove('chat-settings-mode');
+}
+
+// ── Settings page renderer (full page in content area) ──
+
+async function renderSettingsPage(tabId, sectionId) {
+  const el = document.getElementById(`${tabId}-content`);
+  if (!el) return;
+
+  const reg = TAB_REGISTRY[tabId];
+  const sections = SETTINGS_SECTIONS[tabId] || SETTINGS_SECTIONS._default;
+  const sec = sections.find(s => s.id === sectionId) || sections[0];
+  if (!sec) return;
+
+  // For chat — use existing panel system, just switch active panel
+  if (tabId === 'chat') {
+    // Sync sidebar selection with panels
+    document.querySelectorAll('.chat-settings-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById(`cs-panel-${sectionId}`)?.classList.add('active');
+    document.querySelectorAll('.chat-settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.chat-settings-tab[data-panel="${sectionId}"]`)?.classList.add('active');
+    return;
+  }
+
+  // For non-chat — render settings section as full page
+  const tabLabel = S.tabCustomizations[tabId]?.label || reg?.label || tabId;
+  let contentHtml = '';
+
+  if (sectionId === 'general') {
+    // Basic settings from TAB_SETTINGS_DEFS
+    const defs = TAB_SETTINGS_DEFS[tabId] || [];
+    if (defs.length) {
+      let rowsHtml = '';
+      for (const def of defs) {
+        const val = await loadTabSetting(tabId, def.key) ?? def.default;
+        let controlHtml = '';
+        if (def.type === 'toggle') {
+          controlHtml = `<label class="toggle"><input type="checkbox" data-tab-id="${tabId}" data-setting-key="${def.key}" ${val === 'true' ? 'checked' : ''}><span class="toggle-track"></span></label>`;
+        } else if (def.type === 'select') {
+          controlHtml = `<div class="setting-pills" data-tab-id="${tabId}" data-setting-key="${def.key}">` +
+            def.options.map(o => `<button class="setting-pill${val === o.value ? ' active' : ''}" data-value="${o.value}">${o.label}</button>`).join('') + `</div>`;
+        } else if (def.type === 'number') {
+          controlHtml = `<input class="form-input" type="number" min="${def.min || 1}" max="${def.max || 480}" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val)}" style="width:100px;">`;
+        } else {
+          controlHtml = `<input class="form-input" type="text" data-tab-id="${tabId}" data-setting-key="${def.key}" value="${escapeHtml(val || '')}">`;
+        }
+        rowsHtml += `<div class="settings-row"><span class="settings-label">${def.label}</span><span class="settings-value">${controlHtml}</span></div>`;
+      }
+      contentHtml = `<div class="settings-section"><div class="settings-section-title">Основные</div>${rowsHtml}</div>`;
+    } else {
+      contentHtml = `<div class="settings-section"><div class="settings-section-title">Основные</div>
+        <div class="settings-empty-hint">Нет настроек для этой секции</div></div>`;
+    }
+  } else if (sectionId === 'mode') {
+    contentHtml = `<div class="settings-section"><div class="settings-section-title">Режим работы</div>
+      <div class="settings-row"><span class="settings-label">Автопилот</span><span class="settings-value"><label class="toggle"><input type="checkbox" id="setting-autopilot"><span class="toggle-track"></span></label></span></div>
+      <div class="settings-row"><span class="settings-hint">Ханни автоматически ищет, заполняет и обновляет данные</span></div>
+    </div>`;
+  } else if (sectionId === 'skills') {
+    contentHtml = `<div class="settings-section"><div class="settings-section-title">Скиллы (роль Ханни)</div>
+      <div class="settings-empty-hint">Скиллы пока не настроены</div>
+      <button class="btn-smallall" style="margin-top:12px;">+ Добавить скилл</button></div>`;
+  } else if (sectionId === 'integrations') {
+    contentHtml = `<div class="settings-section"><div class="settings-section-title">Интеграции</div>
+      <div class="settings-empty-hint">Нет подключённых интеграций</div>
+      <button class="btn-smallall" style="margin-top:12px;">+ Подключить</button></div>`;
+  } else if (sectionId === 'blocklist') {
+    contentHtml = `<div class="settings-section"><div class="settings-section-title">Блок-лист</div>
+      <div class="settings-empty-hint">Блок-лист пуст</div>
+      <button class="btn-smallall" style="margin-top:12px;">+ Добавить в блок-лист</button></div>`;
+  } else if (sectionId === 'mcp') {
+    contentHtml = `<div class="settings-section"><div class="settings-section-title">MCP серверы</div>
+      <div class="settings-row"><span class="settings-hint">Подключение внешних инструментов через MCP</span></div>
+      <div class="settings-empty-hint">Нет подключённых MCP серверов</div>
+      <button class="btn-smallall" style="margin-top:12px;">+ Подключить MCP</button></div>`;
+  }
+
+  el.innerHTML = `<div class="settings-page">
+    <div class="settings-page-header">
+      <span class="settings-page-icon">${TAB_ICONS.settings}</span>
+      <span class="settings-page-title">Настройки — ${tabLabel}</span>
+    </div>
+    <div class="settings-page-content">${contentHtml}</div>
+  </div>`;
+
+  // Wire up controls
+  el.querySelectorAll('input[data-setting-key], select[data-setting-key]').forEach(ctrl => {
+    ctrl.addEventListener('change', () => {
+      const v = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
+      saveTabSetting(ctrl.dataset.tabId, ctrl.dataset.settingKey, v);
+    });
+  });
+  el.querySelectorAll('.setting-pills').forEach(group => {
+    group.querySelectorAll('.setting-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        group.querySelectorAll('.setting-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        saveTabSetting(group.dataset.tabId, group.dataset.settingKey, pill.dataset.value);
+      });
+    });
+  });
 }
 
 // ── Exports ──
