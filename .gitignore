@@ -40,3 +40,6 @@ desktop/.venv*/
 
 # APK
 *.apk
+mockup-database-view.html
+prototype.html
+screenshots/
