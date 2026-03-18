@@ -273,6 +273,7 @@ export const PROPERTY_TYPE_DEFS = [
   { id: 'date', icon: '◫', name: 'Дата' },
   { id: 'checkbox', icon: '☑', name: 'Чекбокс' },
   { id: 'url', icon: '↗', name: 'Ссылка' },
+  { id: 'status', icon: '◔', name: 'Статус' },
 ];
 
 export function getTypeIcon(typeId) {

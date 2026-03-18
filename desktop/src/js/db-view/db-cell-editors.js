@@ -9,6 +9,11 @@ export function formatPropValue(val, prop) {
   switch (prop.type) {
     case 'checkbox': return val === 'true' ? '\u2713' : '\u2014';
     case 'select': return `<span class="badge badge-blue">${escapeHtml(val)}</span>`;
+    case 'status': {
+      const colors = { 'Готово': 'green', 'В работе': 'blue', 'Не начато': 'gray' };
+      const c = colors[val] || 'gray';
+      return `<span class="badge badge-${c}">${escapeHtml(val)}</span>`;
+    }
     case 'multi_select': {
       try {
         const items = JSON.parse(val);
@@ -36,6 +41,14 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
 
   let editorHtml = '';
   switch (propType) {
+    case 'status': {
+      const statusOpts = options.length > 0 ? options : ['Не начато', 'В работе', 'Готово'];
+      editorHtml = `<select class="inline-editor inline-select">
+        <option value="">\u2014</option>
+        ${statusOpts.map(o => `<option value="${escapeHtml(o)}"${o === currentVal ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+      </select>`;
+      break;
+    }
     case 'select':
       editorHtml = `<select class="inline-editor inline-select">
         <option value="">\u2014</option>
