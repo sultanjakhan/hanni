@@ -74,7 +74,6 @@ async function loadCalendar(subTab) {
         { id: 'week', label: 'Неделя' },
         { id: 'day', label: 'День' },
         { id: 'list', label: 'Список' },
-        { id: 'integrations', label: 'Интеграции' },
       ];
       const activeView = S._calendarInner || 'month';
       paneEl.innerHTML = `

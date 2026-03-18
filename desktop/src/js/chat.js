@@ -1592,95 +1592,10 @@ async function renderChatWelcomeCard() {
       </div>`;
     }
 
-    // Load activity timeline
-    let activityHtml = '';
-    try {
-      const activity = await invoke('get_activity_timeline', { date: null });
-      if (activity && activity.snapshots_count > 0) {
-        const catColors = {
-          coding: 'var(--accent-blue)', writing: 'var(--accent-purple)',
-          learning: 'var(--accent-teal)', browsing: 'var(--accent-yellow)',
-          social: 'var(--accent-orange)', media: 'var(--accent-red)',
-          communication: 'var(--accent-green)', other: 'var(--text-muted)',
-        };
-        const catLabels = {
-          coding: 'Код', writing: 'Текст', learning: 'Обучение',
-          browsing: 'Браузер', social: 'Соцсети', media: 'Медиа',
-          communication: 'Общение', other: 'Другое',
-        };
-
-        // Category breakdown bars
-        const cats = activity.categories || {};
-        const totalMin = activity.total_minutes || 1;
-        const catBars = Object.entries(cats)
-          .sort((a, b) => b[1] - a[1])
-          .map(([cat, min]) => {
-            const pct = Math.max(2, (min / totalMin) * 100);
-            const hrs = Math.floor(min / 60);
-            const mins = Math.round(min % 60);
-            const timeStr = hrs > 0 ? `${hrs}ч ${mins}м` : `${mins}м`;
-            return `<div class="act-cat-row">
-              <span class="act-cat-label" style="color:${catColors[cat] || catColors.other}">${catLabels[cat] || cat}</span>
-              <div class="act-cat-bar-bg"><div class="act-cat-bar" style="width:${pct}%;background:${catColors[cat] || catColors.other}"></div></div>
-              <span class="act-cat-time">${timeStr}</span>
-            </div>`;
-          }).join('');
-
-        // Top apps
-        const topApps = (activity.top_apps || []).slice(0, 5).map(a => {
-          const mins = Math.round(a.minutes);
-          const hrs = Math.floor(mins / 60);
-          const m = mins % 60;
-          return `<span class="act-app-chip">${escapeHtml(a.app)} ${hrs > 0 ? hrs + 'ч ' : ''}${m}м</span>`;
-        }).join('');
-
-        // Timeline blocks (hourly summary)
-        const hourBuckets = {};
-        for (const s of activity.timeline || []) {
-          const h = new Date(s.time).getHours();
-          if (!hourBuckets[h]) hourBuckets[h] = {};
-          const cat = s.category || 'other';
-          hourBuckets[h][cat] = (hourBuckets[h][cat] || 0) + 1;
-        }
-        const hours = Object.keys(hourBuckets).map(Number).sort((a, b) => a - b);
-        const maxPerHour = Math.max(...hours.map(h => Object.values(hourBuckets[h]).reduce((s, v) => s + v, 0)), 1);
-
-        const timelineBlocks = hours.map(h => {
-          const cats = hourBuckets[h];
-          const total = Object.values(cats).reduce((s, v) => s + v, 0);
-          const segments = Object.entries(cats)
-            .sort((a, b) => b[1] - a[1])
-            .map(([cat, count]) => {
-              const pct = (count / total) * 100;
-              return `<div style="width:${pct}%;background:${catColors[cat] || catColors.other};height:100%"></div>`;
-            }).join('');
-          const heightPct = Math.max(15, (total / maxPerHour) * 100);
-          return `<div class="act-tl-col">
-            <div class="act-tl-bar" style="height:${heightPct}%">${segments}</div>
-            <span class="act-tl-hour">${h}</span>
-          </div>`;
-        }).join('');
-
-        const totalHrs = Math.floor(totalMin / 60);
-        const totalM = Math.round(totalMin % 60);
-        const prodPct = totalMin > 0 ? Math.round((activity.productive_minutes / totalMin) * 100) : 0;
-
-        activityHtml = `
-          <div class="welcome-section-title" style="margin-top:var(--space-3)">Активность</div>
-          <div class="act-summary">
-            <span class="act-summary-item">${totalHrs}ч ${totalM}м за экраном</span>
-            <span class="act-summary-item act-prod">${prodPct}% продуктивно</span>
-          </div>
-          <div class="act-timeline">${timelineBlocks}</div>
-          <div class="act-categories">${catBars}</div>
-          <div class="act-apps">${topApps}</div>`;
-      }
-    } catch (_) {}
-
     card.innerHTML = `
       <div class="welcome-greeting">${greeting}!</div>
       <div class="welcome-date">${dateStr}</div>
-      ${focusBanner}${statsHtml}${eventsHtml}${activityHtml}
+      ${focusBanner}${statsHtml}${eventsHtml}
       <div class="welcome-actions">
         <button class="welcome-action-btn" data-nav="notes">Заметка</button>
         <button class="welcome-action-btn" data-nav="focus">Фокус</button>

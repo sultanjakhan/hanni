@@ -433,9 +433,37 @@
 
 .dev-filters {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   margin-bottom: var(--space-4);
-  flex-wrap: wrap;
+  background: var(--bg-sidebar);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.dev-filter-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.dev-filter-btn:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.dev-filter-btn.active {
+  color: var(--text-primary);
+  background: var(--bg-page);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
 .dev-grid {
