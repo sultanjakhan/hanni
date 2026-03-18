@@ -6,12 +6,7 @@ import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
 import { showAddPropertyModal, showColumnMenu } from './db-properties.js';
 
-/**
- * Render a table view into a container element.
- *
- * @param {HTMLElement} el - Container element
- * @param {object} ctx - Context: { tabId, recordTable, records, fixedColumns, idField, customProps, valuesMap, reloadFn, onRowClick, onAdd, addButton, onSort }
- */
+/** Render a table view into a container element */
 export async function renderTableView(el, ctx) {
   const {
     tabId, recordTable, records, fixedColumns = [], idField = 'id',
@@ -23,10 +18,7 @@ export async function renderTableView(el, ctx) {
   const filteredRecords = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField);
   const visibleProps = customProps.filter(p => p.visible !== false);
 
-  // Header
-  const headerHtml = addButton
-    ? `<div class="dbv-header">${addButton ? `<button class="btn-primary dbv-add-btn">${addButton}</button>` : ''}</div>`
-    : '';
+  const headerHtml = addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : '';
 
   // Table head
   const thFixed = fixedColumns.map(c =>
@@ -60,10 +52,17 @@ export async function renderTableView(el, ctx) {
     tbodyHtml = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-faint);padding:24px;">Пока пусто</td></tr>`;
   }
 
+  // Inline "new row" footer
+  const colspan = fixedColumns.length + visibleProps.length + 1;
+  const addRowHtml = onAdd
+    ? `<tfoot><tr class="add-row-inline"><td colspan="${colspan}"><span class="add-row-btn">+ Новая запись</span></td></tr></tfoot>`
+    : '';
+
   el.innerHTML = headerHtml + `
     <table class="data-table database-view">
       <thead><tr>${thFixed}${thCustom}${thAddCol}</tr></thead>
       <tbody>${tbodyHtml}</tbody>
+      ${addRowHtml}
     </table>`;
 
   // Filter bar
@@ -124,10 +123,11 @@ export async function renderTableView(el, ctx) {
     });
   });
 
-  // Add button
+  // Add button (header + inline row)
   if (addButton && onAdd) {
     el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
   }
+  el.querySelector('.add-row-btn')?.addEventListener('click', () => { if (onAdd) onAdd(); });
 
   // Fixed column sorting
   el.querySelectorAll('.sortable-header:not(.prop-header)').forEach(th => {

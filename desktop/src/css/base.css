@@ -510,6 +510,18 @@ body {
   outline-offset: -2px;
   background: var(--bg-page);
 }
+.data-table tfoot td {
+  padding: 4px 10px;
+  height: 32px;
+  border: 1px solid var(--border-subtle);
+}
+.add-row-btn {
+  color: var(--text-faint);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.add-row-btn:hover { color: var(--accent-blue); }
 .data-table-title { font-weight: 500; color: var(--text-primary); }
 
 .module-grid {
