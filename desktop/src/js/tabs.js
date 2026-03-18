@@ -565,6 +565,14 @@ function loadSubTabContent(tabId, subTab) {
     }
     return;
   }
+
+  // Exiting settings — remove overlay, restore original content
+  const contentEl = document.getElementById(`${tabId}-content`);
+  if (contentEl) {
+    contentEl.querySelector('.settings-page')?.remove();
+    Array.from(contentEl.children).forEach(c => c.style.display = '');
+  }
+
   switch (tabId) {
     case 'chat':
       hideChatSettingsMode(); renderSubSidebar(); tabLoaders.loadConversationsList?.(); tabLoaders.focusInput?.();
@@ -694,8 +702,15 @@ async function renderSettingsPage(tabId, sectionId) {
     return;
   }
 
-  // For non-chat — render settings section as full page
+  // For non-chat — render settings as overlay, preserving original content
   const tabLabel = S.tabCustomizations[tabId]?.label || reg?.label || tabId;
+
+  // Hide original content, show settings overlay
+  Array.from(el.children).forEach(c => {
+    if (!c.classList.contains('settings-page')) c.style.display = 'none';
+  });
+  el.querySelector('.settings-page')?.remove();
+
   let contentHtml = '';
 
   if (sectionId === 'general') {
@@ -747,13 +762,13 @@ async function renderSettingsPage(tabId, sectionId) {
       <button class="btn-smallall" style="margin-top:12px;">+ Подключить MCP</button></div>`;
   }
 
-  el.innerHTML = `<div class="settings-page">
+  el.insertAdjacentHTML('beforeend', `<div class="settings-page">
     <div class="settings-page-header">
       <span class="settings-page-icon">${TAB_ICONS.settings}</span>
       <span class="settings-page-title">Настройки — ${tabLabel}</span>
     </div>
     <div class="settings-page-content">${contentHtml}</div>
-  </div>`;
+  </div>`);
 
   // Wire up controls
   el.querySelectorAll('input[data-setting-key], select[data-setting-key]').forEach(ctrl => {
