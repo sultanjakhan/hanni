@@ -522,6 +522,11 @@ body {
   user-select: none;
 }
 .add-row-btn:hover { color: var(--accent-blue); }
+.table-count {
+  float: right;
+  color: var(--text-faint);
+  font-size: 12px;
+}
 .data-table-title { font-weight: 500; color: var(--text-primary); }
 
 .module-grid {

@@ -54,15 +54,15 @@ export async function renderTableView(el, ctx) {
 
   // Inline "new row" footer
   const colspan = fixedColumns.length + visibleProps.length + 1;
-  const addRowHtml = onAdd
-    ? `<tfoot><tr class="add-row-inline"><td colspan="${colspan}"><span class="add-row-btn">+ Новая запись</span></td></tr></tfoot>`
-    : '';
+  const countLabel = `<span class="table-count">Всего: ${filteredRecords.length}</span>`;
+  const addBtn = onAdd ? `<span class="add-row-btn">+ Новая запись</span>` : '';
+  const footerHtml = `<tfoot><tr class="add-row-inline"><td colspan="${colspan}">${addBtn}${countLabel}</td></tr></tfoot>`;
 
   el.innerHTML = headerHtml + `
     <table class="data-table database-view">
       <thead><tr>${thFixed}${thCustom}${thAddCol}</tr></thead>
       <tbody>${tbodyHtml}</tbody>
-      ${addRowHtml}
+      ${footerHtml}
     </table>`;
 
   // Filter bar
