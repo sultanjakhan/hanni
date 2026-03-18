@@ -84,11 +84,26 @@ export async function renderTableView(el, ctx) {
     });
   }
 
-  // Inline editing
-  el.querySelectorAll('.cell-editable').forEach(cell => {
+  // Cell focus + inline editing
+  const allCells = [...el.querySelectorAll('.cell-editable')];
+  allCells.forEach(cell => {
+    cell.setAttribute('tabindex', '0');
     cell.addEventListener('click', (e) => {
       e.stopPropagation();
+      focusCell(el, cell);
       startInlineEdit(cell, recordTable, reloadFn);
+    });
+    cell.addEventListener('focus', () => focusCell(el, cell));
+    cell.addEventListener('keydown', (e) => {
+      if (cell.querySelector('.inline-editor')) return;
+      const idx = allCells.indexOf(cell);
+      const cols = visibleProps.length;
+      const nav = { Tab: e.shiftKey ? -1 : 1, Enter: cols, ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols };
+      const offset = nav[e.key];
+      if (offset == null) return;
+      e.preventDefault();
+      const next = allCells[idx + offset];
+      if (next) { next.focus(); if (e.key === 'Tab' || e.key === 'Enter') next.click(); }
     });
   });
 
@@ -126,4 +141,10 @@ export async function renderTableView(el, ctx) {
       if (onSort) onSort(sortKey, newDir);
     });
   });
+}
+
+/** Highlight a single cell, removing previous focus */
+function focusCell(container, cell) {
+  container.querySelectorAll('.cell-focused').forEach(c => c.classList.remove('cell-focused'));
+  cell.classList.add('cell-focused');
 }
