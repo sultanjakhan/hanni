@@ -232,48 +232,75 @@ function renderSubSidebar() {
                          (S.activeTab !== 'chat' && S.activeSubTab[S.activeTab] === 'Настройки');
 
   if (isSettingsMode) {
-    sidebar.classList.remove('hidden', 'collapsed');
-    sidebar.classList.add('settings-mode');
-    items.innerHTML = '';
-    const convPanel = document.getElementById('conversations-panel');
-    if (convPanel) convPanel.style.display = S.activeTab === 'chat' ? 'none' : '';
+    if (S.activeTab === 'chat') {
+      // Chat: keep vertical sidebar nav for settings sections
+      sidebar.classList.remove('hidden', 'collapsed');
+      sidebar.classList.add('settings-mode');
+      items.innerHTML = '';
+      const convPanel = document.getElementById('conversations-panel');
+      if (convPanel) convPanel.style.display = 'none';
 
-    const sections = SETTINGS_SECTIONS[S.activeTab] || SETTINGS_SECTIONS._default;
-    if (!S.settingsSection || !sections.find(s => s.id === S.settingsSection)) {
-      S.settingsSection = sections[0]?.id || 'general';
+      const sections = SETTINGS_SECTIONS.chat;
+      if (!S.settingsSection || !sections.find(s => s.id === S.settingsSection)) {
+        S.settingsSection = sections[0]?.id || 'memory';
+      }
+
+      const title = document.createElement('div');
+      title.className = 'sidebar-settings-title';
+      title.textContent = 'Настройки';
+      items.appendChild(title);
+
+      for (const sec of sections) {
+        const item = document.createElement('div');
+        item.className = 'sub-sidebar-item' + (sec.id === S.settingsSection ? ' active' : '');
+        item.innerHTML = `<span class="sub-sidebar-dot"></span>${sec.label}`;
+        item.addEventListener('click', () => {
+          S.settingsSection = sec.id;
+          renderSubSidebar();
+          renderSettingsPage(S.activeTab, sec.id);
+        });
+        items.appendChild(item);
+      }
+
+      const settingsBottom = document.getElementById('sub-sidebar-settings');
+      if (settingsBottom) {
+        settingsBottom.innerHTML = '';
+        const ver = document.createElement('div');
+        ver.className = 'version-label';
+        ver.textContent = `v${S.APP_VERSION}`;
+        settingsBottom.appendChild(ver);
+      }
+      const goalsSection = document.getElementById('sub-sidebar-goals');
+      if (goalsSection) goalsSection.classList.add('hidden');
+    } else {
+      // Non-chat: no sidebar sections, horizontal tabs are in content area
+      sidebar.classList.remove('settings-mode');
+      const sections = SETTINGS_SECTIONS[S.activeTab] || SETTINGS_SECTIONS._default;
+      if (!S.settingsSection || !sections.find(s => s.id === S.settingsSection)) {
+        S.settingsSection = sections[0]?.id || 'general';
+      }
+      // Keep sidebar visible with normal sub-tab nav if tab has subTabs
+      const reg = TAB_REGISTRY[S.activeTab];
+      if (reg?.subTabs?.length > 0) {
+        sidebar.classList.remove('hidden', 'collapsed');
+        items.innerHTML = '';
+        const currentSub = S.activeSubTab[S.activeTab];
+        for (const sub of reg.subTabs) {
+          const item = document.createElement('div');
+          item.className = 'sub-sidebar-item' + (sub === currentSub ? ' active' : '');
+          item.innerHTML = `<span class="sub-sidebar-dot"></span>${escapeHtml(sub)}`;
+          item.addEventListener('click', () => {
+            S.activeSubTab[S.activeTab] = sub;
+            saveTabs();
+            renderSubSidebar();
+            loadSubTabContent(S.activeTab, sub);
+          });
+          items.appendChild(item);
+        }
+      } else {
+        sidebar.classList.add('hidden');
+      }
     }
-
-    // Title
-    const title = document.createElement('div');
-    title.className = 'sidebar-settings-title';
-    title.textContent = 'Настройки';
-    items.appendChild(title);
-
-    // Section nav items
-    for (const sec of sections) {
-      const item = document.createElement('div');
-      item.className = 'sub-sidebar-item' + (sec.id === S.settingsSection ? ' active' : '');
-      item.innerHTML = `<span class="sub-sidebar-dot"></span>${sec.label}`;
-      item.addEventListener('click', () => {
-        S.settingsSection = sec.id;
-        renderSubSidebar();
-        renderSettingsPage(S.activeTab, sec.id);
-      });
-      items.appendChild(item);
-    }
-
-    // Bottom: version
-    const settingsBottom = document.getElementById('sub-sidebar-settings');
-    if (settingsBottom) {
-      settingsBottom.innerHTML = '';
-      const ver = document.createElement('div');
-      ver.className = 'version-label';
-      ver.textContent = `v${S.APP_VERSION}`;
-      settingsBottom.appendChild(ver);
-    }
-    // Hide goals in settings mode
-    const goalsSection = document.getElementById('sub-sidebar-goals');
-    if (goalsSection) goalsSection.classList.add('hidden');
     return;
   }
 
@@ -694,7 +721,6 @@ async function renderSettingsPage(tabId, sectionId) {
 
   // For chat — use existing panel system, just switch active panel
   if (tabId === 'chat') {
-    // Sync sidebar selection with panels
     document.querySelectorAll('.chat-settings-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`cs-panel-${sectionId}`)?.classList.add('active');
     document.querySelectorAll('.chat-settings-tab').forEach(t => t.classList.remove('active'));
@@ -702,7 +728,7 @@ async function renderSettingsPage(tabId, sectionId) {
     return;
   }
 
-  // For non-chat — render settings as overlay, preserving original content
+  // For non-chat — render settings with horizontal tabs in content area
   const tabLabel = S.tabCustomizations[tabId]?.label || reg?.label || tabId;
 
   // Hide original content, show settings overlay
@@ -711,10 +737,38 @@ async function renderSettingsPage(tabId, sectionId) {
   });
   el.querySelector('.settings-page')?.remove();
 
-  let contentHtml = '';
+  // Build horizontal tabs
+  const tabsHtml = sections.map(s =>
+    `<button class="tab-settings-tab${s.id === sec.id ? ' active' : ''}" data-section="${s.id}">${s.label}</button>`
+  ).join('');
 
+  // Build section content
+  const contentHtml = await renderSettingsSectionContent(tabId, sec.id);
+
+  el.insertAdjacentHTML('beforeend', `<div class="settings-page">
+    <div class="settings-page-header">
+      <span class="settings-page-icon">${TAB_ICONS.settings}</span>
+      <span class="settings-page-title">Настройки — ${tabLabel}</span>
+    </div>
+    <div class="tab-settings-tabs">${tabsHtml}</div>
+    <div class="settings-page-content">${contentHtml}</div>
+  </div>`);
+
+  // Wire horizontal tab clicks
+  el.querySelectorAll('.tab-settings-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S.settingsSection = btn.dataset.section;
+      renderSubSidebar();
+      renderSettingsPage(tabId, btn.dataset.section);
+    });
+  });
+
+  // Wire up controls
+  wireSettingsControls(el, tabId);
+}
+
+async function renderSettingsSectionContent(tabId, sectionId) {
   if (sectionId === 'general') {
-    // Basic settings from TAB_SETTINGS_DEFS
     const defs = TAB_SETTINGS_DEFS[tabId] || [];
     if (defs.length) {
       let rowsHtml = '';
@@ -733,44 +787,37 @@ async function renderSettingsPage(tabId, sectionId) {
         }
         rowsHtml += `<div class="settings-row"><span class="settings-label">${def.label}</span><span class="settings-value">${controlHtml}</span></div>`;
       }
-      contentHtml = `<div class="settings-section"><div class="settings-section-title">Основные</div>${rowsHtml}</div>`;
-    } else {
-      contentHtml = `<div class="settings-section"><div class="settings-section-title">Основные</div>
-        <div class="settings-empty-hint">Нет настроек для этой секции</div></div>`;
+      return `<div class="settings-section"><div class="settings-section-title">Основные</div>${rowsHtml}</div>`;
     }
+    return `<div class="settings-section"><div class="settings-section-title">Основные</div>
+      <div class="settings-empty-hint">Нет настроек для этой секции</div></div>`;
   } else if (sectionId === 'mode') {
-    contentHtml = `<div class="settings-section"><div class="settings-section-title">Режим работы</div>
+    return `<div class="settings-section"><div class="settings-section-title">Режим работы</div>
       <div class="settings-row"><span class="settings-label">Автопилот</span><span class="settings-value"><label class="toggle"><input type="checkbox" id="setting-autopilot"><span class="toggle-track"></span></label></span></div>
       <div class="settings-row"><span class="settings-hint">Ханни автоматически ищет, заполняет и обновляет данные</span></div>
     </div>`;
   } else if (sectionId === 'skills') {
-    contentHtml = `<div class="settings-section"><div class="settings-section-title">Скиллы (роль Ханни)</div>
+    return `<div class="settings-section"><div class="settings-section-title">Скиллы (роль Ханни)</div>
       <div class="settings-empty-hint">Скиллы пока не настроены</div>
       <button class="btn-smallall" style="margin-top:12px;">+ Добавить скилл</button></div>`;
   } else if (sectionId === 'integrations') {
-    contentHtml = `<div class="settings-section"><div class="settings-section-title">Интеграции</div>
+    return `<div class="settings-section"><div class="settings-section-title">Интеграции</div>
       <div class="settings-empty-hint">Нет подключённых интеграций</div>
       <button class="btn-smallall" style="margin-top:12px;">+ Подключить</button></div>`;
   } else if (sectionId === 'blocklist') {
-    contentHtml = `<div class="settings-section"><div class="settings-section-title">Блок-лист</div>
+    return `<div class="settings-section"><div class="settings-section-title">Блок-лист</div>
       <div class="settings-empty-hint">Блок-лист пуст</div>
       <button class="btn-smallall" style="margin-top:12px;">+ Добавить в блок-лист</button></div>`;
   } else if (sectionId === 'mcp') {
-    contentHtml = `<div class="settings-section"><div class="settings-section-title">MCP серверы</div>
+    return `<div class="settings-section"><div class="settings-section-title">MCP серверы</div>
       <div class="settings-row"><span class="settings-hint">Подключение внешних инструментов через MCP</span></div>
       <div class="settings-empty-hint">Нет подключённых MCP серверов</div>
       <button class="btn-smallall" style="margin-top:12px;">+ Подключить MCP</button></div>`;
   }
+  return '';
+}
 
-  el.insertAdjacentHTML('beforeend', `<div class="settings-page">
-    <div class="settings-page-header">
-      <span class="settings-page-icon">${TAB_ICONS.settings}</span>
-      <span class="settings-page-title">Настройки — ${tabLabel}</span>
-    </div>
-    <div class="settings-page-content">${contentHtml}</div>
-  </div>`);
-
-  // Wire up controls
+function wireSettingsControls(el, tabId) {
   el.querySelectorAll('input[data-setting-key], select[data-setting-key]').forEach(ctrl => {
     ctrl.addEventListener('change', () => {
       const v = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;

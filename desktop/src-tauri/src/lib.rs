@@ -613,18 +613,19 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
                     // Collect OS data in blocking thread
-                    let (app_name, browser, music, window_title, idle_secs) = tokio::task::spawn_blocking(|| {
+                    let (app_name, browser, music, window_title, idle_secs, screen_locked) = tokio::task::spawn_blocking(|| {
                         (
                             get_frontmost_app(),
                             get_browser_url(),
                             get_now_playing_sync(),
                             proactive::get_window_title(),
                             macos::get_macos_idle_seconds(),
+                            macos::is_screen_locked(),
                         )
                     }).await.unwrap_or_default();
 
-                    // Skip recording if idle > 10 min (AFK, saves DB space)
-                    if idle_secs > 600.0 {
+                    // Skip recording if idle > 30 min (long AFK, saves DB space)
+                    if idle_secs > 1800.0 {
                         trigger_counter += 1;
                         continue;
                     }
@@ -633,14 +634,26 @@ pub fn run() {
                     let hour = now.hour() as i64;
                     let weekday = now.weekday().num_days_from_monday() as i64;
 
-                    // Classify activity category
-                    let category = proactive::classify_activity(&app_name, &browser, &window_title);
+                    // AFK detection: screen locked OR idle >= 5 min
+                    let is_afk = screen_locked || idle_secs >= 300.0;
+
+                    // Classify activity category (only meaningful when not AFK)
+                    let category = if is_afk {
+                        "afk"
+                    } else {
+                        proactive::classify_activity(&app_name, &browser, &window_title)
+                    };
 
                     // Compute productive vs distraction (0.5 min per 30-sec snapshot)
-                    let (prod_min, dist_min) = match category {
-                        "coding" | "writing" | "learning" => (0.5_f64, 0.0_f64),
-                        "social" | "media" => (0.0_f64, 0.5_f64),
-                        _ => (0.25_f64, 0.0_f64),
+                    // AFK snapshots get 0/0 — they don't count as productive or distraction
+                    let (prod_min, dist_min) = if is_afk {
+                        (0.0_f64, 0.0_f64)
+                    } else {
+                        match category {
+                            "coding" | "writing" | "learning" => (0.5_f64, 0.0_f64),
+                            "social" | "media" => (0.0_f64, 0.5_f64),
+                            _ => (0.25_f64, 0.0_f64),
+                        }
                     };
 
                     // Write to DB
@@ -648,7 +661,7 @@ pub fn run() {
                     {
                         let conn = db.conn();
                         let _ = conn.execute(
-                            "INSERT INTO activity_snapshots (captured_at, hour, weekday, frontmost_app, browser_url, music_playing, productive_min, distraction_min, idle_secs, window_title, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                            "INSERT INTO activity_snapshots (captured_at, hour, weekday, frontmost_app, browser_url, music_playing, productive_min, distraction_min, idle_secs, window_title, category, screen_locked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                             rusqlite::params![
                                 now.to_rfc3339(),
                                 hour,
@@ -661,6 +674,7 @@ pub fn run() {
                                 idle_secs,
                                 &window_title,
                                 category,
+                                screen_locked as i32,
                             ],
                         );
 

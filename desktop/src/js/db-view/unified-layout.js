@@ -1,7 +1,7 @@
 // ── db-view/unified-layout.js — Unified tab layout with sub-panes ──
-// Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память] [⚙️]
+// Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память]
 
-import { S, invoke, TAB_REGISTRY, TAB_SETTINGS_DEFS, loadTabSetting, saveTabSetting } from '../state.js';
+import { S, invoke, TAB_REGISTRY } from '../state.js';
 import { escapeHtml } from '../utils.js';
 
 const SUB_PANES = [
@@ -34,12 +34,7 @@ const TAB_LABELS = {
 export async function renderUnifiedLayout(el, tabId, config) {
   const activePane = S._unifiedPane?.[tabId] || 'dash';
 
-  // Build panes list — add settings if tab has settings defs
   const panes = [...SUB_PANES];
-  const hasSettings = !!TAB_SETTINGS_DEFS[tabId]?.length;
-  if (hasSettings) {
-    panes.push({ id: 'settings', icon: '⚙️', label: 'Настройки' });
-  }
 
   // Tab title header
   const tabLabel = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '' };
@@ -91,9 +86,6 @@ export async function renderUnifiedLayout(el, tabId, config) {
       break;
     case 'store':
       await renderStorePane(paneEl, tabId, config);
-      break;
-    case 'settings':
-      await renderSettingsPane(paneEl, tabId);
       break;
   }
 }
@@ -474,46 +466,6 @@ function showEditStoreModal(parentEl, tabId, config, entry) {
       overlay.remove();
       renderStorePane(parentEl, tabId, config);
     } catch (err) { alert('Ошибка: ' + err); }
-  });
-}
-
-// ── Settings Pane ──
-async function renderSettingsPane(el, tabId) {
-  const defs = TAB_SETTINGS_DEFS[tabId] || [];
-  if (defs.length === 0) {
-    el.innerHTML = '<div class="uni-empty">Нет настроек для этой вкладки</div>';
-    return;
-  }
-
-  let rowsHtml = '';
-  for (const def of defs) {
-    const val = await loadTabSetting(tabId, def.key) ?? def.default;
-    let controlHtml = '';
-    if (def.type === 'toggle') {
-      controlHtml = `<label class="toggle"><input type="checkbox" data-setting-key="${def.key}" ${val === 'true' || val === true ? 'checked' : ''}><span class="toggle-track"></span></label>`;
-    } else if (def.type === 'select') {
-      controlHtml = `<select class="form-input" data-setting-key="${def.key}" style="max-width:200px;">
-        ${def.options.map(o => `<option value="${o.value}" ${val === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
-      </select>`;
-    } else if (def.type === 'number') {
-      controlHtml = `<input class="form-input" type="number" data-setting-key="${def.key}" value="${escapeHtml(String(val || ''))}" style="max-width:120px;">`;
-    } else {
-      controlHtml = `<input class="form-input" type="text" data-setting-key="${def.key}" value="${escapeHtml(String(val || ''))}">`;
-    }
-    rowsHtml += `<div class="settings-row"><span class="settings-label">${def.label}</span><span class="settings-value">${controlHtml}</span></div>`;
-  }
-
-  const reg = TAB_REGISTRY[tabId];
-  el.innerHTML = `<div class="settings-section">
-    <div class="settings-section-title">Настройки — ${reg?.label || tabId}</div>
-    ${rowsHtml}
-  </div>`;
-
-  el.querySelectorAll('input[data-setting-key], select[data-setting-key]').forEach(ctrl => {
-    ctrl.addEventListener('change', () => {
-      const v = ctrl.type === 'checkbox' ? ctrl.checked : ctrl.value;
-      saveTabSetting(tabId, ctrl.dataset.settingKey, v);
-    });
   });
 }
 

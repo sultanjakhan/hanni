@@ -1994,7 +1994,7 @@ pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>
 
     // Get all snapshots for the day
     let mut stmt = conn.prepare(
-        "SELECT captured_at, frontmost_app, browser_url, window_title, category, idle_secs, music_playing, productive_min, distraction_min
+        "SELECT captured_at, frontmost_app, browser_url, window_title, category, idle_secs, music_playing, productive_min, distraction_min, screen_locked
          FROM activity_snapshots
          WHERE captured_at LIKE ?1
          ORDER BY captured_at ASC"
@@ -2013,29 +2013,42 @@ pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>
                 "music": row.get::<_, String>(6).unwrap_or_default(),
                 "productive": row.get::<_, f64>(7).unwrap_or(0.0),
                 "distraction": row.get::<_, f64>(8).unwrap_or(0.0),
+                "screen_locked": row.get::<_, i32>(9).unwrap_or(0),
             }))
         }
     ).map_err(|e| e.to_string())?.flatten().collect();
 
-    // Aggregate by category and app
+    // Aggregate by category and app, separating active vs AFK
     let mut by_category: HashMap<String, f64> = HashMap::new();
     let mut by_app: HashMap<String, f64> = HashMap::new();
+    let interval_min = 0.5_f64; // each 30-sec snapshot = 0.5 min
 
-    // Calculate per-snapshot interval: use productive+distraction sum to detect old (10min) vs new (0.5min)
-    let prod_min: f64 = snapshots.iter().map(|s| s["productive"].as_f64().unwrap_or(0.0)).sum();
-    let dist_min: f64 = snapshots.iter().map(|s| s["distraction"].as_f64().unwrap_or(0.0)).sum();
-    let total_min = prod_min + dist_min;
-    // Estimate per-snapshot interval from data (handles mixed old 10min + new 0.5min rows)
-    let interval_min = if snapshots.is_empty() { 0.5 } else { total_min / snapshots.len() as f64 };
+    let mut active_minutes = 0.0_f64;
+    let mut idle_minutes = 0.0_f64;
+    let mut locked_minutes = 0.0_f64;
 
     for s in &snapshots {
+        let idle = s["idle"].as_f64().unwrap_or(0.0);
+        let locked = s["screen_locked"].as_i64().unwrap_or(0) == 1;
         let cat = s["category"].as_str().unwrap_or("other").to_string();
         let app = s["app"].as_str().unwrap_or("").to_string();
-        *by_category.entry(cat).or_insert(0.0) += interval_min;
-        if !app.is_empty() {
-            *by_app.entry(app).or_insert(0.0) += interval_min;
+
+        if locked {
+            locked_minutes += interval_min;
+        } else if cat == "afk" || idle >= 300.0 {
+            idle_minutes += interval_min;
+        } else {
+            active_minutes += interval_min;
+            *by_category.entry(cat).or_insert(0.0) += interval_min;
+            if !app.is_empty() {
+                *by_app.entry(app).or_insert(0.0) += interval_min;
+            }
         }
     }
+
+    let prod_min: f64 = snapshots.iter().map(|s| s["productive"].as_f64().unwrap_or(0.0)).sum();
+    let dist_min: f64 = snapshots.iter().map(|s| s["distraction"].as_f64().unwrap_or(0.0)).sum();
+    let total_min = active_minutes + idle_minutes + locked_minutes;
 
     // Sort apps by time descending
     let mut top_apps: Vec<(String, f64)> = by_app.into_iter().collect();
@@ -2045,6 +2058,9 @@ pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>
     Ok(serde_json::json!({
         "date": target_date,
         "total_minutes": total_min,
+        "active_minutes": active_minutes,
+        "idle_minutes": idle_minutes,
+        "locked_minutes": locked_minutes,
         "productive_minutes": prod_min,
         "distraction_minutes": dist_min,
         "snapshots_count": snapshots.len(),
