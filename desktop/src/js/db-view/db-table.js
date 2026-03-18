@@ -3,6 +3,7 @@ import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
 import { showAddPropertyModal, showColumnMenu } from './db-properties.js';
+import { enableColumnDrag } from './db-col-drag.js';
 
 /** Render a table view into a container element */
 export async function renderTableView(el, ctx) {
@@ -113,19 +114,17 @@ export async function renderTableView(el, ctx) {
   el.querySelectorAll('.prop-header').forEach(th => {
     th.addEventListener('click', (e) => {
       e.stopPropagation();
-      const propId = parseInt(th.dataset.propId);
-      const prop = customProps.find(p => p.id === propId);
-      if (!prop) return;
-      const rect = th.getBoundingClientRect();
-      showColumnMenu(prop, rect, tabId, reloadFn, onSort);
+      const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
+      if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reloadFn, onSort);
     });
   });
-
-  // Add button (header + inline row)
-  if (addButton && onAdd) {
-    el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
-  }
+  // Add buttons
+  if (addButton && onAdd) el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
   el.querySelector('.add-row-btn')?.addEventListener('click', () => { if (onAdd) onAdd(); });
+
+  // Column drag-and-drop reorder
+  const tableEl = el.querySelector('.data-table');
+  if (tableEl) enableColumnDrag(tableEl, tabId, reloadFn);
 
   // Sort headers — Shift+click for multi-level sort
   applySortIndicators(el, sortRules);

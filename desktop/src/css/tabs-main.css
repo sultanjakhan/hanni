@@ -1350,6 +1350,9 @@
 .sortable-header.prop-header:hover {
   background: var(--bg-hover);
 }
+.sortable-header.prop-header[draggable="true"] { cursor: grab; }
+.sortable-header.col-dragging { opacity: 0.4; }
+.sortable-header.col-drag-over { border-left: 2px solid var(--accent-blue); }
 
 /* Edit property modal — wider for type picker */
 .modal-property {
