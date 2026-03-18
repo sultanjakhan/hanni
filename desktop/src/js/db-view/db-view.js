@@ -1,5 +1,3 @@
-// ── db-view/db-view.js — DatabaseView orchestrator class ──
-
 import { S, invoke } from '../state.js';
 import { renderToolbar } from './db-toolbar.js';
 import { renderTableView } from './db-table.js';
@@ -7,20 +5,7 @@ import { renderKanbanView } from './db-kanban.js';
 import { renderListView } from './db-list.js';
 import { renderGalleryView } from './db-gallery.js';
 
-/**
- * DatabaseView — Notion-style multi-view database component.
- *
- * Usage:
- *   const dbv = new DatabaseView(containerEl, schema);
- *   await dbv.render();
- *
- * Schema options: see db-config.js for full shape.
- */
 export class DatabaseView {
-  /**
-   * @param {HTMLElement} el - Container element to render into
-   * @param {object} schema - Configuration (see db-config.js)
-   */
   constructor(el, schema) {
     this.el = el;
     this.schema = {
@@ -33,23 +18,15 @@ export class DatabaseView {
     this._records = [];
     this._customProps = [];
     this._valuesMap = {};
+    this._sortRules = []; // [{key, dir}] — multi-level sort
   }
 
   /** Main render entry point */
   async render() {
     const s = this.schema;
 
-    // Fetch records
-    if (s.records) {
-      this._records = s.records;
-    } else if (s.fetchRecords) {
-      try { this._records = await s.fetchRecords(); } catch { this._records = []; }
-    }
-
-    // Load custom props
+    this._records = s.records || (s.fetchRecords ? await s.fetchRecords().catch(() => []) : []);
     try { this._customProps = await invoke('get_property_definitions', { tabId: s.tabId }); } catch { this._customProps = []; }
-
-    // Load property values
     const recordIds = this._records.map(r => r[s.idField]);
     if (recordIds.length > 0 && this._customProps.length > 0) {
       try {
@@ -89,101 +66,67 @@ export class DatabaseView {
     await this.render();
   }
 
-  /** Render the currently selected view into the content element */
   async _renderView(contentEl) {
     const s = this.schema;
     const ctx = {
-      tabId: s.tabId,
-      recordTable: s.recordTable,
-      records: this._records,
-      fixedColumns: s.fixedColumns || [],
-      idField: s.idField,
-      customProps: this._customProps,
-      valuesMap: this._valuesMap,
-      reloadFn: s.reloadFn || (() => this.render()),
-      onRowClick: s.onRowClick,
-      onAdd: s.onAdd,
-      addButton: s.addButton,
-      kanban: s.kanban,
-      gallery: s.gallery,
-      onSort: (sortKey, dir) => this._handleSort(sortKey, dir),
-      onDrop: s.onDrop,
+      tabId: s.tabId, recordTable: s.recordTable, records: this._records,
+      fixedColumns: s.fixedColumns || [], idField: s.idField, customProps: this._customProps,
+      valuesMap: this._valuesMap, reloadFn: s.reloadFn || (() => this.render()),
+      onRowClick: s.onRowClick, onAdd: s.onAdd, addButton: s.addButton,
+      kanban: s.kanban, gallery: s.gallery, onDrop: s.onDrop,
+      onSort: (key, dir, multi) => this._handleSort(key, dir, multi), sortRules: this._sortRules,
     };
-
-    switch (this._currentView) {
-      case 'kanban':
-        renderKanbanView(contentEl, ctx);
-        break;
-      case 'list':
-        renderListView(contentEl, ctx);
-        break;
-      case 'gallery':
-        renderGalleryView(contentEl, ctx);
-        break;
-      case 'table':
-      default:
-        await renderTableView(contentEl, ctx);
-        break;
-    }
+    const renderers = { kanban: renderKanbanView, list: renderListView, gallery: renderGalleryView };
+    const fn = renderers[this._currentView] || renderTableView;
+    await fn(contentEl, ctx);
   }
 
-  /** Handle sort from table view */
-  _handleSort(sortKey, dir) {
-    const s = this.schema;
-    const sorted = [...this._records].sort((a, b) => {
-      let va, vb;
-      if (sortKey.startsWith('prop_')) {
-        const pid = parseInt(sortKey.substring(5));
-        va = this._valuesMap[a[s.idField]]?.[pid] ?? '';
-        vb = this._valuesMap[b[s.idField]]?.[pid] ?? '';
-      } else {
-        va = a[sortKey] ?? '';
-        vb = b[sortKey] ?? '';
-      }
-      if (typeof va === 'number' && typeof vb === 'number') return dir === 'asc' ? va - vb : vb - va;
-      return dir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-    });
-    this._records = sorted;
+  /** Handle sort — multi=true adds secondary sort (Shift+click) */
+  _handleSort(sortKey, dir, multi = false) {
+    if (multi) {
+      const idx = this._sortRules.findIndex(r => r.key === sortKey);
+      if (idx >= 0) this._sortRules[idx].dir = dir;
+      else this._sortRules.push({ key: sortKey, dir });
+    } else {
+      this._sortRules = [{ key: sortKey, dir }];
+    }
+    this._applySortRules();
     this.render();
   }
 
-  /** Load persisted view type from view_configs */
-  async _loadPersistedView() {
-    try {
-      const configs = await invoke('get_view_configs', { tabId: this.schema.tabId });
-      if (configs.length > 0 && configs[0].view_type) {
-        const vt = configs[0].view_type;
-        if (this.schema.availableViews.includes(vt)) return vt;
+  _applySortRules() {
+    if (this._sortRules.length === 0) return;
+    const s = this.schema;
+    const vm = this._valuesMap;
+    const getVal = (rec, key) => {
+      if (key.startsWith('prop_')) return vm[rec[s.idField]]?.[parseInt(key.substring(5))] ?? '';
+      return rec[key] ?? '';
+    };
+    this._records.sort((a, b) => {
+      for (const { key, dir } of this._sortRules) {
+        const va = getVal(a, key), vb = getVal(b, key);
+        let cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+        if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
       }
-    } catch {}
-    return null;
+      return 0;
+    });
   }
 
-  /** Persist view type to view_configs */
   async _persistView(viewType) {
     try {
       const configs = await invoke('get_view_configs', { tabId: this.schema.tabId });
-      if (configs.length > 0) {
-        await invoke('update_view_config', { id: configs[0].id, filterJson: null, sortJson: null, visibleColumns: null });
-        // update_view_config doesn't have viewType param, so we use a workaround: delete + recreate
-        // Actually, let's just store in localStorage for now since the Rust command may not support viewType update
-      } else {
-        await invoke('create_view_config', { tabId: this.schema.tabId, name: 'Default', viewType });
-      }
+      if (configs.length === 0) await invoke('create_view_config', { tabId: this.schema.tabId, name: 'Default', viewType });
     } catch {}
-    // Also store in localStorage as fallback
     localStorage.setItem(`dbv_view_${this.schema.tabId}`, viewType);
   }
 
-  /** Load persisted view with localStorage fallback */
   async _loadPersistedViewFull() {
-    // Try DB first
-    const dbView = await this._loadPersistedView();
-    if (dbView) return dbView;
-    // Fallback to localStorage
-    const lsView = localStorage.getItem(`dbv_view_${this.schema.tabId}`);
-    if (lsView && this.schema.availableViews.includes(lsView)) return lsView;
-    return null;
+    try {
+      const configs = await invoke('get_view_configs', { tabId: this.schema.tabId });
+      if (configs[0]?.view_type && this.schema.availableViews.includes(configs[0].view_type)) return configs[0].view_type;
+    } catch {}
+    const ls = localStorage.getItem(`dbv_view_${this.schema.tabId}`);
+    return ls && this.schema.availableViews.includes(ls) ? ls : null;
   }
 }
 

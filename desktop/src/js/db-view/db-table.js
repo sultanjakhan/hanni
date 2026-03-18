@@ -1,5 +1,3 @@
-// ── db-view/db-table.js — Table view renderer ──
-
 import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
@@ -10,7 +8,7 @@ import { showAddPropertyModal, showColumnMenu } from './db-properties.js';
 export async function renderTableView(el, ctx) {
   const {
     tabId, recordTable, records, fixedColumns = [], idField = 'id',
-    customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, addButton, onSort,
+    customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, addButton, onSort, sortRules = [],
   } = ctx;
 
   // Load and apply filters
@@ -129,22 +127,24 @@ export async function renderTableView(el, ctx) {
   }
   el.querySelector('.add-row-btn')?.addEventListener('click', () => { if (onAdd) onAdd(); });
 
-  // Fixed column sorting
+  // Sort headers — Shift+click for multi-level sort
+  applySortIndicators(el, sortRules);
   el.querySelectorAll('.sortable-header:not(.prop-header)').forEach(th => {
-    th.addEventListener('click', () => {
-      const sortKey = th.dataset.sort;
-      const currentDir = th.dataset.dir || 'none';
-      const newDir = currentDir === 'asc' ? 'desc' : 'asc';
-      el.querySelectorAll('.sortable-header').forEach(h => { h.dataset.dir = 'none'; h.classList.remove('sort-asc', 'sort-desc'); });
-      th.dataset.dir = newDir;
-      th.classList.add(`sort-${newDir}`);
-      if (onSort) onSort(sortKey, newDir);
+    th.addEventListener('click', (e) => {
+      const key = th.dataset.sort;
+      const cur = sortRules.find(r => r.key === key);
+      const dir = cur?.dir === 'asc' ? 'desc' : 'asc';
+      if (onSort) onSort(key, dir, e.shiftKey);
     });
   });
 }
 
-/** Highlight a single cell, removing previous focus */
 function focusCell(container, cell) {
   container.querySelectorAll('.cell-focused').forEach(c => c.classList.remove('cell-focused'));
   cell.classList.add('cell-focused');
+}
+
+function applySortIndicators(el, rules) {
+  el.querySelectorAll('.sortable-header').forEach(h => { h.classList.remove('sort-asc', 'sort-desc'); delete h.dataset.sortLevel; });
+  rules.forEach((r, i) => { const th = el.querySelector(`[data-sort="${r.key}"]`); if (th) { th.classList.add(`sort-${r.dir}`); if (rules.length > 1) th.dataset.sortLevel = i + 1; } });
 }

@@ -1043,8 +1043,10 @@
   position: relative;
 }
 .sortable-header:hover { color: var(--text-secondary); }
-.sortable-header.sort-asc::after { content: ' \u2191'; font-size: 10px; }
-.sortable-header.sort-desc::after { content: ' \u2193'; font-size: 10px; }
+.sortable-header.sort-asc::after { content: ' ↑'; font-size: 10px; }
+.sortable-header.sort-desc::after { content: ' ↓'; font-size: 10px; }
+.sortable-header[data-sort-level].sort-asc::after { content: ' ↑' attr(data-sort-level); }
+.sortable-header[data-sort-level].sort-desc::after { content: ' ↓' attr(data-sort-level); }
 
 /* Editable cells */
 .cell-editable {
