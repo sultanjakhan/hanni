@@ -75,6 +75,7 @@ export const S = {
   calDayDate: null,
   settingsSection: null,
   dbvFilters: {},
+  dbvFilterMode: {},
   dbViews: {},
   _scrollRAF: null,
   _wakeWordSSE: null,

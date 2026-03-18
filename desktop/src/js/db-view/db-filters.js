@@ -1,9 +1,6 @@
-// ── db-view/db-filters.js — Filter builder, persistence ──
-
 import { S, invoke } from '../state.js';
 import { escapeHtml } from '../utils.js';
 
-/** Render filter chip bar above the database view */
 export function renderFilterBar(el, tabId, customProps, onApply) {
   const filters = S.dbvFilters[tabId] || [];
   const chips = filters.map((f, idx) => {
@@ -16,13 +13,23 @@ export function renderFilterBar(el, tabId, customProps, onApply) {
     </span>`;
   }).join('');
 
+  const mode = S.dbvFilterMode?.[tabId] || 'and';
+  const modeBtn = filters.length > 1
+    ? `<button class="btn-secondary dbv-filter-mode-btn">${mode === 'and' ? 'AND' : 'OR'}</button>` : '';
+
   const bar = document.createElement('div');
   bar.className = 'dbv-filter-bar';
-  bar.innerHTML = `<button class="btn-secondary dbv-add-filter-btn">+ Filter</button>${chips}`;
+  bar.innerHTML = `<button class="btn-secondary dbv-add-filter-btn">+ Filter</button>${modeBtn}${chips}`;
   el.prepend(bar);
 
   bar.querySelector('.dbv-add-filter-btn')?.addEventListener('click', () => {
     showFilterBuilderModal(tabId, customProps, onApply);
+  });
+
+  bar.querySelector('.dbv-filter-mode-btn')?.addEventListener('click', () => {
+    if (!S.dbvFilterMode) S.dbvFilterMode = {};
+    S.dbvFilterMode[tabId] = mode === 'and' ? 'or' : 'and';
+    onApply();
   });
 
   bar.querySelectorAll('.dbv-filter-chip-remove').forEach(btn => {
@@ -67,27 +74,18 @@ export function showFilterBuilderModal(tabId, customProps, onApply) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
   const updateValueInput = () => {
-    const sel = document.getElementById('dbv-filter-prop');
-    const opt = sel?.selectedOptions[0];
-    const type = opt?.dataset.type;
+    const opt = document.getElementById('dbv-filter-prop')?.selectedOptions[0];
     const cond = document.getElementById('dbv-filter-cond')?.value;
-    const valGroup = document.getElementById('dbv-filter-val-group');
-
-    if (cond === 'empty' || cond === 'not_empty') {
-      valGroup.style.display = 'none';
-      return;
-    }
-    valGroup.style.display = 'block';
-
-    if (type === 'select' || type === 'multi_select') {
-      let options = [];
-      try { options = JSON.parse(opt?.dataset.options || '[]'); } catch {}
-      valGroup.innerHTML = `<label class="form-label">Value</label>
-        <select class="form-select" id="dbv-filter-val" style="width:100%;">
-          ${options.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}
-        </select>`;
+    const vg = document.getElementById('dbv-filter-val-group');
+    if (cond === 'empty' || cond === 'not_empty') { vg.style.display = 'none'; return; }
+    vg.style.display = 'block';
+    const type = opt?.dataset.type;
+    if (type === 'select' || type === 'multi_select' || type === 'status') {
+      let opts = []; try { opts = JSON.parse(opt?.dataset.options || '[]'); } catch {}
+      if (type === 'status' && opts.length === 0) opts = ['Не начато', 'В работе', 'Готово'];
+      vg.innerHTML = `<label class="form-label">Value</label><select class="form-select" id="dbv-filter-val" style="width:100%;">${opts.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`;
     } else {
-      valGroup.innerHTML = `<label class="form-label">Value</label><input class="form-input" id="dbv-filter-val" placeholder="Value">`;
+      vg.innerHTML = `<label class="form-label">Value</label><input class="form-input" id="dbv-filter-val" placeholder="Value">`;
     }
   };
 
@@ -107,21 +105,23 @@ export function showFilterBuilderModal(tabId, customProps, onApply) {
 }
 
 /** Apply filters to records based on property values */
-export function applyFilters(records, valuesMap, filters, idField) {
+export function applyFilters(records, valuesMap, filters, idField, tabId) {
   if (!filters || filters.length === 0) return records;
+  const mode = S.dbvFilterMode?.[tabId] || 'and';
+  const check = (f, rid) => {
+    const val = valuesMap[rid]?.[f.propId] ?? '';
+    switch (f.condition) {
+      case 'eq': return val === f.value;
+      case 'neq': return val !== f.value;
+      case 'contains': return String(val).toLowerCase().includes(f.value.toLowerCase());
+      case 'empty': return !val;
+      case 'not_empty': return !!val;
+      default: return true;
+    }
+  };
   return records.filter(r => {
     const rid = r[idField];
-    return filters.every(f => {
-      const val = valuesMap[rid]?.[f.propId] ?? '';
-      switch (f.condition) {
-        case 'eq': return val === f.value;
-        case 'neq': return val !== f.value;
-        case 'contains': return String(val).toLowerCase().includes(f.value.toLowerCase());
-        case 'empty': return !val;
-        case 'not_empty': return !!val;
-        default: return true;
-      }
-    });
+    return mode === 'or' ? filters.some(f => check(f, rid)) : filters.every(f => check(f, rid));
   });
 }
 

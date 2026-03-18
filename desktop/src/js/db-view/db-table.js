@@ -14,7 +14,7 @@ export async function renderTableView(el, ctx) {
 
   // Load and apply filters
   if (!S.dbvFilters[tabId]) await loadFiltersFromViewConfig(tabId);
-  const filteredRecords = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField);
+  const filteredRecords = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
   const visibleProps = customProps.filter(p => p.visible !== false);
 
   const headerHtml = addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : '';
