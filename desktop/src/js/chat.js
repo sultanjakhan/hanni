@@ -1574,9 +1574,24 @@ async function renderChatWelcomeCard() {
       </div>`;
     }
 
+    // Load activity tracking data
+    let actHtml = '';
+    try {
+      const act = await invoke('get_activity_timeline', { date: null });
+      if (act.active_minutes > 0 || act.idle_minutes > 0) {
+        const activeH = Math.floor(act.active_minutes / 60);
+        const activeM = Math.round(act.active_minutes % 60);
+        const idleH = Math.floor((act.idle_minutes + act.locked_minutes) / 60);
+        const idleM = Math.round((act.idle_minutes + act.locked_minutes) % 60);
+        actHtml = `
+        <div class="welcome-stat"><div class="welcome-stat-value">${activeH}ч ${activeM}м</div><div class="welcome-stat-label">Активность</div></div>
+        <div class="welcome-stat"><div class="welcome-stat-value">${idleH}ч ${idleM}м</div><div class="welcome-stat-label">AFK</div></div>`;
+      }
+    } catch (_) {}
+
     statsHtml = `
       <div class="welcome-stats">
-        <div class="welcome-stat"><div class="welcome-stat-value">${data.activities_today || 0}</div><div class="welcome-stat-label">Активности</div></div>
+        ${actHtml}
         <div class="welcome-stat"><div class="welcome-stat-value">${data.focus_minutes || 0}м</div><div class="welcome-stat-label">Фокус</div></div>
         <div class="welcome-stat"><div class="welcome-stat-value">${data.notes_count || 0}</div><div class="welcome-stat-label">Заметки</div></div>
         <div class="welcome-stat"><div class="welcome-stat-value">${data.events_today || 0}</div><div class="welcome-stat-label">События</div></div>
