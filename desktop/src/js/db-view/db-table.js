@@ -38,7 +38,8 @@ export async function renderTableView(el, ctx) {
     }).join('');
 
     const tdCustom = visibleProps.map(p => {
-      const rawVal = valuesMap[rid]?.[p.id] ?? '';
+      const autoVals = { created_time: record.created_at, last_edited: record.updated_at, unique_id: rid };
+      const rawVal = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
       const displayVal = formatPropValue(rawVal, p);
       return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}'>${displayVal}</td>`;
     }).join('');

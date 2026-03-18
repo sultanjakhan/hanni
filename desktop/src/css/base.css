@@ -527,6 +527,11 @@ body {
   color: var(--text-faint);
   font-size: 12px;
 }
+.data-table td.cell-wrap { white-space: normal; word-break: break-word; max-width: none; }
+.data-table thead th:first-child, .data-table tbody td:first-child {
+  position: sticky; left: 0; z-index: 1; background: inherit;
+}
+.data-table thead th:first-child { z-index: 2; background: var(--bg-sidebar); }
 .data-table-title { font-weight: 500; color: var(--text-primary); }
 
 .module-grid {

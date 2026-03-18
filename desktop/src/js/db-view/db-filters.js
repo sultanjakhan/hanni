@@ -6,7 +6,7 @@ export function renderFilterBar(el, tabId, customProps, onApply) {
   const chips = filters.map((f, idx) => {
     const prop = customProps.find(p => p.id === f.propId);
     const label = prop ? prop.name : '?';
-    const condLabels = { eq: '=', neq: '\u2260', contains: '\u2248', empty: 'empty', not_empty: 'not empty' };
+    const condLabels = { eq: '=', neq: '\u2260', contains: '\u2248', starts: 'starts', ends: 'ends', before: '<', after: '>', this_week: 'this week', this_month: 'this month', empty: 'empty', not_empty: 'not empty' };
     return `<span class="dbv-filter-chip" data-idx="${idx}">
       ${escapeHtml(label)} ${condLabels[f.condition] || f.condition} ${f.value ? escapeHtml(f.value) : ''}
       <span class="dbv-filter-chip-remove" data-remove="${idx}">\u00d7</span>
@@ -43,9 +43,8 @@ export function renderFilterBar(el, tabId, customProps, onApply) {
   });
 }
 
-/** Show the filter builder modal */
 export function showFilterBuilderModal(tabId, customProps, onApply) {
-  if (customProps.length === 0) { alert('Add custom properties first to filter by them.'); return; }
+  if (!customProps.length) { alert('Сначала добавьте свойства для фильтрации.'); return; }
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal modal-compact">
@@ -59,6 +58,9 @@ export function showFilterBuilderModal(tabId, customProps, onApply) {
       <select class="form-select" id="dbv-filter-cond" style="width:100%;">
         <option value="eq">Equals</option><option value="neq">Not equals</option>
         <option value="contains">Contains</option>
+        <option value="starts">Starts with</option><option value="ends">Ends with</option>
+        <option value="before">Before (date)</option><option value="after">After (date)</option>
+        <option value="this_week">This week</option><option value="this_month">This month</option>
         <option value="empty">Is empty</option><option value="not_empty">Is not empty</option>
       </select>
     </div>
@@ -77,7 +79,7 @@ export function showFilterBuilderModal(tabId, customProps, onApply) {
     const opt = document.getElementById('dbv-filter-prop')?.selectedOptions[0];
     const cond = document.getElementById('dbv-filter-cond')?.value;
     const vg = document.getElementById('dbv-filter-val-group');
-    if (cond === 'empty' || cond === 'not_empty') { vg.style.display = 'none'; return; }
+    if (['empty', 'not_empty', 'this_week', 'this_month'].includes(cond)) { vg.style.display = 'none'; return; }
     vg.style.display = 'block';
     const type = opt?.dataset.type;
     if (type === 'select' || type === 'multi_select' || type === 'status') {
@@ -104,16 +106,22 @@ export function showFilterBuilderModal(tabId, customProps, onApply) {
   });
 }
 
-/** Apply filters to records based on property values */
 export function applyFilters(records, valuesMap, filters, idField, tabId) {
   if (!filters || filters.length === 0) return records;
   const mode = S.dbvFilterMode?.[tabId] || 'and';
   const check = (f, rid) => {
     const val = valuesMap[rid]?.[f.propId] ?? '';
+    const s = String(val).toLowerCase(), fv = (f.value || '').toLowerCase();
     switch (f.condition) {
       case 'eq': return val === f.value;
       case 'neq': return val !== f.value;
-      case 'contains': return String(val).toLowerCase().includes(f.value.toLowerCase());
+      case 'contains': return s.includes(fv);
+      case 'starts': return s.startsWith(fv);
+      case 'ends': return s.endsWith(fv);
+      case 'before': return val && val < f.value;
+      case 'after': return val && val > f.value;
+      case 'this_week': { const d = new Date(), w = new Date(d); w.setDate(d.getDate() - d.getDay()); return val >= w.toISOString().slice(0, 10); }
+      case 'this_month': { const d = new Date(); return val >= `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; }
       case 'empty': return !val;
       case 'not_empty': return !!val;
       default: return true;
@@ -125,26 +133,18 @@ export function applyFilters(records, valuesMap, filters, idField, tabId) {
   });
 }
 
-/** Persist filters to view_configs table */
 export async function saveFiltersToViewConfig(tabId) {
-  const filters = S.dbvFilters[tabId] || [];
+  const json = JSON.stringify(S.dbvFilters[tabId] || []);
   try {
-    const configs = await invoke('get_view_configs', { tabId });
-    if (configs.length > 0) {
-      await invoke('update_view_config', { id: configs[0].id, filterJson: JSON.stringify(filters), sortJson: null, visibleColumns: null });
-    } else {
-      const id = await invoke('create_view_config', { tabId, name: 'Default', viewType: 'table' });
-      await invoke('update_view_config', { id, filterJson: JSON.stringify(filters), sortJson: null, visibleColumns: null });
-    }
+    const c = await invoke('get_view_configs', { tabId });
+    const id = c[0]?.id || await invoke('create_view_config', { tabId, name: 'Default', viewType: 'table' });
+    await invoke('update_view_config', { id, filterJson: json, sortJson: null, visibleColumns: null });
   } catch {}
 }
 
-/** Load filters from view_configs table */
 export async function loadFiltersFromViewConfig(tabId) {
   try {
-    const configs = await invoke('get_view_configs', { tabId });
-    if (configs.length > 0 && configs[0].filter_json) {
-      S.dbvFilters[tabId] = JSON.parse(configs[0].filter_json);
-    }
+    const c = await invoke('get_view_configs', { tabId });
+    if (c[0]?.filter_json) S.dbvFilters[tabId] = JSON.parse(c[0].filter_json);
   } catch {}
 }

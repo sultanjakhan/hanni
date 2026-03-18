@@ -23,6 +23,8 @@ export function formatPropValue(val, prop) {
     case 'url': return `<a href="${escapeHtml(val)}" target="_blank" style="color:var(--accent-blue);text-decoration:none;">${escapeHtml(val.substring(0, 30))}</a>`;
     case 'number': return escapeHtml(val);
     case 'date': return escapeHtml(val);
+    case 'created_time': case 'last_edited': return `<span class="text-faint">${val ? new Date(val).toLocaleDateString('ru-RU') : '—'}</span>`;
+    case 'unique_id': return `<span class="text-faint">${val}</span>`;
     default: return escapeHtml(val);
   }
 }
@@ -30,6 +32,8 @@ export function formatPropValue(val, prop) {
 /** Start inline editing on a cell click */
 export function startInlineEdit(cell, recordTable, reloadFn) {
   if (cell.querySelector('.inline-editor')) return;
+  const autoTypes = ['created_time', 'last_edited', 'unique_id'];
+  if (autoTypes.includes(cell.dataset.propType)) return;
   const recordId = parseInt(cell.dataset.recordId);
   const propId = parseInt(cell.dataset.propId);
   const propType = cell.dataset.propType;

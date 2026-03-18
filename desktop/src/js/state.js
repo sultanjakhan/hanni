@@ -275,6 +275,9 @@ export const PROPERTY_TYPE_DEFS = [
   { id: 'checkbox', icon: '☑', name: 'Чекбокс' },
   { id: 'url', icon: '↗', name: 'Ссылка' },
   { id: 'status', icon: '◔', name: 'Статус' },
+  { id: 'created_time', icon: '🕐', name: 'Создано', auto: true },
+  { id: 'last_edited', icon: '✏️', name: 'Изменено', auto: true },
+  { id: 'unique_id', icon: '#️⃣', name: 'ID', auto: true },
 ];
 
 export function getTypeIcon(typeId) {
