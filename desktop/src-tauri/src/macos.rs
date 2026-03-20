@@ -30,11 +30,25 @@ pub fn get_macos_idle_seconds() -> f64 {
     0.0
 }
 
-/// Checks if screen is locked (loginwindow is frontmost app)
+/// Checks if screen is locked via CGSession dictionary
 pub fn is_screen_locked() -> bool {
+    // Method 1: Check CGSessionScreenIsLocked via ioreg
+    if let Ok(output) = std::process::Command::new("ioreg")
+        .args(["-n", "Root", "-d", "1"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        if text.contains("CGSSessionScreenIsLocked") {
+            return true;
+        }
+    }
+    // Method 2: Check if loginwindow is active (works when GUI available)
     match run_osascript(r#"tell application "System Events" to get name of first application process whose frontmost is true"#) {
         Ok(s) => s.trim() == "loginwindow",
-        Err(_) => false,
+        Err(_) => {
+            // osascript fails when screen is locked — treat as locked
+            true
+        },
     }
 }
 

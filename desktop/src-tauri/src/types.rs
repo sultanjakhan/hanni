@@ -370,6 +370,40 @@ pub struct NonStreamResponse {
     pub choices: Vec<NonStreamChoice>,
 }
 
+// ── Non-streaming response with tool calls (agent loop) ──
+
+#[derive(Deserialize, Debug)]
+pub struct AgentMessage {
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Option<Vec<AgentToolCall>>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct AgentToolCall {
+    pub id: String,
+    pub function: AgentToolCallFunction,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct AgentToolCallFunction {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct AgentChoice {
+    pub message: AgentMessage,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct AgentResponse {
+    pub choices: Vec<AgentChoice>,
+}
+
 // ── Proactive style definitions ──
 
 pub struct ProactiveStyleDef {

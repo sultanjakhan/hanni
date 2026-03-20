@@ -76,6 +76,8 @@ export const S = {
   settingsSection: null,
   dbvFilters: {},
   dbvFilterMode: {},
+  dbvGroupBy: {},
+  dbvGroupCollapsed: {},
   dbViews: {},
   _scrollRAF: null,
   _wakeWordSSE: null,
@@ -168,6 +170,8 @@ export const TAB_REGISTRY = {
   food:        { label: 'Food',        icon: TAB_ICONS.food, closable: true,  subTabs: [] },
   money:       { label: 'Money',       icon: TAB_ICONS.money, closable: true,  subTabs: [] },
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: [] },
+  schedule:    { label: 'Schedule',    icon: '📅', closable: true,  subTabs: [] },
+  dankoe:      { label: 'Dan Koe',     icon: '🧠', closable: true,  subTabs: [] },
 };
 
 export const TAB_DESCRIPTIONS = {
@@ -185,6 +189,8 @@ export const TAB_DESCRIPTIONS = {
   food: 'Food log, recipes, and product inventory',
   money: 'Expenses, income, budgets, and savings',
   people: 'Contacts and relationship management',
+  schedule: 'Recurring events and routines with completion tracking',
+  dankoe: 'Dan Koe Protocol — daily contemplation, pattern interrupt, vision, integration',
 };
 
 // Page customization (Notion-like editable icon/description)
@@ -275,9 +281,11 @@ export const PROPERTY_TYPE_DEFS = [
   { id: 'checkbox', icon: '☑', name: 'Чекбокс' },
   { id: 'url', icon: '↗', name: 'Ссылка' },
   { id: 'status', icon: '◔', name: 'Статус' },
-  { id: 'created_time', icon: '🕐', name: 'Создано', auto: true },
-  { id: 'last_edited', icon: '✏️', name: 'Изменено', auto: true },
-  { id: 'unique_id', icon: '#️⃣', name: 'ID', auto: true },
+  { id: 'email', icon: '@', name: 'Email' },
+  { id: 'phone', icon: '☎', name: 'Телефон' },
+  { id: 'created_time', icon: '⏱', name: 'Создано', auto: true },
+  { id: 'last_edited', icon: '✎', name: 'Изменено', auto: true },
+  { id: 'unique_id', icon: '#', name: 'ID', auto: true },
 ];
 
 export function getTypeIcon(typeId) {

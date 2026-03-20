@@ -12,6 +12,9 @@ mod calendar;
 mod notes;
 mod commands_data;
 mod commands_meta;
+mod mcp;
+mod agent;
+mod vacancy;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -68,6 +71,7 @@ pub fn run() {
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
+    migrate_schedules(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -159,6 +163,7 @@ pub fn run() {
         .manage(audio_state)
         .manage(focus_manager)
         .manage(call_mode)
+        .manage(mcp::McpState::empty())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -293,6 +298,20 @@ pub fn run() {
             commands_data::create_workout,
             commands_data::get_workouts,
             commands_data::get_workout_stats,
+            commands_data::delete_workout,
+            // Schedules
+            commands_data::create_schedule,
+            commands_data::get_schedules,
+            commands_data::update_schedule,
+            commands_data::delete_schedule,
+            commands_data::toggle_schedule_completion,
+            commands_data::get_schedule_completions,
+            commands_data::get_schedule_stats,
+            // Dan Koe Protocol
+            commands_data::get_dan_koe_entry,
+            commands_data::save_dan_koe_entry,
+            commands_data::get_dan_koe_history,
+            commands_data::get_dan_koe_stats,
             // Health & Habits
             commands_data::log_health,
             commands_data::get_health_today,
@@ -443,6 +462,11 @@ pub fn run() {
             // Tab Page Blocks
             commands_data::get_tab_blocks,
             commands_data::save_tab_blocks,
+            // MCP
+            mcp::mcp_call_tool,
+            mcp::mcp_list_tools,
+            // Vacancy
+            vacancy::vacancy_search_now,
         ])
         .setup(move |app| {
             // Auto-updater
@@ -472,6 +496,22 @@ pub fn run() {
             let api_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 spawn_api_server(api_handle).await;
+            });
+
+            // MCP client manager — connect to configured MCP servers in background
+            let mcp_arc = app.state::<mcp::McpState>().0.clone();
+            tauri::async_runtime::spawn(async move {
+                let config_path = dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".hanni")
+                    .join("mcp.json");
+                eprintln!("[mcp] Loading config from: {:?}", config_path);
+                let mgr = mcp::McpManager::from_config(
+                    config_path.to_str().unwrap_or("")
+                ).await;
+                let tool_count = mgr.tools_as_openai().len();
+                *mcp_arc.lock().await = mgr;
+                eprintln!("[mcp] Initialization complete — {} tools loaded", tool_count);
             });
 
             // Backfill: embed existing facts that don't have vector embeddings yet
@@ -634,8 +674,8 @@ pub fn run() {
                     let hour = now.hour() as i64;
                     let weekday = now.weekday().num_days_from_monday() as i64;
 
-                    // AFK detection: screen locked OR idle >= 5 min
-                    let is_afk = screen_locked || idle_secs >= 300.0;
+                    // AFK detection: screen locked OR idle >= 2 min
+                    let is_afk = screen_locked || idle_secs >= 120.0;
 
                     // Classify activity category (only meaningful when not AFK)
                     let category = if is_afk {
@@ -989,6 +1029,12 @@ pub fn run() {
             let proactive_state_ref = proactive_state.clone();
             tauri::async_runtime::spawn(async move {
                 proactive_loop(proactive_handle, proactive_state_ref).await;
+            });
+
+            // Vacancy search background loop
+            let vacancy_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                vacancy::vacancy_search_loop(vacancy_handle).await;
             });
 
             Ok(())

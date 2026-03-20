@@ -458,8 +458,13 @@ export async function executeAction(actionJson) {
         result = await invoke('music_control', { action: action.command || action.action_type || 'toggle' });
         break;
       default:
-        console.warn('Unknown action:', actionType, action);
-        result = 'Unknown action: ' + actionType;
+        // Try MCP servers for unknown actions
+        try {
+          result = await invoke('mcp_call_tool', { name: actionType, arguments: action });
+        } catch (mcpErr) {
+          console.warn('Unknown action (no MCP match):', actionType, action);
+          result = 'Unknown action: ' + actionType;
+        }
     }
 
     return { success: true, result };

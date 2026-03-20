@@ -20,6 +20,7 @@ pub const SYSTEM_PROMPT: &str = r#"Ты — Ханни, тёплый AI-комп
 - Даты: бери Today из [Current context]. "завтра"=Today+1. Формат YYYY-MM-DD.
 - Целодневные события: create_event time="" duration=0.
 - web_search для актуальной информации. read_url для чтения страниц.
+- БРАУЗЕР: ты умеешь управлять браузером через playwright_* инструменты. Используй их когда нужно открыть сайт, заполнить форму, найти вакансии и т.д. Порядок: playwright_browser_navigate → playwright_browser_snapshot (прочитать страницу) → при необходимости playwright_browser_click/playwright_browser_type.
 - После инструмента — кратко подтверди (1 предложение).
 
 СТИЛЬ:
@@ -41,6 +42,12 @@ User: "создай задачу купить молоко на завтра"
 {"action":"create_task","title":"Купить молоко","due_date":"[Today+1 в формате YYYY-MM-DD]"}
 ```
 Готово!
+
+User: "добавь эту вакансию как задачу: Rust Developer, CompanyX, 50$/час"
+```action
+{"action":"create_project_task","title":"CompanyX — Rust Developer (50$/час)","project_id":2,"description":"Удалённо, Rust","priority":"high"}
+```
+Добавила в Вакансии!
 
 User: "запомни что я люблю зелёный чай"
 ```action
@@ -74,6 +81,8 @@ pub const ACTION_KEYWORDS: &[&str] = &[
     "помодоро", "pomodoro", "трекай", "начни трекать", "заверши", "останови",
     "открой вкладк", "открой календарь", "открой заметк", "открой фокус",
     "покажи задач", "какие задач", "мои задач",
+    "вакансии", "вакансию", "работ", "hh.ru", "зайди на", "зайди в", "перейди на",
+    "браузер", "browser", "playwright",
 ];
 
 pub fn needs_full_prompt(user_msg: &str) -> bool {
@@ -237,17 +246,28 @@ pub fn build_tool_definitions() -> Vec<serde_json::Value> {
         tool("get_current_activity", "Check what activity is being tracked", serde_json::json!({
             "type": "object", "properties": {}
         })),
-        // Tasks
-        tool("create_task", "Create a task", serde_json::json!({
+        // Tasks (notes-based quick task)
+        tool("create_task", "Быстрая задача (заметки). Для задач в Work используй create_project_task", serde_json::json!({
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
-                "project_id": {"type": "integer"},
                 "description": {"type": "string"},
                 "priority": {"type": "string", "enum": ["low","medium","high"]},
                 "due_date": {"type": "string"}
             },
             "required": ["title"]
+        })),
+        // Tasks (work tab — projects)
+        tool("create_project_task", "Создать задачу в Work-вкладке (вакансии, проекты). project_id: 1=Входящие, 2=Вакансии", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Название задачи"},
+                "project_id": {"type": "integer", "description": "ID проекта (1=Входящие, 2=Вакансии)"},
+                "description": {"type": "string", "description": "Описание, ссылка, требования"},
+                "priority": {"type": "string", "enum": ["low","normal","high"]},
+                "due_date": {"type": "string", "description": "YYYY-MM-DD"}
+            },
+            "required": ["title", "project_id"]
         })),
         // Focus
         tool("start_focus", "Start focus mode — block distracting sites/apps", serde_json::json!({
@@ -564,10 +584,12 @@ pub fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
          &["get_browser"]),
         (&["запас", "дом ", "домой", "supplies", "shopping"],
          &["add_home_item"]),
-        (&["задач", "task", "проект"],
-         &["create_task"]),
+        (&["задач", "task", "проект", "вакансию как"],
+         &["create_task", "create_project_task"]),
         (&["цел", "goal"],
          &["create_goal", "update_goal"]),
+        (&["вакансии", "вакансию", "работ", "hh.ru", "зайди на", "зайди в", "перейди на", "браузер", "browser", "playwright"],
+         &["web_search"]),
     ];
 
     let mut selected_names: Vec<&str> = Vec::new();

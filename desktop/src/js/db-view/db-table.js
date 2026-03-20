@@ -1,140 +1,122 @@
+// ── db-view/db-table.js — Table view renderer (Notion-style) ──
+
 import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
 import { showAddPropertyModal, showColumnMenu } from './db-properties.js';
+import { bindCheckboxes, renderBulkBar } from './db-select.js';
+import { bindRowContextMenu } from './db-row-menu.js';
+import { bindClipboard } from './db-clipboard.js';
+import { enableRowDrag } from './db-drag-rows.js';
 import { enableColumnDrag } from './db-col-drag.js';
+import { wireColumnResize } from './db-col-resize.js';
 
-/** Render a table view into a container element */
 export async function renderTableView(el, ctx) {
   const {
     tabId, recordTable, records, fixedColumns = [], idField = 'id',
-    customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, addButton, onSort, sortRules = [],
+    customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, addButton, onSort,
+    onDelete, onDuplicate,
   } = ctx;
 
-  // Load and apply filters
   if (!S.dbvFilters[tabId]) await loadFiltersFromViewConfig(tabId);
-  const filteredRecords = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
-  const visibleProps = customProps.filter(p => p.visible !== false);
+  const filtered = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
+  const visProps = customProps.filter(p => p.visible !== false);
+  const hasActions = !!(onDelete || onDuplicate);
+  const reload = reloadFn || (() => {});
+  const colCount = (hasActions ? 1 : 0) + fixedColumns.length + visProps.length + 1;
 
-  const headerHtml = addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : '';
-
-  // Table head
-  const thFixed = fixedColumns.map(c =>
-    `<th class="sortable-header" data-sort="${c.key}">${c.label}</th>`
+  // Header — with initial widths
+  const W = { done: 30, title: 180, projectName: 100, priority: 100, status: 100, date: 100, tags: 120, name: 180, category: 100, quantity: 70, location: 100, needed: 90 };
+  const thCheck = hasActions ? '<th class="col-check-header"><input type="checkbox"></th>' : '';
+  const thFixed = fixedColumns.map(c => {
+    const w = W[c.key] || 140;
+    if (!c.label) return `<th class="sortable-header" data-sort="${c.key}" style="width:${w}px"></th>`;
+    return `<th class="sortable-header" data-sort="${c.key}" style="width:${w}px"><div class="th-content"><span class="col-type-icon">${getTypeIcon(c.editType || 'text')}</span>${c.label}</div></th>`;
+  }).join('');
+  const thCustom = visProps.map(p =>
+    `<th class="sortable-header prop-header" data-sort="prop_${p.id}" data-prop-id="${p.id}" style="width:180px"><div class="th-content"><span class="col-type-icon">${getTypeIcon(p.type)}</span>${escapeHtml(p.name)}</div></th>`
   ).join('');
-  const thCustom = visibleProps.map(p =>
-    `<th class="sortable-header prop-header" data-sort="prop_${p.id}" data-prop-id="${p.id}"><span class="col-type-icon">${getTypeIcon(p.type)}</span>${escapeHtml(p.name)}</th>`
-  ).join('');
-  const thAddCol = `<th class="add-prop-col dbv-add-prop-col" title="Добавить свойство">+</th>`;
 
-  // Table body
-  let tbodyHtml = '';
-  for (const record of filteredRecords) {
-    const rid = record[idField];
+  // Body
+  let tbody = '';
+  for (const r of filtered) {
+    const rid = r[idField];
+    const tdCheck = hasActions ? '<td class="col-check"><input type="checkbox"></td>' : '';
     const tdFixed = fixedColumns.map(c => {
-      const val = c.render ? c.render(record) : escapeHtml(String(record[c.key] ?? ''));
+      const val = c.render ? c.render(r) : escapeHtml(String(r[c.key] ?? ''));
       return `<td>${val}</td>`;
     }).join('');
-
-    const tdCustom = visibleProps.map(p => {
-      const autoVals = { created_time: record.created_at, last_edited: record.updated_at, unique_id: rid };
-      const rawVal = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
-      const displayVal = formatPropValue(rawVal, p);
-      return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}'>${displayVal}</td>`;
+    const tdCustom = visProps.map(p => {
+      const autoVals = { created_time: r.created_at, last_edited: r.updated_at, unique_id: rid };
+      const raw = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
+      return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}' data-raw-value="${escapeHtml(String(raw))}">${formatPropValue(raw, p)}</td>`;
     }).join('');
-
-    tbodyHtml += `<tr class="data-table-row" data-id="${rid}">${tdFixed}${tdCustom}<td></td></tr>`;
+    tbody += `<tr class="data-table-row" data-id="${rid}">${tdCheck}${tdFixed}${tdCustom}<td></td></tr>`;
   }
 
-  if (filteredRecords.length === 0) {
-    const colspan = fixedColumns.length + visibleProps.length + 1;
-    tbodyHtml = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-faint);padding:24px;">Пока пусто</td></tr>`;
+  if (filtered.length === 0) {
+    tbody = `<tr><td colspan="${colCount}" style="text-align:center;color:var(--text-faint);padding:24px;">Пока пусто</td></tr>`;
   }
 
-  // Inline "new row" footer
-  const colspan = fixedColumns.length + visibleProps.length + 1;
-  const countLabel = `<span class="table-count">Всего: ${filteredRecords.length}</span>`;
-  const addBtn = onAdd ? `<span class="add-row-btn">+ Новая запись</span>` : '';
-  const footerHtml = `<tfoot><tr class="add-row-inline"><td colspan="${colspan}">${addBtn}${countLabel}</td></tr></tfoot>`;
+  // Add-row + footer
+  const addRowHtml = onAdd ? `<tr class="dbv-add-row"><td colspan="${colCount}"><div class="dbv-add-row-label"><span class="dbv-add-row-plus">+</span> Новая запись</div></td></tr>` : '';
+  const footerHtml = `<div class="dbv-table-footer"><span>Записей: ${filtered.length}</span></div>`;
 
-  el.innerHTML = headerHtml + `
-    <table class="data-table database-view">
-      <thead><tr>${thFixed}${thCustom}${thAddCol}</tr></thead>
-      <tbody>${tbodyHtml}</tbody>
-      ${footerHtml}
-    </table>`;
+  el.innerHTML = `<div class="dbv-table-wrap"><table class="data-table database-view"><thead><tr>${thCheck}${thFixed}${thCustom}<th class="add-prop-col dbv-add-prop-col" title="Добавить свойство">+</th></tr></thead><tbody>${tbody}${addRowHtml}</tbody></table>${footerHtml}</div>`;
 
-  // Filter bar
-  if (customProps.length > 0) {
-    renderFilterBar(el, tabId, customProps, reloadFn || (() => {}));
+  // Wire features
+  wireColumnResize(el, tabId);
+  if (customProps.length > 0) renderFilterBar(el, tabId, customProps, reload);
+  if (hasActions) {
+    bindCheckboxes(el, tabId, filtered, idField, { ...ctx, reloadFn: reload, records: filtered });
+    renderBulkBar(el, tabId, { ...ctx, reloadFn: reload, records: filtered });
+    bindRowContextMenu(el, { records: filtered, idField, onDelete, onDuplicate, reloadFn: reload });
   }
+  bindClipboard(el, { recordTable, reloadFn: reload });
+  enableRowDrag(el, filtered, idField);
+  const tableEl = el.querySelector('.data-table');
+  if (tableEl) enableColumnDrag(tableEl, tabId, reload);
+
+  // Add-row click
+  el.querySelector('.dbv-add-row')?.addEventListener('click', () => { if (onAdd) onAdd(); });
 
   // Row click
-  if (onRowClick) {
-    el.querySelectorAll('.data-table-row').forEach(row => {
-      row.style.cursor = 'pointer';
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('.cell-editable') && e.target.closest('.inline-editor')) return;
-        const id = parseInt(row.dataset.id);
-        const record = filteredRecords.find(r => r[idField] === id);
-        if (record) onRowClick(record);
-      });
+  if (onRowClick) el.querySelectorAll('.data-table-row').forEach(row => {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.cell-editable,.inline-editor,.col-check')) return;
+      const rec = filtered.find(r => r[idField] === parseInt(row.dataset.id));
+      if (rec) onRowClick(rec);
     });
-  }
+  });
 
-  // Cell focus + inline editing
-  const allCells = [...el.querySelectorAll('.cell-editable')];
-  allCells.forEach(cell => {
+  // Inline editing
+  el.querySelectorAll('.cell-editable').forEach(cell => {
     cell.setAttribute('tabindex', '0');
-    cell.addEventListener('click', (e) => {
-      e.stopPropagation();
-      focusCell(el, cell);
-      startInlineEdit(cell, recordTable, reloadFn);
-    });
+    cell.addEventListener('click', (e) => { e.stopPropagation(); focusCell(el, cell); startInlineEdit(cell, recordTable, reload); });
     cell.addEventListener('focus', () => focusCell(el, cell));
-    cell.addEventListener('keydown', (e) => {
-      if (cell.querySelector('.inline-editor')) return;
-      const idx = allCells.indexOf(cell);
-      const cols = visibleProps.length;
-      const nav = { Tab: e.shiftKey ? -1 : 1, Enter: cols, ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols };
-      const offset = nav[e.key];
-      if (offset == null) return;
-      e.preventDefault();
-      const next = allCells[idx + offset];
-      if (next) { next.focus(); if (e.key === 'Tab' || e.key === 'Enter') next.click(); }
-    });
   });
 
-  // Add property column
-  el.querySelector('.dbv-add-prop-col')?.addEventListener('click', () => {
-    showAddPropertyModal(tabId, reloadFn);
-  });
-
-  // Property header context menu
+  // Column interactions
+  el.querySelector('.dbv-add-prop-col')?.addEventListener('click', () => showAddPropertyModal(tabId, reload));
   el.querySelectorAll('.prop-header').forEach(th => {
     th.addEventListener('click', (e) => {
+      if (e.target.closest('.col-resize-handle')) return;
       e.stopPropagation();
       const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
-      if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reloadFn, onSort);
+      if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reload, onSort);
     });
   });
-  // Add buttons
-  if (addButton && onAdd) el.querySelector('.dbv-add-btn')?.addEventListener('click', onAdd);
-  el.querySelector('.add-row-btn')?.addEventListener('click', () => { if (onAdd) onAdd(); });
 
-  // Column drag-and-drop reorder
-  const tableEl = el.querySelector('.data-table');
-  if (tableEl) enableColumnDrag(tableEl, tabId, reloadFn);
-
-  // Sort headers — Shift+click for multi-level sort
-  applySortIndicators(el, sortRules);
+  // Sorting on fixed headers
   el.querySelectorAll('.sortable-header:not(.prop-header)').forEach(th => {
     th.addEventListener('click', (e) => {
-      const key = th.dataset.sort;
-      const cur = sortRules.find(r => r.key === key);
-      const dir = cur?.dir === 'asc' ? 'desc' : 'asc';
-      if (onSort) onSort(key, dir, e.shiftKey);
+      if (e.target.closest('.col-resize-handle')) return;
+      const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+      el.querySelectorAll('.sortable-header').forEach(h => { h.dataset.dir = 'none'; h.classList.remove('sort-asc', 'sort-desc'); });
+      th.dataset.dir = dir; th.classList.add(`sort-${dir}`);
+      if (onSort) onSort(th.dataset.sort, dir);
     });
   });
 }
@@ -142,9 +124,4 @@ export async function renderTableView(el, ctx) {
 function focusCell(container, cell) {
   container.querySelectorAll('.cell-focused').forEach(c => c.classList.remove('cell-focused'));
   cell.classList.add('cell-focused');
-}
-
-function applySortIndicators(el, rules) {
-  el.querySelectorAll('.sortable-header').forEach(h => { h.classList.remove('sort-asc', 'sort-desc'); delete h.dataset.sortLevel; });
-  rules.forEach((r, i) => { const th = el.querySelector(`[data-sort="${r.key}"]`); if (th) { th.classList.add(`sort-${r.dir}`); if (rules.length > 1) th.dataset.sortLevel = i + 1; } });
 }

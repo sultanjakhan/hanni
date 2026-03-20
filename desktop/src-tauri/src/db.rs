@@ -771,6 +771,40 @@ pub fn migrate_content_blocks(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE custom_pages ADD COLUMN content_blocks TEXT", []).ok();
 }
 
+pub fn migrate_schedules(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            frequency TEXT NOT NULL DEFAULT 'daily',
+            frequency_days TEXT,
+            time_of_day TEXT,
+            details TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS schedule_completions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id INTEGER NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+            date TEXT NOT NULL,
+            completed INTEGER DEFAULT 0,
+            completed_at TEXT,
+            UNIQUE(schedule_id, date)
+        );
+        CREATE TABLE IF NOT EXISTS dan_koe_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL UNIQUE,
+            contemplation INTEGER DEFAULT 0,
+            pattern_interrupt INTEGER DEFAULT 0,
+            vision INTEGER DEFAULT 0,
+            integration INTEGER DEFAULT 0,
+            notes TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );"
+    ).ok();
+}
+
 pub fn migrate_activity_tracking(conn: &rusqlite::Connection) {
     // v0.27: Enhanced activity tracking — idle, window title, category
     conn.execute("ALTER TABLE activity_snapshots ADD COLUMN idle_secs REAL DEFAULT 0", []).ok();

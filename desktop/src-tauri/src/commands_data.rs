@@ -510,6 +510,215 @@ pub fn get_workout_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Va
     Ok(serde_json::json!({ "count": count, "total_minutes": total_min, "total_calories": total_cal }))
 }
 
+#[tauri::command]
+pub fn delete_workout(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    db.conn().execute("DELETE FROM workouts WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+// ── Schedules commands ──
+
+#[tauri::command]
+pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    conn.execute(
+        "INSERT INTO schedules (title, category, frequency, frequency_days, time_of_day, details, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), chrono::Local::now().to_rfc3339()],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let sql = if category.is_some() {
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active FROM schedules WHERE category=?1 ORDER BY title"
+    } else {
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active FROM schedules ORDER BY title"
+    };
+    let mut stmt = conn.prepare(sql).map_err(|e| format!("DB error: {}", e))?;
+    let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cat) = category {
+        vec![Box::new(cat.clone())]
+    } else { vec![] };
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "category": row.get::<_, String>(2)?,
+            "frequency": row.get::<_, String>(3)?,
+            "frequency_days": row.get::<_, Option<String>>(4)?,
+            "time_of_day": row.get::<_, Option<String>>(5)?,
+            "details": row.get::<_, String>(6)?,
+            "is_active": row.get::<_, i64>(7)? == 1,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    if let Some(v) = title { conn.execute("UPDATE schedules SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
+    if let Some(v) = category { conn.execute("UPDATE schedules SET category=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
+    if let Some(v) = frequency { conn.execute("UPDATE schedules SET frequency=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
+    if let Some(v) = frequency_days { conn.execute("UPDATE schedules SET frequency_days=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
+    if let Some(v) = time_of_day { conn.execute("UPDATE schedules SET time_of_day=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
+    if let Some(v) = details { conn.execute("UPDATE schedules SET details=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
+    if let Some(v) = is_active { conn.execute("UPDATE schedules SET is_active=?1 WHERE id=?2", rusqlite::params![v as i64, id]).ok(); }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_schedule(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM schedule_completions WHERE schedule_id=?1", rusqlite::params![id]).ok();
+    conn.execute("DELETE FROM schedules WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::State<'_, HanniDb>) -> Result<bool, String> {
+    let conn = db.conn();
+    let existing: Option<i64> = conn.query_row(
+        "SELECT completed FROM schedule_completions WHERE schedule_id=?1 AND date=?2",
+        rusqlite::params![schedule_id, date], |row| row.get(0),
+    ).ok();
+    match existing {
+        Some(1) => {
+            conn.execute("UPDATE schedule_completions SET completed=0, completed_at=NULL WHERE schedule_id=?1 AND date=?2",
+                rusqlite::params![schedule_id, date]).ok();
+            Ok(false)
+        }
+        Some(_) => {
+            conn.execute("UPDATE schedule_completions SET completed=1, completed_at=?3 WHERE schedule_id=?1 AND date=?2",
+                rusqlite::params![schedule_id, date, chrono::Local::now().to_rfc3339()]).ok();
+            Ok(true)
+        }
+        None => {
+            conn.execute("INSERT INTO schedule_completions (schedule_id, date, completed, completed_at) VALUES (?1, ?2, 1, ?3)",
+                rusqlite::params![schedule_id, date, chrono::Local::now().to_rfc3339()]).ok();
+            Ok(true)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day
+         FROM schedule_completions sc JOIN schedules s ON s.id = sc.schedule_id
+         WHERE sc.date=?1"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![date], |row| {
+        Ok(serde_json::json!({
+            "schedule_id": row.get::<_, i64>(0)?,
+            "completed": row.get::<_, i64>(1)? == 1,
+            "title": row.get::<_, String>(2)?,
+            "category": row.get::<_, String>(3)?,
+            "time_of_day": row.get::<_, Option<String>>(4)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn get_schedule_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let total: i64 = conn.query_row("SELECT COUNT(*) FROM schedules WHERE is_active=1", [], |r| r.get(0)).unwrap_or(0);
+    let week_ago = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+    let completed_week: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM schedule_completions WHERE completed=1 AND date>=?1", rusqlite::params![week_ago], |r| r.get(0)
+    ).unwrap_or(0);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let completed_today: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM schedule_completions WHERE completed=1 AND date=?1", rusqlite::params![today], |r| r.get(0)
+    ).unwrap_or(0);
+    Ok(serde_json::json!({ "total_active": total, "completed_week": completed_week, "completed_today": completed_today }))
+}
+
+// ── Dan Koe Protocol commands ──
+
+#[tauri::command]
+pub fn get_dan_koe_entry(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Option<serde_json::Value>, String> {
+    let conn = db.conn();
+    let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let entry = conn.query_row(
+        "SELECT id, date, contemplation, pattern_interrupt, vision, integration, notes FROM dan_koe_entries WHERE date=?1",
+        rusqlite::params![d], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "date": row.get::<_, String>(1)?,
+                "contemplation": row.get::<_, i64>(2)? == 1,
+                "pattern_interrupt": row.get::<_, i64>(3)? == 1,
+                "vision": row.get::<_, i64>(4)? == 1,
+                "integration": row.get::<_, i64>(5)? == 1,
+                "notes": row.get::<_, String>(6)?,
+            }))
+        },
+    ).ok();
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn save_dan_koe_entry(date: Option<String>, contemplation: bool, pattern_interrupt: bool, vision: bool, integration: bool, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    conn.execute(
+        "INSERT INTO dan_koe_entries (date, contemplation, pattern_interrupt, vision, integration, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(date) DO UPDATE SET contemplation=?2, pattern_interrupt=?3, vision=?4, integration=?5, notes=?6",
+        rusqlite::params![d, contemplation as i64, pattern_interrupt as i64, vision as i64, integration as i64, notes.unwrap_or_default(), chrono::Local::now().to_rfc3339()],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn get_dan_koe_history(days: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT id, date, contemplation, pattern_interrupt, vision, integration, notes FROM dan_koe_entries WHERE date>=?1 ORDER BY date DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![since], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "date": row.get::<_, String>(1)?,
+            "contemplation": row.get::<_, i64>(2)? == 1,
+            "pattern_interrupt": row.get::<_, i64>(3)? == 1,
+            "vision": row.get::<_, i64>(4)? == 1,
+            "integration": row.get::<_, i64>(5)? == 1,
+            "notes": row.get::<_, String>(6)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn get_dan_koe_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let week_ago = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+    let total_week: i64 = conn.query_row("SELECT COUNT(*) FROM dan_koe_entries WHERE date>=?1", rusqlite::params![week_ago], |r| r.get(0)).unwrap_or(0);
+    let full_week: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM dan_koe_entries WHERE date>=?1 AND contemplation=1 AND pattern_interrupt=1 AND vision=1 AND integration=1",
+        rusqlite::params![week_ago], |r| r.get(0)
+    ).unwrap_or(0);
+    // Current streak
+    let mut stmt = conn.prepare("SELECT date FROM dan_koe_entries WHERE contemplation=1 AND pattern_interrupt=1 AND vision=1 AND integration=1 ORDER BY date DESC")
+        .map_err(|e| format!("DB error: {}", e))?;
+    let dates: Vec<String> = stmt.query_map([], |row| row.get(0)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    let mut streak = 0i64;
+    let today = chrono::Local::now().date_naive();
+    for (i, d) in dates.iter().enumerate() {
+        if let Ok(parsed) = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d") {
+            let expected = today - chrono::Duration::days(i as i64);
+            if parsed == expected { streak += 1; } else { break; }
+        }
+    }
+    Ok(serde_json::json!({ "week_entries": total_week, "week_complete": full_week, "streak": streak }))
+}
+
 // ── v0.7.0: Health & Habits commands ──
 
 #[tauri::command]
@@ -2035,7 +2244,7 @@ pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>
 
         if locked {
             locked_minutes += interval_min;
-        } else if cat == "afk" || idle >= 300.0 {
+        } else if cat == "afk" || idle >= 120.0 {
             idle_minutes += interval_min;
         } else {
             active_minutes += interval_min;

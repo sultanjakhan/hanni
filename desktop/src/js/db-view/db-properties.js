@@ -100,7 +100,7 @@ export function showAddPropertyModal(tabId, reloadFn) {
         await invoke('create_property_definition', { tabId, name, propType: selectedType, position: null, color: null, options, defaultValue: null });
         overlay.remove();
         if (reloadFn) reloadFn();
-      } catch (err) { alert('Error: ' + err); }
+      } catch (err) { console.error('Property error:', err); }
     });
   }
 

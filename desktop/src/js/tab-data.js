@@ -1470,8 +1470,8 @@ async function renderProjectsView(el, projects) {
 // ── Work: simple tasks table ──
 function renderWorkTasks(el, tasks, projects) {
   const statusLabels = { todo: 'To Do', in_progress: 'В работе', done: 'Готово' };
-  const statusColors = { todo: 'badge-gray', in_progress: 'badge-blue', done: 'badge-green' };
-  const priorityColors = { high: 'badge-red', normal: 'badge-gray', low: 'badge-gray' };
+  const statusColors = { todo: 'badge-yellow', in_progress: 'badge-blue', done: 'badge-green' };
+  const priorityColors = { high: 'badge-red', normal: 'badge-blue', low: 'badge-gray' };
 
   const dbv = new DatabaseView(el, {
     tabId: 'work',
@@ -1479,16 +1479,46 @@ function renderWorkTasks(el, tasks, projects) {
     records: tasks,
     fixedColumns: [
       { key: 'done', label: '', render: r => `<div class="work-task-check${r.status === 'done' ? ' done' : ''}" data-tid="${r.id}" style="cursor:pointer;"></div>` },
-      { key: 'title', label: 'Задача', render: r => `<span class="data-table-title" style="${r.status === 'done' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${escapeHtml(r.title)}</span>` },
-      { key: 'projectName', label: 'Проект', render: r => `<span style="color:${r.projectColor || 'var(--text-secondary)'};font-size:12px;">${escapeHtml(r.projectName || '')}</span>` },
-      { key: 'priority', label: 'Приоритет', render: r => `<span class="badge ${priorityColors[r.priority] || 'badge-gray'}">${r.priority || 'normal'}</span>` },
-      { key: 'status', label: 'Статус', render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
+      { key: 'title', label: 'Задача', editable: true, editType: 'text', render: r => `<span class="data-table-title" style="${r.status === 'done' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${escapeHtml(r.title)}</span>` },
+      { key: 'projectName', label: 'Проект', render: r => {
+        if (!r.projectName) return '<span class="text-faint">—</span>';
+        const c = r.projectColor || '#6b6b6b';
+        const hex = c.replace('#', '');
+        const rr = parseInt(hex.slice(0,2),16)||107, gg = parseInt(hex.slice(2,4),16)||107, bb = parseInt(hex.slice(4,6),16)||107;
+        return `<span class="badge" style="background:rgba(${rr},${gg},${bb},0.14);color:${c}">${escapeHtml(r.projectName)}</span>`;
+      }},
+      { key: 'priority', label: 'Приоритет', editable: true, editType: 'select', editOptions: [
+        { value: 'low', label: 'low' }, { value: 'normal', label: 'normal' }, { value: 'high', label: 'high' },
+      ], render: r => `<span class="badge ${priorityColors[r.priority] || 'badge-gray'}">${r.priority || 'normal'}</span>` },
+      { key: 'status', label: 'Статус', editable: true, editType: 'select', editOptions: [
+        { value: 'todo', label: 'To Do' }, { value: 'in_progress', label: 'В работе' }, { value: 'done', label: 'Готово' },
+      ], render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
     ],
     idField: 'id',
-    availableViews: ['table', 'kanban', 'list'],
+    availableViews: ['table', 'kanban', 'list', 'gallery'],
     defaultView: 'table',
     addButton: '+ Задача',
     onAdd: () => showAddTaskModal(projects),
+    onQuickAdd: async (title) => {
+      let pid = projects[0]?.id;
+      if (!pid) pid = await invoke('create_project', { name: 'Входящие', description: '', color: '#9B9B9B' });
+      await invoke('create_task', { projectId: pid, title, description: '', priority: 'normal', dueDate: null });
+      loadWork();
+    },
+    onCellEdit: async (recordId, key, value, skipReload) => {
+      await invoke('update_task_field', { id: recordId, field: key, value });
+      if (!skipReload) loadWork();
+    },
+    onDelete: async (recordId) => {
+      await invoke('delete_task', { id: recordId });
+      loadWork();
+    },
+    onDuplicate: async (recordId) => {
+      const t = tasks.find(r => r.id === recordId);
+      if (!t) return;
+      await invoke('create_task', { projectId: t.project_id, title: t.title + ' (копия)', description: t.description || '', priority: t.priority || 'normal', dueDate: t.due_date || null });
+      loadWork();
+    },
     reloadFn: () => loadWork(),
     kanban: {
       groupByField: 'status',
@@ -2291,6 +2321,229 @@ async function loadCustomPage(tabId) {
   }
 }
 
+// ── Schedule tab ──
+
+const SCHEDULE_CATEGORIES = { health: '💊 Здоровье', sport: '🏋️ Спорт', home: '🏠 Дом', practice: '🧠 Практика', challenge: '🚫 Челлендж', work: '💼 Работа', other: '📌 Другое' };
+const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
+const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+async function loadSchedule(subTab) {
+  const el = document.getElementById('schedule-content');
+  if (!el) return;
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'schedule', {
+    title: 'Schedule',
+    subtitle: 'Расписание и повторяющиеся события',
+    icon: '📅',
+    renderDash: async (paneEl) => {
+      const stats = await invoke('get_schedule_stats').catch(() => ({ total_active: 0, completed_week: 0, completed_today: 0 }));
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.total_active}</div><div class="uni-dash-label">Активных</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.completed_today}</div><div class="uni-dash-label">Сегодня ✓</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.completed_week}</div><div class="uni-dash-label">За неделю ✓</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
+      const today = new Date().toISOString().slice(0, 10);
+      const completions = await invoke('get_schedule_completions', { date: today }).catch(() => []);
+      const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
+
+      const dbv = new DatabaseView(paneEl, {
+        tabId: 'schedule', recordTable: 'schedules', records: schedules,
+        availableViews: ['table', 'list'],
+        fixedColumns: [
+          { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
+          { key: 'title', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+          { key: 'category', label: 'Категория', render: r => `<span class="badge badge-purple">${SCHEDULE_CATEGORIES[r.category] || r.category}</span>` },
+          { key: 'frequency', label: 'Частота', render: r => {
+            if (r.frequency === 'custom' && r.frequency_days) {
+              return r.frequency_days.split(',').map(d => DAYS_SHORT[parseInt(d)-1] || d).join(', ');
+            }
+            return `<span style="font-size:12px;color:var(--text-muted);">${SCHEDULE_FREQ[r.frequency] || r.frequency}</span>`;
+          }},
+          { key: 'time_of_day', label: 'Время', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.time_of_day || '—'}</span>` },
+          { key: 'is_active', label: 'Статус', render: r => r.is_active ? '<span class="badge badge-green">Вкл</span>' : '<span class="badge badge-gray">Выкл</span>' },
+        ],
+        idField: 'id',
+        addButton: '+ Расписание',
+        onAdd: () => showScheduleModal(),
+        onQuickAdd: async (title) => {
+          await invoke('create_schedule', { title, category: 'other', frequency: 'daily', frequencyDays: null, timeOfDay: null, details: null });
+          loadSchedule();
+        },
+        reloadFn: () => loadSchedule(),
+        onDelete: async (id) => { await invoke('delete_schedule', { id }); },
+      });
+      await dbv.render();
+      paneEl.addEventListener('click', async (e) => {
+        const chk = e.target.closest('[data-schid]');
+        if (chk) {
+          await invoke('toggle_schedule_completion', { scheduleId: parseInt(chk.dataset.schid), date: today });
+          loadSchedule();
+        }
+      });
+    },
+  });
+}
+
+function showScheduleModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-compact">
+    <div class="modal-title">Новое расписание</div>
+    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="sch-title"></div>
+    <div class="form-group"><label class="form-label">Категория</label>
+      <select class="form-select" id="sch-cat" style="width:100%;">
+        ${Object.entries(SCHEDULE_CATEGORIES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label class="form-label">Частота</label>
+      <select class="form-select" id="sch-freq" style="width:100%;">
+        <option value="daily">Ежедневно</option><option value="weekly">Еженедельно</option><option value="custom">По дням</option>
+      </select></div>
+    <div class="form-group" id="sch-days-group" style="display:none;"><label class="form-label">Дни (1=Пн ... 7=Вс)</label>
+      <div style="display:flex;gap:4px;">${DAYS_SHORT.map((d,i) => `<label style="display:flex;align-items:center;gap:2px;font-size:12px;"><input type="checkbox" value="${i+1}" class="sch-day-cb">${d}</label>`).join('')}</div>
+    </div>
+    <div class="form-group"><label class="form-label">Время</label><input class="form-input" id="sch-time" type="time"></div>
+    <div class="form-group"><label class="form-label">Детали</label><input class="form-input" id="sch-details" placeholder="Дозировка, длительность..."></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="sch-save">Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('sch-freq')?.addEventListener('change', (e) => {
+    document.getElementById('sch-days-group').style.display = e.target.value === 'custom' ? '' : 'none';
+  });
+  document.getElementById('sch-save')?.addEventListener('click', async () => {
+    const title = document.getElementById('sch-title')?.value?.trim();
+    if (!title) return;
+    const freqDays = [...overlay.querySelectorAll('.sch-day-cb:checked')].map(cb => cb.value).join(',') || null;
+    try {
+      await invoke('create_schedule', {
+        title,
+        category: document.getElementById('sch-cat')?.value || 'other',
+        frequency: document.getElementById('sch-freq')?.value || 'daily',
+        frequencyDays: freqDays,
+        timeOfDay: document.getElementById('sch-time')?.value || null,
+        details: document.getElementById('sch-details')?.value || null,
+      });
+      overlay.remove();
+      loadSchedule();
+    } catch (err) { alert('Ошибка: ' + err); }
+  });
+}
+
+// ── Dan Koe Protocol tab ──
+
+const DK_PRACTICES = [
+  {
+    key: 'contemplation', label: 'Contemplation', icon: '🧘',
+    what: 'Тихое созерцание — 10-15 минут без отвлечений',
+    why: 'Тренирует осознанность, снижает реактивность ума, помогает замечать автоматические мысли вместо того, чтобы следовать за ними.',
+    how: [
+      'Сядь в тихое место, закрой глаза',
+      'Не пытайся "очистить разум" — просто наблюдай мысли как облака',
+      'Когда замечаешь, что увлёкся мыслью — мягко возвращайся к наблюдению',
+      'Начни с 5 минут, постепенно увеличивай до 15-20',
+    ],
+  },
+  {
+    key: 'pattern_interrupt', label: 'Pattern Interrupt', icon: '⚡',
+    what: 'Прерывание автоматических паттернов поведения',
+    why: 'Большинство действий выполняются на автопилоте. Прерывая паттерны, ты возвращаешь контроль над вниманием и решениями.',
+    how: [
+      'Замечай моменты "на автопилоте": рука тянется к телефону, открываешь соцсети, ешь от скуки',
+      'Спроси себя: "Зачем я это делаю прямо сейчас?"',
+      'Сделай паузу на 10 секунд перед импульсивным действием',
+      'Замени автоматическое действие осознанным выбором',
+    ],
+    examples: 'Потянулся к Instagram → паузу → "мне скучно, я могу почитать/погулять". Хочу сладкое → "голоден или стресс?"',
+  },
+  {
+    key: 'vision', label: 'Vision', icon: '🔭',
+    what: 'Вопросы о видении будущего — 5-10 минут рефлексии',
+    why: 'Без ясного видения будущего ты реагируешь на обстоятельства вместо того, чтобы создавать жизнь по своему дизайну.',
+    how: [
+      'Задай себе один из вопросов ниже и запиши ответ',
+      'Не фильтруй — пиши первое, что приходит',
+      'Перечитывай свои ответы раз в неделю',
+    ],
+    questions: [
+      'Какой будет моя идеальная жизнь через 3 года?',
+      'Что бы я делал, если бы деньги не были проблемой?',
+      'Какой навык изменит мою жизнь больше всего?',
+      'От чего мне нужно отказаться, чтобы расти?',
+      'Что я откладываю и почему?',
+      'Каким человеком я хочу стать?',
+    ],
+  },
+  {
+    key: 'integration', label: 'Integration', icon: '🔗',
+    what: 'Одно конкретное действие, основанное на практиках выше',
+    why: 'Инсайты без действий — просто развлечение. Integration превращает осознанность в реальные изменения.',
+    how: [
+      'Выбери одну вещь из сегодняшних практик, которую можешь применить прямо сейчас',
+      'Сделай это маленьким и конкретным: "напишу 200 слов", а не "начну писать книгу"',
+      'Запиши, что сделал — это усиливает привычку',
+    ],
+    examples: 'Vision → "хочу быть здоровее" → Integration → "сегодня пойду на 30-мин прогулку вместо скролла"',
+  },
+];
+
+async function loadDanKoe(subTab) {
+  const el = document.getElementById('dankoe-content');
+  if (!el) return;
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'dankoe', {
+    title: 'Dan Koe Protocol',
+    subtitle: 'Ежедневная практика осознанности',
+    icon: '🧠',
+    renderDash: async (paneEl) => {
+      const stats = await invoke('get_dan_koe_stats').catch(() => ({ week_entries: 0, week_complete: 0, streak: 0 }));
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.streak}</div><div class="uni-dash-label">Streak 🔥</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.week_complete}/7</div><div class="uni-dash-label">Полных дней</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.week_entries}/7</div><div class="uni-dash-label">Записей</div></div>
+        </div>
+        <div style="margin-top:20px;padding:16px;border-radius:var(--radius-2);background:var(--bg-hover);">
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Как это работает</div>
+          <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">
+            Протокол Dan Koe — 4 ежедневные практики для осознанной жизни.
+            Каждая занимает 5-15 минут. Выполняй по порядку, лучше утром.
+            Отмечай выполнение в <b>Schedule</b> → они появятся в <b>Календаре</b>.
+          </div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      paneEl.innerHTML = DK_PRACTICES.map(p => `
+        <div style="margin-bottom:24px;padding:16px;border-radius:var(--radius-2);border:1px solid var(--border-subtle);">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <span style="font-size:20px;">${p.icon}</span>
+            <span style="font-size:16px;font-weight:600;color:var(--text-primary);">${p.label}</span>
+          </div>
+          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">${p.what}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-1);">
+            <b>Зачем:</b> ${p.why}
+          </div>
+          <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Как делать:</div>
+          <ul style="margin:0 0 8px 16px;padding:0;font-size:13px;color:var(--text-secondary);line-height:1.7;">
+            ${p.how.map(h => `<li>${h}</li>`).join('')}
+          </ul>
+          ${p.questions ? `
+            <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Вопросы для рефлексии:</div>
+            <ul style="margin:0 0 8px 16px;padding:0;font-size:13px;color:var(--text-muted);line-height:1.7;font-style:italic;">
+              ${p.questions.map(q => `<li>${q}</li>`).join('')}
+            </ul>` : ''}
+          ${p.examples ? `<div style="font-size:12px;color:var(--text-faint);margin-top:8px;">💡 <i>${p.examples}</i></div>` : ''}
+        </div>`).join('');
+    },
+  });
+}
+
 export {
   loadHome,
   loadMindset,
@@ -2308,5 +2561,7 @@ export {
   loadSports,
   loadHealth,
   loadCustomPage,
+  loadSchedule,
+  loadDanKoe,
   panelItem,
 };

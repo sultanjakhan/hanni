@@ -2,7 +2,7 @@
 // Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память]
 
 import { S, invoke, TAB_REGISTRY } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, confirmModal } from '../utils.js';
 
 const SUB_PANES = [
   { id: 'dash',  icon: '📊', label: 'Дашборд' },
@@ -148,7 +148,7 @@ function showAddGoalModal(parentEl, tabId, config) {
       });
       overlay.remove();
       renderGoalsPane(parentEl, tabId, config);
-    } catch (err) { alert('Ошибка: ' + err); }
+    } catch (err) { console.error('Error:', err); }
   });
 }
 
@@ -249,7 +249,7 @@ function showAddNoteModal(parentEl, tabId, config) {
       });
       overlay.remove();
       renderNotesPane(parentEl, tabId, config);
-    } catch (err) { alert('Ошибка: ' + err); }
+    } catch (err) { console.error('Error:', err); }
   });
 }
 
@@ -279,7 +279,7 @@ function showEditNoteModal(parentEl, tabId, config, note) {
       });
       overlay.remove();
       renderNotesPane(parentEl, tabId, config);
-    } catch (err) { alert('Ошибка: ' + err); }
+    } catch (err) { console.error('Error:', err); }
   });
 }
 
@@ -389,11 +389,11 @@ async function renderStorePane(el, tabId, config) {
       e.stopPropagation();
       const entry = entries.find(en => en.id === parseInt(btn.dataset.storeId));
       if (!entry) return;
-      if (!confirm(`Удалить «${entry.key}»?`)) return;
+      if (!(await confirmModal(`Удалить «${entry.key}»?`))) return;
       try {
         await invoke('memory_forget', { category: tabId, key: entry.key });
         renderStorePane(el, tabId, config);
-      } catch (err) { alert('Ошибка: ' + err); }
+      } catch (err) { console.error('Error:', err); }
     });
   });
 
@@ -438,7 +438,7 @@ function showAddStoreModal(parentEl, tabId, config) {
       });
       overlay.remove();
       renderStorePane(parentEl, tabId, config);
-    } catch (err) { alert('Ошибка: ' + err); }
+    } catch (err) { console.error('Error:', err); }
   });
 }
 
@@ -465,7 +465,7 @@ function showEditStoreModal(parentEl, tabId, config, entry) {
       });
       overlay.remove();
       renderStorePane(parentEl, tabId, config);
-    } catch (err) { alert('Ошибка: ' + err); }
+    } catch (err) { console.error('Error:', err); }
   });
 }
 

@@ -618,6 +618,8 @@ function loadSubTabContent(tabId, subTab) {
     case 'food': tabLoaders.loadFood?.(subTab); break;
     case 'money': tabLoaders.loadMoney?.(subTab); break;
     case 'people': tabLoaders.loadPeople?.(subTab); break;
+    case 'schedule': tabLoaders.loadSchedule?.(subTab); break;
+    case 'dankoe': tabLoaders.loadDanKoe?.(subTab); break;
     default:
       if (tabId.startsWith('page_')) tabLoaders.loadCustomPage?.(tabId);
       break;

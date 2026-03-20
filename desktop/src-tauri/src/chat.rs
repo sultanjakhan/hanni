@@ -2,6 +2,7 @@
 use futures_util::StreamExt;
 use crate::types::*;
 use crate::prompts::*;
+use crate::mcp::McpState;
 use crate::memory::{build_memory_context_from_db, embed_texts, rerank_facts, search_similar_facts, gather_memory_candidates};
 use crate::proactive::{get_frontmost_app, get_browser_url, get_now_playing_sync};
 use crate::macos::get_macos_idle_seconds;
@@ -554,6 +555,20 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
             }
         }
     } else { tools_param };
+
+    // Append MCP tools (from connected MCP servers)
+    let tools_param = {
+        let mcp_state = app.state::<McpState>();
+        let mcp = mcp_state.0.lock().await;
+        let mcp_tools = mcp.tools_as_openai();
+        if !mcp_tools.is_empty() {
+            let mut tools = tools_param.unwrap_or_default();
+            tools.extend_from_slice(mcp_tools);
+            Some(tools)
+        } else {
+            tools_param
+        }
+    };
 
     // C5: Adaptive temperature based on query type
     let adaptive_temp = if !call_mode {
