@@ -4,7 +4,7 @@ import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
-import { showAddPropertyModal, showColumnMenu } from './db-properties.js';
+import { showAddPropertyPopover, showColumnMenu } from './db-properties.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
 import { bindClipboard } from './db-clipboard.js';
@@ -99,7 +99,7 @@ export async function renderTableView(el, ctx) {
   });
 
   // Column interactions
-  el.querySelector('.dbv-add-prop-col')?.addEventListener('click', () => showAddPropertyModal(tabId, reload));
+  el.querySelector('.dbv-add-prop-col')?.addEventListener('click', (e) => showAddPropertyPopover(tabId, e.target, reload));
   el.querySelectorAll('.prop-header').forEach(th => {
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle')) return;

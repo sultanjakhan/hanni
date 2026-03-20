@@ -1,150 +1,138 @@
-import { S, invoke } from '../state.js';
-import { escapeHtml } from '../utils.js';
+// ── db-view/db-filters.js — Filter UI (chips + dropdown) ──
 
-export function renderFilterBar(el, tabId, customProps, onApply) {
+import { S } from '../state.js';
+import { escapeHtml } from '../utils.js';
+import { applyFilters, saveFiltersToViewConfig, loadFiltersFromViewConfig } from './db-filter-logic.js';
+
+// Re-export logic
+export { applyFilters, saveFiltersToViewConfig, loadFiltersFromViewConfig };
+
+const COND_OPTIONS = [
+  { value: 'contains', label: 'содержит' },
+  { value: 'not_contains', label: 'не содержит' },
+  { value: 'eq', label: 'равно' },
+  { value: 'neq', label: 'не равно' },
+  { value: 'starts_with', label: 'начинается с' },
+  { value: 'ends_with', label: 'заканчивается на' },
+  { value: 'empty', label: 'пусто' },
+  { value: 'not_empty', label: 'не пусто' },
+  { value: 'gt', label: '>' },
+  { value: 'lt', label: '<' },
+  { value: 'before', label: 'до (дата)' },
+  { value: 'after', label: 'после (дата)' },
+  { value: 'this_week', label: 'эта неделя' },
+  { value: 'this_month', label: 'этот месяц' },
+  { value: 'last_7_days', label: 'последние 7 дней' },
+  { value: 'last_30_days', label: 'последние 30 дней' },
+];
+
+const COND_LABELS = Object.fromEntries(COND_OPTIONS.map(c => [c.value, c.label]));
+
+/** Render filter chip bar above the database view */
+export function renderFilterBar(el, tabId, allFields, onApply) {
   const filters = S.dbvFilters[tabId] || [];
-  const chips = filters.map((f, idx) => {
-    const prop = customProps.find(p => p.id === f.propId);
-    const label = prop ? prop.name : '?';
-    const condLabels = { eq: '=', neq: '\u2260', contains: '\u2248', starts: 'starts', ends: 'ends', before: '<', after: '>', this_week: 'this week', this_month: 'this month', empty: 'empty', not_empty: 'not empty' };
+  if (filters.length === 0) return;
+
+  const mode = filters._mode || 'and';
+  const chips = filters.filter(f => typeof f === 'object' && f.condition).map((f, idx) => {
+    const field = allFields.find(p => p.filterKey === f.filterKey);
+    const label = field ? field.label : '?';
+    const condLabel = COND_LABELS[f.condition] || f.condition;
     return `<span class="dbv-filter-chip" data-idx="${idx}">
-      ${escapeHtml(label)} ${condLabels[f.condition] || f.condition} ${f.value ? escapeHtml(f.value) : ''}
-      <span class="dbv-filter-chip-remove" data-remove="${idx}">\u00d7</span>
+      ${escapeHtml(label)} <em>${condLabel}</em> ${f.value ? escapeHtml(f.value) : ''}
+      <span class="dbv-filter-chip-remove" data-remove="${idx}">×</span>
     </span>`;
   }).join('');
 
-  const mode = S.dbvFilterMode?.[tabId] || 'and';
-  const modeBtn = filters.length > 1
-    ? `<button class="btn-secondary dbv-filter-mode-btn">${mode === 'and' ? 'AND' : 'OR'}</button>` : '';
+  const modeToggle = filters.length > 1
+    ? `<button class="dbv-filter-mode-btn">${mode === 'or' ? 'ИЛИ' : 'И'}</button>` : '';
 
   const bar = document.createElement('div');
   bar.className = 'dbv-filter-bar';
-  bar.innerHTML = `<button class="btn-secondary dbv-add-filter-btn">+ Filter</button>${modeBtn}${chips}`;
+  bar.innerHTML = chips + modeToggle;
   el.prepend(bar);
-
-  bar.querySelector('.dbv-add-filter-btn')?.addEventListener('click', () => {
-    showFilterBuilderModal(tabId, customProps, onApply);
-  });
-
-  bar.querySelector('.dbv-filter-mode-btn')?.addEventListener('click', () => {
-    if (!S.dbvFilterMode) S.dbvFilterMode = {};
-    S.dbvFilterMode[tabId] = mode === 'and' ? 'or' : 'and';
-    onApply();
-  });
 
   bar.querySelectorAll('.dbv-filter-chip-remove').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const idx = parseInt(btn.dataset.remove);
-      if (S.dbvFilters[tabId]) S.dbvFilters[tabId].splice(idx, 1);
+      S.dbvFilters[tabId].splice(parseInt(btn.dataset.remove), 1);
       saveFiltersToViewConfig(tabId);
       onApply();
     });
   });
-}
 
-export function showFilterBuilderModal(tabId, customProps, onApply) {
-  if (!customProps.length) { alert('Сначала добавьте свойства для фильтрации.'); return; }
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal modal-compact">
-    <div class="modal-title">Add Filter</div>
-    <div class="form-group"><label class="form-label">Property</label>
-      <select class="form-select" id="dbv-filter-prop" style="width:100%;">
-        ${customProps.map(p => `<option value="${p.id}" data-type="${p.type}" data-options='${escapeHtml(p.options || "[]")}'>${escapeHtml(p.name)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group"><label class="form-label">Condition</label>
-      <select class="form-select" id="dbv-filter-cond" style="width:100%;">
-        <option value="eq">Equals</option><option value="neq">Not equals</option>
-        <option value="contains">Contains</option>
-        <option value="starts">Starts with</option><option value="ends">Ends with</option>
-        <option value="before">Before (date)</option><option value="after">After (date)</option>
-        <option value="this_week">This week</option><option value="this_month">This month</option>
-        <option value="empty">Is empty</option><option value="not_empty">Is not empty</option>
-      </select>
-    </div>
-    <div class="form-group" id="dbv-filter-val-group"><label class="form-label">Value</label>
-      <input class="form-input" id="dbv-filter-val" placeholder="Value">
-    </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-      <button class="btn-primary" id="dbv-filter-apply">Apply</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-  const updateValueInput = () => {
-    const opt = document.getElementById('dbv-filter-prop')?.selectedOptions[0];
-    const cond = document.getElementById('dbv-filter-cond')?.value;
-    const vg = document.getElementById('dbv-filter-val-group');
-    if (['empty', 'not_empty', 'this_week', 'this_month'].includes(cond)) { vg.style.display = 'none'; return; }
-    vg.style.display = 'block';
-    const type = opt?.dataset.type;
-    if (type === 'select' || type === 'multi_select' || type === 'status') {
-      let opts = []; try { opts = JSON.parse(opt?.dataset.options || '[]'); } catch {}
-      if (type === 'status' && opts.length === 0) opts = ['Не начато', 'В работе', 'Готово'];
-      vg.innerHTML = `<label class="form-label">Value</label><select class="form-select" id="dbv-filter-val" style="width:100%;">${opts.map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('')}</select>`;
-    } else {
-      vg.innerHTML = `<label class="form-label">Value</label><input class="form-input" id="dbv-filter-val" placeholder="Value">`;
-    }
-  };
-
-  document.getElementById('dbv-filter-prop')?.addEventListener('change', updateValueInput);
-  document.getElementById('dbv-filter-cond')?.addEventListener('change', updateValueInput);
-
-  document.getElementById('dbv-filter-apply')?.addEventListener('click', () => {
-    const propId = parseInt(document.getElementById('dbv-filter-prop')?.value);
-    const condition = document.getElementById('dbv-filter-cond')?.value || 'eq';
-    const value = document.getElementById('dbv-filter-val')?.value || '';
-    if (!S.dbvFilters[tabId]) S.dbvFilters[tabId] = [];
-    S.dbvFilters[tabId].push({ propId, condition, value });
-    overlay.remove();
+  bar.querySelector('.dbv-filter-mode-btn')?.addEventListener('click', () => {
+    const f = S.dbvFilters[tabId];
+    f._mode = (f._mode || 'and') === 'and' ? 'or' : 'and';
     saveFiltersToViewConfig(tabId);
     onApply();
   });
 }
 
-export function applyFilters(records, valuesMap, filters, idField, tabId) {
-  if (!filters || filters.length === 0) return records;
-  const mode = S.dbvFilterMode?.[tabId] || 'and';
-  const check = (f, rid) => {
-    const val = valuesMap[rid]?.[f.propId] ?? '';
-    const s = String(val).toLowerCase(), fv = (f.value || '').toLowerCase();
-    switch (f.condition) {
-      case 'eq': return val === f.value;
-      case 'neq': return val !== f.value;
-      case 'contains': return s.includes(fv);
-      case 'starts': return s.startsWith(fv);
-      case 'ends': return s.endsWith(fv);
-      case 'before': return val && val < f.value;
-      case 'after': return val && val > f.value;
-      case 'this_week': { const d = new Date(), w = new Date(d); w.setDate(d.getDate() - d.getDay()); return val >= w.toISOString().slice(0, 10); }
-      case 'this_month': { const d = new Date(); return val >= `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; }
-      case 'empty': return !val;
-      case 'not_empty': return !!val;
-      default: return true;
+/** Show inline filter dropdown under anchor button */
+export function showFilterDropdown(anchorEl, tabId, allFields, onApply) {
+  if (allFields.length === 0) return;
+  document.querySelectorAll('.dbv-filter-dropdown').forEach(d => d.remove());
+
+  const rect = anchorEl.getBoundingClientRect();
+  const dd = document.createElement('div');
+  dd.className = 'dbv-filter-dropdown';
+  dd.style.top = rect.bottom + 4 + 'px';
+  dd.style.right = (window.innerWidth - rect.right) + 'px';
+
+  let selField = allFields[0], selCond = COND_OPTIONS[0], valueStr = '';
+
+  const render = () => {
+    let fieldOpts = selField.options || [];
+    const noValue = ['empty', 'not_empty', 'this_week', 'this_month', 'last_7_days', 'last_30_days'].includes(selCond.value);
+
+    dd.innerHTML = `
+      <div class="dbv-fd-row"><div class="dbv-fd-picker" id="dbv-fd-prop">${escapeHtml(selField.label)}<span class="dbv-fd-arrow">▾</span></div></div>
+      <div class="dbv-fd-row"><div class="dbv-fd-picker" id="dbv-fd-cond">${escapeHtml(selCond.label)}<span class="dbv-fd-arrow">▾</span></div></div>
+      ${!noValue ? `<div class="dbv-fd-row">${fieldOpts.length > 0
+        ? `<div class="dbv-fd-picker" id="dbv-fd-val">${valueStr ? escapeHtml(valueStr) : '<span style="color:var(--text-faint)">Выберите...</span>'}<span class="dbv-fd-arrow">▾</span></div>`
+        : `<input class="dbv-fd-input" id="dbv-fd-val" placeholder="Значение..." value="${escapeHtml(valueStr)}">`}</div>` : ''}
+      <button class="dbv-fd-apply">Применить</button>`;
+
+    dd.querySelector('#dbv-fd-prop')?.addEventListener('click', () => {
+      showPickerMenu(dd.querySelector('#dbv-fd-prop'), allFields.map(f => ({ value: f.filterKey, label: f.label })), selField.filterKey, (v) => { selField = allFields.find(f => f.filterKey === v) || allFields[0]; valueStr = ''; render(); });
+    });
+    dd.querySelector('#dbv-fd-cond')?.addEventListener('click', () => {
+      showPickerMenu(dd.querySelector('#dbv-fd-cond'), COND_OPTIONS, selCond.value, (v) => { selCond = COND_OPTIONS.find(o => o.value === v) || COND_OPTIONS[0]; render(); });
+    });
+    const valEl = dd.querySelector('#dbv-fd-val');
+    if (valEl && fieldOpts.length > 0 && valEl.tagName !== 'INPUT') {
+      valEl.addEventListener('click', () => { showPickerMenu(valEl, fieldOpts.map(o => ({ value: o, label: o })), valueStr, (v) => { valueStr = v; render(); }); });
     }
+    if (valEl?.tagName === 'INPUT') valEl.addEventListener('input', (e) => { valueStr = e.target.value; });
+
+    dd.querySelector('.dbv-fd-apply')?.addEventListener('click', () => {
+      if (!S.dbvFilters[tabId]) S.dbvFilters[tabId] = [];
+      S.dbvFilters[tabId].push({ filterKey: selField.filterKey, condition: selCond.value, value: valueStr });
+      dd.remove(); saveFiltersToViewConfig(tabId); onApply();
+    });
   };
-  return records.filter(r => {
-    const rid = r[idField];
-    return mode === 'or' ? filters.some(f => check(f, rid)) : filters.every(f => check(f, rid));
+
+  render();
+  document.body.appendChild(dd);
+  setTimeout(() => {
+    const close = (e) => { if (!dd.contains(e.target) && !anchorEl.contains(e.target) && !e.target.closest('.dbv-picker-menu')) { dd.remove(); document.removeEventListener('mousedown', close); } };
+    document.addEventListener('mousedown', close);
+  }, 10);
+}
+
+function showPickerMenu(anchor, options, currentVal, onSelect) {
+  document.querySelectorAll('.dbv-picker-menu').forEach(m => m.remove());
+  const rect = anchor.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'dbv-picker-menu';
+  menu.style.top = rect.bottom + 2 + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.style.minWidth = rect.width + 'px';
+  menu.innerHTML = options.map(o => `<div class="dbv-picker-item${o.value === currentVal ? ' active' : ''}" data-val="${escapeHtml(o.value)}">${escapeHtml(o.label)}</div>`).join('');
+  document.body.appendChild(menu);
+  menu.querySelectorAll('.dbv-picker-item').forEach(item => {
+    item.addEventListener('click', (e) => { e.stopPropagation(); menu.remove(); onSelect(item.dataset.val); });
   });
-}
-
-export async function saveFiltersToViewConfig(tabId) {
-  const json = JSON.stringify(S.dbvFilters[tabId] || []);
-  try {
-    const c = await invoke('get_view_configs', { tabId });
-    const id = c[0]?.id || await invoke('create_view_config', { tabId, name: 'Default', viewType: 'table' });
-    await invoke('update_view_config', { id, filterJson: json, sortJson: null, visibleColumns: null });
-  } catch {}
-}
-
-export async function loadFiltersFromViewConfig(tabId) {
-  try {
-    const c = await invoke('get_view_configs', { tabId });
-    if (c[0]?.filter_json) S.dbvFilters[tabId] = JSON.parse(c[0].filter_json);
-  } catch {}
+  setTimeout(() => { const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('mousedown', close); } }; document.addEventListener('mousedown', close); }, 10);
 }

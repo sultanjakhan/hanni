@@ -13,19 +13,19 @@ const SUB_PANES = [
 ];
 
 const TAB_LABELS = {
-  work: { name: 'Работа', icon: '💼' },
-  development: { name: 'Развитие', icon: '🚀' },
-  home: { name: 'Дом', icon: '🏠' },
-  hobbies: { name: 'Хобби', icon: '🎮' },
-  sports: { name: 'Спорт', icon: '⚽' },
-  health: { name: 'Здоровье', icon: '❤️' },
-  mindset: { name: 'Мышление', icon: '🧠' },
-  food: { name: 'Питание', icon: '🍔' },
-  money: { name: 'Финансы', icon: '💰' },
-  people: { name: 'Люди', icon: '👥' },
-  calendar: { name: 'Календарь', icon: '📅' },
-  focus: { name: 'Фокус', icon: '🎯' },
-  projects: { name: 'Проекты', icon: '📁' },
+  work: { name: 'Работа', icon: '💼', desc: 'Проекты и задачи' },
+  development: { name: 'Развитие', icon: '🚀', desc: 'Обучение и навыки' },
+  home: { name: 'Дом', icon: '🏠', desc: 'Дом и хозяйство' },
+  hobbies: { name: 'Хобби', icon: '🎮', desc: 'Медиа и коллекции' },
+  sports: { name: 'Спорт', icon: '⚽', desc: 'Тренировки и активность' },
+  health: { name: 'Здоровье', icon: '❤️', desc: 'Здоровье и привычки' },
+  mindset: { name: 'Мышление', icon: '🧠', desc: 'Дневник, настроение, принципы' },
+  food: { name: 'Питание', icon: '🍔', desc: 'Рацион и рецепты' },
+  money: { name: 'Финансы', icon: '💰', desc: 'Бюджет и расходы' },
+  people: { name: 'Люди', icon: '👥', desc: 'Контакты и связи' },
+  calendar: { name: 'Календарь', icon: '📅', desc: 'События и расписание' },
+  focus: { name: 'Фокус', icon: '🎯', desc: 'Глубокая работа' },
+  projects: { name: 'Проекты', icon: '📁', desc: 'Проекты и их задачи' },
 };
 
 /**
@@ -43,13 +43,16 @@ export async function renderUnifiedLayout(el, tabId, config) {
     const count = config.counts?.[p.id];
     const countHtml = count != null ? `<span class="uni-tab-count">(${count})</span>` : '';
     const cls = p.id === activePane ? ' active' : '';
-    return `<div class="uni-tab${cls}" data-pane="${p.id}"><span class="uni-tab-icon">${p.icon}</span>${p.label}${countHtml}</div>`;
+    return `<div class="uni-tab${cls}" data-pane="${p.id}">${p.label}${countHtml}</div>`;
   }).join('');
+
+  const desc = tabLabel.desc || config.subtitle || '';
 
   el.innerHTML = `
     <div class="uni-header">
       <span class="uni-header-icon">${tabLabel.icon}</span>
       <span class="uni-header-name">${escapeHtml(tabLabel.name)}</span>
+      ${desc ? `<div class="uni-header-desc">${escapeHtml(desc)}</div>` : ''}
     </div>
     <div class="uni-tabs">${tabsHtml}</div>
     <div class="uni-content">

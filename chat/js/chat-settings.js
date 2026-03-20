@@ -1,0 +1,651 @@
+// ── js/chat-settings.js — Chat settings panel (memory, proactive, voice, styles, tools, data, appearance, about) ──
+
+import { S, invoke, PROACTIVE_STYLE_DEFINITIONS, MEMORY_CATEGORIES, setTheme } from './state.js';
+import { escapeHtml, confirmModal, skeletonPage } from './utils.js';
+
+// Helper: render memory items (just the list — no listener re-registration)
+function _csMemRenderList(memories) {
+  const list = document.getElementById('cs-mem-list');
+  if (!list) return;
+  const countEl = document.getElementById('cs-mem-count');
+  if (countEl) countEl.textContent = `${memories.length} фактов`;
+  list.innerHTML = memories.map(m => `<div class="memory-item" data-mem-id="${m.id}">
+    <span class="memory-item-category memory-cat-${m.category || 'other'}">${escapeHtml(m.category)}</span>
+    <span class="memory-item-key">${escapeHtml(m.key)}</span>
+    <span class="memory-item-value">${escapeHtml(m.value)}</span>
+    <div class="memory-item-actions">
+      <button class="memory-item-btn memory-edit-btn" data-csedit="${m.id}" title="Редактировать">&#9998;</button>
+      <button class="memory-item-btn" data-csdel="${m.id}" title="Удалить">&times;</button>
+    </div>
+  </div>`).join('') || '<div style="color:var(--text-faint);font-size:12px;padding:8px;">Ничего не найдено</div>';
+}
+
+// Setup memory panel: event delegation + search + add (called ONCE)
+function _chatSettingsSetupMemory(memories) {
+  // Reload helper
+  const reloadMem = async () => {
+    const q = document.getElementById('cs-mem-search')?.value || null;
+    const updated = await invoke('get_all_memories', { search: q }).catch(() => []);
+    _csMemRenderList(updated);
+  };
+
+  // Event delegation on the list container (handles delete + edit for all items)
+  const list = document.getElementById('cs-mem-list');
+  if (list) {
+    list.addEventListener('click', async (e) => {
+      const delBtn = e.target.closest('[data-csdel]');
+      if (delBtn) {
+        if (await confirmModal()) {
+          await invoke('delete_memory', { id: parseInt(delBtn.dataset.csdel) }).catch(e => console.error('delete_memory error:', e));
+          reloadMem();
+        }
+        return;
+      }
+      const editBtn = e.target.closest('[data-csedit]');
+      if (editBtn) {
+        const id = parseInt(editBtn.dataset.csedit);
+        // Fetch current value from DB to avoid stale data
+        const allMem = await invoke('get_all_memories', { search: null }).catch(() => []);
+        const m = allMem.find(x => x.id === id);
+        if (!m) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `<div class="modal modal-compact">
+          <div class="modal-title">Редактировать факт</div>
+          <div class="form-group"><label class="form-label">Категория</label>
+            <select class="form-select memory-edit-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')}</select>
+          </div>
+          <div class="form-group"><label class="form-label">Ключ</label>
+            <input class="form-input memory-edit-key" value="${escapeHtml(m.key)}" placeholder="Ключ">
+          </div>
+          <div class="form-group"><label class="form-label">Значение</label>
+            <textarea class="form-input memory-edit-val" placeholder="Значение" rows="3" style="resize:vertical;">${escapeHtml(m.value)}</textarea>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-secondary mem-cancel">Отмена</button>
+            <button class="btn-primary mem-save">Сохранить</button>
+          </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('.mem-cancel').onclick = () => overlay.remove();
+        overlay.addEventListener('click', ev => { if (ev.target === overlay) overlay.remove(); });
+        overlay.querySelector('.mem-save').onclick = async () => {
+          const cat = overlay.querySelector('.memory-edit-cat').value;
+          const key = overlay.querySelector('.memory-edit-key').value.trim();
+          const val = overlay.querySelector('.memory-edit-val').value.trim();
+          if (!key || !val) return;
+          try { await invoke('update_memory', { id, category: cat, key, value: val }); } catch (err) { console.error(err); }
+          overlay.remove();
+          reloadMem();
+        };
+      }
+    });
+  }
+
+  // Add button (once)
+  document.getElementById('cs-mem-add-btn')?.addEventListener('click', () => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal modal-compact">
+      <div class="modal-title">Новый факт</div>
+      <div class="form-group"><label class="form-label">Категория</label>
+        <select class="form-select memory-add-cat">${MEMORY_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label class="form-label">Ключ</label>
+        <input class="form-input memory-add-key" placeholder="напр. имя, привычка" autocomplete="off">
+      </div>
+      <div class="form-group"><label class="form-label">Значение</label>
+        <input class="form-input memory-add-val" placeholder="Значение факта" autocomplete="off">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary mem-cancel">Отмена</button>
+        <button class="btn-primary mem-save">Добавить</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mem-cancel').onclick = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('.mem-save').onclick = async () => {
+      const cat = overlay.querySelector('.memory-add-cat').value;
+      const key = overlay.querySelector('.memory-add-key').value.trim();
+      const val = overlay.querySelector('.memory-add-val').value.trim();
+      if (!key || key.length < 2 || !val || val.length < 2) { overlay.querySelector('.memory-add-key').style.borderColor = !key || key.length < 2 ? 'var(--accent)' : ''; return; }
+      try { await invoke('memory_remember', { category: cat, key, value: val }); } catch (err) { console.error(err); }
+      overlay.remove();
+      reloadMem();
+    };
+  });
+
+  // Search (once, with debounce)
+  let searchTimeout;
+  document.getElementById('cs-mem-search')?.addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      const q = e.target.value;
+      const results = await invoke('get_all_memories', { search: q || null }).catch(() => []);
+      _csMemRenderList(results);
+    }, 300);
+  });
+}
+
+async function loadChatSettings() {
+  const el = document.getElementById('chat-settings-content');
+  if (!el) return;
+  el.innerHTML = skeletonPage();
+  try {
+    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory, useOpenClaw] = await Promise.all([
+      invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
+      invoke('get_tts_voices').catch(() => []),
+      invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
+      invoke('get_all_memories', { search: null }).catch(() => []),
+      invoke('get_app_setting', { key: 'voice_clone_enabled' }).catch(() => null),
+      invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null),
+      invoke('list_voice_samples').catch(() => []),
+      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
+      invoke('get_flywheel_history').catch(() => []),
+      invoke('get_app_setting', { key: 'use_openclaw' }).catch(() => null),
+    ]);
+    const voicesByLang = {};
+    for (const v of ttsVoices) {
+      const lang = v.lang || 'other';
+      if (!voicesByLang[lang]) voicesByLang[lang] = [];
+      voicesByLang[lang].push(v);
+    }
+    const langOrder = ['ru-RU', 'kk-KZ', 'en-US'];
+    const sortedLangs = [...langOrder.filter(l => voicesByLang[l]), ...Object.keys(voicesByLang).filter(l => !langOrder.includes(l)).sort()];
+
+    const enabledStyles = proactive.enabled_styles || PROACTIVE_STYLE_DEFINITIONS.map(s => s.id);
+    const quietStart = proactive.quiet_start_time || `${String(proactive.quiet_hours_start ?? 23).padStart(2,'0')}:00`;
+    const quietEnd = proactive.quiet_end_time || `${String(proactive.quiet_hours_end ?? 8).padStart(2,'0')}:00`;
+
+    el.innerHTML = `
+      <div class="chat-settings-tabs">
+        <button class="chat-settings-tab active" data-panel="memory">Память</button>
+        <button class="chat-settings-tab" data-panel="general">Автономный</button>
+        <button class="chat-settings-tab" data-panel="voice">Голос</button>
+        <button class="chat-settings-tab" data-panel="styles">Стили</button>
+        <button class="chat-settings-tab" data-panel="tools">Инструменты</button>
+        <button class="chat-settings-tab" data-panel="data">Данные</button>
+        <button class="chat-settings-tab" data-panel="appearance">Оформление</button>
+        <button class="chat-settings-tab" data-panel="about">О Hanni</button>
+      </div>
+
+      <div class="chat-settings-panel active" id="cs-panel-memory">
+        <div class="memory-header">
+          <div class="memory-search-box" style="flex:1;">
+            <input class="form-input" id="cs-mem-search" placeholder="Поиск по памяти..." autocomplete="off">
+          </div>
+          <button class="btn-primary" id="cs-mem-add-btn">+ Добавить</button>
+        </div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:12px;" id="cs-mem-count">${memories.length} фактов</div>
+        <div class="memory-browser" id="cs-mem-list"></div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-general">
+        <div class="settings-section">
+          <div class="settings-section-title">Автономный режим <span class="proactive-status-badge" id="proactive-status-badge">Активен</span></div>
+          <div class="settings-row">
+            <span class="settings-label">Включён</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-proactive-enabled" ${proactive.enabled ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Интервал</span>
+            <div class="proactive-interval-row">
+              <input type="range" id="chat-proactive-slider" class="proactive-slider" min="1" max="60" value="${proactive.interval_minutes}">
+              <input type="number" id="chat-proactive-number" class="proactive-interval-number" min="1" max="120" value="${proactive.interval_minutes}">
+              <span class="proactive-interval-unit">мин</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Тихие часы</span>
+            <div class="quiet-hours-row">
+              <span class="quiet-hours-label">С</span>
+              <input type="time" id="chat-quiet-start" class="form-input" style="width:90px;text-align:center" value="${quietStart}">
+              <span class="quiet-hours-separator">—</span>
+              <span class="quiet-hours-label">До</span>
+              <input type="time" id="chat-quiet-end" class="form-input" style="width:90px;text-align:center" value="${quietEnd}">
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Лимит в день</span>
+            <div class="proactive-interval-row">
+              <input type="number" id="chat-daily-limit" class="proactive-interval-number" min="0" max="100" value="${proactive.daily_limit ?? 20}">
+              <span class="proactive-interval-unit">сообщ. (0 = безлимит)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-voice">
+        <div class="settings-section">
+          <div class="settings-section-title">Озвучка</div>
+          <div class="settings-row">
+            <span class="settings-label">Включена</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-voice-enabled" ${proactive.voice_enabled ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Голос</span>
+            <select class="form-select" id="chat-voice-name" style="width:260px">
+              ${sortedLangs.map(lang => `
+                <optgroup label="${lang}">
+                  ${(voicesByLang[lang] || []).map(v =>
+                    `<option value="${v.name}" ${proactive.voice_name === v.name ? 'selected' : ''}>${v.name} (${v.gender})</option>`
+                  ).join('')}
+                </optgroup>
+              `).join('')}
+            </select>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label"></span>
+            <button class="settings-btn" id="chat-test-voice">Прослушать</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">TTS Сервер (PC)</div>
+          <div class="settings-row">
+            <span class="settings-label">URL сервера</span>
+            <input class="form-input" id="chat-tts-server-url" placeholder="http://192.168.x.x:8236" value="${ttsServerUrl || ''}" style="width:220px">
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Статус</span>
+            <span class="settings-value" id="chat-tts-server-status">—</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label"></span>
+            <button class="settings-btn" id="chat-tts-server-save">Сохранить</button>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Клонирование голоса (PC)</div>
+          <div class="settings-row">
+            <span class="settings-label">Использовать клон</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-voice-clone-enabled" ${voiceCloneEnabled === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Образец голоса</span>
+            <select class="form-select" id="chat-voice-clone-sample" style="width:220px">
+              <option value="">— нет —</option>
+              ${voiceSamples.map(s => `<option value="${s.name}" ${voiceCloneSample === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label"></span>
+            <button class="settings-btn" id="chat-record-voice-sample">Записать образец</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-styles">
+        <div class="settings-section">
+          <div class="settings-section-title">Стили проактивных сообщений</div>
+          <div class="proactive-styles-section">
+            <div class="proactive-styles-desc">Какие стили Hanni может использовать в автономном режиме.</div>
+            <div class="proactive-styles-actions">
+              <button class="btn-smallall" id="proactive-select-all">Все</button>
+              <button class="btn-smallall" id="proactive-select-none">Снять все</button>
+            </div>
+            <div class="proactive-styles-grid" id="proactive-styles-grid">
+              ${PROACTIVE_STYLE_DEFINITIONS.map(s => {
+                const isEnabled = enabledStyles.includes(s.id);
+                return `<div class="proactive-style-card${isEnabled ? ' enabled' : ''}" data-style-id="${s.id}">
+                  <span class="proactive-style-icon">${s.icon}</span>
+                  <div class="proactive-style-info">
+                    <div class="proactive-style-name">${s.name}</div>
+                    <div class="proactive-style-desc">${s.desc}</div>
+                  </div>
+                  <label class="mini-toggle proactive-style-toggle">
+                    <input type="checkbox" ${isEnabled ? 'checked' : ''} data-style="${s.id}">
+                    <span class="mini-toggle-slider"></span>
+                  </label>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-tools">
+        <div class="settings-section">
+          <div class="settings-section-title">AI движок</div>
+          <div class="settings-row">
+            <span class="settings-label">OpenClaw Gateway</span>
+            <label class="toggle">
+              <input type="checkbox" id="chat-use-openclaw" ${useOpenClaw === 'true' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">Агент, 24 инструмента, Talk Mode, Telegram</span>
+          </div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">Дашборд: <a href="#" onclick="window.__TAURI__.shell.open('http://127.0.0.1:18789/');return false" style="color:var(--blue)">localhost:18789</a></span>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Встроенные инструменты</div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">web_search, read_url, set_timer, open_app, media, calendar, notes, money</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-data">
+        <div class="settings-section">
+          <div class="settings-section-title">Данные для обучения</div>
+          <div class="settings-row"><span class="settings-label">Диалогов (4+ сообщений)</span><span class="settings-value">${trainStats.conversations}</span></div>
+          <div class="settings-row"><span class="settings-label">Всего сообщений</span><span class="settings-value">${trainStats.total_messages}</span></div>
+          <div class="settings-row"><span class="settings-label">Thumbs-up пар</span><span class="settings-value" id="train-pairs-count">...</span></div>
+          <div class="settings-row"><span class="settings-label">Период</span><span class="settings-value">${trainStats.earliest ? trainStats.earliest.substring(0,10) + ' — ' + trainStats.latest.substring(0,10) : '—'}</span></div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Экспорт</div>
+          <div class="settings-row"><span class="settings-label">JSONL</span><button class="settings-btn" id="train-export-btn">Экспорт данных</button></div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Data Flywheel</div>
+          <div class="settings-row"><span class="settings-label">Всего thumbs-up</span><span class="settings-value">${trainFlywheel.thumbs_up_total}</span></div>
+          <div class="settings-row"><span class="settings-label">Новых (не экспортировано)</span><span class="settings-value" style="${trainFlywheel.new_pairs >= 20 ? 'color:var(--accent)' : ''}">${trainFlywheel.new_pairs}</span></div>
+          <div class="settings-row"><span class="settings-label">Циклов обучения</span><span class="settings-value">${trainFlywheel.total_cycles}</span></div>
+          <div class="settings-row"><span class="settings-label">Последний цикл</span><span class="settings-value">${trainFlywheel.last_cycle ? trainFlywheel.last_cycle.date.substring(0,10) + ' — ' + trainFlywheel.last_cycle.status : '—'}</span></div>
+          <div class="settings-row">
+            <span class="settings-label">Полный цикл</span>
+            <button class="settings-btn ${trainFlywheel.ready_to_train ? 'btn-primary' : ''}" id="flywheel-run-btn" ${trainFlywheel.ready_to_train ? '' : 'title="Нужно минимум 20 новых пар"'}>
+              ${trainFlywheel.ready_to_train ? 'Запустить цикл' : 'Мало данных (' + trainFlywheel.new_pairs + '/20)'}
+            </button>
+          </div>
+          <div id="flywheel-progress" class="hidden" style="margin-top:8px;">
+            <div class="train-progress-bar"><div class="train-progress-fill" id="flywheel-fill"></div></div>
+            <div id="flywheel-status" style="font-size:12px;color:var(--text-secondary);margin-top:4px;"></div>
+          </div>
+          ${trainHistory.length > 0 ? `
+          <div style="margin-top:12px;">
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">История циклов:</div>
+            ${trainHistory.slice(0, 5).map(c => `
+              <div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border-color);">
+                #${c.id} ${(c.started_at || '').substring(0,16)} — ${c.status} (${c.train_pairs} пар)${c.eval_score != null ? ' score:' + c.eval_score.toFixed(2) : ''}
+              </div>
+            `).join('')}
+          </div>` : ''}
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-appearance">
+        <div class="settings-section">
+          <div class="settings-section-title">Тема оформления</div>
+          <div class="settings-row">
+            <div>
+              <span class="settings-label">Тёмная тема</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="cs-theme-toggle" ${S.theme === 'dark' ? 'checked' : ''}>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-settings-panel" id="cs-panel-about">
+        <div class="about-wrapper">
+          <div class="about-card">
+            <div class="about-header">
+              <div class="about-logo">\u{1F916}</div>
+              <div class="about-name">Hanni</div>
+              <span class="about-version">v${S.APP_VERSION}</span>
+            </div>
+            <hr class="about-divider">
+            <div class="about-info-list">
+              <div class="about-info-row"><span class="about-info-label">Модель</span><span class="about-info-value" id="cs-about-model">Загрузка...</span></div>
+              <div class="about-info-row"><span class="about-info-label">MLX сервер</span><span class="about-info-value" id="cs-about-mlx">Загрузка...</span></div>
+              <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="cs-about-api">Проверяю...</span></div>
+            </div>
+            <hr class="about-divider">
+            <div class="about-actions">
+              <button class="settings-btn" id="cs-about-check-update">Проверить обновления</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    // ── Memory panel ──
+    _csMemRenderList(memories);
+    _chatSettingsSetupMemory(memories);
+
+    // ── Tab switching ──
+    document.querySelectorAll('.chat-settings-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.chat-settings-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.chat-settings-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`cs-panel-${tab.dataset.panel}`)?.classList.add('active');
+      });
+    });
+
+    // ── Save handlers ──
+    const getEnabledStyles = () => {
+      const checks = document.querySelectorAll('#proactive-styles-grid input[data-style]');
+      return Array.from(checks).filter(c => c.checked).map(c => c.dataset.style);
+    };
+    const getChatProactiveValues = () => {
+      const qStart = document.getElementById('chat-quiet-start')?.value || '23:00';
+      const qEnd = document.getElementById('chat-quiet-end')?.value || '08:00';
+      const [sh, sm] = qStart.split(':').map(Number);
+      const [eh, em] = qEnd.split(':').map(Number);
+      return {
+        enabled: document.getElementById('chat-proactive-enabled').checked,
+        voice_enabled: document.getElementById('chat-voice-enabled').checked,
+        voice_name: document.getElementById('chat-voice-name')?.value || 'xenia',
+        interval_minutes: parseInt(document.getElementById('chat-proactive-number')?.value || '10'),
+        quiet_hours_start: sh,
+        quiet_hours_end: eh,
+        quiet_start_time: qStart,
+        quiet_end_time: qEnd,
+        enabled_styles: getEnabledStyles(),
+        daily_limit: parseInt(document.getElementById('chat-daily-limit')?.value || '20'),
+      };
+    };
+    const saveChatSettings = () => invoke('set_proactive_settings', { settings: getChatProactiveValues() }).catch(() => {});
+
+    // ── Theme toggle ──
+    document.getElementById('cs-theme-toggle')?.addEventListener('change', (e) => {
+      setTheme(e.target.checked ? 'dark' : 'light');
+    });
+
+    document.getElementById('chat-use-openclaw')?.addEventListener('change', (e) => {
+      invoke('set_app_setting', { key: 'use_openclaw', value: e.target.checked ? 'true' : 'false' });
+    });
+    document.getElementById('chat-proactive-enabled')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-voice-enabled')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-quiet-start')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-quiet-end')?.addEventListener('change', saveChatSettings);
+    document.getElementById('chat-daily-limit')?.addEventListener('change', saveChatSettings);
+
+    // Interval slider <-> number sync
+    const slider = document.getElementById('chat-proactive-slider');
+    const numInput = document.getElementById('chat-proactive-number');
+    slider?.addEventListener('input', () => {
+      numInput.value = slider.value;
+    });
+    slider?.addEventListener('change', saveChatSettings);
+    numInput?.addEventListener('input', () => {
+      const v = Math.max(1, Math.min(120, parseInt(numInput.value) || 1));
+      if (v <= 60) slider.value = v;
+      saveChatSettings();
+    });
+
+    // Style toggles
+    document.querySelectorAll('#proactive-styles-grid .proactive-style-card').forEach(card => {
+      const checkbox = card.querySelector('input[data-style]');
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.mini-toggle')) return;
+        checkbox.checked = !checkbox.checked;
+        card.classList.toggle('enabled', checkbox.checked);
+        saveChatSettings();
+      });
+      checkbox?.addEventListener('change', () => {
+        card.classList.toggle('enabled', checkbox.checked);
+        saveChatSettings();
+      });
+    });
+
+    // Select all / none
+    document.getElementById('proactive-select-all')?.addEventListener('click', () => {
+      document.querySelectorAll('#proactive-styles-grid input[data-style]').forEach(c => { c.checked = true; });
+      document.querySelectorAll('#proactive-styles-grid .proactive-style-card').forEach(c => c.classList.add('enabled'));
+      saveChatSettings();
+    });
+    document.getElementById('proactive-select-none')?.addEventListener('click', () => {
+      document.querySelectorAll('#proactive-styles-grid input[data-style]').forEach(c => { c.checked = false; });
+      document.querySelectorAll('#proactive-styles-grid .proactive-style-card').forEach(c => c.classList.remove('enabled'));
+      saveChatSettings();
+    });
+
+    document.getElementById('chat-test-voice')?.addEventListener('click', async () => {
+      const voice = document.getElementById('chat-voice-name')?.value || 'xenia';
+      const btn = document.getElementById('chat-test-voice');
+      btn.textContent = 'Говорю...';
+      btn.disabled = true;
+      try {
+        await invoke('speak_text', { text: 'Привет! Я Ханни, твой персональный ассистент.', voice });
+      } catch (e) { console.error(e); }
+      setTimeout(() => { btn.textContent = 'Прослушать'; btn.disabled = false; }, 3000);
+    });
+
+    // TTS server
+    document.getElementById('chat-tts-server-save')?.addEventListener('click', async () => {
+      const url = document.getElementById('chat-tts-server-url')?.value.trim() || '';
+      await invoke('set_app_setting', { key: 'tts_server_url', value: url });
+      const statusEl = document.getElementById('chat-tts-server-status');
+      if (!url) { if (statusEl) statusEl.textContent = 'Отключён (edge-tts)'; return; }
+      try {
+        const resp = await fetch(url.replace(/\/$/, '') + '/health');
+        const data = await resp.json();
+        if (statusEl) statusEl.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = 'Недоступен';
+      }
+    });
+
+    // Auto-check TTS server
+    if (ttsServerUrl) {
+      try {
+        const resp = await fetch(ttsServerUrl.replace(/\/$/, '') + '/health');
+        const data = await resp.json();
+        const s = document.getElementById('chat-tts-server-status');
+        if (s) s.textContent = `${data.model} | ${data.gpu || 'CPU'}`;
+      } catch { const s = document.getElementById('chat-tts-server-status'); if (s) s.textContent = 'Недоступен'; }
+    }
+
+    // ── Voice Clone handlers ──
+    document.getElementById('chat-voice-clone-enabled')?.addEventListener('change', async (e) => {
+      await invoke('set_app_setting', { key: 'voice_clone_enabled', value: String(e.target.checked) });
+    });
+    document.getElementById('chat-voice-clone-sample')?.addEventListener('change', async (e) => {
+      await invoke('set_app_setting', { key: 'voice_clone_sample', value: e.target.value });
+    });
+    document.getElementById('chat-record-voice-sample')?.addEventListener('click', async () => {
+      const btn = document.getElementById('chat-record-voice-sample');
+      if (!btn) return;
+      const name = prompt('Имя для образца голоса:', 'my_voice');
+      if (!name) return;
+      btn.textContent = 'Записываю (5 сек)...';
+      btn.disabled = true;
+      try {
+        // Record directly via cpal for 5 seconds → save as WAV
+        const path = await invoke('record_voice_sample', { name, durationSecs: 5 });
+        btn.textContent = 'Сохранено!';
+        // Refresh sample list
+        const samples = await invoke('list_voice_samples').catch(() => []);
+        const sel = document.getElementById('chat-voice-clone-sample');
+        if (sel) {
+          sel.innerHTML = '<option value="">— нет —</option>' +
+            samples.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+          sel.value = name;
+        }
+        await invoke('set_app_setting', { key: 'voice_clone_sample', value: name });
+      } catch (err) {
+        btn.textContent = 'Ошибка: ' + String(err).substring(0, 30);
+      }
+      setTimeout(() => { btn.textContent = 'Записать образец'; btn.disabled = false; }, 3000);
+    });
+
+    // ── Training panel handlers ──
+    try {
+      const pairsPath = '~/Library/Application Support/Hanni/training_pairs.jsonl';
+      const content = await invoke('read_file', { path: pairsPath }).catch(() => '');
+      const count = content ? content.trim().split('\\n').filter(l => l.trim()).length : 0;
+      const pairsEl = document.getElementById('train-pairs-count');
+      if (pairsEl) pairsEl.textContent = String(count);
+    } catch (_) {
+      const pairsEl = document.getElementById('train-pairs-count');
+      if (pairsEl) pairsEl.textContent = '0';
+    }
+    document.getElementById('train-export-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
+      try { const r = await invoke('export_training_data'); btn.textContent = r.train_count + ' train + ' + r.valid_count + ' valid'; }
+      catch (err) { btn.textContent = String(err).substring(0, 30); }
+      setTimeout(() => { btn.textContent = 'Экспорт данных'; btn.disabled = false; }, 4000);
+    });
+    document.getElementById('flywheel-run-btn')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.disabled = true;
+      const progress = document.getElementById('flywheel-progress');
+      const fill = document.getElementById('flywheel-fill');
+      const status = document.getElementById('flywheel-status');
+      progress?.classList.remove('hidden');
+      btn.textContent = 'Экспорт...';
+      if (status) status.textContent = 'Шаг 1/3: Экспорт данных...';
+      if (fill) fill.style.width = '15%';
+      try {
+        await invoke('export_training_data');
+        btn.textContent = 'Обучение...';
+        if (status) status.textContent = 'Шаг 2/3: Fine-tuning (может занять 10-30 минут)...';
+        if (fill) fill.style.width = '40%';
+        const r = await invoke('run_flywheel_cycle');
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = `Цикл #${r.cycle_id} завершён: ${r.status} (${r.train_pairs} пар)`;
+        btn.textContent = 'Готово!';
+      } catch (err) {
+        if (fill) fill.style.width = '100%';
+        if (status) status.textContent = 'Ошибка: ' + String(err).substring(0, 80);
+        btn.textContent = 'Ошибка';
+      }
+      setTimeout(() => { btn.textContent = 'Запустить цикл'; btn.disabled = false; }, 5000);
+    });
+
+    // ── About panel ──
+    invoke('get_model_info').catch(() => ({})).then(info => {
+      const modelEl = document.getElementById('cs-about-model');
+      if (modelEl) modelEl.textContent = info.model_name || '?';
+      const mlxEl = document.getElementById('cs-about-mlx');
+      if (mlxEl) { mlxEl.textContent = info.server_online ? 'Онлайн' : 'Офлайн'; mlxEl.className = 'about-info-value ' + (info.server_online ? 'online' : 'offline'); }
+    });
+    fetch('http://127.0.0.1:8235/api/status').then(resp => {
+      const apiEl = document.getElementById('cs-about-api');
+      if (apiEl) { apiEl.textContent = resp.ok ? 'Активен' : 'Недоступен'; apiEl.className = 'about-info-value ' + (resp.ok ? 'online' : 'offline'); }
+    }).catch(() => {
+      const apiEl = document.getElementById('cs-about-api');
+      if (apiEl) { apiEl.textContent = 'Недоступен'; apiEl.className = 'about-info-value offline'; }
+    });
+    document.getElementById('cs-about-check-update')?.addEventListener('click', async (e) => {
+      const btn = e.target; btn.textContent = 'Проверяю...'; btn.disabled = true;
+      try { const r = await invoke('check_update'); btn.textContent = r; }
+      catch (err) { btn.textContent = 'Ошибка'; }
+      setTimeout(() => { btn.textContent = 'Проверить обновления'; btn.disabled = false; }, 4000);
+    });
+
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--color-red);font-size:14px;">Ошибка: ${e}</div>`;
+  }
+}
+
+export { loadChatSettings };

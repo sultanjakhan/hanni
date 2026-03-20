@@ -12,6 +12,7 @@ import { escapeHtml } from '../utils.js';
 export function renderGalleryView(el, ctx) {
   const {
     records, idField = 'id', fixedColumns = [],
+    customProps = [], valuesMap = {},
     onRowClick, onAdd, addButton,
     gallery = {},
   } = ctx;
@@ -32,7 +33,7 @@ export function renderGalleryView(el, ctx) {
     if (renderCard) {
       return `<div class="dbv-gallery-card" data-id="${rec[idField]}">${renderCard(rec)}</div>`;
     }
-    return renderDefaultCard(rec, fixedColumns, idField);
+    return renderDefaultCard(rec, fixedColumns, idField, customProps, valuesMap);
   }).join('');
 
   el.innerHTML = `${addButton ? `<div class="dbv-header"><button class="btn-primary dbv-add-btn">${addButton}</button></div>` : ''}
@@ -53,11 +54,33 @@ export function renderGalleryView(el, ctx) {
   }
 }
 
-function renderDefaultCard(rec, fixedColumns, idField) {
+const IMG_RE = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?|$)/i;
+
+function findCoverUrl(rec, fixedColumns, customProps, valuesMap, idField) {
+  // Check URL-type fixed columns
+  for (const c of fixedColumns) {
+    const v = String(rec[c.key] ?? '');
+    if (v && IMG_RE.test(v)) return v;
+  }
+  // Check URL-type custom properties
+  const rv = valuesMap[rec[idField]];
+  if (rv) {
+    for (const p of (customProps || []).filter(p => p.prop_type === 'url' && p.visible !== false)) {
+      const v = String(rv[p.id] ?? '');
+      if (v && IMG_RE.test(v)) return v;
+    }
+  }
+  return null;
+}
+
+function renderDefaultCard(rec, fixedColumns, idField, customProps, valuesMap) {
   const titleCol = fixedColumns[0];
   const title = titleCol
     ? (titleCol.render ? titleCol.render(rec) : escapeHtml(String(rec[titleCol.key] ?? '')))
     : escapeHtml(String(rec.title || rec.name || rec[idField]));
+
+  const coverUrl = findCoverUrl(rec, fixedColumns, customProps, valuesMap, idField);
+  const coverHtml = coverUrl ? `<div class="dbv-gallery-cover"><img src="${escapeHtml(coverUrl)}" alt="" loading="lazy"></div>` : '';
 
   const badges = fixedColumns.slice(1, 4).map(c => {
     const val = c.render ? c.render(rec) : escapeHtml(String(rec[c.key] ?? ''));
@@ -67,6 +90,7 @@ function renderDefaultCard(rec, fixedColumns, idField) {
   }).filter(Boolean).join('');
 
   return `<div class="dbv-gallery-card" data-id="${rec[idField]}">
+    ${coverHtml}
     <div class="dbv-gallery-card-title">${title}</div>
     ${badges ? `<div class="dbv-gallery-card-meta">${badges}</div>` : ''}
   </div>`;

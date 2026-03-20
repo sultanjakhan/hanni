@@ -14,7 +14,8 @@
  *   kanban?: { groupByField, columns: [{ key, label, icon?, color? }] },
  *   gallery?: { renderCard?, minCardWidth? },
  *   fetchRecords: () => Promise<array>,
- *   onAdd?: () => void,
+ *   onAdd?: () => void,              // fallback: opens modal
+ *   onQuickAdd?: (name) => Promise,   // inline creation (Notion-style)
  *   onRowClick?: (record) => void,
  *   addButton?: string,
  *   reloadFn?: () => void,

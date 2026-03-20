@@ -12,6 +12,7 @@ import { escapeHtml } from '../utils.js';
 export function renderKanbanView(el, ctx) {
   const {
     records, idField = 'id', kanban = {}, fixedColumns = [],
+    customProps = [], valuesMap = {},
     onRowClick, onAdd, addButton, onDrop,
   } = ctx;
 
@@ -36,7 +37,7 @@ export function renderKanbanView(el, ctx) {
     const colorDot = col.color ? `<span class="dbv-col-dot" style="background:var(--color-${col.color}, ${col.color})"></span>` : '';
     const icon = col.icon ? `<span class="dbv-col-icon">${col.icon}</span>` : '';
     const cardsHtml = items.length > 0
-      ? items.map(rec => renderCard(rec, fixedColumns, idField)).join('')
+      ? items.map(rec => renderCard(rec, fixedColumns, idField, customProps, valuesMap)).join('')
       : '<div class="dbv-kanban-empty">Нет записей</div>';
 
     return `<div class="dbv-kanban-column" data-group="${escapeHtml(col.key)}">
@@ -73,7 +74,7 @@ export function renderKanbanView(el, ctx) {
   setupKanbanDnD(el, records, idField, groupByField, onDrop);
 }
 
-function renderCard(rec, fixedColumns, idField) {
+function renderCard(rec, fixedColumns, idField, customProps, valuesMap) {
   const titleCol = fixedColumns[0];
   const title = titleCol
     ? (titleCol.render ? titleCol.render(rec) : escapeHtml(String(rec[titleCol.key] ?? '')))
@@ -82,14 +83,22 @@ function renderCard(rec, fixedColumns, idField) {
   const badges = fixedColumns.slice(1).map(c => {
     const val = c.render ? c.render(rec) : escapeHtml(String(rec[c.key] ?? ''));
     if (!val) return '';
-    // If the render already returns HTML with classes, use as-is; otherwise wrap in a badge
     if (val.includes('class=')) return `<span class="dbv-card-badge">${val}</span>`;
     return `<span class="dbv-card-badge badge badge-gray">${val}</span>`;
-  }).filter(Boolean).join('');
+  }).filter(Boolean);
+
+  // Show visible custom properties on card
+  const rv = valuesMap[rec[idField]];
+  if (rv) {
+    for (const p of (customProps || []).filter(p => p.visible !== false)) {
+      const v = rv[p.id];
+      if (v != null && v !== '') badges.push(`<span class="dbv-card-badge badge badge-gray">${escapeHtml(String(v))}</span>`);
+    }
+  }
 
   return `<div class="dbv-kanban-card" data-id="${rec[idField]}" draggable="true">
     <div class="dbv-kanban-card-title">${title}</div>
-    ${badges ? `<div class="dbv-kanban-card-meta">${badges}</div>` : ''}
+    ${badges.length ? `<div class="dbv-kanban-card-meta">${badges.join('')}</div>` : ''}
   </div>`;
 }
 

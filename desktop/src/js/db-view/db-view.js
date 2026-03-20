@@ -1,142 +1,153 @@
+// ── db-view/db-view.js — DatabaseView orchestrator class ──
+
 import { S, invoke } from '../state.js';
 import { renderToolbar } from './db-toolbar.js';
 import { renderTableView } from './db-table.js';
 import { renderKanbanView } from './db-kanban.js';
 import { renderListView } from './db-list.js';
 import { renderGalleryView } from './db-gallery.js';
+import { renderTimelineView } from './db-timeline.js';
+import { renderCalendarView } from './db-calendar.js';
+import { showFilterDropdown, renderFilterBar } from './db-filters.js';
+import { showSortDropdown, getSortRules, applySortRules } from './db-sort.js';
+import { exportToCsv } from './db-export.js';
+import { importCsv } from './db-import.js';
 
 export class DatabaseView {
   constructor(el, schema) {
     this.el = el;
-    this.schema = {
-      idField: 'id',
-      availableViews: ['table'],
-      defaultView: 'table',
-      ...schema,
-    };
-    this._currentView = null;
-    this._records = [];
-    this._customProps = [];
-    this._valuesMap = {};
-    this._sortRules = []; // [{key, dir}] — multi-level sort
+    this.schema = { idField: 'id', availableViews: ['table'], defaultView: 'table', ...schema };
+    Object.assign(this, { _currentView: null, _records: [], _customProps: [], _valuesMap: {}, _searchQuery: '' });
+    const removed = JSON.parse(localStorage.getItem(`dbv_removed_${this.schema.tabId}`) || '[]');
+    this.schema.availableViews = this.schema.availableViews.filter(v => !removed.includes(v));
+    if (!this.schema.availableViews.includes('table')) this.schema.availableViews.unshift('table');
   }
 
-  /** Main render entry point */
   async render() {
     const s = this.schema;
-
     this._records = s.records || (s.fetchRecords ? await s.fetchRecords().catch(() => []) : []);
     try { this._customProps = await invoke('get_property_definitions', { tabId: s.tabId }); } catch { this._customProps = []; }
-    const recordIds = this._records.map(r => r[s.idField]);
-    if (recordIds.length > 0 && this._customProps.length > 0) {
-      try {
-        const allValues = await invoke('get_property_values', { recordTable: s.recordTable, recordIds });
-        this._valuesMap = {};
-        for (const v of allValues) {
-          if (!this._valuesMap[v.record_id]) this._valuesMap[v.record_id] = {};
-          this._valuesMap[v.record_id][v.property_id] = v.value;
-        }
-      } catch { this._valuesMap = {}; }
-    }
-
-    // Resolve current view type (persisted or default)
-    if (!this._currentView) {
-      this._currentView = await this._loadPersistedViewFull() || s.defaultView;
-    }
-
-    // Clear & render
+    await this._loadValues();
+    if (!this._currentView) this._currentView = await this._loadPersistedView() || s.defaultView;
     this.el.innerHTML = '';
-
-    // Wrapper div for content (toolbar prepends before it)
     const contentEl = document.createElement('div');
     contentEl.className = 'dbv-content';
     this.el.appendChild(contentEl);
-
-    // Toolbar
-    renderToolbar(this.el, s.availableViews, this._currentView, (vt) => this._switchView(vt));
-
-    // Render current view
-    await this._renderView(contentEl);
+    const allFields = this._buildFields();
+    this._renderToolbar(allFields, contentEl);
+    await this._renderView(contentEl, allFields);
   }
 
-  /** Switch to a different view type */
-  async _switchView(viewType) {
-    this._currentView = viewType;
-    this._persistView(viewType);
-    await this.render();
-  }
-
-  async _renderView(contentEl) {
-    const s = this.schema;
-    const ctx = {
-      tabId: s.tabId, recordTable: s.recordTable, records: this._records,
-      fixedColumns: s.fixedColumns || [], idField: s.idField, customProps: this._customProps,
-      valuesMap: this._valuesMap, reloadFn: s.reloadFn || (() => this.render()),
-      onRowClick: s.onRowClick, onAdd: s.onAdd, addButton: s.addButton,
-      kanban: s.kanban, gallery: s.gallery, onDrop: s.onDrop,
-      onSort: (key, dir, multi) => this._handleSort(key, dir, multi), sortRules: this._sortRules,
-    };
-    const renderers = { kanban: renderKanbanView, list: renderListView, gallery: renderGalleryView };
-    const fn = renderers[this._currentView] || renderTableView;
-    await fn(contentEl, ctx);
-  }
-
-  /** Handle sort — multi=true adds secondary sort (Shift+click) */
-  _handleSort(sortKey, dir, multi = false) {
-    if (multi) {
-      const idx = this._sortRules.findIndex(r => r.key === sortKey);
-      if (idx >= 0) this._sortRules[idx].dir = dir;
-      else this._sortRules.push({ key: sortKey, dir });
-    } else {
-      this._sortRules = [{ key: sortKey, dir }];
-    }
-    this._applySortRules();
-    this.render();
-  }
-
-  _applySortRules() {
-    if (this._sortRules.length === 0) return;
-    const s = this.schema;
-    const vm = this._valuesMap;
-    const getVal = (rec, key) => {
-      if (key.startsWith('prop_')) return vm[rec[s.idField]]?.[parseInt(key.substring(5))] ?? '';
-      return rec[key] ?? '';
-    };
-    this._records.sort((a, b) => {
-      for (const { key, dir } of this._sortRules) {
-        const va = getVal(a, key), vb = getVal(b, key);
-        let cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
-        if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
-      }
-      return 0;
+  _renderToolbar(allFields, contentEl) {
+    const s = this.schema, visProp = () => this._customProps.filter(p => p.visible !== false);
+    renderToolbar(this.el, s.availableViews, this._currentView, (vt) => this._switchView(vt), {
+      onSearch: (q) => { this._searchQuery = q; this._renderView(contentEl, allFields); },
+      onFilter: (a) => showFilterDropdown(a, s.tabId, allFields, () => this.render()),
+      onSort: (a) => showSortDropdown(a, s.tabId, this._customProps, s.fixedColumns || [], () => this._handleSort()),
+      onAdd: s.onQuickAdd ? () => { this._searchQuery = ''; s.onQuickAdd(); } : null,
+      onExport: () => exportToCsv(this._applySearch(this._records), s.fixedColumns || [], visProp(), this._valuesMap, s.idField, s.tabId),
+      onImport: () => importCsv(s.tabId, s.fixedColumns || [], this._customProps, s.reloadFn || (() => this.render())),
+      onDeleteView: (vt) => this._removeView(vt),
+      onAddView: (vt) => this._addView(vt),
     });
   }
 
-  async _persistView(viewType) {
-    try {
-      const configs = await invoke('get_view_configs', { tabId: this.schema.tabId });
-      if (configs.length === 0) await invoke('create_view_config', { tabId: this.schema.tabId, name: 'Default', viewType });
-    } catch {}
-    localStorage.setItem(`dbv_view_${this.schema.tabId}`, viewType);
+  async _renderView(contentEl, allFields) {
+    const s = this.schema, records = this._applySearch(this._records);
+    const ctx = {
+      tabId: s.tabId, recordTable: s.recordTable, records,
+      fixedColumns: s.fixedColumns || [], idField: s.idField,
+      customProps: this._customProps, valuesMap: this._valuesMap,
+      reloadFn: s.reloadFn || (() => this.render()),
+      onRowClick: s.onRowClick, onAdd: s.onAdd, onQuickAdd: s.onQuickAdd,
+      addButton: s.addButton, kanban: s.kanban, gallery: s.gallery,
+      onSort: () => this._handleSort(),
+      onDrop: s.onDrop, onCellEdit: s.onCellEdit, onDelete: s.onDelete, onDuplicate: s.onDuplicate,
+    };
+    const views = { kanban: renderKanbanView, list: renderListView, gallery: renderGalleryView, timeline: renderTimelineView, calendar: renderCalendarView };
+    const fn = views[this._currentView];
+    if (fn) fn(contentEl, ctx); else await renderTableView(contentEl, ctx);
+    renderFilterBar(contentEl, s.tabId, allFields || this._buildFields(), () => this.render());
   }
 
-  async _loadPersistedViewFull() {
+  _applySearch(records) {
+    if (!this._searchQuery) return records;
+    const q = this._searchQuery.toLowerCase(), s = this.schema;
+    return records.filter(r => {
+      for (const c of (s.fixedColumns || [])) if (String(r[c.key] ?? '').toLowerCase().includes(q)) return true;
+      const vals = this._valuesMap[r[s.idField]];
+      return vals ? Object.values(vals).some(v => String(v ?? '').toLowerCase().includes(q)) : false;
+    });
+  }
+
+  _buildFields() {
+    const s = this.schema;
+    return [
+      ...(s.fixedColumns || []).map(c => ({ filterKey: c.key, label: c.label, options: c.editOptions || [] })),
+      ...this._customProps.filter(p => p.visible !== false).map(p => {
+        let opts = []; try { opts = JSON.parse(p.options || '[]'); } catch {} return { filterKey: `prop_${p.id}`, label: p.name, options: opts };
+      }),
+    ];
+  }
+
+  async _loadValues() {
+    const s = this.schema, ids = this._records.map(r => r[s.idField]);
+    if (ids.length === 0 || this._customProps.length === 0) return;
     try {
-      const configs = await invoke('get_view_configs', { tabId: this.schema.tabId });
-      if (configs[0]?.view_type && this.schema.availableViews.includes(configs[0].view_type)) return configs[0].view_type;
-    } catch {}
+      const all = await invoke('get_property_values', { recordTable: s.recordTable, recordIds: ids });
+      this._valuesMap = {};
+      for (const v of all) { if (!this._valuesMap[v.record_id]) this._valuesMap[v.record_id] = {}; this._valuesMap[v.record_id][v.property_id] = v.value; }
+    } catch { this._valuesMap = {}; }
+  }
+
+  _handleSort() {
+    const rules = getSortRules(this.schema.tabId);
+    applySortRules(this._records, rules, this.schema.idField, this._valuesMap);
+    this.render();
+  }
+  async _switchView(vt) { this._currentView = vt; this._persistView(vt); await this.render(); }
+  _addView(vt) {
+    const s = this.schema;
+    if (!s.availableViews.includes(vt)) s.availableViews.push(vt);
+    const removed = JSON.parse(localStorage.getItem(`dbv_removed_${s.tabId}`) || '[]');
+    const idx = removed.indexOf(vt);
+    if (idx !== -1) { removed.splice(idx, 1); localStorage.setItem(`dbv_removed_${s.tabId}`, JSON.stringify(removed)); }
+    this._switchView(vt);
+  }
+
+  _removeView(vt) {
+    const s = this.schema;
+    const vi = s.availableViews.indexOf(vt);
+    if (vi === -1) return;
+    s.availableViews.splice(vi, 1);
+    if (this._currentView === vt) this._currentView = 'table';
+    this._persistView(this._currentView);
+    const removed = JSON.parse(localStorage.getItem(`dbv_removed_${s.tabId}`) || '[]');
+    if (!removed.includes(vt)) { removed.push(vt); localStorage.setItem(`dbv_removed_${s.tabId}`, JSON.stringify(removed)); }
+    this.render();
+  }
+
+  async _loadPersistedView() {
+    try { const c = await invoke('get_view_configs', { tabId: this.schema.tabId }); if (c[0]?.view_type && this.schema.availableViews.includes(c[0].view_type)) return c[0].view_type; } catch {}
     const ls = localStorage.getItem(`dbv_view_${this.schema.tabId}`);
     return ls && this.schema.availableViews.includes(ls) ? ls : null;
   }
+  async _persistView(vt) {
+    try { const c = await invoke('get_view_configs', { tabId: this.schema.tabId }); if (c.length > 0) await invoke('update_view_config', { id: c[0].id, viewType: vt, filterJson: null, sortJson: null, visibleColumns: null }); else await invoke('create_view_config', { tabId: this.schema.tabId, name: 'Default', viewType: vt }); } catch {}
+    localStorage.setItem(`dbv_view_${this.schema.tabId}`, vt);
+  }
 }
 
-// Re-export everything for convenience
 export { registerSchema, getSchema, getSchemaIds } from './db-config.js';
 export { renderTableView } from './db-table.js';
 export { renderKanbanView } from './db-kanban.js';
 export { renderListView } from './db-list.js';
 export { renderGalleryView } from './db-gallery.js';
+export { renderTimelineView } from './db-timeline.js';
+export { renderCalendarView } from './db-calendar.js';
 export { formatPropValue, startInlineEdit } from './db-cell-editors.js';
-export { renderFilterBar, applyFilters, showFilterBuilderModal, saveFiltersToViewConfig, loadFiltersFromViewConfig } from './db-filters.js';
-export { showAddPropertyModal, showColumnMenu } from './db-properties.js';
+export { renderFilterBar, applyFilters, showFilterDropdown } from './db-filters.js';
+export { showAddPropertyPopover, showColumnMenu } from './db-properties.js';
 export { renderToolbar } from './db-toolbar.js';
+export { exportToCsv } from './db-export.js';
+export { importCsv } from './db-import.js';

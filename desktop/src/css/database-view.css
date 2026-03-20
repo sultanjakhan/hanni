@@ -338,6 +338,26 @@
   background: var(--bg-hover);
 }
 
+/* "+" add view button */
+.dbv-view-add {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  color: var(--text-faint);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  margin-left: 2px;
+  transition: all 100ms;
+}
+.dbv-view-add:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
 /* ── Header (add button row) ── */
 .dbv-header {
   display: flex;
