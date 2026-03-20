@@ -28,6 +28,7 @@ import {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
   loadMemoryTab, loadAbout, loadWork, loadProjects, loadDevelopment,
   loadHobbies, loadSports, loadHealth, loadCustomPage,
+  loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
 
 // ══════════════════════════════════════════════
@@ -98,6 +99,8 @@ tabLoaders.loadMindset = loadMindset;
 tabLoaders.loadFood = loadFood;
 tabLoaders.loadMoney = loadMoney;
 tabLoaders.loadPeople = loadPeople;
+tabLoaders.loadSchedule = loadSchedule;
+tabLoaders.loadDanKoe = loadDanKoe;
 tabLoaders.loadCustomPage = loadCustomPage;
 
 // Focus widget
