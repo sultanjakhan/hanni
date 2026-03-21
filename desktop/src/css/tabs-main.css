@@ -64,7 +64,7 @@
 }
 .focus-preset.active {
   background: var(--accent-blue); border-color: var(--accent-blue);
-  color: #fff; box-shadow: 0 2px 8px rgba(68, 122, 203, 0.3);
+  color: #fff; box-shadow: var(--shadow-sm);
 }
 
 /* Focus — Today Stats */
@@ -753,6 +753,7 @@
 }
 .gallery-card:hover {
   border-color: var(--border-default);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-card-hover);
 }
 .gallery-card-header {
@@ -1578,13 +1579,8 @@
 /* ── Phase 4: Polish & Enhancements ── */
 
 /* 4.3 Smooth page transitions */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 .page-content {
-  animation: fadeIn 0.15s ease-out;
+  animation: slideUp 0.15s ease-out;
 }
 
 /* 4.2 Drag handle polish */

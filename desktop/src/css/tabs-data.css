@@ -297,7 +297,7 @@
   transition: opacity var(--transition-normal);
 }
 
-.dashboard-stat:hover { border-color: var(--border-hover); }
+.dashboard-stat:hover { border-color: var(--border-hover); transform: translateY(-1px); box-shadow: var(--shadow-card-hover); }
 .dashboard-stat:hover::before { opacity: 1; }
 
 .dashboard-stat-value {
@@ -373,6 +373,29 @@
 }
 
 .work-project-count { font-size: 11px; color: var(--text-faint); }
+
+.work-project-delete,
+.trash-restore,
+.trash-delete {
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+  flex-shrink: 0;
+}
+.work-project-item:hover .work-project-delete,
+.work-project-item:hover .trash-restore,
+.work-project-item:hover .trash-delete { opacity: 1; }
+.work-project-delete:hover { color: var(--accent-red); }
+.trash-restore:hover { color: var(--accent-green); }
+.trash-delete:hover { color: var(--accent-red); }
+
+.trash-list { display: flex; flex-direction: column; }
 
 .work-tasks {
   flex: 1;
@@ -487,6 +510,7 @@
 
 .dev-card:hover {
   border-color: var(--border-hover);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-inset-border), var(--shadow-card-hover);
 }
 
@@ -509,7 +533,7 @@
 
 .dev-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-blue), #6B9FE8);
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-blue-light));
   border-radius: 3px;
   transition: width 0.4s ease;
 }
@@ -565,6 +589,7 @@
 
 .workout-card:hover {
   border-color: var(--border-hover);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-inset-border), var(--shadow-card-hover);
 }
 
@@ -768,7 +793,8 @@
 
 .contact-item:hover {
   border-color: var(--border-hover);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card-hover);
 }
 .contact-item.blocked { border-left: 3px solid var(--color-red); opacity: 0.7; }
 .contact-item.favorite { border-left: 3px solid var(--color-yellow); }
@@ -847,7 +873,6 @@
   animation: fadeIn 0.12s ease-out;
 }
 
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .modal {
   background: var(--bg-elevated);
@@ -967,22 +992,6 @@
   letter-spacing: 0.3px;
 }
 
-/* ── Keyframes ── */
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes slideIn {
-  from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
 
 /* ── HomeFit Integration ── */
 .hf-setup {

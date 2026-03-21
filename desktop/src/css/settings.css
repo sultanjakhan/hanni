@@ -23,6 +23,7 @@
 
 .integration-card:hover {
   border-color: var(--border-hover);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-inset-border), var(--shadow-card-hover);
 }
 
@@ -586,6 +587,8 @@
 
 .proactive-style-card:hover {
   border-color: var(--border-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .proactive-style-card.enabled {

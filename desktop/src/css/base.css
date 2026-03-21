@@ -60,6 +60,8 @@
   /* Accent */
   --accent-fill: #37352f;
   --accent-blue: #2383e2;
+  --accent-blue-light: #5ba3f5;
+  --accent-purple: #9065b0;
 
   /* Semantic colors */
   --color-green: #448361;
@@ -137,6 +139,8 @@
   /* Accent */
   --accent-fill: #EBEBEB;
   --accent-blue: #447ACB;
+  --accent-blue-light: #6B9FE8;
+  --accent-purple: #865DBB;
 
   /* Semantic colors */
   --color-green: #4F9768;
@@ -287,6 +291,7 @@ body {
 }
 .card:hover {
   border-color: var(--border-hover);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-inset-border), var(--shadow-card-hover);
 }
 
@@ -314,6 +319,7 @@ body {
 
 .module-card:hover {
   border-color: var(--border-hover);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-inset-border), var(--shadow-card-hover);
 }
 
@@ -690,3 +696,37 @@ body {
 .badge-purple { background: var(--color-purple-bg); color: var(--color-purple); }
 .badge-orange { background: var(--color-orange-bg); color: var(--color-orange); }
 .badge-pink { background: var(--color-pink-bg); color: var(--color-pink); }
+
+/* ── Shared Keyframes ── */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Animation utilities ── */
+
+.anim-fade-in { animation: fadeIn var(--transition-normal) ease-out; }
+.anim-slide-up { animation: slideUp var(--transition-normal) ease-out; }
+.anim-slide-in { animation: slideIn var(--transition-normal) ease-out; }
+.anim-scale-in { animation: scaleIn var(--transition-normal) ease-out; }

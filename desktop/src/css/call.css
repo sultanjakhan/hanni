@@ -317,7 +317,7 @@
 }
 
 .call-end-btn:hover {
-  background: #e33;
+  background: var(--color-red);
   transform: scale(1.08);
   box-shadow: 0 6px 32px rgba(220, 50, 50, 0.5);
 }

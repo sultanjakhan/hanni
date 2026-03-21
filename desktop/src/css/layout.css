@@ -409,7 +409,7 @@
 
 .goal-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-blue), #6B9FE8);
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-blue-light));
   border-radius: 3px;
 }
 
@@ -454,12 +454,7 @@
 
 .view.active {
   display: flex;
-  animation: viewFadeIn 0.15s ease-out;
-}
-
-@keyframes viewFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  animation: fadeIn 0.15s ease-out;
 }
 
 /* ── Cmd+K Command Palette ── */
