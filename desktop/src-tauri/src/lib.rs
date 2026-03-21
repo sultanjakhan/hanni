@@ -285,6 +285,10 @@ pub fn run() {
             commands_data::create_task,
             commands_data::get_tasks,
             commands_data::update_task_status,
+            commands_data::archive_project,
+            commands_data::get_archived_projects,
+            commands_data::restore_project,
+            commands_data::delete_project_permanent,
             // Learning Items (Development)
             commands_data::create_learning_item,
             commands_data::get_learning_items,

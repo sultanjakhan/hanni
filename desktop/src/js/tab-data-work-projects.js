@@ -27,11 +27,13 @@ export async function loadProjects() {
       paneEl.innerHTML = `
         <div class="dev-filters" style="margin-bottom:var(--space-3);">
           <button class="pill${activeInner === 'local' ? ' active' : ''}" data-prj="local">Проекты</button>
+          <button class="pill${activeInner === 'trash' ? ' active' : ''}" data-prj="trash">🗑 Корзина</button>
           <button class="pill${activeInner === 'forge' ? ' active' : ''}" data-prj="forge">✍️ Writer's Forge</button>
         </div>
         <div id="projects-inner-content"></div>`;
       const innerEl = paneEl.querySelector('#projects-inner-content');
       if (activeInner === 'forge') await loadWriterForge(innerEl);
+      else if (activeInner === 'trash') await renderTrashView(innerEl);
       else {
         const projects = await invoke('get_projects').catch(() => []);
         await renderProjectsView(innerEl, projects || []);
@@ -69,8 +71,15 @@ async function renderProjectsView(el, projects) {
     item.className = 'work-project-item' + (p.id === S.currentProjectId ? ' active' : '');
     item.innerHTML = `<span class="work-project-dot" style="background:${p.color || 'var(--accent-blue)'}"></span>
       <span class="work-project-name">${escapeHtml(p.name)}</span>
-      <span class="work-project-count">${p.task_count || 0}</span>`;
-    item.addEventListener('click', () => { S.currentProjectId = p.id; loadProjects(); });
+      <span class="work-project-count">${p.task_count || 0}</span>
+      <button class="work-project-delete" title="Удалить проект">×</button>`;
+    item.querySelector('.work-project-name').addEventListener('click', () => { S.currentProjectId = p.id; loadProjects(); });
+    item.querySelector('.work-project-dot').addEventListener('click', () => { S.currentProjectId = p.id; loadProjects(); });
+    item.querySelector('.work-project-count').addEventListener('click', () => { S.currentProjectId = p.id; loadProjects(); });
+    item.querySelector('.work-project-delete').addEventListener('click', (e) => {
+      e.stopPropagation();
+      showArchiveConfirm(p);
+    });
     projectList.appendChild(item);
   }
 
@@ -98,4 +107,78 @@ async function renderProjectsView(el, projects) {
     const title = prompt('Задача:');
     if (title) invoke('create_task', { projectId: S.currentProjectId, title, description: '', priority: 'normal', dueDate: null }).then(() => loadProjects()).catch(e => alert(e));
   });
+}
+
+function showArchiveConfirm(project) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-compact">
+    <div class="modal-title">Удалить проект?</div>
+    <p style="color:var(--text-secondary);margin:var(--space-2) 0;">
+      Проект <strong>${escapeHtml(project.name)}</strong>${project.task_count ? ` и ${project.task_count} задач` : ''} будет перемещён в корзину.
+    </p>
+    <div class="modal-actions">
+      <button class="btn-secondary confirm-cancel">Отмена</button>
+      <button class="btn-primary" style="background:var(--accent-red);" id="confirm-archive">Удалить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.confirm-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#confirm-archive').onclick = async () => {
+    await invoke('archive_project', { id: project.id }).catch(e => alert(e));
+    overlay.remove();
+    if (S.currentProjectId === project.id) S.currentProjectId = null;
+    loadProjects();
+  };
+}
+
+async function renderTrashView(el) {
+  const archived = await invoke('get_archived_projects').catch(() => []);
+  if (!archived.length) {
+    el.innerHTML = `<div style="text-align:center;padding:var(--space-6);color:var(--text-tertiary);">
+      <div style="font-size:32px;margin-bottom:var(--space-2);">🗑</div>
+      Корзина пуста</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="trash-list"></div>`;
+  const list = el.querySelector('.trash-list');
+  for (const p of archived) {
+    const item = document.createElement('div');
+    item.className = 'work-project-item';
+    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || 'var(--accent-blue)'}"></span>
+      <span class="work-project-name">${escapeHtml(p.name)}</span>
+      <span class="work-project-count">${p.task_count || 0}</span>
+      <button class="btn-small trash-restore" title="Восстановить">↩</button>
+      <button class="btn-small trash-delete" title="Удалить навсегда" style="color:var(--accent-red);">×</button>`;
+    item.querySelector('.trash-restore').addEventListener('click', async () => {
+      await invoke('restore_project', { id: p.id }).catch(e => alert(e));
+      loadProjects();
+    });
+    item.querySelector('.trash-delete').addEventListener('click', () => showPermanentDeleteConfirm(p));
+    list.appendChild(item);
+  }
+}
+
+function showPermanentDeleteConfirm(project) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-compact">
+    <div class="modal-title">Удалить навсегда?</div>
+    <p style="color:var(--text-secondary);margin:var(--space-2) 0;">
+      Проект <strong>${escapeHtml(project.name)}</strong> и все задачи будут удалены безвозвратно.
+    </p>
+    <div class="modal-actions">
+      <button class="btn-secondary confirm-cancel">Отмена</button>
+      <button class="btn-primary" style="background:var(--accent-red);" id="confirm-perm-delete">Удалить навсегда</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.confirm-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#confirm-perm-delete').onclick = async () => {
+    await invoke('delete_project_permanent', { id: project.id }).catch(e => alert(e));
+    overlay.remove();
+    loadProjects();
+  };
 }

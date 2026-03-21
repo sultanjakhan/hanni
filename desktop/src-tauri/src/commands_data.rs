@@ -343,6 +343,54 @@ pub fn update_task_status(id: i64, status: String, db: tauri::State<'_, HanniDb>
     Ok(())
 }
 
+#[tauri::command]
+pub fn archive_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("UPDATE projects SET status='archived', updated_at=?1 WHERE id=?2",
+        rusqlite::params![chrono::Local::now().to_rfc3339(), id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_archived_projects(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.name, p.color, p.updated_at,
+                (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as task_count
+         FROM projects p WHERE p.status='archived' ORDER BY p.updated_at DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "color": row.get::<_, String>(2)?,
+            "updated_at": row.get::<_, String>(3)?,
+            "task_count": row.get::<_, i64>(4)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn restore_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("UPDATE projects SET status='active', updated_at=?1 WHERE id=?2",
+        rusqlite::params![chrono::Local::now().to_rfc3339(), id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_project_permanent(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM tasks WHERE project_id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    conn.execute("DELETE FROM projects WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
 // ── v0.7.0: Learning Items (Development) commands ──
 
 #[tauri::command]
