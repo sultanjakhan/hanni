@@ -991,7 +991,7 @@ function addProactiveFeedbackButtons(wrapper, proactiveId, botText) {
 
 // ── File attachment ──
 
-attachBtn.addEventListener('click', () => fileInput.click());
+attachBtn?.addEventListener('click', () => fileInput.click());
 
 fileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
@@ -1459,39 +1459,94 @@ async function newChat() {
 
 document.getElementById('new-chat')?.addEventListener('click', newChat);
 
-// ── Input toolbar chips (Thinking, Self-refine, Web Search) ──
-const chipThinking = document.getElementById('chip-thinking');
-const chipSelfRefine = document.getElementById('chip-selfrefine');
-const chipWebSearch = document.getElementById('chip-websearch');
+// ── Input tools: plus button → dropdown → pills ──
+const TOOLS_CONFIG = [
+  { id: 'thinking', key: 'enable_thinking', label: 'Думать', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2a6.5 6.5 0 0 1 4.93 10.73L15 14H9l.57-1.27A6.5 6.5 0 0 1 9.5 2z"/><path d="M9 14v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-2"/><line x1="10" y1="18" x2="14" y2="18"/></svg>' },
+  { id: 'selfrefine', key: 'enable_self_refine', label: 'Проверить', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>' },
+  { id: 'websearch', key: 'enable_web_search', label: 'Поиск', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' },
+];
+const toolsState = {};
+const plusBtn = document.getElementById('input-plus-btn');
+const pillsContainer = document.getElementById('input-pills');
 
+function renderPills() {
+  pillsContainer.innerHTML = '';
+  for (const t of TOOLS_CONFIG) {
+    if (!toolsState[t.id]) continue;
+    const pill = document.createElement('span');
+    pill.className = 'input-pill';
+    pill.dataset.tool = t.id;
+    pill.innerHTML = `<svg class="pill-icon" width="12" height="12">${t.icon}</svg>${t.label}<span class="pill-close" data-tool="${t.id}">&times;</span>`;
+    pill.querySelector('.pill-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleTool(t.id);
+    });
+    pillsContainer.appendChild(pill);
+  }
+}
+
+async function toggleTool(id) {
+  toolsState[id] = !toolsState[id];
+  const cfg = TOOLS_CONFIG.find(t => t.id === id);
+  if (cfg) await invoke('set_app_setting', { key: cfg.key, value: toolsState[id] ? 'true' : 'false' }).catch(() => {});
+  renderPills();
+  const dd = document.getElementById('input-tools-dropdown');
+  if (dd) dd.querySelector(`[data-tool="${id}"]`)?.classList.toggle('active', toolsState[id]);
+}
+
+function showToolsDropdown() {
+  let dd = document.getElementById('input-tools-dropdown');
+  if (dd) { closeToolsDropdown(); return; }
+  plusBtn.classList.add('open');
+  dd = document.createElement('div');
+  dd.id = 'input-tools-dropdown';
+  const checkSvg = '<svg class="tools-dd-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 8 7 12 13 4"/></svg>';
+  for (const t of TOOLS_CONFIG) {
+    const item = document.createElement('button');
+    item.className = 'tools-dd-item' + (toolsState[t.id] ? ' active' : '');
+    item.dataset.tool = t.id;
+    item.innerHTML = `<svg width="16" height="16">${t.icon}</svg>${t.label}${checkSvg}`;
+    item.addEventListener('click', () => toggleTool(t.id));
+    dd.appendChild(item);
+  }
+  const sep = document.createElement('div');
+  sep.className = 'tools-dd-sep';
+  dd.appendChild(sep);
+  const attachItem = document.createElement('button');
+  attachItem.className = 'tools-dd-item';
+  attachItem.innerHTML = `<svg viewBox="0 0 16 16" fill="none"><path d="M13.5 7.5l-5.793 5.793a3.5 3.5 0 01-4.95-4.95L9.05 2.05a2 2 0 012.828 2.828L5.586 11.17a.5.5 0 01-.707-.707L11.17 4.17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Прикрепить файл`;
+  attachItem.addEventListener('click', () => { fileInput.click(); closeToolsDropdown(); });
+  dd.appendChild(attachItem);
+  document.getElementById('input-wrapper').appendChild(dd);
+  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 10);
+}
+
+function closeToolsDropdown() {
+  const dd = document.getElementById('input-tools-dropdown');
+  if (dd) dd.remove();
+  plusBtn.classList.remove('open');
+  document.removeEventListener('mousedown', handleOutsideClick);
+}
+
+function handleOutsideClick(e) {
+  const dd = document.getElementById('input-tools-dropdown');
+  if (dd && !dd.contains(e.target) && e.target !== plusBtn && !plusBtn.contains(e.target)) closeToolsDropdown();
+}
+
+plusBtn.addEventListener('click', showToolsDropdown);
+
+// Load saved state
 (async () => {
   const [thinkVal, refineVal, webVal] = await Promise.all([
     invoke('get_app_setting', { key: 'enable_thinking' }).catch(() => null),
     invoke('get_app_setting', { key: 'enable_self_refine' }).catch(() => null),
     invoke('get_app_setting', { key: 'enable_web_search' }).catch(() => null),
   ]);
-  if (thinkVal === 'true') chipThinking?.classList.add('active');
-  if (refineVal === 'true') chipSelfRefine?.classList.add('active');
-  if (webVal === 'true') chipWebSearch?.classList.add('active');
+  toolsState.thinking = thinkVal === 'true';
+  toolsState.selfrefine = refineVal === 'true';
+  toolsState.websearch = webVal === 'true';
+  renderPills();
 })();
-
-chipThinking?.addEventListener('click', async () => {
-  chipThinking.classList.toggle('active');
-  const on = chipThinking.classList.contains('active');
-  await invoke('set_app_setting', { key: 'enable_thinking', value: on ? 'true' : 'false' }).catch(() => {});
-});
-
-chipSelfRefine?.addEventListener('click', async () => {
-  chipSelfRefine.classList.toggle('active');
-  const on = chipSelfRefine.classList.contains('active');
-  await invoke('set_app_setting', { key: 'enable_self_refine', value: on ? 'true' : 'false' }).catch(() => {});
-});
-
-chipWebSearch?.addEventListener('click', async () => {
-  chipWebSearch.classList.toggle('active');
-  const on = chipWebSearch.classList.contains('active');
-  await invoke('set_app_setting', { key: 'enable_web_search', value: on ? 'true' : 'false' }).catch(() => {});
-});
 
 sendBtn.addEventListener('click', send);
 input.addEventListener('keydown', e => {

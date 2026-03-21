@@ -61,24 +61,11 @@
       <div id="chat-settings-content" class="tab-content"></div>
       <div id="attach-preview"></div>
       <div id="input-area">
-        <div id="input-toolbar">
-          <button class="input-chip" id="chip-thinking" title="Глубокое размышление для сложных задач">
-            <svg class="chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2a6.5 6.5 0 0 1 4.93 10.73L15 14H9l.57-1.27A6.5 6.5 0 0 1 9.5 2z"/><path d="M9 14v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-2"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
-            <span>Думать</span>
-          </button>
-          <button class="input-chip" id="chip-selfrefine" title="Авто-критика сложных ответов">
-            <svg class="chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-            <span>Проверить</span>
-          </button>
-          <button class="input-chip" id="chip-websearch" title="Всегда искать в интернете">
-            <svg class="chip-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-            <span>Поиск</span>
-          </button>
-        </div>
         <div id="input-wrapper">
-          <button id="attach" title="Прикрепить файл">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 7.5l-5.793 5.793a3.5 3.5 0 01-4.95-4.95L9.05 2.05a2 2 0 012.828 2.828L5.586 11.17a.5.5 0 01-.707-.707L11.17 4.17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <button id="input-plus-btn" title="Инструменты">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
           </button>
+          <div id="input-pills"></div>
           <input id="file-input" type="file" style="display:none">
           <textarea id="input" placeholder="Напиши сообщение..." autocomplete="off" rows="1"></textarea>
           <button id="stop-tts" class="hidden" title="Остановить озвучку">
