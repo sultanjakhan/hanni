@@ -45,7 +45,7 @@ export function enableColumnDrag(tableEl, tabId, reloadFn, visProps) {
         const propOrder = order.filter(id => id.startsWith('prop_'));
         for (let i = 0; i < propOrder.length; i++) {
           const propId = parseInt(propOrder[i].replace('prop_', ''));
-          await invoke('update_property_definition', { id: propId, position: i }).catch(() => {});
+          await invoke('update_property_definition', { id: propId, name: null, propType: null, position: i, color: null, options: null, visible: null }).catch(() => {});
         }
       }
 

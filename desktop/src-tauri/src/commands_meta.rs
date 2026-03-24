@@ -877,6 +877,23 @@ pub fn update_view_config(id: i64, filter_json: Option<String>, sort_json: Optio
     Ok(())
 }
 
+// ── UI State (persistent key-value, replaces localStorage) ──
+
+#[tauri::command]
+pub fn get_ui_state(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<String>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare("SELECT value FROM ui_state WHERE key=?1").map_err(|e| e.to_string())?;
+    let val = stmt.query_row(rusqlite::params![key], |r| r.get::<_, String>(0)).ok();
+    Ok(val)
+}
+
+#[tauri::command]
+pub fn set_ui_state(key: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("INSERT INTO ui_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", rusqlite::params![key, value]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ── Integrations, Model Info, Health Check ──
 // ── Integrations info ──
 

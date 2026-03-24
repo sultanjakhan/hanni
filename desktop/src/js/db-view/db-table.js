@@ -4,13 +4,15 @@ import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
-import { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder, highlightColumn, clearColumnHighlight } from './db-properties.js';
+import { getHiddenFixedCols, getFixedColName, getColumnOrder } from './db-properties.js';
+import { loadColState } from './db-col-state.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
 import { bindClipboard } from './db-clipboard.js';
 import { enableRowDrag } from './db-drag-rows.js';
 import { enableColumnDrag } from './db-col-drag.js';
 import { wireColumnResize } from './db-col-resize.js';
+import { wireColumnClicks } from './db-col-clicks.js';
 
 export async function renderTableView(el, ctx) {
   const {
@@ -19,6 +21,7 @@ export async function renderTableView(el, ctx) {
     onDelete, onDuplicate,
   } = ctx;
 
+  await loadColState(tabId);
   if (!S.dbvFilters[tabId]) await loadFiltersFromViewConfig(tabId);
   const filtered = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
   const visProps = customProps.filter(p => p.visible !== false);
@@ -90,19 +93,6 @@ export async function renderTableView(el, ctx) {
   const tableEl = el.querySelector('.data-table');
   if (tableEl) enableColumnDrag(tableEl, tabId, reload, visProps);
 
-  // Add-row click
-  el.querySelector('.dbv-add-row')?.addEventListener('click', () => { if (onAdd) onAdd(); });
-
-  // Row click
-  if (onRowClick) el.querySelectorAll('.data-table-row').forEach(row => {
-    row.style.cursor = 'pointer';
-    row.addEventListener('click', (e) => {
-      if (e.target.closest('.cell-editable,.inline-editor,.col-check')) return;
-      const rec = filtered.find(r => r[idField] === parseInt(row.dataset.id));
-      if (rec) onRowClick(rec);
-    });
-  });
-
   // Inline editing
   el.querySelectorAll('.cell-editable').forEach(cell => {
     cell.setAttribute('tabindex', '0');
@@ -110,36 +100,8 @@ export async function renderTableView(el, ctx) {
     cell.addEventListener('focus', () => focusCell(el, cell));
   });
 
-  // Column interactions
-  el.querySelector('.dbv-add-prop-col')?.addEventListener('click', (e) => showAddPropertyPopover(tabId, e.target, reload));
-  el.querySelectorAll('.prop-header').forEach(th => {
-    th.addEventListener('click', (e) => {
-      if (e.target.closest('.col-resize-handle')) return;
-      e.stopPropagation();
-      const colIdx = Array.from(th.parentElement.children).indexOf(th);
-      highlightColumn(tableEl, colIdx);
-      const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
-      if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reload, onSort);
-    });
-  });
-
-  // Fixed column header click → highlight + column menu
-  el.querySelectorAll('.fixed-header').forEach(th => {
-    th.addEventListener('click', (e) => {
-      if (e.target.closest('.col-resize-handle')) return;
-      e.stopPropagation();
-      const colIdx = Array.from(th.parentElement.children).indexOf(th);
-      highlightColumn(tableEl, colIdx);
-      showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort);
-    });
-  });
-
-  // Clear column highlight when clicking outside headers
-  el.addEventListener('click', (e) => {
-    if (!e.target.closest('.prop-header') && !e.target.closest('.fixed-header')) {
-      clearColumnHighlight(tableEl);
-    }
-  });
+  // Column clicks, row clicks, add-row
+  wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, filtered, idField, recordTable });
 }
 
 function focusCell(container, cell) {

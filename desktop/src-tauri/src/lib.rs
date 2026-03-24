@@ -434,6 +434,8 @@ pub fn run() {
             commands_meta::get_view_configs,
             commands_meta::create_view_config,
             commands_meta::update_view_config,
+            commands_meta::get_ui_state,
+            commands_meta::set_ui_state,
             // Call Mode
             voice::start_call_mode,
             voice::stop_call_mode,

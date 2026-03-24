@@ -596,6 +596,12 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             created_at TEXT NOT NULL
         );
 
+        -- v0.27.6: UI state (replaces localStorage for persistence across updates)
+        CREATE TABLE IF NOT EXISTS ui_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
         -- v0.11.0: Activity snapshots for background learning
         CREATE TABLE IF NOT EXISTS activity_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
