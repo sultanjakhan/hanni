@@ -2565,3 +2565,12 @@ export {
   loadDanKoe,
   panelItem,
 };
+
+// Register in tabLoaders for tabs.js switchTab()
+Object.assign(tabLoaders, {
+  loadHome, loadMindset, loadFood, loadMoney, loadPeople,
+  loadWork, loadProjects, loadDevelopment,
+  loadHobbies, loadSports, loadHealth,
+  loadCustomPage, loadSchedule, loadDanKoe,
+  loadMemoryTab, loadAbout,
+});
