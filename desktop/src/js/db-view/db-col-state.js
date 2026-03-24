@@ -23,17 +23,15 @@ export async function loadColState(tabId) {
     `dbv_col_order_${tabId}`, `dbv_wrap_${tabId}`, `dbv_frozen_${tabId}`,
   ];
   for (const k of keys) {
-    if (k in _cache) continue;
     try {
       const v = await invoke('get_ui_state', { key: k });
       if (v != null) _cache[k] = v;
+      else if (!(k in _cache)) {
+        // Migrate from localStorage on first load
+        const ls = localStorage.getItem(k);
+        if (ls) { _cache[k] = ls; invoke('set_ui_state', { key: k, value: ls }).catch(() => {}); }
+      }
     } catch {}
-  }
-  // Migrate from localStorage if DB is empty
-  for (const k of keys) {
-    if (k in _cache) continue;
-    const ls = localStorage.getItem(k);
-    if (ls) { _cache[k] = ls; invoke('set_ui_state', { key: k, value: ls }).catch(() => {}); }
   }
 }
 
