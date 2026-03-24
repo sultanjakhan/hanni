@@ -4,7 +4,7 @@ import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
-import { showAddPropertyPopover, showColumnMenu } from './db-properties.js';
+import { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder, highlightColumn, clearColumnHighlight } from './db-properties.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
 import { bindClipboard } from './db-clipboard.js';
@@ -22,37 +22,49 @@ export async function renderTableView(el, ctx) {
   if (!S.dbvFilters[tabId]) await loadFiltersFromViewConfig(tabId);
   const filtered = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
   const visProps = customProps.filter(p => p.visible !== false);
+  const hiddenFixed = getHiddenFixedCols(tabId);
+  const visFixedColumns = fixedColumns.filter(c => !hiddenFixed.includes(c.key));
   const hasActions = !!(onDelete || onDuplicate);
   const reload = reloadFn || (() => {});
-  const colCount = (hasActions ? 1 : 0) + fixedColumns.length + visProps.length + 1;
 
-  // Header — with initial widths
+  // Build unified column order (fixed keys + "prop_ID")
+  const unifiedCols = buildUnifiedColumns(tabId, visFixedColumns, visProps);
+  const colCount = (hasActions ? 1 : 0) + unifiedCols.length + 1;
+
+  // Header
   const W = { done: 30, title: 180, projectName: 100, priority: 100, status: 100, date: 100, tags: 120, name: 180, category: 100, quantity: 70, location: 100, needed: 90 };
   const thCheck = hasActions ? '<th class="col-check-header"><input type="checkbox"></th>' : '';
-  const thFixed = fixedColumns.map(c => {
-    const w = W[c.key] || 140;
-    if (!c.label) return `<th class="sortable-header" data-sort="${c.key}" style="width:${w}px"></th>`;
-    return `<th class="sortable-header" data-sort="${c.key}" style="width:${w}px"><div class="th-content"><span class="col-type-icon">${getTypeIcon(c.editType || 'text')}</span>${c.label}</div></th>`;
+  const thCols = unifiedCols.map(col => {
+    if (col.kind === 'fixed') {
+      const c = col.def;
+      const w = W[c.key] || 140;
+      const displayName = getFixedColName(tabId, c.key, c.label);
+      if (!displayName) return `<th class="sortable-header fixed-header draggable-col" data-sort="${c.key}" data-fixed-key="${c.key}" data-col-id="${c.key}" style="width:${w}px"></th>`;
+      return `<th class="sortable-header fixed-header draggable-col" data-sort="${c.key}" data-fixed-key="${c.key}" data-fixed-label="${escapeHtml(c.label)}" data-col-id="${c.key}" style="width:${w}px"><div class="th-content">${escapeHtml(displayName)}</div></th>`;
+    } else {
+      const p = col.def;
+      return `<th class="sortable-header prop-header draggable-col" data-sort="prop_${p.id}" data-prop-id="${p.id}" data-col-id="prop_${p.id}" style="width:180px"><div class="th-content">${escapeHtml(p.name)}</div></th>`;
+    }
   }).join('');
-  const thCustom = visProps.map(p =>
-    `<th class="sortable-header prop-header" data-sort="prop_${p.id}" data-prop-id="${p.id}" style="width:180px"><div class="th-content"><span class="col-type-icon">${getTypeIcon(p.type)}</span>${escapeHtml(p.name)}</div></th>`
-  ).join('');
 
   // Body
   let tbody = '';
   for (const r of filtered) {
     const rid = r[idField];
     const tdCheck = hasActions ? '<td class="col-check"><input type="checkbox"></td>' : '';
-    const tdFixed = fixedColumns.map(c => {
-      const val = c.render ? c.render(r) : escapeHtml(String(r[c.key] ?? ''));
-      return `<td>${val}</td>`;
+    const tdCols = unifiedCols.map(col => {
+      if (col.kind === 'fixed') {
+        const c = col.def;
+        const val = c.render ? c.render(r) : escapeHtml(String(r[c.key] ?? ''));
+        return `<td>${val}</td>`;
+      } else {
+        const p = col.def;
+        const autoVals = { created_time: r.created_at, last_edited: r.updated_at, unique_id: rid };
+        const raw = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
+        return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}' data-raw-value="${escapeHtml(String(raw))}">${formatPropValue(raw, p)}</td>`;
+      }
     }).join('');
-    const tdCustom = visProps.map(p => {
-      const autoVals = { created_time: r.created_at, last_edited: r.updated_at, unique_id: rid };
-      const raw = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
-      return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}' data-raw-value="${escapeHtml(String(raw))}">${formatPropValue(raw, p)}</td>`;
-    }).join('');
-    tbody += `<tr class="data-table-row" data-id="${rid}">${tdCheck}${tdFixed}${tdCustom}<td></td></tr>`;
+    tbody += `<tr class="data-table-row" data-id="${rid}">${tdCheck}${tdCols}<td></td></tr>`;
   }
 
   if (filtered.length === 0) {
@@ -63,7 +75,7 @@ export async function renderTableView(el, ctx) {
   const addRowHtml = onAdd ? `<tr class="dbv-add-row"><td colspan="${colCount}"><div class="dbv-add-row-label"><span class="dbv-add-row-plus">+</span> Новая запись</div></td></tr>` : '';
   const footerHtml = `<div class="dbv-table-footer"><span>Записей: ${filtered.length}</span></div>`;
 
-  el.innerHTML = `<div class="dbv-table-wrap"><table class="data-table database-view"><thead><tr>${thCheck}${thFixed}${thCustom}<th class="add-prop-col dbv-add-prop-col" title="Добавить свойство">+</th></tr></thead><tbody>${tbody}${addRowHtml}</tbody></table>${footerHtml}</div>`;
+  el.innerHTML = `<div class="dbv-table-wrap"><table class="data-table database-view"><thead><tr>${thCheck}${thCols}<th class="add-prop-col dbv-add-prop-col" title="Добавить свойство">+</th></tr></thead><tbody>${tbody}${addRowHtml}</tbody></table>${footerHtml}</div>`;
 
   // Wire features
   wireColumnResize(el, tabId);
@@ -76,7 +88,7 @@ export async function renderTableView(el, ctx) {
   bindClipboard(el, { recordTable, reloadFn: reload });
   enableRowDrag(el, filtered, idField);
   const tableEl = el.querySelector('.data-table');
-  if (tableEl) enableColumnDrag(tableEl, tabId, reload);
+  if (tableEl) enableColumnDrag(tableEl, tabId, reload, visProps);
 
   // Add-row click
   el.querySelector('.dbv-add-row')?.addEventListener('click', () => { if (onAdd) onAdd(); });
@@ -104,24 +116,58 @@ export async function renderTableView(el, ctx) {
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle')) return;
       e.stopPropagation();
+      const colIdx = Array.from(th.parentElement.children).indexOf(th);
+      highlightColumn(tableEl, colIdx);
       const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
       if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reload, onSort);
     });
   });
 
-  // Sorting on fixed headers
-  el.querySelectorAll('.sortable-header:not(.prop-header)').forEach(th => {
+  // Fixed column header click → highlight + column menu
+  el.querySelectorAll('.fixed-header').forEach(th => {
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle')) return;
-      const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
-      el.querySelectorAll('.sortable-header').forEach(h => { h.dataset.dir = 'none'; h.classList.remove('sort-asc', 'sort-desc'); });
-      th.dataset.dir = dir; th.classList.add(`sort-${dir}`);
-      if (onSort) onSort(th.dataset.sort, dir);
+      e.stopPropagation();
+      const colIdx = Array.from(th.parentElement.children).indexOf(th);
+      highlightColumn(tableEl, colIdx);
+      showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort);
     });
+  });
+
+  // Clear column highlight when clicking outside headers
+  el.addEventListener('click', (e) => {
+    if (!e.target.closest('.prop-header') && !e.target.closest('.fixed-header')) {
+      clearColumnHighlight(tableEl);
+    }
   });
 }
 
 function focusCell(container, cell) {
   container.querySelectorAll('.cell-focused').forEach(c => c.classList.remove('cell-focused'));
   cell.classList.add('cell-focused');
+}
+
+/** Merge fixed + custom columns in persisted order */
+function buildUnifiedColumns(tabId, visFixed, visProps) {
+  const savedOrder = getColumnOrder(tabId);
+  const fixedMap = Object.fromEntries(visFixed.map(c => [c.key, c]));
+  const propMap = Object.fromEntries(visProps.map(p => [`prop_${p.id}`, p]));
+  const allIds = new Set([...visFixed.map(c => c.key), ...visProps.map(p => `prop_${p.id}`)]);
+  const result = [];
+  const placed = new Set();
+
+  // Place columns in saved order
+  for (const id of savedOrder) {
+    if (!allIds.has(id)) continue;
+    if (fixedMap[id]) result.push({ kind: 'fixed', def: fixedMap[id] });
+    else if (propMap[id]) result.push({ kind: 'prop', def: propMap[id] });
+    placed.add(id);
+  }
+  // Append any new columns not in saved order
+  for (const id of allIds) {
+    if (placed.has(id)) continue;
+    if (fixedMap[id]) result.push({ kind: 'fixed', def: fixedMap[id] });
+    else if (propMap[id]) result.push({ kind: 'prop', def: propMap[id] });
+  }
+  return result;
 }

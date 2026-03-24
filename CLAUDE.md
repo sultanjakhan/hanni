@@ -33,10 +33,12 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 
 ### Pre-commit Checklist
 - [ ] `UPDATER_GITHUB_TOKEN=dummy cargo check` passes
+- [ ] **`node --check` on every modified JS file** — catch SyntaxError before runtime
 - [ ] No hardcoded colors/sizes (use CSS vars)
 - [ ] New Tauri commands registered in `invoke_handler`
 - [ ] No `console.log` / `dbg!()` left behind
 - [ ] No files over 150 lines introduced
+- [ ] No duplicate `const`/`let` declarations in the same scope
 
 ## Tools Strategy
 

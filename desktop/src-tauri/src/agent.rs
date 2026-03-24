@@ -71,8 +71,9 @@ pub async fn run_agent_task(
 
         // No tool calls — we're done
         if tool_calls.is_empty() {
+            let preview: String = content.chars().take(100).collect();
             eprintln!("[agent] Done after {} iterations, response: {}...",
-                iteration + 1, &content[..content.len().min(100)]);
+                iteration + 1, preview);
             return Ok(content);
         }
 

@@ -63,6 +63,9 @@ pub async fn sync_apple_calendar(month: u32, year: i32, db: tauri::State<'_, Han
 
     let script = format!(
         r#"
+        if application "Calendar" is not running then
+            return "NOT_RUNNING"
+        end if
         set output to ""
         set startD to current date
         set year of startD to {year}
@@ -125,6 +128,12 @@ pub async fn sync_apple_calendar(month: u32, year: i32, db: tauri::State<'_, Han
             }));
         }
     };
+
+    // Calendar.app not running — return zero events without clearing DB
+    if output.trim() == "NOT_RUNNING" {
+        return Ok(serde_json::json!({ "synced": 0, "source": "apple", "skipped": true, "error": null }));
+    }
+
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
 

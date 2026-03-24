@@ -2,7 +2,7 @@
 
 import { S } from '../state.js';
 import { startInlineEdit, startFixedCellEdit } from './db-cell-editors.js';
-import { showAddPropertyPopover, showColumnMenu } from './db-properties.js';
+import { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu } from './db-properties.js';
 import { clearCellFocus } from './db-cell-nav.js';
 import { showSidePeek } from './db-side-peek.js';
 
@@ -24,6 +24,7 @@ export function wireTableEvents(el, ctx, filtered, visProp) {
   wireCellEditing(el, recordTable, reloadFn, onCellEdit);
   wireAddProperty(el, tabId, reloadFn);
   wireColumnMenus(el, customProps, tabId, reloadFn, onSort);
+  wireFixedColumnMenus(el, tabId, reloadFn, onSort);
   wireAddRow(el, tabId, onQuickAdd);
   wireRowInsert(el, tabId, onQuickAdd);
   wireOpenButtons(el, filtered, ctx);
@@ -131,8 +132,18 @@ function wireRowInsert(el, tabId, onQuickAdd) {
   });
 }
 
+function wireFixedColumnMenus(el, tabId, reloadFn, onSort) {
+  el.querySelectorAll('.fixed-header').forEach(th => {
+    th.addEventListener('click', (e) => {
+      if (e.target.closest('.col-resize-handle')) return;
+      e.stopPropagation();
+      showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reloadFn, onSort);
+    });
+  });
+}
+
 function wireFixedSorting(el, onSort) {
-  el.querySelectorAll('.sortable-header:not(.prop-header)').forEach(th => {
+  el.querySelectorAll('.sortable-header:not(.prop-header):not(.fixed-header)').forEach(th => {
     th.addEventListener('click', () => {
       const key = th.dataset.sort;
       const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';

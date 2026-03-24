@@ -12,6 +12,7 @@ import { showFilterDropdown, renderFilterBar } from './db-filters.js';
 import { showSortDropdown, getSortRules, applySortRules } from './db-sort.js';
 import { exportToCsv } from './db-export.js';
 import { importCsv } from './db-import.js';
+import { getHiddenFixedCols, setHiddenFixedCols } from './db-col-state.js';
 
 export class DatabaseView {
   constructor(el, schema) {
@@ -40,6 +41,7 @@ export class DatabaseView {
 
   _renderToolbar(allFields, contentEl) {
     const s = this.schema, visProp = () => this._customProps.filter(p => p.visible !== false);
+    const hiddenCols = this._getHiddenColumns();
     renderToolbar(this.el, s.availableViews, this._currentView, (vt) => this._switchView(vt), {
       onSearch: (q) => { this._searchQuery = q; this._renderView(contentEl, allFields); },
       onFilter: (a) => showFilterDropdown(a, s.tabId, allFields, () => this.render()),
@@ -49,6 +51,8 @@ export class DatabaseView {
       onImport: () => importCsv(s.tabId, s.fixedColumns || [], this._customProps, s.reloadFn || (() => this.render())),
       onDeleteView: (vt) => this._removeView(vt),
       onAddView: (vt) => this._addView(vt),
+      hiddenColumns: hiddenCols,
+      onShowColumn: (col) => this._showColumn(col),
     });
   }
 
@@ -75,55 +79,50 @@ export class DatabaseView {
     const q = this._searchQuery.toLowerCase(), s = this.schema;
     return records.filter(r => {
       for (const c of (s.fixedColumns || [])) if (String(r[c.key] ?? '').toLowerCase().includes(q)) return true;
-      const vals = this._valuesMap[r[s.idField]];
-      return vals ? Object.values(vals).some(v => String(v ?? '').toLowerCase().includes(q)) : false;
+      const v = this._valuesMap[r[s.idField]]; return v ? Object.values(v).some(x => String(x ?? '').toLowerCase().includes(q)) : false;
     });
   }
-
   _buildFields() {
     const s = this.schema;
-    return [
-      ...(s.fixedColumns || []).map(c => ({ filterKey: c.key, label: c.label, options: c.editOptions || [] })),
+    return [...(s.fixedColumns || []).map(c => ({ filterKey: c.key, label: c.label, type: c.editType || 'text', options: c.editOptions || [] })),
       ...this._customProps.filter(p => p.visible !== false).map(p => {
-        let opts = []; try { opts = JSON.parse(p.options || '[]'); } catch {} return { filterKey: `prop_${p.id}`, label: p.name, options: opts };
-      }),
-    ];
+        let opts = []; try { opts = JSON.parse(p.options || '[]'); } catch {} return { filterKey: `prop_${p.id}`, label: p.name, type: p.type, options: opts };
+      })];
   }
-
   async _loadValues() {
     const s = this.schema, ids = this._records.map(r => r[s.idField]);
-    if (ids.length === 0 || this._customProps.length === 0) return;
-    try {
-      const all = await invoke('get_property_values', { recordTable: s.recordTable, recordIds: ids });
-      this._valuesMap = {};
+    if (!ids.length || !this._customProps.length) return;
+    try { const all = await invoke('get_property_values', { recordTable: s.recordTable, recordIds: ids }); this._valuesMap = {};
       for (const v of all) { if (!this._valuesMap[v.record_id]) this._valuesMap[v.record_id] = {}; this._valuesMap[v.record_id][v.property_id] = v.value; }
     } catch { this._valuesMap = {}; }
   }
-
-  _handleSort() {
-    const rules = getSortRules(this.schema.tabId);
-    applySortRules(this._records, rules, this.schema.idField, this._valuesMap);
-    this.render();
+  _handleSort() { const r = getSortRules(this.schema.tabId); applySortRules(this._records, r, this.schema.idField, this._valuesMap); this.render(); }
+  _getHiddenColumns() {
+    const s = this.schema, result = [], hiddenFixed = getHiddenFixedCols(s.tabId);
+    for (const key of hiddenFixed) { const col = (s.fixedColumns || []).find(c => c.key === key); result.push({ id: key, name: col ? col.label : key, kind: 'fixed' }); }
+    for (const p of this._customProps) { if (p.visible === false) result.push({ id: p.id, name: p.name, kind: 'custom' }); }
+    return result;
   }
+  async _showColumn(col) {
+    const s = this.schema, reload = s.reloadFn || (() => this.render());
+    if (col.kind === 'fixed') { const h = getHiddenFixedCols(s.tabId); setHiddenFixedCols(s.tabId, h.filter(k => k !== col.id)); }
+    else await invoke('update_property_definition', { id: col.id, name: null, propType: null, position: null, color: null, options: null, visible: true });
+    reload();
+  }
+
   async _switchView(vt) { this._currentView = vt; this._persistView(vt); await this.render(); }
   _addView(vt) {
-    const s = this.schema;
-    if (!s.availableViews.includes(vt)) s.availableViews.push(vt);
-    const removed = JSON.parse(localStorage.getItem(`dbv_removed_${s.tabId}`) || '[]');
-    const idx = removed.indexOf(vt);
-    if (idx !== -1) { removed.splice(idx, 1); localStorage.setItem(`dbv_removed_${s.tabId}`, JSON.stringify(removed)); }
+    const s = this.schema; if (!s.availableViews.includes(vt)) s.availableViews.push(vt);
+    const rm = JSON.parse(localStorage.getItem(`dbv_removed_${s.tabId}`) || '[]'), idx = rm.indexOf(vt);
+    if (idx !== -1) { rm.splice(idx, 1); localStorage.setItem(`dbv_removed_${s.tabId}`, JSON.stringify(rm)); }
     this._switchView(vt);
   }
-
   _removeView(vt) {
-    const s = this.schema;
-    const vi = s.availableViews.indexOf(vt);
-    if (vi === -1) return;
-    s.availableViews.splice(vi, 1);
-    if (this._currentView === vt) this._currentView = 'table';
+    const s = this.schema, vi = s.availableViews.indexOf(vt); if (vi === -1) return;
+    s.availableViews.splice(vi, 1); if (this._currentView === vt) this._currentView = 'table';
     this._persistView(this._currentView);
-    const removed = JSON.parse(localStorage.getItem(`dbv_removed_${s.tabId}`) || '[]');
-    if (!removed.includes(vt)) { removed.push(vt); localStorage.setItem(`dbv_removed_${s.tabId}`, JSON.stringify(removed)); }
+    const rm = JSON.parse(localStorage.getItem(`dbv_removed_${s.tabId}`) || '[]');
+    if (!rm.includes(vt)) { rm.push(vt); localStorage.setItem(`dbv_removed_${s.tabId}`, JSON.stringify(rm)); }
     this.render();
   }
 
@@ -138,16 +137,10 @@ export class DatabaseView {
   }
 }
 
-export { registerSchema, getSchema, getSchemaIds } from './db-config.js';
-export { renderTableView } from './db-table.js';
-export { renderKanbanView } from './db-kanban.js';
-export { renderListView } from './db-list.js';
-export { renderGalleryView } from './db-gallery.js';
-export { renderTimelineView } from './db-timeline.js';
-export { renderCalendarView } from './db-calendar.js';
-export { formatPropValue, startInlineEdit } from './db-cell-editors.js';
-export { renderFilterBar, applyFilters, showFilterDropdown } from './db-filters.js';
-export { showAddPropertyPopover, showColumnMenu } from './db-properties.js';
-export { renderToolbar } from './db-toolbar.js';
-export { exportToCsv } from './db-export.js';
-export { importCsv } from './db-import.js';
+export { registerSchema, getSchema, getSchemaIds } from './db-config.js'; export { renderTableView } from './db-table.js';
+export { renderKanbanView } from './db-kanban.js'; export { renderListView } from './db-list.js';
+export { renderGalleryView } from './db-gallery.js'; export { renderTimelineView } from './db-timeline.js';
+export { renderCalendarView } from './db-calendar.js'; export { formatPropValue, startInlineEdit } from './db-cell-editors.js';
+export { renderFilterBar, applyFilters, showFilterDropdown } from './db-filters.js'; export { renderToolbar } from './db-toolbar.js';
+export { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder } from './db-properties.js';
+export { exportToCsv } from './db-export.js'; export { importCsv } from './db-import.js';

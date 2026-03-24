@@ -242,9 +242,13 @@ pub fn gather_context_blocking() -> String {
         ctx.push_str(&format!("\n--- Screen Time ---\n{}\n", activity));
     }
 
-    // Calendar events from Calendar.app (skip if access was denied)
+    // Calendar events from Calendar.app (skip if access was denied or app not running)
     if check_calendar_access() {
         let cal_script = r#"
+            -- Only query Calendar if it's already running (don't launch it)
+            if application "Calendar" is not running then
+                return "Calendar.app not running — skipped"
+            end if
             set output to ""
             set today to current date
             set endDate to today + (2 * days)

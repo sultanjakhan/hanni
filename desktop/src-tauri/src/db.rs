@@ -1,7 +1,8 @@
-// db.rs — Database initialization, migrations
+// db.rs — Database initialization, migrations, auto-backup
 use serde::Deserialize;
 use std::collections::HashMap;
 use crate::types::hanni_data_dir;
+use chrono;
 
 /// Migrate data from old ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
 pub fn migrate_old_data_dir() {
@@ -52,6 +53,40 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
         }
     }
     Ok(())
+}
+
+/// Create a timestamped backup of hanni.db, keep last 5
+pub fn backup_db() {
+    let data_dir = hanni_data_dir();
+    let db_path = data_dir.join("hanni.db");
+    if !db_path.exists() { return; }
+    let backup_dir = data_dir.join("backups");
+    let _ = std::fs::create_dir_all(&backup_dir);
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let dest = backup_dir.join(format!("hanni_{}.db", ts));
+    if let Err(e) = std::fs::copy(&db_path, &dest) {
+        eprintln!("Backup failed: {}", e);
+        return;
+    }
+    // Also copy WAL if present
+    let wal = data_dir.join("hanni.db-wal");
+    if wal.exists() {
+        let _ = std::fs::copy(&wal, backup_dir.join(format!("hanni_{}.db-wal", ts)));
+    }
+    // Keep only last 5 backups
+    let mut backups: Vec<_> = std::fs::read_dir(&backup_dir)
+        .into_iter().flatten().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("hanni_") && e.file_name().to_string_lossy().ends_with(".db"))
+        .collect();
+    backups.sort_by_key(|e| e.file_name());
+    while backups.len() > 5 {
+        let old = backups.remove(0);
+        let _ = std::fs::remove_file(old.path());
+        // Remove matching WAL
+        let wal_path = old.path().with_extension("db-wal");
+        let _ = std::fs::remove_file(wal_path);
+    }
+    eprintln!("DB backup: {}", dest.display());
 }
 
 pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {

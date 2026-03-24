@@ -728,9 +728,15 @@
   gap: 0;
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--space-5);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.tab-settings-tabs::-webkit-scrollbar { display: none; }
 
 .tab-settings-tab {
+  white-space: nowrap;
+  flex-shrink: 0;
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;

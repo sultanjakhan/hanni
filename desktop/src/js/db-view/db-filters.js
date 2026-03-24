@@ -2,31 +2,26 @@
 
 import { S } from '../state.js';
 import { escapeHtml } from '../utils.js';
+import { getFilterConditions } from './db-type-registry.js';
 import { applyFilters, saveFiltersToViewConfig, loadFiltersFromViewConfig } from './db-filter-logic.js';
 
-// Re-export logic
 export { applyFilters, saveFiltersToViewConfig, loadFiltersFromViewConfig };
 
-const COND_OPTIONS = [
-  { value: 'contains', label: 'содержит' },
-  { value: 'not_contains', label: 'не содержит' },
-  { value: 'eq', label: 'равно' },
-  { value: 'neq', label: 'не равно' },
-  { value: 'starts_with', label: 'начинается с' },
-  { value: 'ends_with', label: 'заканчивается на' },
-  { value: 'empty', label: 'пусто' },
-  { value: 'not_empty', label: 'не пусто' },
-  { value: 'gt', label: '>' },
-  { value: 'lt', label: '<' },
-  { value: 'before', label: 'до (дата)' },
-  { value: 'after', label: 'после (дата)' },
-  { value: 'this_week', label: 'эта неделя' },
-  { value: 'this_month', label: 'этот месяц' },
-  { value: 'last_7_days', label: 'последние 7 дней' },
-  { value: 'last_30_days', label: 'последние 30 дней' },
-];
+const ALL_COND_LABELS = {
+  contains: 'содержит', not_contains: 'не содержит',
+  eq: 'равно', neq: 'не равно',
+  starts_with: 'начинается с', ends_with: 'заканчивается на',
+  empty: 'пусто', not_empty: 'не пусто',
+  gt: '>', lt: '<',
+  before: 'до', after: 'после',
+  this_week: 'эта неделя', this_month: 'этот месяц',
+  last_7_days: 'последние 7 дней', last_30_days: 'последние 30 дней',
+};
 
-const COND_LABELS = Object.fromEntries(COND_OPTIONS.map(c => [c.value, c.label]));
+function condOptionsForType(type) {
+  const ids = getFilterConditions(type || 'text');
+  return ids.map(id => ({ value: id, label: ALL_COND_LABELS[id] || id }));
+}
 
 /** Render filter chip bar above the database view */
 export function renderFilterBar(el, tabId, allFields, onApply) {
@@ -37,7 +32,7 @@ export function renderFilterBar(el, tabId, allFields, onApply) {
   const chips = filters.filter(f => typeof f === 'object' && f.condition).map((f, idx) => {
     const field = allFields.find(p => p.filterKey === f.filterKey);
     const label = field ? field.label : '?';
-    const condLabel = COND_LABELS[f.condition] || f.condition;
+    const condLabel = ALL_COND_LABELS[f.condition] || f.condition;
     return `<span class="dbv-filter-chip" data-idx="${idx}">
       ${escapeHtml(label)} <em>${condLabel}</em> ${f.value ? escapeHtml(f.value) : ''}
       <span class="dbv-filter-chip-remove" data-remove="${idx}">×</span>
@@ -80,10 +75,15 @@ export function showFilterDropdown(anchorEl, tabId, allFields, onApply) {
   dd.style.top = rect.bottom + 4 + 'px';
   dd.style.right = (window.innerWidth - rect.right) + 'px';
 
-  let selField = allFields[0], selCond = COND_OPTIONS[0], valueStr = '';
+  let selField = allFields[0];
+  let condOpts = condOptionsForType(selField.type);
+  let selCond = condOpts[0];
+  let valueStr = '';
 
   const render = () => {
-    let fieldOpts = selField.options || [];
+    condOpts = condOptionsForType(selField.type);
+    if (!condOpts.find(c => c.value === selCond.value)) selCond = condOpts[0];
+    const fieldOpts = selField.options || [];
     const noValue = ['empty', 'not_empty', 'this_week', 'this_month', 'last_7_days', 'last_30_days'].includes(selCond.value);
 
     dd.innerHTML = `
@@ -95,10 +95,14 @@ export function showFilterDropdown(anchorEl, tabId, allFields, onApply) {
       <button class="dbv-fd-apply">Применить</button>`;
 
     dd.querySelector('#dbv-fd-prop')?.addEventListener('click', () => {
-      showPickerMenu(dd.querySelector('#dbv-fd-prop'), allFields.map(f => ({ value: f.filterKey, label: f.label })), selField.filterKey, (v) => { selField = allFields.find(f => f.filterKey === v) || allFields[0]; valueStr = ''; render(); });
+      showPickerMenu(dd.querySelector('#dbv-fd-prop'), allFields.map(f => ({ value: f.filterKey, label: f.label })), selField.filterKey, (v) => {
+        selField = allFields.find(f => f.filterKey === v) || allFields[0]; valueStr = ''; render();
+      });
     });
     dd.querySelector('#dbv-fd-cond')?.addEventListener('click', () => {
-      showPickerMenu(dd.querySelector('#dbv-fd-cond'), COND_OPTIONS, selCond.value, (v) => { selCond = COND_OPTIONS.find(o => o.value === v) || COND_OPTIONS[0]; render(); });
+      showPickerMenu(dd.querySelector('#dbv-fd-cond'), condOpts, selCond.value, (v) => {
+        selCond = condOpts.find(o => o.value === v) || condOpts[0]; render();
+      });
     });
     const valEl = dd.querySelector('#dbv-fd-val');
     if (valEl && fieldOpts.length > 0 && valEl.tagName !== 'INPUT') {

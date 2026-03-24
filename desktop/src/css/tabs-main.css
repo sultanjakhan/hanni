@@ -1254,7 +1254,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-  min-width: 200px;
+  min-width: 220px;
   padding: var(--space-1);
   animation: fadeIn 0.1s ease-out;
 }
@@ -1271,28 +1271,43 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font-size: 13px;
   color: var(--text-secondary);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  white-space: nowrap;
   transition: background var(--transition-fast);
 }
 
 .col-menu-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.col-menu-item.disabled { opacity: 0.5; cursor: default; pointer-events: none; }
 .col-menu-item.danger { color: var(--color-red); }
 .col-menu-item.danger:hover { background: var(--color-red-bg); }
 
 .col-menu-icon {
-  width: 18px;
-  font-size: 13px;
+  width: 18px; height: 18px;
+  font-size: 15px; line-height: 18px;
   text-align: center;
   color: var(--text-muted);
   flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 
 .col-menu-item:hover .col-menu-icon { color: var(--text-secondary); }
 .col-menu-item.danger .col-menu-icon { color: var(--color-red); }
+
+/* Column selection highlight */
+.col-selected {
+  background: var(--accent-blue-bg, rgba(37, 99, 235, 0.06)) !important;
+}
+
+.col-menu-title {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
 
 .col-menu-name-input {
   width: 100%;
@@ -1310,6 +1325,21 @@
 }
 
 .col-menu-name-input:focus { border-color: var(--accent-blue); }
+
+/* Toggle switch in column menu */
+.col-menu-item.toggle { justify-content: space-between; }
+.col-menu-toggle {
+  width: 28px; height: 16px; border-radius: 8px;
+  background: var(--border-light); position: relative;
+  flex-shrink: 0; transition: background var(--transition-fast);
+}
+.col-menu-toggle::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; transition: transform var(--transition-fast);
+}
+.col-menu-toggle.on { background: var(--accent-blue); }
+.col-menu-toggle.on::after { transform: translateX(12px); }
 
 /* Notion-style + column header */
 .add-prop-col {

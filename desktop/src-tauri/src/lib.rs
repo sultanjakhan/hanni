@@ -60,6 +60,7 @@ pub fn run() {
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    backup_db(); // Auto-backup before opening DB
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
     init_db(&conn).expect("Cannot initialize database");
@@ -164,6 +165,7 @@ pub fn run() {
         .manage(focus_manager)
         .manage(call_mode)
         .manage(mcp::McpState::empty())
+        .manage(commands_meta::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -471,6 +473,8 @@ pub fn run() {
             mcp::mcp_list_tools,
             // Vacancy
             vacancy::vacancy_search_now,
+            // Automation API
+            commands_meta::auto_eval_callback,
         ])
         .setup(move |app| {
             // Auto-updater

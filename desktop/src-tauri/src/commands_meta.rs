@@ -9,6 +9,17 @@ use tauri_plugin_updater::UpdaterExt;
 use std::sync::atomic::Ordering;
 use std::process::{Command, Child};
 use std::path::PathBuf;
+use std::collections::HashMap;
+
+/// Global callback map for auto_eval HTTP → JS → Rust roundtrip
+pub struct AutoEvalCallbacks(pub std::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<String>>>);
+
+#[tauri::command]
+pub fn auto_eval_callback(cb_id: String, result: String, state: tauri::State<'_, AutoEvalCallbacks>) {
+    if let Some(tx) = state.0.lock().unwrap().remove(&cb_id) {
+        let _ = tx.send(result);
+    }
+}
 
 // ── Focus Commands ──
 
@@ -1297,11 +1308,64 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         Ok(Json(serde_json::json!({ "status": "ok" })))
     }
 
+    // ── Automation endpoints (eval JS in WebView, works even minimized) ──
+
+    #[derive(Deserialize)]
+    struct EvalReq {
+        script: String,
+    }
+
+    pub async fn auto_eval(
+        headers: HeaderMap,
+        AxumState(state): AxumState<ApiState>,
+        Json(req): Json<EvalReq>,
+    ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+        check_auth(&headers, &state.token)?;
+
+        let cb_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+
+        // Register callback in global map
+        state.app.state::<AutoEvalCallbacks>()
+            .0.lock().unwrap()
+            .insert(cb_id.clone(), tx);
+
+        // Wrap script to invoke Tauri command with result
+        let wrapped = format!(
+            r#"(async () => {{
+                try {{
+                    const __r = await (async () => {{ {script} }})();
+                    await window.__TAURI__.core.invoke('auto_eval_callback', {{ cbId: '{cb_id}', result: JSON.stringify(__r ?? null) }});
+                }} catch(e) {{
+                    await window.__TAURI__.core.invoke('auto_eval_callback', {{ cbId: '{cb_id}', result: JSON.stringify({{ __error: e.message }}) }});
+                }}
+            }})()"#,
+            script = req.script, cb_id = cb_id
+        );
+
+        if let Some(win) = state.app.get_webview_window("main") {
+            win.eval(&wrapped).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("eval error: {}", e)))?;
+        } else {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "No main webview found".into()));
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+            Ok(Ok(result)) => {
+                let inner: serde_json::Value = serde_json::from_str(&result)
+                    .unwrap_or(serde_json::Value::String(result));
+                Ok(Json(serde_json::json!({ "result": inner })))
+            }
+            Ok(Err(_)) => Err((StatusCode::INTERNAL_SERVER_ERROR, "Channel closed".into())),
+            Err(_) => Err((StatusCode::REQUEST_TIMEOUT, "Script timed out after 10s".into())),
+        }
+    }
+
     let app = Router::new()
         .route("/api/status", get(api_status))
         .route("/api/chat", post(api_chat))
         .route("/api/memory/search", get(api_memory_search))
         .route("/api/memory", post(api_memory_add))
+        .route("/auto/eval", post(auto_eval))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8235").await;

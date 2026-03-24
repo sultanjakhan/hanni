@@ -271,32 +271,10 @@ export const STATUS_LABELS = { planned:'Planned',in_progress:'In Progress',compl
 // ── Memory categories ──
 export const MEMORY_CATEGORIES = ['user', 'preferences', 'people', 'habits', 'work', 'health', 'observation', 'other'];
 
-// ── Property type definitions (Notion-style) ──
-export const PROPERTY_TYPE_DEFS = [
-  { id: 'text', icon: 'Aa', name: 'Текст' },
-  { id: 'number', icon: '#', name: 'Число' },
-  { id: 'select', icon: '◉', name: 'Выбор' },
-  { id: 'multi_select', icon: '☰', name: 'Мульти-выбор' },
-  { id: 'date', icon: '◫', name: 'Дата' },
-  { id: 'checkbox', icon: '☑', name: 'Чекбокс' },
-  { id: 'url', icon: '↗', name: 'Ссылка' },
-  { id: 'status', icon: '◔', name: 'Статус' },
-  { id: 'email', icon: '@', name: 'Email' },
-  { id: 'phone', icon: '☎', name: 'Телефон' },
-  { id: 'created_time', icon: '⏱', name: 'Создано', auto: true },
-  { id: 'last_edited', icon: '✎', name: 'Изменено', auto: true },
-  { id: 'unique_id', icon: '#', name: 'ID', auto: true },
-];
-
-export function getTypeIcon(typeId) {
-  const t = PROPERTY_TYPE_DEFS.find(d => d.id === typeId);
-  return t ? t.icon : 'Aa';
-}
-
-export function getTypeName(typeId) {
-  const t = PROPERTY_TYPE_DEFS.find(d => d.id === typeId);
-  return t ? t.name : typeId;
-}
+// ── Property types — re-exported from centralized registry ──
+export { getTypeList as PROPERTY_TYPE_DEFS_FN, getTypeIcon, getTypeName, getTypeList, getType, getFilterConditions } from './db-view/db-type-registry.js';
+import { getTypeList } from './db-view/db-type-registry.js';
+export const PROPERTY_TYPE_DEFS = getTypeList();
 
 // ── Custom page emojis ──
 export const COMMON_EMOJIS = ['📄','📝','📋','📌','📎','📁','💡','🎯','🔥','⭐','🏠','💼','🎨','🎮','📚','🎵','💰','🏋️','❤️','🧠','🍔','📅','🔧','🚀','🌟','✅','📊','🗂️','💬','🔔'];

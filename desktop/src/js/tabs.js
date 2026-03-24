@@ -1,7 +1,7 @@
 // ── js/tabs.js — Tab navigation, sub-sidebar, sub-tab bar, goals, dropdown, shortcuts, router ──
 
 import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders, loadTabSetting, saveTabSetting } from './state.js';
-import { escapeHtml, renderTabSettingsPage, setupPageHeaderControls, renderPageHeader } from './utils.js';
+import { escapeHtml, confirmModal, renderTabSettingsPage, setupPageHeaderControls, renderPageHeader } from './utils.js';
 
 // ── Settings sections per tab ──
 const SETTINGS_SECTIONS = {
@@ -22,6 +22,7 @@ const SETTINGS_SECTIONS = {
     { id: 'integrations', label: 'Интеграции' },
     { id: 'blocklist', label: 'Блок-лист' },
     { id: 'mcp', label: 'MCP серверы' },
+    { id: 'manage', label: 'Управление' },
   ],
 };
 
@@ -767,6 +768,7 @@ async function renderSettingsPage(tabId, sectionId) {
 
   // Wire up controls
   wireSettingsControls(el, tabId);
+  wireManageControls(el, tabId);
 }
 
 async function renderSettingsSectionContent(tabId, sectionId) {
@@ -815,6 +817,8 @@ async function renderSettingsSectionContent(tabId, sectionId) {
       <div class="settings-row"><span class="settings-hint">Подключение внешних инструментов через MCP</span></div>
       <div class="settings-empty-hint">Нет подключённых MCP серверов</div>
       <button class="btn-smallall" style="margin-top:12px;">+ Подключить MCP</button></div>`;
+  } else if (sectionId === 'manage') {
+    return renderManageSection(tabId);
   }
   return '';
 }
@@ -834,6 +838,38 @@ function wireSettingsControls(el, tabId) {
         saveTabSetting(group.dataset.tabId, group.dataset.settingKey, pill.dataset.value);
       });
     });
+  });
+}
+
+// ── Tab Management (Danger Zone) ──
+
+function renderManageSection(tabId) {
+  const reg = TAB_REGISTRY[tabId];
+  const tabName = S.tabCustomizations[tabId]?.label || reg?.label || tabId;
+  return `
+    <div class="settings-section" style="border:1px solid var(--color-red-bg);">
+      <div class="settings-section-title" style="color:var(--color-red);">Danger Zone</div>
+      <div class="settings-row"><span class="settings-label">Удалить проект «${escapeHtml(tabName)}»</span>
+        <span class="settings-value"><button class="btn-danger" id="manage-delete-btn">Удалить</button></span></div>
+      <div class="settings-row"><span class="settings-hint">Проект будет закрыт и убран из панели. Для пользовательских страниц — данные удаляются навсегда.</span></div>
+    </div>`;
+}
+
+function wireManageControls(el, tabId) {
+  const deleteBtn = el.querySelector('#manage-delete-btn');
+  if (!deleteBtn) return;
+  deleteBtn.addEventListener('click', async () => {
+    const reg = TAB_REGISTRY[tabId];
+    const tabName = S.tabCustomizations[tabId]?.label || reg?.label || tabId;
+    const ok = await confirmModal(`Удалить «${tabName}»?`, 'Удалить');
+    if (!ok) return;
+    // For custom pages — also delete from DB
+    if (reg?.custom && reg?.pageId) {
+      await invoke('delete_custom_page', { id: reg.pageId }).catch(() => {});
+      delete TAB_REGISTRY[tabId];
+    }
+    closeTab(tabId);
+    switchTab('chat');
   });
 }
 

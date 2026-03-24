@@ -1,29 +1,10 @@
 // ── db-view/db-cell-editors.js — Inline cell editing (Notion-style, no popups) ──
 
 import { invoke } from '../state.js';
-import { escapeHtml } from '../utils.js';
 import { showSelectDropdown, showMultiSelectDropdown } from './db-dropdowns.js';
 import { getNextCell, getPrevCell, getCellBelow } from './db-cell-nav.js';
-
-const BADGE_COLORS = ['blue', 'green', 'yellow', 'red', 'purple', 'orange', 'pink', 'gray'];
-
-function badgeColor(val, prop) {
-  let opts = []; try { opts = JSON.parse(prop.options || '[]'); } catch {}
-  const idx = opts.indexOf(val);
-  return BADGE_COLORS[idx >= 0 ? idx % BADGE_COLORS.length : 0];
-}
-
-export function formatPropValue(val, prop) {
-  if (!val && val !== 0) return '<span class="text-faint">\u2014</span>';
-  if (prop.type === 'checkbox') return `<span class="cell-check-round${val === 'true' ? ' checked' : ''}"></span>`;
-  if (prop.type === 'select') return `<span class="badge badge-${badgeColor(val, prop)}">${escapeHtml(val)}</span>`;
-  if (prop.type === 'multi_select') {
-    try { return JSON.parse(val).map(i => `<span class="badge badge-${badgeColor(i, prop)}">${escapeHtml(i)}</span>`).join(' '); }
-    catch { return escapeHtml(val); }
-  }
-  if (prop.type === 'url') return `<a href="${escapeHtml(val)}" target="_blank" class="cell-link">${escapeHtml(val.length > 30 ? val.substring(0, 30) + '...' : val)}</a>`;
-  return escapeHtml(val);
-}
+import { renderTimeEditor, renderProgressEditor, renderRatingEditor } from './db-type-editors.js';
+export { formatPropValue } from './db-cell-format.js';
 
 function overlayEditor(cell, type, value) {
   cell.style.position = 'relative';
@@ -128,6 +109,15 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
       return;
     case 'multi_select':
       showMultiSelectDropdown(cell, options, rawVal, save);
+      return;
+    case 'time':
+      renderTimeEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });
+      return;
+    case 'progress':
+      renderProgressEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });
+      return;
+    case 'rating':
+      renderRatingEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });
       return;
     default: {
       const inputType = propType === 'date' ? 'date' : propType === 'number' ? 'number' : 'text';
