@@ -1381,7 +1381,8 @@
 .sortable-header.prop-header:hover {
   background: var(--bg-hover);
 }
-.sortable-header.prop-header[draggable="true"] { cursor: grab; }
+.sortable-header.draggable-col[draggable="true"] { cursor: grab; -webkit-user-drag: element; }
+.sortable-header.draggable-col .th-content { pointer-events: none; }
 .sortable-header.col-dragging { opacity: 0.4; }
 .sortable-header.col-drag-over { border-left: 2px solid var(--accent-blue); }
 
