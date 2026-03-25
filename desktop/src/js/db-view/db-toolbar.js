@@ -79,12 +79,6 @@ export function renderToolbar(container, availableViews, activeView, onViewChang
 
   if (actions.onExport || actions.onImport) addActionBtn(actionsBar, '⋯', () => showMoreMenu(actionsBar.lastChild, actions), 'Ещё');
 
-  if (actions.onAdd) {
-    const btn = document.createElement('button');
-    btn.className = 'dbv-new-btn'; btn.textContent = 'Новая';
-    btn.addEventListener('click', () => actions.onAdd());
-    actionsBar.appendChild(btn);
-  }
 
   toolbar.appendChild(actionsBar);
   container.prepend(toolbar);

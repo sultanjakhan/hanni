@@ -939,6 +939,74 @@ pub fn get_dashboard_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::V
     }))
 }
 
+// ── Notification widget data ──
+
+#[tauri::command]
+pub fn get_notifications(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now();
+    let today = now.format("%Y-%m-%d").to_string();
+    let current_time = now.format("%H:%M").to_string();
+    let soon_time = (now + chrono::Duration::hours(2)).format("%H:%M").to_string();
+
+    // Upcoming events (next 2 hours)
+    let mut upcoming: Vec<serde_json::Value> = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title, time FROM events WHERE date = ?1 AND time >= ?2 AND time <= ?3 ORDER BY time"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![&today, &current_time, &soon_time], |row| {
+            let title: String = row.get(0)?;
+            let time: String = row.get(1)?;
+            Ok(serde_json::json!({"type": "event", "title": title, "time": time}))
+        }) {
+            upcoming.extend(rows.flatten());
+        }
+    }
+
+    // Overdue tasks
+    let mut overdue: Vec<serde_json::Value> = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT title, due_date FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done' ORDER BY due_date DESC LIMIT 5"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
+            let title: String = row.get(0)?;
+            let due: String = row.get(1)?;
+            Ok(serde_json::json!({"type": "overdue", "title": title, "due_date": due}))
+        }) {
+            overdue.extend(rows.flatten());
+        }
+    }
+
+    // Overdue schedule items (not completed today)
+    let mut missed: Vec<serde_json::Value> = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT s.name FROM schedules s WHERE s.active = 1 AND s.id NOT IN (SELECT schedule_id FROM schedule_completions WHERE date = ?1) LIMIT 5"
+    ) {
+        if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
+            let name: String = row.get(0)?;
+            Ok(serde_json::json!({"type": "schedule", "title": name}))
+        }) {
+            missed.extend(rows.flatten());
+        }
+    }
+
+    // Today's completed count
+    let done_today: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE completed_at LIKE ?1",
+        rusqlite::params![format!("{}%", today)], |row| row.get(0),
+    ).unwrap_or(0);
+
+    let total = upcoming.len() + overdue.len() + missed.len();
+    Ok(serde_json::json!({
+        "upcoming": upcoming,
+        "overdue": overdue,
+        "missed_schedules": missed,
+        "done_today": done_today,
+        "total": total,
+        "now": current_time,
+    }))
+}
+
 // ── v0.7.0: Memory browser command ──
 
 #[tauri::command]

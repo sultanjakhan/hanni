@@ -326,6 +326,7 @@ pub fn run() {
             commands_data::get_habits_today,
             // Dashboard
             commands_data::get_dashboard_data,
+            commands_data::get_notifications,
             // Activity tracking
             commands_data::get_activity_timeline,
             commands_data::get_activity_weekly,

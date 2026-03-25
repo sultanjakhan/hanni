@@ -17,7 +17,7 @@ import { wireColumnClicks } from './db-col-clicks.js';
 export async function renderTableView(el, ctx) {
   const {
     tabId, recordTable, records, fixedColumns = [], idField = 'id',
-    customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, addButton, onSort,
+    customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, onQuickAdd, addButton, onSort,
     onDelete, onDuplicate,
   } = ctx;
 
@@ -50,6 +50,16 @@ export async function renderTableView(el, ctx) {
     }
   }).join('');
 
+  // If a new row was just created, move it to the end so it appears at the bottom
+  if (S._focusNewRow === tabId) {
+    let maxId = -1, maxIdx = -1;
+    filtered.forEach((r, i) => { const id = r[idField]; if (id > maxId) { maxId = id; maxIdx = i; } });
+    if (maxIdx > -1 && maxIdx < filtered.length - 1) {
+      const [newRec] = filtered.splice(maxIdx, 1);
+      filtered.push(newRec);
+    }
+  }
+
   // Body
   let tbody = '';
   for (const r of filtered) {
@@ -75,7 +85,7 @@ export async function renderTableView(el, ctx) {
   }
 
   // Add-row + footer
-  const addRowHtml = onAdd ? `<tr class="dbv-add-row"><td colspan="${colCount}"><div class="dbv-add-row-label"><span class="dbv-add-row-plus">+</span> Новая запись</div></td></tr>` : '';
+  const addRowHtml = (onAdd || onQuickAdd) ? `<tr class="dbv-add-row"><td colspan="${colCount}"><div class="dbv-add-row-label"><span class="dbv-add-row-plus">+</span></div></td></tr>` : '';
   const footerHtml = `<div class="dbv-table-footer"><span>Записей: ${filtered.length}</span></div>`;
 
   el.innerHTML = `<div class="dbv-table-wrap"><table class="data-table database-view"><thead><tr>${thCheck}${thCols}<th class="add-prop-col dbv-add-prop-col" title="Добавить свойство">+</th></tr></thead><tbody>${tbody}${addRowHtml}</tbody></table>${footerHtml}</div>`;
@@ -101,7 +111,22 @@ export async function renderTableView(el, ctx) {
   });
 
   // Column clicks, row clicks, add-row
-  wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, filtered, idField, recordTable });
+  wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, onQuickAdd, filtered, idField, recordTable });
+
+  // Auto-focus new row (find row with highest ID = most recently created)
+  if (S._focusNewRow === tabId) {
+    S._focusNewRow = null;
+    const rows = el.querySelectorAll('.data-table-row');
+    let newRow = null;
+    let maxId = -1;
+    rows.forEach(r => { const id = parseInt(r.dataset.id); if (id > maxId) { maxId = id; newRow = r; } });
+    if (newRow) {
+      newRow.classList.add('dbv-row-new');
+      newRow.scrollIntoView({ block: 'nearest' });
+      const firstCell = newRow.querySelector('.cell-editable') || newRow.querySelector('.cell-fixed-edit');
+      if (firstCell) setTimeout(() => firstCell.click(), 50);
+    }
+  }
 }
 
 function focusCell(container, cell) {

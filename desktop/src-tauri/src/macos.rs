@@ -68,6 +68,13 @@ pub fn check_calendar_access() -> bool {
     if CALENDAR_ACCESS_DENIED.load(Ordering::Relaxed) {
         return false;
     }
+    // Don't launch Calendar.app — only proceed if it's already running
+    let running = run_osascript(
+        r#"if application "Calendar" is running then return "YES" else return "NO""#
+    );
+    if running.as_deref() != Ok("YES") {
+        return false;
+    }
     if CALENDAR_ACCESS_CHECKED.load(Ordering::Relaxed) {
         return true;
     }
@@ -545,6 +552,9 @@ pub async fn get_calendar_events() -> Result<String, String> {
         return Ok("Calendar access denied. Enable in System Settings → Privacy → Automation".into());
     }
     let script = r#"
+        if application "Calendar" is not running then
+            return "Calendar.app not running — skipped"
+        end if
         set output to ""
         set today to current date
         set endDate to today + (2 * days)

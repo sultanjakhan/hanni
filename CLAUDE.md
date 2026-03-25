@@ -1,20 +1,58 @@
 # Hanni — Claude Code Rules
 
+**CRITICAL: Read memory files FIRST.** Before starting any work, read `~/.claude/projects/-Users-sultanbekjakhanov-hanni/memory/MEMORY.md` and load relevant memories. They contain hard-won lessons — ignoring them wastes the user's time.
+
+**CRITICAL: Communicate in Russian.** The user speaks Russian. All questions, plans, and explanations — in Russian.
+
 ## Workflow: Feature Requests
 
-When the user asks for a feature or change:
+**ОБЯЗАТЕЛЬНО** следуй этим шагам. НЕ НАЧИНАЙ писать код без уточнения. Это БЛОКИРУЮЩЕЕ требование.
 
-1. **Clarify** — ask targeted questions to understand exactly what and where:
-   - What behavior is expected?
-   - Which tab/view/component is affected?
-   - Any edge cases to handle?
-   - Only proceed when confident there are no ambiguities
-2. **Plan** — read affected files, then present a short plan (which files change, what changes)
-3. **Confirm** — wait for OK before coding
-4. **Implement** — write code, following all rules below
-5. **Verify** — `UPDATER_GITHUB_TOKEN=dummy cargo check` for Rust changes
+1. **Clarify** — ОБЯЗАТЕЛЬНО задай вопросы (см. чеклист ниже). **НЕ НАЧИНАЙ код пока не получишь ответы**
+2. **Research** — look up docs/APIs if unsure how something works (context7, Nia, web search)
+3. **Plan** — read affected files, then present a short plan (which files change, what changes)
+4. **Confirm** — wait for OK before coding
+5. **Implement** — write code, following all rules below
+6. **Verify** — `UPDATER_GITHUB_TOKEN=dummy cargo check` for Rust changes
 
 Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
+
+### Clarification checklist
+
+**Always ask:**
+1. **ЧТО** — опиши результат одним предложением
+2. **ГДЕ** — какой таб → какой sub-view → какой элемент
+3. **ТРИГГЕР** — клик? hover? загрузка? горячая клавиша? таймер?
+
+**По типу задачи:**
+
+*UI элемент:*
+- Есть референс? (скрин, ссылка, "как кнопка X в Y")
+- Размер/позиция: внутри чего? слева/справа/снизу от чего?
+- Что при hover? Что при клике? Анимация?
+
+*Данные/БД:*
+- Откуда данные? (SQLite таблица, API, localStorage, S объект)
+- Формат: текст/число/дата/enum?
+- Нужна ли миграция (новая колонка/таблица)?
+
+*Поведение/логика:*
+- Что если данных нет / пусто?
+- Что если ошибка?
+- Сохраняется между сессиями или временно?
+- Работает офлайн?
+
+*Стиль:*
+- Как существующий элемент X или новый стиль?
+- Светлая/тёмная тема — оба?
+
+**Правило:** если не уверен хотя бы в 1 пункте — **спроси, не додумывай**.
+
+### Research before coding
+- **Незнакомый API/библиотека** — сначала context7 или Nia для документации
+- **Tauri/Rust API** — проверь docs.rs или context7 перед использованием
+- **CSS свойство** — проверь совместимость через MCP css если сомневаешься
+- **Не угадывай сигнатуры функций** — найди реальную документацию
 
 ## Coding Rules
 
@@ -46,10 +84,10 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 Use Read/Edit/Grep/Glob/Bash for all code tasks. They are faster and more reliable.
 
 ### MCP usage
-- **tauri-automation** — ALWAYS use for testing the Hanni app (NOT playwright)
+- **screenshot.sh** — `desktop/tools/screenshot.sh` for Hanni screenshots (NOT MCP screenshot)
+- **HTTP API** — `127.0.0.1:8235/auto/eval` for DOM operations, clicks, data reading
 - **playwright** — only for external web pages, never for Hanni itself
-- **context7** — library documentation lookup
-- **screenshot** — visual verification
+- **context7 / Nia** — library/API documentation lookup before coding
 - **css/a11y** — only when explicitly requested for audit
 
 ### Skills strategy
@@ -67,8 +105,19 @@ When a task is non-trivial, consider which skill fits during the clarification s
 | `perf` | Profiling, optimization |
 | `commit` / `release` / `changelog` | Git workflow |
 | `improve` | Code review from a specific perspective |
+| `security` | Hardening, vulnerability audit, input validation |
+| `deps` | Audit/update Cargo, pip, npm dependencies |
 
 For architectural decisions or large features, use `architect` or the Plan agent first.
+
+### Hanni app interaction
+- **Screenshots**: `desktop/tools/screenshot.sh /tmp/out.png` → Read tool to view. Silent (`-x`), works minimized (html2canvas fallback)
+- **DOM operations**: HTTP API at `127.0.0.1:8235`, endpoint `POST /auto/eval` with `{"script": "..."}`. Use python3 urllib for complex scripts with quotes
+- **Click/type/navigate**: `element.click()`, `dispatchEvent(new MouseEvent('dblclick'))`, `KeyboardEvent` — all via `/auto/eval`
+- **Token**: `cat ~/Library/Application\ Support/Hanni/api_token.txt`
+- **NEVER** use MCP screenshot (hangs on macOS) or tauri-automation (broken on macOS)
+- **NEVER** run 2 Hanni instances (dev + production). Kill one before starting the other
+- **After UI changes** — take screenshot and show the user for verification
 
 ## Architecture Quick Reference
 
@@ -77,7 +126,18 @@ For architectural decisions or large features, use `architect` or the Plan agent
 - **Rust pattern**: `types.rs` shared via `use types::*`, commands `pub` for `generate_handler![]`
 - **LLM**: local MLX server at `127.0.0.1:8234` (Qwen3.5-35B-A3B)
 - **Streaming**: SSE events — `chat-token`, `chat-done`, `chat-reasoning`, `chat-reasoning-done`
+- **HTTP API**: `127.0.0.1:8235` — automation endpoint for DOM eval, used by screenshot.sh and Claude
+- **MCP hanni**: Python MCP server (`hanni-mcp/server.py`) — CRUD for SQLite (facts, events, SQL)
+- **Voice**: `voice_server.py` — background LaunchAgent for speech
 - **Build**: `UPDATER_GITHUB_TOKEN=dummy cargo check` for dev
+- **Graceful restart**: `osascript -e 'tell application "Hanni" to quit'` + `open -a Hanni`. Never `kill -9`
+
+## Safety & Rollback
+
+- **Before risky changes** (multi-file refactor, migration, delete) — `git stash` or commit current state first
+- **If something breaks** — `git diff` to see what changed, revert the broken part, don't pile fixes on top of fixes
+- **Never force-push to main**
+- **Test incrementally** — change one thing, verify, then next. Not 5 changes at once
 
 ## Conflict Resolution
 

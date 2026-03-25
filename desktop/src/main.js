@@ -23,6 +23,7 @@ import { checkVoiceServer, startRecording, stopRecordingAndSend, cancelRecording
 // ── Tab modules ──
 import { loadCalendar } from './js/tab-calendar.js';
 import { loadFocus, createFocusWidget, updateFocusWidget, updateFocusWidgetVisibility, toggleFocusWidgetPopover, startPomodoro, bindFocusWidgetEvents } from './js/tab-focus.js';
+import { initNotificationWidget } from './js/notification-widget.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
@@ -239,6 +240,9 @@ document.addEventListener('keydown', (e) => {
   // Render tab bar
   renderTabBar();
   activateView();
+
+  // Notification widget (above focus)
+  initNotificationWidget();
 
   // Focus floating widget
   createFocusWidget();

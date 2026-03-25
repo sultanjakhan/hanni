@@ -113,9 +113,17 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  padding-left: 8px;
 }
 .dbv-add-row:hover .dbv-add-row-label { color: var(--text-muted); }
 .dbv-add-row-plus { font-size: 16px; font-weight: 300; }
+
+/* ── New row fade-in animation ── */
+@keyframes dbv-row-fadein {
+  from { background: var(--accent-blue-bg, rgba(59,130,246,0.08)); }
+  to { background: transparent; }
+}
+.dbv-row-new { animation: dbv-row-fadein 0.6s ease-out; }
 
 /* ── Table footer (summary row) ── */
 .dbv-table-footer {

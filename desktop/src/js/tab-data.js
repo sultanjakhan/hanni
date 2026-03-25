@@ -63,6 +63,10 @@ async function loadHome(subTab) {
         ],
         addButton: '+ Добавить',
         onAdd: () => { showHomeAddModal(); },
+        onQuickAdd: async () => {
+          await invoke('add_home_item', { name: '', category: '', location: '' });
+          loadHome();
+        },
         reloadFn: () => loadHome(),
       });
       await dbv.render();
@@ -295,6 +299,10 @@ async function loadPrinciples(el) {
         const title = prompt('Принцип:');
         if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
       },
+      onQuickAdd: async () => {
+        await invoke('create_principle', { title: '', description: '', category: '' });
+        loadPrinciples(el);
+      },
       reloadFn: () => loadPrinciples(el),
     });
     await dbv.render();
@@ -371,6 +379,10 @@ async function loadFoodLog(el) {
       idField: 'id',
       addButton: '+ Записать',
       onAdd: () => showAddFoodModal(el),
+      onQuickAdd: async () => {
+        await invoke('log_food', { mealType: '', name: '' });
+        loadFoodLog(el);
+      },
       reloadFn: () => loadFoodLog(el),
     });
     await dbv.render();
@@ -433,6 +445,10 @@ async function loadRecipes(el) {
       fixedColumns, idField: 'id',
       addButton: '+ Рецепт',
       onAdd: () => showAddRecipeModal(el),
+      onQuickAdd: async () => {
+        await invoke('create_recipe', { name: '', ingredients: '', instructions: '' });
+        loadRecipes(el);
+      },
       reloadFn: () => loadRecipes(el),
     });
     await dbv.render();
@@ -497,6 +513,10 @@ async function loadProducts(el) {
       fixedColumns, idField: 'id',
       addButton: '+ Продукт',
       onAdd: () => showAddProductModal(el),
+      onQuickAdd: async () => {
+        await invoke('add_product', { name: '' });
+        loadProducts(el);
+      },
       reloadFn: () => loadProducts(el),
     });
     await dbv.render();
@@ -634,6 +654,10 @@ async function loadTransactions(el) {
       defaultView: 'table',
       addButton: '+ Add',
       onAdd: () => showAddTransactionModal(el),
+      onQuickAdd: async () => {
+        await invoke('add_transaction', { transactionType: '', amount: 0, category: '' });
+        loadTransactions(el);
+      },
       reloadFn: () => loadTransactions(el),
     });
     S.dbViews.transactions = dbv;
@@ -714,6 +738,10 @@ async function loadBudgets(el) {
         const amt = prompt('Сумма:');
         if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
       },
+      onQuickAdd: async () => {
+        await invoke('create_budget', { category: '', amount: 0 });
+        loadBudgets(el);
+      },
       reloadFn: () => loadBudgets(el),
     });
     await dbv.render();
@@ -744,6 +772,10 @@ async function loadSavings(el) {
         const name = prompt('Название цели:');
         const target = prompt('Целевая сумма:');
         if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#9B9B9B' }).then(() => loadSavings(el)).catch(e => alert(e));
+      },
+      onQuickAdd: async () => {
+        await invoke('create_savings_goal', { name: '', targetAmount: 0 });
+        loadSavings(el);
       },
       reloadFn: () => loadSavings(el),
     });
@@ -782,6 +814,10 @@ async function loadSubscriptions(el) {
       idField: 'id',
       addButton: '+ Добавить',
       onAdd: () => showAddSubscriptionModal(el),
+      onQuickAdd: async () => {
+        await invoke('add_subscription', { name: '', amount: 0 });
+        loadSubscriptions(el);
+      },
       reloadFn: () => loadSubscriptions(el),
     });
     await dbv.render();
@@ -844,6 +880,10 @@ async function loadDebts(el) {
         const type = prompt('Тип (owe/owed):') || 'owe';
         const amount = prompt('Сумма:');
         if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
+      },
+      onQuickAdd: async () => {
+        await invoke('add_debt', { name: '', debtType: '', amount: 0 });
+        loadDebts(el);
       },
       reloadFn: () => loadDebts(el),
     });
@@ -911,6 +951,10 @@ async function loadPeople(subTab) {
           defaultView: 'table',
           addButton: '+ Добавить',
           onAdd: () => showAddContactModal(),
+          onQuickAdd: async () => {
+            await invoke('add_contact', { name: '' });
+            loadPeople();
+          },
           reloadFn: () => loadPeople(),
         });
         await dbv.render();
@@ -1502,7 +1546,7 @@ function renderWorkTasks(el, tasks, projects) {
     onQuickAdd: async (title) => {
       let pid = projects[0]?.id;
       if (!pid) pid = await invoke('create_project', { name: 'Входящие', description: '', color: '#9B9B9B' });
-      await invoke('create_task', { projectId: pid, title, description: '', priority: 'normal', dueDate: null });
+      await invoke('create_task', { projectId: pid, title: title || '', description: '', priority: 'normal', dueDate: null });
       loadWork();
     },
     onCellEdit: async (recordId, key, value, skipReload) => {
@@ -1648,6 +1692,10 @@ function renderDevelopment(el, items) {
     defaultView: 'table',
     addButton: '+ Добавить',
     onAdd: () => showAddLearningModal(),
+    onQuickAdd: async () => {
+      await invoke('create_learning_item', { itemType: '', title: '', description: '', url: '' });
+      loadDevelopment();
+    },
     reloadFn: () => loadDevelopment(),
     kanban: {
       groupByField: 'status',
@@ -1797,6 +1845,10 @@ async function loadMediaList(el, mediaType) {
       defaultView: 'table',
       addButton: '+ Add',
       onAdd: () => showAddMediaModal(mediaType),
+      onQuickAdd: async () => {
+        await invoke('add_media_item', { mediaType, title: '' });
+        loadMediaList(el, mediaType);
+      },
       onRowClick: (record) => showMediaDetail(record, mediaType),
       reloadFn: () => loadMediaList(el, mediaType),
       kanban: {
@@ -1995,6 +2047,10 @@ async function loadMartialArts(el) {
         showAddWorkoutModal();
         setTimeout(() => { const sel = document.getElementById('workout-type'); if (sel) sel.value = 'martial_arts'; }, 50);
       },
+      onQuickAdd: async () => {
+        await invoke('create_workout', { workoutType: '', title: '', durationMinutes: 0, notes: '' });
+        loadSports();
+      },
       reloadFn: () => loadSports(),
     });
     await dbv.render();
@@ -2045,6 +2101,10 @@ function renderSports(el, workouts, stats) {
     defaultView: 'table',
     addButton: '+ Тренировка',
     onAdd: () => showAddWorkoutModal(),
+    onQuickAdd: async () => {
+      await invoke('create_workout', { workoutType: '', title: '', durationMinutes: 0, notes: '' });
+      loadSports();
+    },
     reloadFn: () => loadSports(),
   });
   dbv.render();
@@ -2182,6 +2242,10 @@ function renderHealth(el, today, habits) {
     onAdd: () => {
       const name = prompt('Название привычки:');
       if (name) invoke('create_habit', { name, icon: '', frequency: 'daily' }).then(() => loadHealth()).catch(e => alert(e));
+    },
+    onQuickAdd: async () => {
+      await invoke('create_habit', { name: '', icon: '', frequency: '' });
+      loadHealth();
     },
     reloadFn: () => loadHealth(),
   });
@@ -2370,7 +2434,7 @@ async function loadSchedule(subTab) {
         addButton: '+ Расписание',
         onAdd: () => showScheduleModal(),
         onQuickAdd: async (title) => {
-          await invoke('create_schedule', { title, category: 'other', frequency: 'daily', frequencyDays: null, timeOfDay: null, details: null });
+          await invoke('create_schedule', { title: title || '', category: '', frequency: 'daily', frequencyDays: null, timeOfDay: null, details: null });
           loadSchedule();
         },
         reloadFn: () => loadSchedule(),

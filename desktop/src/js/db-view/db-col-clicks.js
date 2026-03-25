@@ -1,9 +1,10 @@
 // ── db-view/db-col-clicks.js — Column header click handlers ──
 
+import { S } from '../state.js';
 import { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, highlightColumn, clearColumnHighlight } from './db-properties.js';
 
 /** Wire all column header interactions (click, inline edit, highlight) */
-export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, filtered, idField, recordTable }) {
+export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, onQuickAdd, filtered, idField, recordTable }) {
   const tableEl = el.querySelector('.data-table');
 
   // Add property column
@@ -35,8 +36,13 @@ export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRow
     if (!e.target.closest('.prop-header') && !e.target.closest('.fixed-header')) clearColumnHighlight(tableEl);
   });
 
-  // Add-row
-  el.querySelector('.dbv-add-row')?.addEventListener('click', () => { if (onAdd) onAdd(); });
+  // Add-row: prefer inline creation (onQuickAdd), fallback to modal (onAdd)
+  el.querySelector('.dbv-add-row')?.addEventListener('click', async () => {
+    if (onQuickAdd) {
+      S._focusNewRow = tabId;
+      try { await onQuickAdd(); } catch { S._focusNewRow = null; }
+    } else if (onAdd) { onAdd(); }
+  });
 
   // Row click
   if (onRowClick) el.querySelectorAll('.data-table-row').forEach(row => {
