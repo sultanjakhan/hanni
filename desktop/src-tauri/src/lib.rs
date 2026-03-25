@@ -327,6 +327,10 @@ pub fn run() {
             // Dashboard
             commands_data::get_dashboard_data,
             commands_data::get_notifications,
+            commands_data::save_proactive_message,
+            commands_data::get_proactive_messages,
+            commands_data::mark_proactive_read,
+            commands_data::archive_old_proactive,
             // Activity tracking
             commands_data::get_activity_timeline,
             commands_data::get_activity_weekly,

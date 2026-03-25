@@ -842,6 +842,13 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
             integration INTEGER DEFAULT 0,
             notes TEXT DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS proactive_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            read INTEGER DEFAULT 0,
+            archived INTEGER DEFAULT 0
         );"
     ).ok();
 }

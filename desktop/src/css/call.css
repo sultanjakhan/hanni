@@ -343,7 +343,7 @@
 
 .notification-widget {
   position: absolute;
-  bottom: 130px;
+  bottom: 124px;
   right: 16px;
   z-index: 900;
   display: flex;
@@ -468,7 +468,7 @@
 
 .focus-widget {
   position: absolute;
-  bottom: 80px;
+  bottom: 72px;
   right: 16px;
   z-index: 900;
   display: flex;

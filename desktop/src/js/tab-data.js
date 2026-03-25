@@ -2388,6 +2388,7 @@ async function loadCustomPage(tabId) {
 // ── Schedule tab ──
 
 const SCHEDULE_CATEGORIES = { health: '💊 Здоровье', sport: '🏋️ Спорт', home: '🏠 Дом', practice: '🧠 Практика', challenge: '🚫 Челлендж', work: '💼 Работа', other: '📌 Другое' };
+const SCH_CAT_COLORS = { health: 'blue', sport: 'green', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'gray' };
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
@@ -2419,23 +2420,31 @@ async function loadSchedule(subTab) {
         availableViews: ['table', 'list'],
         fixedColumns: [
           { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
-          { key: 'title', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-          { key: 'category', label: 'Категория', render: r => `<span class="badge badge-purple">${SCHEDULE_CATEGORIES[r.category] || r.category}</span>` },
+          { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v })), render: r => `<span class="badge badge-${SCH_CAT_COLORS[r.category] || 'gray'}">${SCHEDULE_CATEGORIES[r.category] || r.category}</span>` },
           { key: 'frequency', label: 'Частота', render: r => {
             if (r.frequency === 'custom' && r.frequency_days) {
               return r.frequency_days.split(',').map(d => DAYS_SHORT[parseInt(d)-1] || d).join(', ');
             }
             return `<span style="font-size:12px;color:var(--text-muted);">${SCHEDULE_FREQ[r.frequency] || r.frequency}</span>`;
           }},
-          { key: 'time_of_day', label: 'Время', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.time_of_day || '—'}</span>` },
-          { key: 'is_active', label: 'Статус', render: r => r.is_active ? '<span class="badge badge-green">Вкл</span>' : '<span class="badge badge-gray">Выкл</span>' },
+          { key: 'time_of_day', label: 'Время', editable: true, editType: 'text', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.time_of_day || '—'}</span>` },
+          { key: 'is_active', label: 'Статус', width: 60, render: r => `<div class="col-menu-toggle${r.is_active ? ' on' : ''}" data-toggle-id="${r.id}" style="cursor:pointer"></div>` },
         ],
         idField: 'id',
         addButton: '+ Расписание',
         onAdd: () => showScheduleModal(),
-        onQuickAdd: async (title) => {
-          await invoke('create_schedule', { title: title || '', category: '', frequency: 'daily', frequencyDays: null, timeOfDay: null, details: null });
+        onQuickAdd: async () => {
+          await invoke('create_schedule', { title: 'Новая привычка', category: 'other', frequency: 'daily', frequencyDays: null, timeOfDay: null, details: null });
           loadSchedule();
+        },
+        onCellEdit: async (recordId, key, value, skipReload) => {
+          const keyMap = { title: 'title', category: 'category', time_of_day: 'timeOfDay' };
+          const params = { id: recordId };
+          const paramKey = keyMap[key];
+          if (paramKey) params[paramKey] = value;
+          await invoke('update_schedule', params);
+          if (!skipReload) loadSchedule();
         },
         reloadFn: () => loadSchedule(),
         onDelete: async (id) => { await invoke('delete_schedule', { id }); },
@@ -2445,6 +2454,14 @@ async function loadSchedule(subTab) {
         const chk = e.target.closest('[data-schid]');
         if (chk) {
           await invoke('toggle_schedule_completion', { scheduleId: parseInt(chk.dataset.schid), date: today });
+          loadSchedule();
+          return;
+        }
+        const tog = e.target.closest('[data-toggle-id]');
+        if (tog) {
+          const id = parseInt(tog.dataset.toggleId);
+          const isOn = tog.classList.contains('on');
+          await invoke('update_schedule', { id, isActive: !isOn });
           loadSchedule();
         }
       });

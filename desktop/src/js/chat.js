@@ -57,6 +57,11 @@ listen('proactive-message', async (event) => {
 
   await autoSaveConversation();
 
+  // Save to proactive_messages table for sidebar
+  invoke('save_proactive_message', { text }).then(() => {
+    tabLoaders.loadConversationsList?.();
+  }).catch(() => {});
+
   // Add proactive feedback buttons (copy + thumbs — no regen)
   if (wrapper) {
     addProactiveFeedbackButtons(wrapper, proactiveId, text);

@@ -40,20 +40,6 @@ function renderItems(data) {
     </div>`);
   }
 
-  // Missed schedules
-  for (const s of data.missed_schedules || []) {
-    items.push(`<div class="nw-item nw-missed">
-      <span class="nw-icon">◻</span>
-      <span class="nw-text">${s.title}</span>
-      <span class="nw-time">сегодня</span>
-    </div>`);
-  }
-
-  // Footer
-  if (data.done_today > 0) {
-    items.push(`<div class="nw-footer">✅ Сделано сегодня: ${data.done_today}</div>`);
-  }
-
   return items.length > 0 ? items.join('') : '<div class="nw-empty">Событий нет</div>';
 }
 

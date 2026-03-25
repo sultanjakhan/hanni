@@ -18,6 +18,58 @@ export async function loadConversationsList(searchQuery) {
     if (!convs) return;  // fetch failed — don't wipe sidebar
     convList.innerHTML = '';
 
+    // Proactive chat item
+    try {
+      const proMsgs = await invoke('get_proactive_messages');
+      if (proMsgs && proMsgs.length > 0) {
+        const hasUnread = proMsgs.some(m => !m.read);
+        const latest = proMsgs[0];
+        const preview = latest.text.replace(/\n/g, ' ').slice(0, 50) + (latest.text.length > 50 ? '…' : '');
+        const item = document.createElement('div');
+        item.className = 'proactive-chat-item' + (hasUnread ? ' unread' : '');
+        item.innerHTML = `
+          <div class="proactive-chat-icon">🤖</div>
+          <div class="proactive-chat-content">
+            <div class="proactive-chat-name">Hanni</div>
+            <div class="proactive-chat-preview">${escapeHtml(preview)}</div>
+          </div>
+          ${hasUnread ? `<span class="proactive-chat-badge">${proMsgs.filter(m => !m.read).length}</span>` : ''}
+        `;
+        item.addEventListener('click', () => {
+          // Mark all as read
+          for (const m of proMsgs) {
+            if (!m.read) invoke('mark_proactive_read', { id: m.id }).catch(() => {});
+          }
+          item.classList.remove('unread');
+          const badge = item.querySelector('.proactive-chat-badge');
+          if (badge) badge.remove();
+          // Open proactive chat view
+          chat.innerHTML = '';
+          // Show all messages in chronological order (oldest first)
+          const sorted = [...proMsgs].reverse();
+          for (const m of sorted) {
+            const msgDiv = tabLoaders.addMsg('bot', m.text);
+            if (msgDiv) {
+              const wrapper = msgDiv.closest('.msg-wrapper') || msgDiv.parentElement;
+              if (wrapper && tabLoaders.addFeedbackButtons) {
+                tabLoaders.addFeedbackButtons(wrapper, 0, 0, m.text);
+              }
+              const ts = document.createElement('div');
+              ts.className = 'proactive-time';
+              const d = new Date(m.created_at + 'Z');
+              ts.textContent = d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+              msgDiv.parentElement?.after(ts);
+            }
+          }
+          tabLoaders.scrollDown();
+        });
+        convList.appendChild(item);
+      }
+    } catch (_) {}
+
+    // Archive old proactive messages on load
+    invoke('archive_old_proactive').catch(() => {});
+
     // Group by date (Today / Yesterday / This Week / Earlier)
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());

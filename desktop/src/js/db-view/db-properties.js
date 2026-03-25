@@ -6,7 +6,7 @@ import { getHiddenFixedCols, setHiddenFixedCols, getFixedColName, setFixedColNam
 import { showAddPropertyPopover } from './db-add-property.js';
 
 export { showAddPropertyPopover } from './db-add-property.js';
-export { getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder, isColumnWrapped, highlightColumn, clearColumnHighlight } from './db-col-state.js';
+export { getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder, isColumnWrapped, highlightColumn, clearColumnHighlight, buildUnifiedColumns } from './db-col-state.js';
 
 /** Show column menu for a custom property */
 export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallback, filterCallback) {

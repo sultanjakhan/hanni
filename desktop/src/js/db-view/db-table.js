@@ -1,10 +1,8 @@
-// ── db-view/db-table.js — Table view renderer (Notion-style) ──
-
 import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
-import { formatPropValue, startInlineEdit } from './db-cell-editors.js';
+import { formatPropValue, startInlineEdit, startFixedCellEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
-import { getHiddenFixedCols, getFixedColName, getColumnOrder } from './db-properties.js';
+import { getHiddenFixedCols, getFixedColName, buildUnifiedColumns } from './db-properties.js';
 import { loadColState } from './db-col-state.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
@@ -18,7 +16,7 @@ export async function renderTableView(el, ctx) {
   const {
     tabId, recordTable, records, fixedColumns = [], idField = 'id',
     customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, onQuickAdd, addButton, onSort,
-    onDelete, onDuplicate,
+    onDelete, onDuplicate, onCellEdit,
   } = ctx;
 
   await loadColState(tabId);
@@ -35,7 +33,7 @@ export async function renderTableView(el, ctx) {
   const colCount = (hasActions ? 1 : 0) + unifiedCols.length + 1;
 
   // Header
-  const W = { done: 30, title: 180, projectName: 100, priority: 100, status: 100, date: 100, tags: 120, name: 180, category: 100, quantity: 70, location: 100, needed: 90 };
+  const W = { done: 30, title: 180, projectName: 100, priority: 100, status: 100, date: 100, tags: 120, name: 180, category: 130, quantity: 70, location: 100, needed: 90, frequency: 110, is_active: 60 };
   const thCheck = hasActions ? '<th class="col-check-header"><input type="checkbox"></th>' : '';
   const thCols = unifiedCols.map(col => {
     if (col.kind === 'fixed') {
@@ -69,6 +67,11 @@ export async function renderTableView(el, ctx) {
       if (col.kind === 'fixed') {
         const c = col.def;
         const val = c.render ? c.render(r) : escapeHtml(String(r[c.key] ?? ''));
+        if (c.editable) {
+          const raw = escapeHtml(String(r[c.key] ?? ''));
+          const opts = c.editOptions ? escapeHtml(JSON.stringify(c.editOptions)) : '[]';
+          return `<td class="cell-fixed-edit" data-record-id="${rid}" data-edit-key="${c.key}" data-edit-type="${c.editType || 'text'}" data-edit-options='${opts}' data-raw-value="${raw}" tabindex="0">${val}</td>`;
+        }
         return `<td>${val}</td>`;
       } else {
         const p = col.def;
@@ -103,11 +106,23 @@ export async function renderTableView(el, ctx) {
   const tableEl = el.querySelector('.data-table');
   if (tableEl) enableColumnDrag(tableEl, tabId, reload, visProps);
 
-  // Inline editing
+  // Inline editing — custom props
   el.querySelectorAll('.cell-editable').forEach(cell => {
     cell.setAttribute('tabindex', '0');
     cell.addEventListener('click', (e) => { e.stopPropagation(); focusCell(el, cell); startInlineEdit(cell, recordTable, reload); });
     cell.addEventListener('focus', () => focusCell(el, cell));
+  });
+
+  // Inline editing — fixed columns
+  el.querySelectorAll('.cell-fixed-edit').forEach(cell => {
+    cell.addEventListener('click', (e) => { e.stopPropagation(); focusCell(el, cell); startFixedCellEdit(cell, reload); });
+    cell.addEventListener('focus', () => focusCell(el, cell));
+  });
+  el.addEventListener('fixed-cell-save', async (e) => {
+    const { recordId, key, value, skipReload } = e.detail;
+    if (onCellEdit) {
+      try { await onCellEdit(parseInt(recordId), key, value, skipReload); } catch {}
+    }
   });
 
   // Column clicks, row clicks, add-row
@@ -132,29 +147,4 @@ export async function renderTableView(el, ctx) {
 function focusCell(container, cell) {
   container.querySelectorAll('.cell-focused').forEach(c => c.classList.remove('cell-focused'));
   cell.classList.add('cell-focused');
-}
-
-/** Merge fixed + custom columns in persisted order */
-function buildUnifiedColumns(tabId, visFixed, visProps) {
-  const savedOrder = getColumnOrder(tabId);
-  const fixedMap = Object.fromEntries(visFixed.map(c => [c.key, c]));
-  const propMap = Object.fromEntries(visProps.map(p => [`prop_${p.id}`, p]));
-  const allIds = new Set([...visFixed.map(c => c.key), ...visProps.map(p => `prop_${p.id}`)]);
-  const result = [];
-  const placed = new Set();
-
-  // Place columns in saved order
-  for (const id of savedOrder) {
-    if (!allIds.has(id)) continue;
-    if (fixedMap[id]) result.push({ kind: 'fixed', def: fixedMap[id] });
-    else if (propMap[id]) result.push({ kind: 'prop', def: propMap[id] });
-    placed.add(id);
-  }
-  // Append any new columns not in saved order
-  for (const id of allIds) {
-    if (placed.has(id)) continue;
-    if (fixedMap[id]) result.push({ kind: 'fixed', def: fixedMap[id] });
-    else if (propMap[id]) result.push({ kind: 'prop', def: propMap[id] });
-  }
-  return result;
 }

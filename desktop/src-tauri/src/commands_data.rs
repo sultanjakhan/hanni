@@ -977,34 +977,61 @@ pub fn get_notifications(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Va
         }
     }
 
-    // Overdue schedule items (not completed today)
-    let mut missed: Vec<serde_json::Value> = Vec::new();
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT s.name FROM schedules s WHERE s.active = 1 AND s.id NOT IN (SELECT schedule_id FROM schedule_completions WHERE date = ?1) LIMIT 5"
-    ) {
-        if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
-            let name: String = row.get(0)?;
-            Ok(serde_json::json!({"type": "schedule", "title": name}))
-        }) {
-            missed.extend(rows.flatten());
-        }
-    }
-
-    // Today's completed count
-    let done_today: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE completed_at LIKE ?1",
-        rusqlite::params![format!("{}%", today)], |row| row.get(0),
-    ).unwrap_or(0);
-
-    let total = upcoming.len() + overdue.len() + missed.len();
+    let total = upcoming.len() + overdue.len();
     Ok(serde_json::json!({
         "upcoming": upcoming,
         "overdue": overdue,
-        "missed_schedules": missed,
-        "done_today": done_today,
         "total": total,
         "now": current_time,
     }))
+}
+
+// ── Proactive messages ──
+
+#[tauri::command]
+pub fn save_proactive_message(text: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    conn.execute(
+        "INSERT INTO proactive_messages (text) VALUES (?1)",
+        rusqlite::params![text],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn get_proactive_messages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, text, created_at, read FROM proactive_messages WHERE archived = 0 ORDER BY id DESC LIMIT 5"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "text": row.get::<_, String>(1)?,
+            "created_at": row.get::<_, String>(2)?,
+            "read": row.get::<_, bool>(3)?,
+        }))
+    }).map_err(|e| format!("DB error: {}", e))?;
+    Ok(rows.flatten().collect())
+}
+
+#[tauri::command]
+pub fn mark_proactive_read(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("UPDATE proactive_messages SET read = 1 WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn archive_old_proactive(db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let cutoff = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
+    let count = conn.execute(
+        "UPDATE proactive_messages SET archived = 1 WHERE archived = 0 AND created_at < ?1",
+        rusqlite::params![cutoff],
+    ).map_err(|e| format!("DB error: {}", e))? as i64;
+    Ok(count)
 }
 
 // ── v0.7.0: Memory browser command ──

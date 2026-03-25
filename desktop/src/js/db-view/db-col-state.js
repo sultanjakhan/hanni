@@ -98,3 +98,26 @@ export function clearColumnHighlight(tableEl) {
   if (!tableEl) return;
   tableEl.querySelectorAll('.col-selected').forEach(c => c.classList.remove('col-selected'));
 }
+
+/** Merge fixed + custom columns in persisted order */
+export function buildUnifiedColumns(tabId, visFixed, visProps) {
+  const savedOrder = getColumnOrder(tabId);
+  const fixedMap = Object.fromEntries(visFixed.map(c => [c.key, c]));
+  const propMap = Object.fromEntries(visProps.map(p => [`prop_${p.id}`, p]));
+  const allIds = new Set([...visFixed.map(c => c.key), ...visProps.map(p => `prop_${p.id}`)]);
+  const result = [];
+  const placed = new Set();
+
+  for (const id of savedOrder) {
+    if (!allIds.has(id)) continue;
+    if (fixedMap[id]) result.push({ kind: 'fixed', def: fixedMap[id] });
+    else if (propMap[id]) result.push({ kind: 'prop', def: propMap[id] });
+    placed.add(id);
+  }
+  for (const id of allIds) {
+    if (placed.has(id)) continue;
+    if (fixedMap[id]) result.push({ kind: 'fixed', def: fixedMap[id] });
+    else if (propMap[id]) result.push({ kind: 'prop', def: propMap[id] });
+  }
+  return result;
+}
