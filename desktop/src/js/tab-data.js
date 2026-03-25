@@ -2421,8 +2421,9 @@ async function loadSchedule(subTab) {
         fixedColumns: [
           { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
           { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v })), render: r => `<span class="badge badge-${SCH_CAT_COLORS[r.category] || 'gray'}">${SCHEDULE_CATEGORIES[r.category] || r.category}</span>` },
-          { key: 'frequency', label: 'Частота', render: r => {
+          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v })), render: r => r.category ? `<span class="badge badge-${SCH_CAT_COLORS[r.category] || 'gray'}">${SCHEDULE_CATEGORIES[r.category] || r.category}</span>` : '' },
+          { key: 'frequency', label: 'Частота', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_FREQ).map(([k, v]) => ({ value: k, label: v })), render: r => {
+            if (!r.frequency) return '';
             if (r.frequency === 'custom' && r.frequency_days) {
               return r.frequency_days.split(',').map(d => DAYS_SHORT[parseInt(d)-1] || d).join(', ');
             }
@@ -2435,11 +2436,11 @@ async function loadSchedule(subTab) {
         addButton: '+ Расписание',
         onAdd: () => showScheduleModal(),
         onQuickAdd: async () => {
-          await invoke('create_schedule', { title: 'Новая привычка', category: 'other', frequency: 'daily', frequencyDays: null, timeOfDay: null, details: null });
+          await invoke('create_schedule', { title: '', category: '', frequency: '', frequencyDays: null, timeOfDay: null, details: null });
           loadSchedule();
         },
         onCellEdit: async (recordId, key, value, skipReload) => {
-          const keyMap = { title: 'title', category: 'category', time_of_day: 'timeOfDay' };
+          const keyMap = { title: 'title', category: 'category', frequency: 'frequency', time_of_day: 'timeOfDay' };
           const params = { id: recordId };
           const paramKey = keyMap[key];
           if (paramKey) params[paramKey] = value;

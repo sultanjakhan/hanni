@@ -12,7 +12,7 @@ import { showFilterDropdown, renderFilterBar } from './db-filters.js';
 import { showSortDropdown, getSortRules, applySortRules } from './db-sort.js';
 import { exportToCsv } from './db-export.js';
 import { importCsv } from './db-import.js';
-import { getHiddenFixedCols, setHiddenFixedCols } from './db-col-state.js';
+import { getHiddenFixedCols, setHiddenFixedCols, getDeletedFixedCols } from './db-col-state.js';
 
 export class DatabaseView {
   constructor(el, schema) {
@@ -98,14 +98,14 @@ export class DatabaseView {
   }
   _handleSort() { const r = getSortRules(this.schema.tabId); applySortRules(this._records, r, this.schema.idField, this._valuesMap); this.render(); }
   _getHiddenColumns() {
-    const s = this.schema, result = [], hiddenFixed = getHiddenFixedCols(s.tabId);
-    for (const key of hiddenFixed) { const col = (s.fixedColumns || []).find(c => c.key === key); result.push({ id: key, name: col ? col.label : key, kind: 'fixed' }); }
+    const s = this.schema, result = [], hiddenFixed = getHiddenFixedCols(s.tabId), deletedFixed = getDeletedFixedCols(s.tabId);
+    for (const key of hiddenFixed) { if (deletedFixed.includes(key)) continue; const col = (s.fixedColumns || []).find(c => c.key === key); result.push({ id: key, name: col ? col.label : key, kind: 'fixed' }); }
     for (const p of this._customProps) { if (p.visible === false) result.push({ id: p.id, name: p.name, kind: 'custom' }); }
     return result;
   }
   async _showColumn(col) {
     const s = this.schema, reload = s.reloadFn || (() => this.render());
-    if (col.kind === 'fixed') { const h = getHiddenFixedCols(s.tabId); setHiddenFixedCols(s.tabId, h.filter(k => k !== col.id)); }
+    if (col.kind === 'fixed') { const h = getHiddenFixedCols(s.tabId); await setHiddenFixedCols(s.tabId, h.filter(k => k !== col.id)); }
     else await invoke('update_property_definition', { id: col.id, name: null, propType: null, position: null, color: null, options: null, visible: true });
     reload();
   }
@@ -142,5 +142,5 @@ export { renderKanbanView } from './db-kanban.js'; export { renderListView } fro
 export { renderGalleryView } from './db-gallery.js'; export { renderTimelineView } from './db-timeline.js';
 export { renderCalendarView } from './db-calendar.js'; export { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 export { renderFilterBar, applyFilters, showFilterDropdown } from './db-filters.js'; export { renderToolbar } from './db-toolbar.js';
-export { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder } from './db-properties.js';
+export { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, getHiddenFixedCols, getDeletedFixedCols, getFixedColName, getColumnOrder, setColumnOrder } from './db-properties.js';
 export { exportToCsv } from './db-export.js'; export { importCsv } from './db-import.js';

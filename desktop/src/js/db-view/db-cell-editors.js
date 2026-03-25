@@ -72,13 +72,16 @@ export function startFixedCellEdit(cell, reloadFn) {
     const navTarget = cell._navTarget;
     delete cell._navTarget;
     removeEditor(cell);
-    cell.dataset.rawValue = val;
-    const display = cell.querySelector('.data-table-title, span');
-    if (display) display.textContent = val || '\u2014';
-    cell.dispatchEvent(new CustomEvent('fixed-cell-save', {
-      bubbles: true,
-      detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val, skipReload: !!navTarget },
-    }));
+    const changed = val !== cleanVal;
+    if (changed) {
+      cell.dataset.rawValue = val;
+      const display = cell.querySelector('.data-table-title, span');
+      if (display) display.textContent = val || '\u2014';
+      cell.dispatchEvent(new CustomEvent('fixed-cell-save', {
+        bubbles: true,
+        detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val, skipReload: true },
+      }));
+    }
     if (navTarget) setTimeout(() => navTarget.click(), 10);
   };
   editor.addEventListener('blur', saveAndClose);
@@ -121,13 +124,17 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
       return;
     default: {
       const inputType = propType === 'date' ? 'date' : propType === 'number' ? 'number' : 'text';
-      const editor = overlayEditor(cell, inputType, rawVal || '');
+      const origVal = rawVal || '';
+      const editor = overlayEditor(cell, inputType, origVal);
       const done = () => {
+        const val = editor.value || '';
         const navTarget = cell._navTarget;
         delete cell._navTarget;
         removeEditor(cell);
-        cell.dataset.rawValue = editor.value || '';
-        save(editor.value || null, !!navTarget);
+        if (val !== origVal) {
+          cell.dataset.rawValue = val;
+          save(val || null, true);
+        }
         if (navTarget) setTimeout(() => navTarget.click(), 10);
       };
       editor.addEventListener('blur', done);

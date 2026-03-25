@@ -2,11 +2,11 @@
 
 import { invoke, PROPERTY_TYPE_DEFS, getTypeIcon, getTypeName } from '../state.js';
 import { escapeHtml, confirmModal } from '../utils.js';
-import { getHiddenFixedCols, setHiddenFixedCols, getFixedColName, setFixedColName, clearColumnHighlight, isColumnWrapped, toggleWrap } from './db-col-state.js';
+import { getHiddenFixedCols, setHiddenFixedCols, getDeletedFixedCols, addDeletedFixedCol, getFixedColName, setFixedColName, clearColumnHighlight, isColumnWrapped, toggleWrap } from './db-col-state.js';
 import { showAddPropertyPopover } from './db-add-property.js';
 
 export { showAddPropertyPopover } from './db-add-property.js';
-export { getHiddenFixedCols, getFixedColName, getColumnOrder, setColumnOrder, isColumnWrapped, highlightColumn, clearColumnHighlight, buildUnifiedColumns } from './db-col-state.js';
+export { getHiddenFixedCols, getDeletedFixedCols, addDeletedFixedCol, getFixedColName, getColumnOrder, setColumnOrder, isColumnWrapped, highlightColumn, clearColumnHighlight, buildUnifiedColumns } from './db-col-state.js';
 
 /** Show column menu for a custom property */
 export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallback, filterCallback) {
@@ -54,8 +54,8 @@ export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadF
     'sort-desc': () => { if (sortCallback) sortCallback(colKey, 'desc'); menu.remove(); },
     'filter': () => { menu.remove(); if (filterCallback) filterCallback(colKey); },
     'wrap': () => { toggleWrap(tabId, colKey); if (reloadFn) reloadFn(); menu.remove(); },
-    'hide': () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); },
-    'delete': () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); },
+    'hide': async () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); await setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); },
+    'delete': async () => { menu.remove(); if (await confirmModal(`Удалить столбец "${displayName}"? Данные будут потеряны.`)) { await addDeletedFixedCol(tabId, colKey); if (reloadFn) reloadFn(); } },
   });
   wireClose(menu);
 }

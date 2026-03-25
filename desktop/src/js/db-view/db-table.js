@@ -2,7 +2,7 @@ import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit, startFixedCellEdit } from './db-cell-editors.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
-import { getHiddenFixedCols, getFixedColName, buildUnifiedColumns } from './db-properties.js';
+import { getHiddenFixedCols, getDeletedFixedCols, getFixedColName, buildUnifiedColumns } from './db-properties.js';
 import { loadColState } from './db-col-state.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
@@ -24,7 +24,8 @@ export async function renderTableView(el, ctx) {
   const filtered = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
   const visProps = customProps.filter(p => p.visible !== false);
   const hiddenFixed = getHiddenFixedCols(tabId);
-  const visFixedColumns = fixedColumns.filter(c => !hiddenFixed.includes(c.key));
+  const deletedFixed = getDeletedFixedCols(tabId);
+  const visFixedColumns = fixedColumns.filter(c => !hiddenFixed.includes(c.key) && !deletedFixed.includes(c.key));
   const hasActions = !!(onDelete || onDuplicate);
   const reload = reloadFn || (() => {});
 
@@ -48,14 +49,13 @@ export async function renderTableView(el, ctx) {
     }
   }).join('');
 
-  // If a new row was just created, move it to the end so it appears at the bottom
-  if (S._focusNewRow === tabId) {
-    let maxId = -1, maxIdx = -1;
-    filtered.forEach((r, i) => { const id = r[idField]; if (id > maxId) { maxId = id; maxIdx = i; } });
-    if (maxIdx > -1 && maxIdx < filtered.length - 1) {
-      const [newRec] = filtered.splice(maxIdx, 1);
-      filtered.push(newRec);
-    }
+  // Always move rows with empty primary field to the bottom (new blank rows stay at end)
+  if (visFixedColumns.length > 0) {
+    const pk = visFixedColumns[0].key;
+    const nonEmpty = filtered.filter(r => r[pk] && String(r[pk]).trim() !== '');
+    const empty = filtered.filter(r => !r[pk] || String(r[pk]).trim() === '');
+    filtered.length = 0;
+    filtered.push(...nonEmpty, ...empty);
   }
 
   // Body

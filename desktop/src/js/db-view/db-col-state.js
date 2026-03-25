@@ -13,13 +13,13 @@ function _get(key, fallback) {
 function _set(key, value) {
   const json = JSON.stringify(value);
   _cache[key] = json;
-  invoke('set_ui_state', { key, value: json }).catch(() => {});
+  return invoke('set_ui_state', { key, value: json }).catch(() => {});
 }
 
 /** Load all ui_state for a tab into cache (call once on tab render) */
 export async function loadColState(tabId) {
   const keys = [
-    `dbv_hidden_fixed_${tabId}`, `dbv_fixed_names_${tabId}`,
+    `dbv_hidden_fixed_${tabId}`, `dbv_deleted_fixed_${tabId}`, `dbv_fixed_names_${tabId}`,
     `dbv_col_order_${tabId}`, `dbv_wrap_${tabId}`, `dbv_frozen_${tabId}`,
   ];
   for (const k of keys) {
@@ -39,7 +39,19 @@ export async function loadColState(tabId) {
 
 export function getHiddenFixedCols(tabId) { return _get(`dbv_hidden_fixed_${tabId}`, []); }
 
-export function setHiddenFixedCols(tabId, keys) { _set(`dbv_hidden_fixed_${tabId}`, keys); }
+export async function setHiddenFixedCols(tabId, keys) { await _set(`dbv_hidden_fixed_${tabId}`, keys); }
+
+// ── Deleted fixed columns (permanent, not shown in hidden menu) ──
+
+export function getDeletedFixedCols(tabId) { return _get(`dbv_deleted_fixed_${tabId}`, []); }
+
+export async function addDeletedFixedCol(tabId, key) {
+  const deleted = getDeletedFixedCols(tabId);
+  if (!deleted.includes(key)) { deleted.push(key); await _set(`dbv_deleted_fixed_${tabId}`, deleted); }
+  // Also remove from hidden list if it was there
+  const hidden = getHiddenFixedCols(tabId);
+  if (hidden.includes(key)) await setHiddenFixedCols(tabId, hidden.filter(k => k !== key));
+}
 
 // ── Fixed column custom display names ──
 

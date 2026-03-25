@@ -174,32 +174,41 @@
 .database-view .col-check-header input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 1.5px solid var(--text-faint);
-  border-radius: 3px;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-xs);
   cursor: pointer;
   vertical-align: middle;
   position: relative;
-  transition: all 100ms;
+  transition: border-color 150ms, background 150ms, box-shadow 150ms;
   background: transparent;
+  flex-shrink: 0;
 }
 .database-view .col-check input[type="checkbox"]:hover,
 .database-view .col-check-header input[type="checkbox"]:hover {
   border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+}
+.database-view .col-check input[type="checkbox"]:active,
+.database-view .col-check-header input[type="checkbox"]:active {
+  transform: scale(0.9);
 }
 .database-view .col-check input[type="checkbox"]:checked,
 .database-view .col-check-header input[type="checkbox"]:checked {
   background: var(--accent-blue);
   border-color: var(--accent-blue);
 }
+.database-view .col-check input[type="checkbox"]:checked:hover {
+  background: color-mix(in srgb, var(--accent-blue) 85%, black);
+}
 .database-view .col-check input[type="checkbox"]:checked::after {
   content: '';
   position: absolute;
-  top: 1px; left: 4px;
+  top: 2px; left: 5px;
   width: 5px; height: 9px;
   border: solid #fff;
-  border-width: 0 1.5px 1.5px 0;
+  border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
 
@@ -1219,20 +1228,21 @@
 .dbv-bulk-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--accent-blue);
-  color: #fff;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   border-radius: var(--radius-sm);
   margin-bottom: var(--space-2);
-  font-size: 13px;
+  font-size: 12px;
+  border: 1px solid var(--border-default);
 }
-.dbv-bulk-count { font-weight: 500; }
+.dbv-bulk-count { font-weight: 500; color: var(--text-secondary); }
 .dbv-bulk-delete {
-  color: #fff !important;
-  opacity: 0.9;
+  color: var(--color-red) !important;
+  opacity: 0.85;
 }
-.dbv-bulk-delete:hover { opacity: 1; background: rgba(255,255,255,0.15) !important; }
+.dbv-bulk-delete:hover { opacity: 1; background: var(--bg-hover) !important; }
 
 /* ══════════════════════════════════════════════
    Side Peek (record detail panel)
@@ -1544,20 +1554,6 @@
 .cell-link:hover { text-decoration: underline; }
 
 /* ── Checkbox column ── */
-.col-check-header, .col-check {
-  width: 32px;
-  min-width: 32px;
-  max-width: 32px;
-  text-align: center;
-  padding: 0 !important;
-}
-.col-check input[type="checkbox"],
-.col-check-header input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: var(--accent-blue);
-}
 .data-table-row:hover .col-check { background: var(--bg-hover); }
 
 /* ── Row context menu danger item ── */
@@ -1575,6 +1571,24 @@
 
 /* ── Cell focus for clipboard ── */
 .cell-focused { outline: 2px solid var(--accent-blue); outline-offset: -2px; z-index: 1; position: relative; }
+.cell-focused:has(.inline-editor) { outline: none; }
+
+/* ── Inline editor overlay inside cells ── */
+.database-view .inline-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0 8px;
+  background: var(--bg-primary);
+  border: 2px solid var(--accent-blue);
+  border-radius: 0;
+  font-size: inherit;
+  color: var(--text-primary);
+  outline: none;
+}
 
 /* ── Cell wrap toggle ── */
 .cell-wrap { white-space: normal !important; word-break: break-word; }
@@ -1628,15 +1642,13 @@
 
 /* ── Bulk actions bar enhancements ── */
 .dbv-bulk-deselect {
-  color: #fff !important;
-  opacity: 0.85;
+  color: var(--text-secondary) !important;
 }
-.dbv-bulk-deselect:hover { opacity: 1; background: rgba(255,255,255,0.15) !important; }
+.dbv-bulk-deselect:hover { background: var(--bg-hover) !important; }
 .dbv-bulk-dup {
-  color: #fff !important;
-  opacity: 0.9;
+  color: var(--text-secondary) !important;
 }
-.dbv-bulk-dup:hover { opacity: 1; background: rgba(255,255,255,0.15) !important; }
+.dbv-bulk-dup:hover { background: var(--bg-hover) !important; }
 
 /* ── Time cell ── */
 .cell-time { font-variant-numeric: tabular-nums; }
