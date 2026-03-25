@@ -292,12 +292,19 @@
   background: var(--accent-orange); color: var(--bg-primary); border-radius: 8px;
   margin-left: 4px; padding: 0 4px;
 }
+.dbv-hidden-cols-menu { min-width: 200px; padding: 4px; }
 .dbv-hidden-cols-title {
-  padding: 6px 12px; font-size: 11px; font-weight: 600;
+  padding: 8px 12px 4px; font-size: 11px; font-weight: 600;
   color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.5px;
 }
-.dbv-hidden-col-item { display: flex; align-items: center; gap: 6px; }
-.dbv-hidden-col-eye { color: var(--text-faint); font-size: 12px; }
+.dbv-hidden-col-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+.dbv-hidden-col-eye { color: var(--text-faint); display: flex; flex-shrink: 0; }
+.dbv-hidden-col-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbv-hidden-col-show { color: var(--text-faint); display: flex; flex-shrink: 0; opacity: 0; transition: opacity 100ms; }
+.dbv-hidden-col-item:hover .dbv-hidden-col-show { opacity: 1; }
+.dbv-hidden-col-item:hover .dbv-hidden-col-eye { color: var(--accent-blue); }
+.dbv-hidden-cols-divider { height: 1px; background: var(--border-default); margin: 4px 8px; }
+.dbv-hidden-col-all { color: var(--accent-blue); font-size: 12px; font-weight: 500; justify-content: center; }
 
 .dbv-view-btn {
   all: unset;

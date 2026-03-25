@@ -30,7 +30,7 @@ export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallbac
     'hide': () => { invoke('update_property_definition', { id: propDef.id, name: null, propType: null, position: null, color: null, options: null, visible: false }).then(() => { if (reloadFn) reloadFn(); }).catch(() => {}); menu.remove(); },
     'insert-left': () => { menu.remove(); showAddPropertyPopover(tabId, menu, reloadFn); },
     'insert-right': () => { menu.remove(); showAddPropertyPopover(tabId, menu, reloadFn); },
-    'delete': async () => { if (await confirmModal(`Удалить свойство "${propDef.name}"?`)) { try { await invoke('delete_property_definition', { id: propDef.id }); if (reloadFn) reloadFn(); } catch {} } menu.remove(); },
+    'delete': async () => { menu.remove(); if (await confirmModal(`Удалить свойство "${propDef.name}"?`)) { try { await invoke('delete_property_definition', { id: propDef.id }); if (reloadFn) reloadFn(); } catch {} } },
   });
   wireClose(menu);
 }
@@ -54,8 +54,8 @@ export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadF
     'sort-desc': () => { if (sortCallback) sortCallback(colKey, 'desc'); menu.remove(); },
     'filter': () => { menu.remove(); if (filterCallback) filterCallback(colKey); },
     'wrap': () => { toggleWrap(tabId, colKey); if (reloadFn) reloadFn(); menu.remove(); },
-    'hide': () => { const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); menu.remove(); },
-    'delete': () => { const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); menu.remove(); },
+    'hide': () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); },
+    'delete': () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); },
   });
   wireClose(menu);
 }
@@ -90,9 +90,11 @@ function openMenu(anchorRect, html) {
   const menu = document.createElement('div');
   menu.className = 'col-context-menu';
   menu.innerHTML = html;
-  menu.style.left = Math.min(anchorRect.left, window.innerWidth - 220) + 'px';
-  menu.style.top = anchorRect.bottom + 4 + 'px';
   document.body.appendChild(menu);
+  const mH = menu.offsetHeight, mW = menu.offsetWidth;
+  const top = anchorRect.bottom + 4 + mH > window.innerHeight ? Math.max(4, anchorRect.top - mH - 4) : anchorRect.bottom + 4;
+  menu.style.left = Math.min(anchorRect.left, window.innerWidth - mW - 8) + 'px';
+  menu.style.top = top + 'px';
   return menu;
 }
 

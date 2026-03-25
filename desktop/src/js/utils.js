@@ -76,6 +76,7 @@ export function skeletonPage() {
 
 export function confirmModal(msg = 'Удалить?', confirmLabel = 'Да') {
   return new Promise(resolve => {
+    document.querySelectorAll('.col-context-menu').forEach(m => m.remove());
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `<div class="modal modal-compact" style="max-width:320px;text-align:center;">

@@ -1,6 +1,8 @@
 // ── db-view/db-toolbar.js — Toolbar: view switcher + actions (Notion-style) ──
 
 const _s = (d) => `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">${d}</svg>`;
+const EYE_OFF = _s('<path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><line x1="2" y1="14" x2="14" y2="2"/>');
+const EYE_ON = _s('<path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>');
 const VIEW_ICONS = {
   table: _s('<rect x="1.5" y="1.5" width="13" height="13" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="1.5" y1="10" x2="14.5" y2="10"/><line x1="6" y1="5.5" x2="6" y2="14.5"/>'),
   kanban: _s('<rect x="1" y="1.5" width="4" height="13" rx="1"/><rect x="6" y="1.5" width="4" height="9" rx="1"/><rect x="11" y="1.5" width="4" height="11" rx="1"/>'),
@@ -116,16 +118,15 @@ function showAddViewDropdown(anchor, addable, onAddView) {
 
 function showHiddenColumnsMenu(anchor, hiddenColumns, onShowColumn) {
   document.querySelectorAll('.dbv-hidden-cols-menu').forEach(m => m.remove());
-  const rect = anchor.getBoundingClientRect();
-  const menu = document.createElement('div');
+  const rect = anchor.getBoundingClientRect(), menu = document.createElement('div');
   menu.className = 'inline-dropdown dbv-hidden-cols-menu';
   menu.style.cssText = `top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px`;
   menu.innerHTML = `<div class="dbv-hidden-cols-title">Скрытые столбцы</div>` +
-    hiddenColumns.map((col, i) => `<div class="inline-dd-option dbv-hidden-col-item" data-idx="${i}"><span class="dbv-hidden-col-eye">◻</span>${col.name}</div>`).join('');
+    hiddenColumns.map((col, i) => `<div class="inline-dd-option dbv-hidden-col-item" data-idx="${i}"><span class="dbv-hidden-col-eye">${EYE_OFF}</span><span class="dbv-hidden-col-name">${col.name}</span><span class="dbv-hidden-col-show">${EYE_ON}</span></div>`).join('') +
+    (hiddenColumns.length > 1 ? `<div class="dbv-hidden-cols-divider"></div><div class="inline-dd-option dbv-hidden-col-all">Показать все</div>` : '');
   document.body.appendChild(menu);
-  menu.querySelectorAll('.dbv-hidden-col-item').forEach(item => {
-    item.addEventListener('click', () => { if (onShowColumn) onShowColumn(hiddenColumns[parseInt(item.dataset.idx)]); menu.remove(); });
-  });
+  menu.querySelectorAll('.dbv-hidden-col-item').forEach(item => item.addEventListener('click', () => { onShowColumn?.(hiddenColumns[parseInt(item.dataset.idx)]); menu.remove(); }));
+  menu.querySelector('.dbv-hidden-col-all')?.addEventListener('click', () => { hiddenColumns.forEach(col => onShowColumn?.(col)); menu.remove(); });
   autoClose(menu);
 }
 
@@ -135,15 +136,13 @@ function showMoreMenu(anchor, actions) {
   const menu = document.createElement('div');
   menu.className = 'inline-dropdown dbv-more-menu';
   menu.style.cssText = `top:${rect.bottom + 4}px;right:${window.innerWidth - rect.right}px`;
-  menu.innerHTML = `${actions.onExport ? '<div class="inline-dd-option" data-action="export">⤓ Экспорт CSV</div>' : ''}${actions.onImport ? '<div class="inline-dd-option" data-action="import">⤒ Импорт CSV</div>' : ''}<div class="inline-dd-option" data-action="copy-link">🔗 Копировать ссылку</div>`;
+  const items = [];
+  if (actions.onExport) items.push('<div class="inline-dd-option" data-action="export">⤓ Экспорт CSV</div>');
+  if (actions.onImport) items.push('<div class="inline-dd-option" data-action="import">⤒ Импорт CSV</div>');
+  items.push('<div class="inline-dd-option" data-action="copy-link">🔗 Копировать ссылку</div>');
+  menu.innerHTML = items.join('');
   document.body.appendChild(menu);
-  menu.querySelectorAll('.inline-dd-option').forEach(item => {
-    item.addEventListener('click', () => {
-      if (item.dataset.action === 'export' && actions.onExport) actions.onExport();
-      if (item.dataset.action === 'import' && actions.onImport) actions.onImport();
-      if (item.dataset.action === 'copy-link') navigator.clipboard.writeText(window.location.href).catch(() => {});
-      menu.remove();
-    });
-  });
+  const handlers = { export: actions.onExport, import: actions.onImport, 'copy-link': () => navigator.clipboard.writeText(window.location.href).catch(() => {}) };
+  menu.querySelectorAll('.inline-dd-option').forEach(el => el.addEventListener('click', () => { handlers[el.dataset.action]?.(); menu.remove(); }));
   autoClose(menu);
 }
