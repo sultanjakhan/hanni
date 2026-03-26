@@ -863,3 +863,19 @@ pub fn migrate_activity_tracking(conn: &rusqlite::Connection) {
     // Index for daily queries
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_captured ON activity_snapshots(captured_at)", []).ok();
 }
+
+pub fn migrate_custom_projects(conn: &rusqlite::Connection) {
+    // page_type: 'page' (default) or 'project' (unified layout with table)
+    conn.execute("ALTER TABLE custom_pages ADD COLUMN page_type TEXT DEFAULT 'page'", []).ok();
+    // Generic records table for custom projects
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS project_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_records_project ON project_records(project_id);"
+    ).ok();
+}

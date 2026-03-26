@@ -4,6 +4,7 @@ import { invoke } from '../state.js';
 import { showSelectDropdown, showMultiSelectDropdown } from './db-dropdowns.js';
 import { getNextCell, getPrevCell, getCellBelow } from './db-cell-nav.js';
 import { renderTimeEditor, renderProgressEditor, renderRatingEditor } from './db-type-editors.js';
+import { getType } from './db-type-registry.js';
 export { formatPropValue } from './db-cell-format.js';
 
 function overlayEditor(cell, type, value) {
@@ -91,9 +92,10 @@ export function startFixedCellEdit(cell, reloadFn) {
 /** Start inline editing on a custom property cell */
 export function startInlineEdit(cell, recordTable, reloadFn) {
   if (cell.querySelector('.inline-editor') || cell.querySelector('.inline-dropdown')) return;
+  const propType = cell.dataset.propType;
+  if (getType(propType).auto) return;
   const recordId = parseInt(cell.dataset.recordId);
   const propId = parseInt(cell.dataset.propId);
-  const propType = cell.dataset.propType;
   const rawVal = cell.dataset.rawValue || '';
   let options = [];
   try { options = JSON.parse(cell.dataset.propOptions || '[]'); } catch {}
@@ -130,6 +132,13 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
         const val = editor.value || '';
         const navTarget = cell._navTarget;
         delete cell._navTarget;
+        const typeDef = getType(propType);
+        if (val && typeDef.validate && !typeDef.validate(val)) {
+          cell.classList.add('cell-invalid');
+          editor.focus();
+          setTimeout(() => cell.classList.remove('cell-invalid'), 1200);
+          return;
+        }
         removeEditor(cell);
         if (val !== origVal) {
           cell.dataset.rawValue = val;

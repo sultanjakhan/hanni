@@ -28,6 +28,16 @@ const TAB_LABELS = {
   projects: { name: 'Проекты', icon: '📁', desc: 'Проекты и их задачи' },
 };
 
+// ── Tab metadata persistence ──
+
+async function getTabMeta(tabId) {
+  try { const v = await invoke('get_ui_state', { key: `tab_meta_${tabId}` }); return v ? JSON.parse(v) : {}; } catch { return {}; }
+}
+
+async function saveTabMeta(tabId, meta) {
+  await invoke('set_ui_state', { key: `tab_meta_${tabId}`, value: JSON.stringify(meta) }).catch(() => {});
+}
+
 /**
  * Render the unified tab layout into a container.
  */
@@ -35,9 +45,14 @@ export async function renderUnifiedLayout(el, tabId, config) {
   const activePane = S._unifiedPane?.[tabId] || 'dash';
 
   const panes = [...SUB_PANES];
+  if (config.renderTracking) panes.splice(2, 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
 
-  // Tab title header
-  const tabLabel = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '' };
+  // Tab title header — merge defaults with user overrides
+  const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };
+  const meta = await getTabMeta(tabId);
+  const icon = meta.icon || defaults.icon;
+  const name = meta.name || defaults.name;
+  const desc = meta.desc ?? defaults.desc ?? '';
 
   const tabsHtml = panes.map(p => {
     const count = config.counts?.[p.id];
@@ -46,18 +61,19 @@ export async function renderUnifiedLayout(el, tabId, config) {
     return `<div class="uni-tab${cls}" data-pane="${p.id}">${p.label}${countHtml}</div>`;
   }).join('');
 
-  const desc = tabLabel.desc || config.subtitle || '';
-
   el.innerHTML = `
     <div class="uni-header">
-      <span class="uni-header-icon">${tabLabel.icon}</span>
-      <span class="uni-header-name">${escapeHtml(tabLabel.name)}</span>
-      ${desc ? `<div class="uni-header-desc">${escapeHtml(desc)}</div>` : ''}
+      <span class="uni-header-icon" title="Изменить иконку">${icon}</span>
+      <span class="uni-header-name" title="Изменить название">${escapeHtml(name)}</span>
+      <div class="uni-header-desc" title="Изменить описание">${desc ? escapeHtml(desc) : '<span style="opacity:0.4">Добавить описание…</span>'}</div>
     </div>
     <div class="uni-tabs">${tabsHtml}</div>
     <div class="uni-content">
       <div class="uni-pane" id="uni-pane-${tabId}"></div>
     </div>`;
+
+  // Wire header editing
+  wireHeaderEdit(el, tabId, config, meta, defaults);
 
   // Wire sub-tab clicks
   el.querySelectorAll('.uni-tab').forEach(tab => {
@@ -81,6 +97,10 @@ export async function renderUnifiedLayout(el, tabId, config) {
       if (config.renderTable) await config.renderTable(paneEl);
       else paneEl.innerHTML = renderEmptyState('Таблица', 'Пока нет записей');
       break;
+    case 'tracking':
+      if (config.renderTracking) await config.renderTracking(paneEl);
+      else paneEl.innerHTML = renderEmptyState('Трекинг', 'Скоро здесь появится трекинг');
+      break;
     case 'goals':
       await renderGoalsPane(paneEl, tabId, config);
       break;
@@ -91,6 +111,77 @@ export async function renderUnifiedLayout(el, tabId, config) {
       await renderStorePane(paneEl, tabId, config);
       break;
   }
+}
+
+// ── Header inline editing ──
+
+function wireHeaderEdit(el, tabId, config, meta, defaults) {
+  const iconEl = el.querySelector('.uni-header-icon');
+  const nameEl = el.querySelector('.uni-header-name');
+  const descEl = el.querySelector('.uni-header-desc');
+
+  // Icon click → small input popup
+  iconEl?.addEventListener('click', () => {
+    const popup = document.createElement('div');
+    popup.className = 'uni-icon-popup';
+    popup.innerHTML = `<input class="uni-icon-input" value="${meta.icon || defaults.icon}" maxlength="2" placeholder="🎯">`;
+    const rect = iconEl.getBoundingClientRect();
+    popup.style.left = rect.left + 'px';
+    popup.style.top = rect.bottom + 4 + 'px';
+    document.body.appendChild(popup);
+    const input = popup.querySelector('input');
+    input.focus();
+    input.select();
+    const save = async () => {
+      const val = input.value.trim();
+      if (val && val !== (meta.icon || defaults.icon)) { meta.icon = val; await saveTabMeta(tabId, meta); }
+      popup.remove();
+      renderUnifiedLayout(el, tabId, config);
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { popup.remove(); } e.stopPropagation(); });
+    input.addEventListener('blur', save);
+  });
+
+  // Name click → contenteditable
+  nameEl?.addEventListener('click', () => {
+    if (nameEl.contentEditable === 'true') return;
+    nameEl.contentEditable = 'true';
+    nameEl.focus();
+    const range = document.createRange();
+    range.selectNodeContents(nameEl);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    const save = async () => {
+      nameEl.contentEditable = 'false';
+      const val = nameEl.textContent.trim();
+      if (val && val !== (meta.name || defaults.name)) { meta.name = val; await saveTabMeta(tabId, meta); }
+    };
+    nameEl.addEventListener('blur', save, { once: true });
+    nameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); } if (e.key === 'Escape') { nameEl.textContent = meta.name || defaults.name; nameEl.blur(); } e.stopPropagation(); });
+  });
+
+  // Desc click → contenteditable
+  descEl?.addEventListener('click', () => {
+    if (descEl.contentEditable === 'true') return;
+    const currentDesc = meta.desc ?? defaults.desc ?? '';
+    descEl.innerHTML = escapeHtml(currentDesc);
+    descEl.contentEditable = 'true';
+    descEl.focus();
+    if (currentDesc) {
+      const range = document.createRange();
+      range.selectNodeContents(descEl);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    }
+    const save = async () => {
+      descEl.contentEditable = 'false';
+      const val = descEl.textContent.trim();
+      if (val !== (meta.desc ?? defaults.desc ?? '')) { meta.desc = val; await saveTabMeta(tabId, meta); }
+      if (!val) descEl.innerHTML = '<span style="opacity:0.4">Добавить описание…</span>';
+    };
+    descEl.addEventListener('blur', save, { once: true });
+    descEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); descEl.blur(); } if (e.key === 'Escape') { descEl.textContent = meta.desc ?? defaults.desc ?? ''; descEl.blur(); } e.stopPropagation(); });
+  });
 }
 
 // ── Goals Pane ──

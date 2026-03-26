@@ -1,12 +1,15 @@
 import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit, startFixedCellEdit } from './db-cell-editors.js';
+import { getType } from './db-type-registry.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
 import { getHiddenFixedCols, getDeletedFixedCols, getFixedColName, buildUnifiedColumns } from './db-properties.js';
 import { loadColState } from './db-col-state.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
 import { bindClipboard } from './db-clipboard.js';
+import { setAnchor, extendTo, clearSelection } from './db-selection.js';
+import { getNextCell, getPrevCell, getCellAbove, getCellBelow } from './db-cell-nav.js';
 import { enableRowDrag } from './db-drag-rows.js';
 import { enableColumnDrag } from './db-col-drag.js';
 import { wireColumnResize } from './db-col-resize.js';
@@ -77,7 +80,9 @@ export async function renderTableView(el, ctx) {
         const p = col.def;
         const autoVals = { created_time: r.created_at, last_edited: r.updated_at, unique_id: rid };
         const raw = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
-        return `<td class="cell-editable" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}' data-raw-value="${escapeHtml(String(raw))}">${formatPropValue(raw, p)}</td>`;
+        const isReadonly = getType(p.type).auto;
+        const cellClass = isReadonly ? 'cell-readonly' : 'cell-editable';
+        return `<td class="${cellClass}" data-record-id="${rid}" data-prop-id="${p.id}" data-prop-type="${p.type}" data-prop-options='${escapeHtml(p.options || "[]")}' data-raw-value="${escapeHtml(String(raw))}">${formatPropValue(raw, p)}</td>`;
       }
     }).join('');
     tbody += `<tr class="data-table-row" data-id="${rid}">${tdCheck}${tdCols}<td></td></tr>`;
@@ -91,7 +96,16 @@ export async function renderTableView(el, ctx) {
   const addRowHtml = (onAdd || onQuickAdd) ? `<tr class="dbv-add-row"><td colspan="${colCount}"><div class="dbv-add-row-label"><span class="dbv-add-row-plus">+</span></div></td></tr>` : '';
   const footerHtml = `<div class="dbv-table-footer"><span>Записей: ${filtered.length}</span></div>`;
 
+  // Preserve scroll position across re-renders
+  const oldWrap = el.querySelector('.dbv-table-wrap');
+  const scrollTop = oldWrap ? oldWrap.scrollTop : 0;
+  const scrollLeft = oldWrap ? oldWrap.scrollLeft : 0;
+
   el.innerHTML = `<div class="dbv-table-wrap"><table class="data-table database-view"><thead><tr>${thCheck}${thCols}<th class="add-prop-col dbv-add-prop-col" title="Добавить свойство">+</th></tr></thead><tbody>${tbody}${addRowHtml}</tbody></table>${footerHtml}</div>`;
+
+  // Restore scroll position
+  const newWrap = el.querySelector('.dbv-table-wrap');
+  if (newWrap) { newWrap.scrollTop = scrollTop; newWrap.scrollLeft = scrollLeft; }
 
   // Wire features
   wireColumnResize(el, tabId);
@@ -106,17 +120,42 @@ export async function renderTableView(el, ctx) {
   const tableEl = el.querySelector('.data-table');
   if (tableEl) enableColumnDrag(tableEl, tabId, reload, visProps);
 
-  // Inline editing — custom props
-  el.querySelectorAll('.cell-editable').forEach(cell => {
+  // Cell selection + inline editing (click=select, dblclick=edit)
+  const allCells = el.querySelectorAll('.cell-editable, .cell-fixed-edit, .cell-readonly');
+  allCells.forEach(cell => {
     cell.setAttribute('tabindex', '0');
-    cell.addEventListener('click', (e) => { e.stopPropagation(); focusCell(el, cell); startInlineEdit(cell, recordTable, reload); });
+    cell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.shiftKey && tableEl) { extendTo(cell, tableEl); return; }
+      focusCell(el, cell);
+      if (tableEl) setAnchor(cell, tableEl);
+    });
     cell.addEventListener('focus', () => focusCell(el, cell));
   });
-
-  // Inline editing — fixed columns
+  el.querySelectorAll('.cell-editable').forEach(cell => {
+    cell.addEventListener('dblclick', (e) => { e.stopPropagation(); startInlineEdit(cell, recordTable, reload); });
+  });
   el.querySelectorAll('.cell-fixed-edit').forEach(cell => {
-    cell.addEventListener('click', (e) => { e.stopPropagation(); focusCell(el, cell); startFixedCellEdit(cell, reload); });
-    cell.addEventListener('focus', () => focusCell(el, cell));
+    cell.addEventListener('dblclick', (e) => { e.stopPropagation(); startFixedCellEdit(cell, reload); });
+  });
+  // Keyboard navigation + Escape
+  el.addEventListener('keydown', (e) => {
+    if (e.target.closest('.inline-editor')) return;
+    const focused = el.querySelector('.cell-focused');
+    if (!focused) return;
+    if (e.key === 'Escape' && tableEl) { clearSelection(tableEl); focusCell(el, document.createElement('div')); return; }
+    const nav = { Tab: e.shiftKey ? getPrevCell : getNextCell, ArrowRight: getNextCell, ArrowLeft: getPrevCell, ArrowDown: getCellBelow, ArrowUp: getCellAbove };
+    const fn = nav[e.key];
+    if (fn) {
+      e.preventDefault();
+      const next = fn(focused);
+      if (next) { focusCell(el, next); if (tableEl) setAnchor(next, tableEl); next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (focused.classList.contains('cell-editable')) startInlineEdit(focused, recordTable, reload);
+      else if (focused.classList.contains('cell-fixed-edit')) startFixedCellEdit(focused, reload);
+    }
   });
   el.addEventListener('fixed-cell-save', async (e) => {
     const { recordId, key, value, skipReload } = e.detail;

@@ -19,6 +19,12 @@ export function formatPropValue(val, prop) {
     catch { return escapeHtml(val); }
   }
   if (prop.type === 'url') return `<a href="${escapeHtml(val)}" target="_blank" class="cell-link">${escapeHtml(val.length > 30 ? val.substring(0, 30) + '...' : val)}</a>`;
+  if (prop.type === 'email') return `<a href="mailto:${escapeHtml(val)}" class="cell-link">${escapeHtml(val)}</a>`;
+  if (prop.type === 'phone') return `<a href="tel:${escapeHtml(val)}" class="cell-link">${escapeHtml(val)}</a>`;
+  if (prop.type === 'date') { const d = new Date(val); return isNaN(d) ? escapeHtml(val) : `<span class="cell-date">${d.toLocaleDateString('ru-RU')}</span>`; }
+  if (prop.type === 'created_time' || prop.type === 'last_edited') {
+    const d = new Date(val); return isNaN(d) ? escapeHtml(val) : `<span class="cell-date text-faint">${d.toLocaleDateString('ru-RU')} ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>`;
+  }
   if (prop.type === 'time') return `<span class="cell-time">${escapeHtml(val)}</span>`;
   if (prop.type === 'progress') {
     const n = parseInt(val) || 0;

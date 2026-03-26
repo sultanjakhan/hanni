@@ -454,6 +454,7 @@
 
 .view.active {
   display: flex;
+  opacity: 1;
   animation: fadeIn 0.15s ease-out;
 }
 

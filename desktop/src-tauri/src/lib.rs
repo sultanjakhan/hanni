@@ -73,6 +73,7 @@ pub fn run() {
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
     migrate_schedules(&conn);
+    migrate_custom_projects(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -470,6 +471,11 @@ pub fn run() {
             notes::get_custom_page,
             notes::update_custom_page,
             notes::delete_custom_page,
+            // Project Records
+            notes::get_project_records,
+            notes::create_project_record,
+            notes::update_project_record,
+            notes::delete_project_record,
             // Focus Overlay
             notes::toggle_focus_overlay,
             // Tab Page Blocks

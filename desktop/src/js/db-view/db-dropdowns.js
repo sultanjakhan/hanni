@@ -1,6 +1,13 @@
 // ── db-view/db-dropdowns.js — Select & multi-select dropdown UI ──
 
 import { escapeHtml } from '../utils.js';
+import { invoke } from '../state.js';
+
+function repositionDropdown(dd, anchorRect) {
+  const r = dd.getBoundingClientRect();
+  if (r.bottom > window.innerHeight) dd.style.top = Math.max(4, anchorRect.top - r.height - 2) + 'px';
+  if (r.right > window.innerWidth) dd.style.left = Math.max(4, window.innerWidth - r.width - 8) + 'px';
+}
 
 export function showSelectDropdown(cell, options, currentVal, save) {
   closeAllDropdowns();
@@ -31,6 +38,7 @@ export function showSelectDropdown(cell, options, currentVal, save) {
 
   dd.innerHTML = `<div class="inline-dd-search-wrap"><input class="inline-dd-search" placeholder="Поиск или создать..."></div><div class="inline-dd-list"></div>`;
   document.body.appendChild(dd);
+  repositionDropdown(dd, rect);
   renderOptions('');
 
   const input = dd.querySelector('.inline-dd-search');
@@ -52,6 +60,7 @@ export function showMultiSelectDropdown(cell, options, rawVal, save) {
   closeAllDropdowns();
   let selected = [];
   try { selected = JSON.parse(rawVal || '[]'); } catch { selected = rawVal ? [rawVal] : []; }
+  let allOptions = [...options];
 
   const rect = cell.getBoundingClientRect();
   const dd = document.createElement('div');
@@ -60,24 +69,49 @@ export function showMultiSelectDropdown(cell, options, rawVal, save) {
   dd.style.top = rect.bottom + 2 + 'px';
   dd.style.minWidth = Math.max(rect.width, 160) + 'px';
 
-  const render = () => {
-    dd.innerHTML = options.map(o =>
+  const renderOptions = (filter) => {
+    const list = dd.querySelector('.inline-dd-list');
+    const filtered = filter
+      ? allOptions.filter(o => o.toLowerCase().includes(filter.toLowerCase()))
+      : allOptions;
+    let html = filtered.map(o =>
       `<div class="inline-dd-option${selected.includes(o) ? ' active' : ''}" data-val="${escapeHtml(o)}">
         <span class="inline-dd-check">${selected.includes(o) ? '\u2713' : ''}</span>${escapeHtml(o)}
       </div>`
     ).join('');
-    dd.querySelectorAll('.inline-dd-option').forEach(opt => {
+    if (filter && !allOptions.some(o => o.toLowerCase() === filter.toLowerCase())) {
+      html += `<div class="inline-dd-option inline-dd-create" data-val="${escapeHtml(filter)}">+ ${escapeHtml(filter)}</div>`;
+    }
+    list.innerHTML = html;
+    list.querySelectorAll('.inline-dd-option').forEach(opt => {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const v = opt.dataset.val;
-        if (selected.includes(v)) selected = selected.filter(x => x !== v);
-        else selected.push(v);
-        render();
+        if (opt.classList.contains('inline-dd-create')) {
+          allOptions.push(v);
+          selected.push(v);
+        } else if (selected.includes(v)) {
+          selected = selected.filter(x => x !== v);
+        } else {
+          selected.push(v);
+        }
+        renderOptions(dd.querySelector('.inline-dd-search')?.value.trim() || '');
       });
     });
   };
-  render();
+
+  dd.innerHTML = `<div class="inline-dd-search-wrap"><input class="inline-dd-search" placeholder="Поиск или создать..."></div><div class="inline-dd-list"></div>`;
   document.body.appendChild(dd);
+  repositionDropdown(dd, rect);
+  renderOptions('');
+
+  const input = dd.querySelector('.inline-dd-search');
+  input.focus();
+  input.addEventListener('input', () => renderOptions(input.value.trim()));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') dd.remove();
+    e.stopPropagation();
+  });
 
   setTimeout(() => {
     const close = (e) => {

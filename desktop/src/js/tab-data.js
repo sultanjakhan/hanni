@@ -2273,11 +2273,16 @@ function renderHealth(el, today, habits) {
 }
 
 // ── Custom Pages ──
-async function loadCustomPage(tabId) {
+async function loadCustomPage(tabId, subTab) {
   const reg = TAB_REGISTRY[tabId];
   if (!reg?.custom || !reg.pageId) return;
   const el = document.getElementById(`${tabId}-content`);
   if (!el) return;
+
+  // Projects use unified layout with DatabaseView
+  if (reg.pageType === 'project') {
+    return loadCustomProject(tabId, subTab, el, reg);
+  }
 
   try {
     const page = await invoke('get_custom_page', { id: reg.pageId });
@@ -2385,6 +2390,45 @@ async function loadCustomPage(tabId) {
   }
 }
 
+// ── Custom Project (unified layout) ──
+async function loadCustomProject(tabId, subTab, el, reg) {
+  const projectId = String(reg.pageId);
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, tabId, {
+    title: reg.label || 'Новый проект',
+    subtitle: '',
+    icon: reg.icon || '📁',
+    renderDash: async (paneEl) => {
+      const records = await invoke('get_project_records', { projectId }).catch(() => []);
+      paneEl.innerHTML = `
+        <div class="uni-dash-grid">
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${records.length}</div><div class="uni-dash-label">Записей</div></div>
+        </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const records = await invoke('get_project_records', { projectId }).catch(() => []);
+      const dbv = new DatabaseView(paneEl, {
+        tabId, recordTable: 'project_records', records,
+        fixedColumns: [
+          { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name || '')}</span>` },
+        ],
+        addButton: '+ Добавить',
+        onAdd: async () => {
+          await invoke('create_project_record', { projectId, name: '' });
+          loadCustomPage(tabId, subTab);
+        },
+        onQuickAdd: async () => {
+          await invoke('create_project_record', { projectId, name: '' });
+          loadCustomPage(tabId, subTab);
+        },
+        reloadFn: () => loadCustomPage(tabId, subTab),
+      });
+      S.dbViews[`project_${projectId}`] = dbv;
+      await dbv.render();
+    },
+  });
+}
+
 // ── Schedule tab ──
 
 const SCHEDULE_CATEGORIES = { health: '💊 Здоровье', sport: '🏋️ Спорт', home: '🏠 Дом', practice: '🧠 Практика', challenge: '🚫 Челлендж', work: '💼 Работа', other: '📌 Другое' };
@@ -2409,12 +2453,50 @@ async function loadSchedule(subTab) {
           <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.completed_week}</div><div class="uni-dash-label">За неделю ✓</div></div>
         </div>`;
     },
+    renderTracking: async (paneEl) => {
+      const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
+      const active = schedules.filter(s => s.is_active);
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+      }
+      const compMap = {};
+      for (const date of days) {
+        const comps = await invoke('get_schedule_completions', { date }).catch(() => []);
+        for (const c of comps) { if (c.completed) { if (!compMap[c.schedule_id]) compMap[c.schedule_id] = new Set(); compMap[c.schedule_id].add(date); } }
+      }
+      const dayLabels = days.map(d => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('ru', { weekday: 'short', day: 'numeric' }); });
+      const headerCols = dayLabels.map(l => `<th style="text-align:center;font-size:12px;min-width:50px;">${l}</th>`).join('');
+      const rows = active.map(s => {
+        const cells = days.map(d => {
+          const done = compMap[s.id]?.has(d);
+          return `<td style="text-align:center;">${done ? '<span style="color:var(--color-green);font-size:16px;">✓</span>' : '<span style="color:var(--text-faint);">·</span>'}</td>`;
+        }).join('');
+        const streak = days.reduce((acc, d) => compMap[s.id]?.has(d) ? acc + 1 : 0, 0);
+        return `<tr><td style="font-size:13px;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
+      }).join('');
+      paneEl.innerHTML = active.length === 0
+        ? '<div style="text-align:center;color:var(--text-faint);padding:40px;">Нет активных расписаний</div>'
+        : `<div style="overflow-x:auto;"><table class="data-table" style="font-size:13px;">
+            <thead><tr><th style="min-width:150px;">Практика</th>${headerCols}<th style="text-align:center;font-size:12px;">Streak</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>`;
+    },
     renderTable: async (paneEl) => {
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
       const today = new Date().toISOString().slice(0, 10);
       const completions = await invoke('get_schedule_completions', { date: today }).catch(() => []);
       const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
 
+      const reloadTable = async () => {
+        const fresh = await invoke('get_schedules', { category: null }).catch(() => []);
+        const comp = await invoke('get_schedule_completions', { date: today }).catch(() => []);
+        const cIds = new Set(comp.filter(c => c.completed).map(c => c.schedule_id));
+        dbv.schema.records = fresh;
+        dbv.schema.fixedColumns[0].render = r => `<div class="habit-check${cIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${cIds.has(r.id) ? '&#10003;' : ''}</div>`;
+        await dbv.render();
+      };
       const dbv = new DatabaseView(paneEl, {
         tabId: 'schedule', recordTable: 'schedules', records: schedules,
         availableViews: ['table', 'list'],
@@ -2437,7 +2519,7 @@ async function loadSchedule(subTab) {
         onAdd: () => showScheduleModal(),
         onQuickAdd: async () => {
           await invoke('create_schedule', { title: '', category: '', frequency: '', frequencyDays: null, timeOfDay: null, details: null });
-          loadSchedule();
+          reloadTable();
         },
         onCellEdit: async (recordId, key, value, skipReload) => {
           const keyMap = { title: 'title', category: 'category', frequency: 'frequency', time_of_day: 'timeOfDay' };
@@ -2445,9 +2527,9 @@ async function loadSchedule(subTab) {
           const paramKey = keyMap[key];
           if (paramKey) params[paramKey] = value;
           await invoke('update_schedule', params);
-          if (!skipReload) loadSchedule();
+          if (!skipReload) reloadTable();
         },
-        reloadFn: () => loadSchedule(),
+        reloadFn: reloadTable,
         onDelete: async (id) => { await invoke('delete_schedule', { id }); },
       });
       await dbv.render();
@@ -2455,7 +2537,7 @@ async function loadSchedule(subTab) {
         const chk = e.target.closest('[data-schid]');
         if (chk) {
           await invoke('toggle_schedule_completion', { scheduleId: parseInt(chk.dataset.schid), date: today });
-          loadSchedule();
+          reloadTable();
           return;
         }
         const tog = e.target.closest('[data-toggle-id]');
@@ -2463,7 +2545,7 @@ async function loadSchedule(subTab) {
           const id = parseInt(tog.dataset.toggleId);
           const isOn = tog.classList.contains('on');
           await invoke('update_schedule', { id, isActive: !isOn });
-          loadSchedule();
+          reloadTable();
         }
       });
     },

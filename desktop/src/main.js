@@ -222,6 +222,7 @@ document.addEventListener('keydown', (e) => {
     const customPages = await invoke('get_custom_pages');
     for (const page of customPages) {
       const tabId = `page_${page.id}`;
+      const isProject = page.page_type === 'project';
       TAB_REGISTRY[tabId] = {
         label: page.title,
         icon: page.icon,
@@ -229,6 +230,7 @@ document.addEventListener('keydown', (e) => {
         subTabs: JSON.parse(page.sub_tabs || '[]'),
         custom: true,
         pageId: page.id,
+        pageType: isProject ? 'project' : 'page',
       };
     }
   } catch (_) {}

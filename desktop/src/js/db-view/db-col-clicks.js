@@ -2,6 +2,7 @@
 
 import { S } from '../state.js';
 import { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, highlightColumn, clearColumnHighlight } from './db-properties.js';
+import { selectColumn, clearSelection } from './db-selection.js';
 
 /** Wire all column header interactions (click, inline edit, highlight) */
 export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, onQuickAdd, filtered, idField, recordTable }) {
@@ -15,7 +16,9 @@ export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRow
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle')) return;
       e.stopPropagation();
-      highlightColumn(tableEl, Array.from(th.parentElement.children).indexOf(th));
+      const colIdx = Array.from(th.parentElement.children).indexOf(th);
+      highlightColumn(tableEl, colIdx);
+      if (tableEl) selectColumn(colIdx, tableEl);
       const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
       if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reload, onSort);
     });
@@ -26,14 +29,19 @@ export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRow
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle')) return;
       e.stopPropagation();
-      highlightColumn(tableEl, Array.from(th.parentElement.children).indexOf(th));
+      const colIdx = Array.from(th.parentElement.children).indexOf(th);
+      highlightColumn(tableEl, colIdx);
+      if (tableEl) selectColumn(colIdx, tableEl);
       showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort);
     });
   });
 
-  // Clear highlight on click outside
+  // Clear highlight + selection on click outside
   el.addEventListener('click', (e) => {
-    if (!e.target.closest('.prop-header') && !e.target.closest('.fixed-header')) clearColumnHighlight(tableEl);
+    if (!e.target.closest('.prop-header') && !e.target.closest('.fixed-header')) {
+      clearColumnHighlight(tableEl);
+      if (!e.target.closest('.cell-editable, .cell-fixed-edit, .cell-readonly') && tableEl) clearSelection(tableEl);
+    }
   });
 
   // Add-row: prefer inline creation (onQuickAdd), fallback to modal (onAdd)

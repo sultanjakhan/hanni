@@ -622,7 +622,7 @@ function loadSubTabContent(tabId, subTab) {
     case 'schedule': tabLoaders.loadSchedule?.(subTab); break;
     case 'dankoe': tabLoaders.loadDanKoe?.(subTab); break;
     default:
-      if (tabId.startsWith('page_')) tabLoaders.loadCustomPage?.(tabId);
+      if (tabId.startsWith('page_')) tabLoaders.loadCustomPage?.(tabId, subTab);
       break;
   }
   // Wire up editable page header controls (icon picker, description) after content renders
@@ -661,6 +661,30 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
     } catch (err) { console.error('Page create error:', err); }
   });
   list.appendChild(newPageItem);
+
+  // "New Project" option
+  const newProjItem = document.createElement('div');
+  newProjItem.className = 'tab-dropdown-item tab-dropdown-new-page';
+  newProjItem.innerHTML = `<span class="tab-item-icon">📁</span> Новый проект`;
+  newProjItem.addEventListener('click', async () => {
+    dropdown.classList.add('hidden');
+    try {
+      const page = await invoke('create_custom_page', { pageType: 'project' });
+      const tabId = `page_${page.id}`;
+      TAB_REGISTRY[tabId] = {
+        label: page.title,
+        icon: page.icon,
+        closable: true,
+        subTabs: [],
+        custom: true,
+        pageId: page.id,
+        pageType: 'project',
+      };
+      ensureViewDiv(tabId);
+      openTab(tabId);
+    } catch (err) { console.error('Project create error:', err); }
+  });
+  list.appendChild(newProjItem);
 
   // Separator
   const sep = document.createElement('div');

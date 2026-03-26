@@ -125,12 +125,18 @@ function showTypeChanger(propDef, anchorRect, tabId, reloadFn) {
   menu.innerHTML = PROPERTY_TYPE_DEFS.map(t =>
     `<div class="col-menu-item${t.id === propDef.type ? ' active' : ''}" data-type="${t.id}"><span class="col-menu-icon">${t.icon}</span><span>${t.name}</span></div>`
   ).join('');
-  menu.style.left = (anchorRect.left + 220) + 'px';
-  menu.style.top = anchorRect.bottom + 4 + 'px';
   document.body.appendChild(menu);
+  const mW = menu.offsetWidth, mH = menu.offsetHeight;
+  let left = anchorRect.left + 220;
+  if (left + mW > window.innerWidth) left = Math.max(4, anchorRect.left - mW - 4);
+  let top = anchorRect.bottom + 4;
+  if (top + mH > window.innerHeight) top = Math.max(4, anchorRect.top - mH - 4);
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
   menu.querySelectorAll('.col-menu-item').forEach(item => {
     item.addEventListener('click', async () => {
       if (item.dataset.type !== propDef.type) {
+        if (!await confirmModal('Смена типа может привести к потере данных. Продолжить?')) { menu.remove(); return; }
         try { await invoke('update_property_definition', { id: propDef.id, name: null, propType: item.dataset.type, position: null, color: null, options: null, visible: null }); if (reloadFn) reloadFn(); } catch {}
       }
       menu.remove();

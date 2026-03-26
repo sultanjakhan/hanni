@@ -709,19 +709,55 @@
   line-height: 1;
   display: block;
   margin-bottom: var(--space-1);
+  cursor: pointer;
+  border-radius: var(--radius-1);
+  padding: 2px 4px;
+  display: inline-block;
 }
+.uni-header-icon:hover { background: var(--bg-hover); }
 .uni-header-name {
   font-size: 26px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.5px;
   line-height: 1.2;
+  cursor: pointer;
+  border-radius: var(--radius-1);
+  padding: 2px 4px;
+  outline: none;
 }
+.uni-header-name:hover { background: var(--bg-hover); }
+.uni-header-name[contenteditable="true"] { background: var(--bg-hover); }
 .uni-header-desc {
   font-size: 14px;
   color: var(--text-muted);
   margin-top: var(--space-1);
   line-height: 1.5;
+  cursor: pointer;
+  border-radius: var(--radius-1);
+  padding: 2px 4px;
+  outline: none;
+}
+.uni-header-desc:hover { background: var(--bg-hover); }
+.uni-header-desc[contenteditable="true"] { background: var(--bg-hover); }
+.uni-icon-popup {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-2);
+  padding: 8px;
+  box-shadow: var(--shadow-lg);
+}
+.uni-icon-input {
+  width: 60px;
+  font-size: 24px;
+  text-align: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-1);
+  background: var(--bg-secondary);
+  padding: 4px;
+  outline: none;
 }
 
 /* ── Sub-tab bar (Notion view switcher) ── */
@@ -1573,6 +1609,22 @@
 .cell-focused { outline: 2px solid var(--accent-blue); outline-offset: -2px; z-index: 1; position: relative; }
 .cell-focused:has(.inline-editor) { outline: none; }
 
+/* ── Cell range selection ── */
+.cell-range-selected { background: rgba(59,130,246,0.06) !important; position: relative; }
+.cell-range-top { border-top: 2px solid var(--accent-blue) !important; }
+.cell-range-bottom { border-bottom: 2px solid var(--accent-blue) !important; }
+.cell-range-left { border-left: 2px solid var(--accent-blue) !important; }
+.cell-range-right { border-right: 2px solid var(--accent-blue) !important; }
+th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
+.cell-copied { animation: cell-copy-flash 0.4s ease; }
+@keyframes cell-copy-flash { 0% { background: rgba(59,130,246,0.2); } 100% { background: transparent; } }
+
+/* ── Readonly cells (auto types: created_time, last_edited, unique_id) ── */
+.cell-readonly { color: var(--text-faint); cursor: default; }
+
+/* ── Validation error flash ── */
+.cell-invalid { outline: 2px solid var(--color-red) !important; outline-offset: -2px; }
+
 /* ── Inline editor overlay inside cells ── */
 .database-view .inline-editor {
   position: absolute;
@@ -1592,6 +1644,56 @@
 
 /* ── Cell wrap toggle ── */
 .cell-wrap { white-space: normal !important; word-break: break-word; }
+
+/* ── Add property popover ── */
+.prop-add-popover {
+  position: fixed;
+  z-index: 9999;
+  width: 220px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.15), 0 20px 48px rgba(0,0,0,.1);
+  padding: var(--space-2) 0;
+  overflow: hidden;
+}
+.prop-add-name-input {
+  width: calc(100% - 16px);
+  margin: 0 8px var(--space-2);
+  padding: 6px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+.prop-add-name-input:focus {
+  border-color: var(--accent-blue);
+}
+.prop-add-type-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.prop-add-type-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 100ms;
+}
+.prop-add-type-item:hover {
+  background: var(--bg-hover);
+}
+.prop-add-type-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
 
 /* ── Filter mode toggle (AND/OR) ── */
 .dbv-filter-mode-btn {

@@ -30,6 +30,13 @@ export class DatabaseView {
     try { this._customProps = await invoke('get_property_definitions', { tabId: s.tabId }); } catch { this._customProps = []; }
     await this._loadValues();
     if (!this._currentView) this._currentView = await this._loadPersistedView() || s.defaultView;
+
+    // Preserve scroll position and height across full re-renders
+    const oldWrap = this.el.querySelector('.dbv-table-wrap');
+    const savedScroll = oldWrap ? { top: oldWrap.scrollTop, left: oldWrap.scrollLeft } : null;
+    const savedHeight = this.el.offsetHeight;
+    if (savedHeight > 0) this.el.style.minHeight = savedHeight + 'px';
+
     this.el.innerHTML = '';
     const contentEl = document.createElement('div');
     contentEl.className = 'dbv-content';
@@ -37,6 +44,13 @@ export class DatabaseView {
     const allFields = this._buildFields();
     this._renderToolbar(allFields, contentEl);
     await this._renderView(contentEl, allFields);
+
+    // Restore scroll position and release height lock
+    if (savedScroll) {
+      const newWrap = this.el.querySelector('.dbv-table-wrap');
+      if (newWrap) { newWrap.scrollTop = savedScroll.top; newWrap.scrollLeft = savedScroll.left; }
+    }
+    this.el.style.minHeight = '';
   }
 
   _renderToolbar(allFields, contentEl) {

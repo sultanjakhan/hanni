@@ -20,6 +20,17 @@ export function applySortRules(records, rules, idField, valuesMap) {
       const pid = isProp ? parseInt(key.substring(5)) : null;
       const va = isProp ? (valuesMap[a[idField]]?.[pid] ?? '') : (a[key] ?? '');
       const vb = isProp ? (valuesMap[b[idField]]?.[pid] ?? '') : (b[key] ?? '');
+      // Multi-select JSON arrays: sort by element count
+      const isJsonA = typeof va === 'string' && va.startsWith('[');
+      const isJsonB = typeof vb === 'string' && vb.startsWith('[');
+      if (isJsonA || isJsonB) {
+        let la = 0, lb = 0;
+        try { la = JSON.parse(va || '[]').length; } catch {}
+        try { lb = JSON.parse(vb || '[]').length; } catch {}
+        const cmp = la - lb;
+        if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
+        continue;
+      }
       const na = parseFloat(va), nb = parseFloat(vb);
       const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : String(va).localeCompare(String(vb));
       if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
