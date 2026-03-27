@@ -339,6 +339,59 @@
   .call-end-btn { width: 60px; height: 60px; }
 }
 
+/* ── Music Widget ── */
+
+.music-widget {
+  position: absolute;
+  bottom: 176px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.mw-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  position: relative;
+  box-shadow: var(--shadow-card);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.mw-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+  transform: scale(1.05);
+}
+
+.mw-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-green, #22c55e);
+  border: 2px solid var(--bg-elevated);
+  animation: mw-pulse 2s ease infinite;
+}
+.mw-dot.hidden { display: none; }
+
+@keyframes mw-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* ── Notification Widget ── */
 
 .notification-widget {

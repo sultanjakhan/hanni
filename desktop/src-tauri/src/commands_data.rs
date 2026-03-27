@@ -2,6 +2,7 @@
 use crate::types::*;
 use crate::prompts::SYSTEM_PROMPT;
 use crate::commands_meta::{start_focus, stop_focus};
+use chrono::Timelike;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -344,6 +345,22 @@ pub fn update_task_status(id: i64, status: String, db: tauri::State<'_, HanniDb>
 }
 
 #[tauri::command]
+pub fn update_task_field(id: i64, field: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let allowed = ["title", "priority", "status", "description", "due_date"];
+    if !allowed.contains(&field.as_str()) {
+        return Err(format!("Field '{}' not allowed", field));
+    }
+    let conn = db.conn();
+    let sql = format!("UPDATE tasks SET {}=?1 WHERE id=?2", field);
+    conn.execute(&sql, rusqlite::params![value, id]).map_err(|e| format!("DB error: {}", e))?;
+    if field == "status" && value == "done" {
+        let now = chrono::Local::now().to_rfc3339();
+        conn.execute("UPDATE tasks SET completed_at=?1 WHERE id=?2", rusqlite::params![now, id]).map_err(|e| format!("DB error: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn archive_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("UPDATE projects SET status='archived', updated_at=?1 WHERE id=?2",
@@ -446,6 +463,32 @@ pub fn update_learning_item_status(id: i64, status: String, db: tauri::State<'_,
         "UPDATE learning_items SET status = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![status, now, id],
     ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_learning_item(id: i64, title: Option<String>, item_type: Option<String>, status: Option<String>, progress: Option<i32>, url: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    let mut updates = vec![format!("updated_at=?1")];
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
+    let mut idx = 2;
+    if let Some(v) = title { updates.push(format!("title=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = item_type { updates.push(format!("type=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = status { updates.push(format!("status=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = progress { updates.push(format!("progress=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = url { updates.push(format!("url=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE learning_items SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_learning_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    db.conn().execute("DELETE FROM learning_items WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -562,6 +605,24 @@ pub fn get_workout_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Va
 pub fn delete_workout(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     db.conn().execute("DELETE FROM workouts WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_workout(id: i64, title: Option<String>, workout_type: Option<String>, duration_minutes: Option<i64>, calories: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = title { updates.push(format!("title=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = workout_type { updates.push(format!("type=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = duration_minutes { updates.push(format!("duration_minutes=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = calories { updates.push(format!("calories=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE workouts SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -847,6 +908,79 @@ pub fn check_habit(habit_id: i64, date: Option<String>, db: tauri::State<'_, Han
             rusqlite::params![habit_id, target_date, now],
         ).map_err(|e| format!("DB error: {}", e))?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_habit(id: i64, name: Option<String>, frequency: Option<String>, icon: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = frequency { updates.push(format!("frequency=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = icon { updates.push(format!("icon=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE habits SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_habit(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM habit_checks WHERE habit_id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    conn.execute("DELETE FROM habits WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+// ── Activities: get_all, update, delete (for Focus DatabaseView) ──
+
+#[tauri::command]
+pub fn get_all_activities(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, title, category, started_at, ended_at, duration_minutes, focus_mode, notes
+         FROM activities ORDER BY started_at DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "category": row.get::<_, String>(2)?,
+            "started_at": row.get::<_, String>(3)?,
+            "ended_at": row.get::<_, Option<String>>(4)?,
+            "duration_minutes": row.get::<_, Option<i64>>(5)?,
+            "focus_mode": row.get::<_, i64>(6)?,
+            "notes": row.get::<_, Option<String>>(7)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn update_activity(id: i64, title: Option<String>, category: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = title { updates.push(format!("title=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = notes { updates.push(format!("notes=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE activities SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_activity(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM activities WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -1440,6 +1574,26 @@ pub fn delete_food_entry(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), S
 }
 
 #[tauri::command]
+pub fn update_food_entry(id: i64, name: Option<String>, meal_type: Option<String>, calories: Option<i64>, protein: Option<f64>, carbs: Option<f64>, fat: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = meal_type { updates.push(format!("meal_type=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = calories { updates.push(format!("calories=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = protein { updates.push(format!("protein=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = carbs { updates.push(format!("carbs=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = fat { updates.push(format!("fat=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE food_log SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_food_stats(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
     let d = days.unwrap_or(7);
@@ -1499,6 +1653,26 @@ pub fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlit
 }
 
 #[tauri::command]
+pub fn update_recipe(id: i64, name: Option<String>, prep_time: Option<i64>, cook_time: Option<i64>, servings: Option<i64>, calories: Option<i64>, tags: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = prep_time { updates.push(format!("prep_time=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = cook_time { updates.push(format!("cook_time=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = servings { updates.push(format!("servings=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = calories { updates.push(format!("calories=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = tags { updates.push(format!("tags=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE recipes SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
@@ -1551,16 +1725,21 @@ pub fn product_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqli
 }
 
 #[tauri::command]
-pub fn update_product(id: i64, quantity: Option<f64>, expiry_date: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_product(id: i64, name: Option<String>, quantity: Option<f64>, expiry_date: Option<String>, location: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    let (cur_qty, cur_exp, cur_notes): (f64, Option<String>, String) = conn.query_row(
-        "SELECT quantity, expiry_date, notes FROM products WHERE id=?1", rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-    ).map_err(|e| format!("Not found: {}", e))?;
-    conn.execute(
-        "UPDATE products SET quantity=?1, expiry_date=?2, notes=?3 WHERE id=?4",
-        rusqlite::params![quantity.unwrap_or(cur_qty), expiry_date.or(cur_exp), notes.unwrap_or(cur_notes), id],
-    ).map_err(|e| format!("DB error: {}", e))?;
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = quantity { updates.push(format!("quantity=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = expiry_date { updates.push(format!("expiry_date=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = location { updates.push(format!("location=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = notes { updates.push(format!("notes=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE products SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -1636,6 +1815,24 @@ pub fn tx_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite::E
 }
 
 #[tauri::command]
+pub fn update_transaction(id: i64, amount: Option<f64>, category: Option<String>, description: Option<String>, tx_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = amount { updates.push(format!("amount=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = description { updates.push(format!("description=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = tx_type { updates.push(format!("type=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE transactions SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_transaction(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM transactions WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
@@ -1697,6 +1894,23 @@ pub fn get_budgets(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Valu
 }
 
 #[tauri::command]
+pub fn update_budget(id: i64, category: Option<String>, amount: Option<f64>, period: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = amount { updates.push(format!("amount=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = period { updates.push(format!("period=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE budgets SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_budget(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM budgets WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
@@ -1735,7 +1949,7 @@ pub fn get_savings_goals(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json
 }
 
 #[tauri::command]
-pub fn update_savings_goal(id: i64, add_amount: Option<f64>, target_amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_savings_goal(id: i64, add_amount: Option<f64>, target_amount: Option<f64>, name: Option<String>, deadline: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(add) = add_amount {
         conn.execute("UPDATE savings_goals SET current_amount = current_amount + ?1 WHERE id=?2", rusqlite::params![add, id])
@@ -1743,6 +1957,14 @@ pub fn update_savings_goal(id: i64, add_amount: Option<f64>, target_amount: Opti
     }
     if let Some(target) = target_amount {
         conn.execute("UPDATE savings_goals SET target_amount=?1 WHERE id=?2", rusqlite::params![target, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    if let Some(v) = name {
+        conn.execute("UPDATE savings_goals SET name=?1 WHERE id=?2", rusqlite::params![v, id])
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+    if let Some(v) = deadline {
+        conn.execute("UPDATE savings_goals SET deadline=?1 WHERE id=?2", rusqlite::params![v, id])
             .map_err(|e| format!("DB error: {}", e))?;
     }
     Ok(())
@@ -1785,10 +2007,21 @@ pub fn get_subscriptions(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json
 }
 
 #[tauri::command]
-pub fn update_subscription(id: i64, active: Option<bool>, amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_subscription(id: i64, active: Option<bool>, amount: Option<f64>, name: Option<String>, period: Option<String>, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    if let Some(a) = active { conn.execute("UPDATE subscriptions SET active=?1 WHERE id=?2", rusqlite::params![a as i32, id]).map_err(|e| format!("DB error: {}", e))?; }
-    if let Some(amt) = amount { conn.execute("UPDATE subscriptions SET amount=?1 WHERE id=?2", rusqlite::params![amt, id]).map_err(|e| format!("DB error: {}", e))?; }
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = active { updates.push(format!("active=?{}", idx)); params.push(Box::new(v as i32)); idx += 1; }
+    if let Some(v) = amount { updates.push(format!("amount=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = period { updates.push(format!("period=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE subscriptions SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -1831,12 +2064,23 @@ pub fn get_debts(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>
 }
 
 #[tauri::command]
-pub fn update_debt(id: i64, pay_amount: Option<f64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_debt(id: i64, pay_amount: Option<f64>, name: Option<String>, remaining: Option<f64>, debt_type: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(pay) = pay_amount {
         conn.execute("UPDATE debts SET remaining = MAX(0, remaining - ?1) WHERE id=?2", rusqlite::params![pay, id])
             .map_err(|e| format!("DB error: {}", e))?;
     }
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = remaining { updates.push(format!("remaining=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = debt_type { updates.push(format!("type=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE debts SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -2401,6 +2645,14 @@ pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>
     let prod_min: f64 = snapshots.iter().map(|s| s["productive"].as_f64().unwrap_or(0.0)).sum();
     let dist_min: f64 = snapshots.iter().map(|s| s["distraction"].as_f64().unwrap_or(0.0)).sum();
     let total_min = active_minutes + idle_minutes + locked_minutes;
+    // Unknown = time of day elapsed minus tracked time
+    let day_elapsed_min = if target_date == chrono::Local::now().format("%Y-%m-%d").to_string() {
+        let now = chrono::Local::now();
+        (now.hour() as f64) * 60.0 + now.minute() as f64
+    } else {
+        1440.0 // full day
+    };
+    let unknown_minutes = (day_elapsed_min - total_min).max(0.0);
 
     // Sort apps by time descending
     let mut top_apps: Vec<(String, f64)> = by_app.into_iter().collect();
@@ -2415,6 +2667,7 @@ pub fn get_activity_timeline(db: tauri::State<'_, HanniDb>, date: Option<String>
         "locked_minutes": locked_minutes,
         "productive_minutes": prod_min,
         "distraction_minutes": dist_min,
+        "unknown_minutes": unknown_minutes,
         "snapshots_count": snapshots.len(),
         "categories": by_category,
         "top_apps": top_apps.iter().map(|(app, min)| serde_json::json!({"app": app, "minutes": min})).collect::<Vec<_>>(),
@@ -2456,4 +2709,102 @@ pub fn get_activity_weekly(db: tauri::State<'_, HanniDb>) -> Result<serde_json::
     }
 
     Ok(serde_json::json!({ "days": days }))
+}
+
+// ── Body Records (3D Body Tab) ──
+
+#[tauri::command]
+pub async fn create_body_record(
+    db: tauri::State<'_, HanniDb>,
+    zone: String,
+    zone_label: String,
+    record_type: String,
+    intensity: Option<i32>,
+    pain_type: Option<String>,
+    goal_type: Option<String>,
+    value: Option<f64>,
+    unit: Option<String>,
+    treatment_type: Option<String>,
+    note: Option<String>,
+    date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let n = note.unwrap_or_default();
+    conn.execute(
+        "INSERT INTO body_records (zone, zone_label, record_type, intensity, pain_type, goal_type, value, unit, treatment_type, note, date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![zone, zone_label, record_type, intensity, pain_type, goal_type, value, unit, treatment_type, n, d],
+    ).map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    Ok(serde_json::json!({ "id": id }))
+}
+
+#[tauri::command]
+pub async fn get_body_records(
+    db: tauri::State<'_, HanniDb>,
+    zone: Option<String>,
+    record_type: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut sql = "SELECT id, zone, zone_label, record_type, intensity, pain_type, goal_type, value, unit, treatment_type, note, date, created_at FROM body_records WHERE 1=1".to_string();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+    if let Some(z) = &zone {
+        sql.push_str(&format!(" AND zone = ?{}", params.len() + 1));
+        params.push(Box::new(z.clone()));
+    }
+    if let Some(rt) = &record_type {
+        sql.push_str(&format!(" AND record_type = ?{}", params.len() + 1));
+        params.push(Box::new(rt.clone()));
+    }
+    sql.push_str(" ORDER BY date DESC, created_at DESC LIMIT 200");
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "zone": row.get::<_, String>(1)?,
+            "zone_label": row.get::<_, String>(2)?,
+            "record_type": row.get::<_, String>(3)?,
+            "intensity": row.get::<_, Option<i32>>(4)?,
+            "pain_type": row.get::<_, Option<String>>(5)?,
+            "goal_type": row.get::<_, Option<String>>(6)?,
+            "value": row.get::<_, Option<f64>>(7)?,
+            "unit": row.get::<_, Option<String>>(8)?,
+            "treatment_type": row.get::<_, Option<String>>(9)?,
+            "note": row.get::<_, String>(10)?,
+            "date": row.get::<_, String>(11)?,
+            "created_at": row.get::<_, String>(12)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    let records: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    Ok(serde_json::json!(records))
+}
+
+#[tauri::command]
+pub async fn delete_body_record(db: tauri::State<'_, HanniDb>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM body_records WHERE id = ?1", [id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_body_zones_summary(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT zone, zone_label, record_type, COUNT(*) as cnt,
+                MAX(CASE WHEN record_type='pain' THEN intensity ELSE NULL END) as max_intensity
+         FROM body_records GROUP BY zone, record_type"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "zone": row.get::<_, String>(0)?,
+            "zone_label": row.get::<_, String>(1)?,
+            "record_type": row.get::<_, String>(2)?,
+            "count": row.get::<_, i64>(3)?,
+            "max_intensity": row.get::<_, Option<i32>>(4)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    let records: Vec<_> = rows.filter_map(|r| r.ok()).collect();
+    Ok(serde_json::json!(records))
 }

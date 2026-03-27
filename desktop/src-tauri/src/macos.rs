@@ -1,5 +1,6 @@
 // macos.rs — macOS actions, OS context helpers, reminders, web search
 use crate::types::*;
+use tauri::Manager;
 use crate::proactive::truncate_utf8;
 use std::sync::atomic::Ordering;
 use std::io::Write;
@@ -637,5 +638,140 @@ pub async fn get_browser_tab() -> Result<String, String> {
     }
 
     Ok("No supported browser is currently open.".into())
+}
+
+// ── YouTube Music WebView window ──
+
+#[tauri::command]
+pub async fn open_youtube_music(app: tauri::AppHandle) -> Result<String, String> {
+    // If window already exists, focus it
+    if let Some(win) = app.get_webview_window("youtube-music") {
+        win.set_focus().map_err(|e| e.to_string())?;
+        return Ok("focused".into());
+    }
+
+    let chrome_ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "youtube-music",
+        tauri::WebviewUrl::External("https://music.youtube.com".parse().unwrap()),
+    )
+    .title("YouTube Music")
+    .inner_size(420.0, 700.0)
+    .center()
+    .user_agent(chrome_ua)
+    .build()
+    .map_err(|e| format!("Failed to open YouTube Music: {}", e))?;
+
+    Ok("opened".into())
+}
+
+// ── YouTube Music (browser-based) ──
+
+#[tauri::command]
+pub async fn get_youtube_music_info() -> Result<serde_json::Value, String> {
+    let browsers = ["Google Chrome", "Arc"];
+    for browser in &browsers {
+        let check = run_osascript(&format!(
+            "tell application \"System Events\" to (name of processes) contains \"{}\"", browser
+        ));
+        if check.as_deref() != Ok("true") { continue; }
+
+        // Find YT Music tab and get title + URL
+        let script = format!(
+            r#"tell application "{}"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if URL of t contains "music.youtube.com" then
+        return (title of t) & "|||" & (URL of t)
+      end if
+    end repeat
+  end repeat
+end tell
+return "NOT_FOUND""#, browser);
+
+        let result = match run_osascript(&script) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if result == "NOT_FOUND" || result.is_empty() { continue; }
+
+        let parts: Vec<&str> = result.splitn(2, "|||").collect();
+        let title_raw = parts.first().unwrap_or(&"").trim();
+        let _url = parts.get(1).unwrap_or(&"").trim();
+
+        // Parse title: "Song - Artist - YouTube Music" or just "YouTube Music"
+        let is_playing;
+        let mut track = String::new();
+        let mut artist = String::new();
+
+        let cleaned = title_raw.trim_end_matches(" - YouTube Music").trim();
+        if cleaned.is_empty() || cleaned == "YouTube Music" {
+            is_playing = false;
+        } else if let Some(dash) = cleaned.rfind(" - ") {
+            track = cleaned[..dash].to_string();
+            artist = cleaned[dash + 3..].to_string();
+            is_playing = true;
+        } else {
+            track = cleaned.to_string();
+            is_playing = true;
+        }
+
+        return Ok(serde_json::json!({
+            "playing": is_playing,
+            "track": track,
+            "artist": artist,
+            "browser": browser,
+            "source": "youtube_music"
+        }));
+    }
+
+    Ok(serde_json::json!({ "playing": false, "source": "none" }))
+}
+
+#[tauri::command]
+pub async fn youtube_music_control(action: String) -> Result<String, String> {
+    let js_code = match action.as_str() {
+        "toggle" | "play" | "pause" => {
+            r#"document.querySelector('.play-pause-button button, tp-yt-paper-icon-button.play-pause-button, button[aria-label="Play"], button[aria-label="Pause"]').click()"#
+        }
+        "next" | "skip" => {
+            r#"document.querySelector('.next-button button, tp-yt-paper-icon-button.next-button, button[aria-label="Next"]').click()"#
+        }
+        "prev" | "previous" | "back" => {
+            r#"document.querySelector('.previous-button button, tp-yt-paper-icon-button.previous-button, button[aria-label="Previous"]').click()"#
+        }
+        _ => return Err(format!("Unknown action: {}", action)),
+    };
+
+    let browsers = ["Google Chrome", "Arc"];
+    for browser in &browsers {
+        let check = run_osascript(&format!(
+            "tell application \"System Events\" to (name of processes) contains \"{}\"", browser
+        ));
+        if check.as_deref() != Ok("true") { continue; }
+
+        let escaped_js = js_code.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            r#"tell application "{}"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if URL of t contains "music.youtube.com" then
+        execute t javascript "{}"
+        return "ok"
+      end if
+    end repeat
+  end repeat
+end tell
+return "not_found""#, browser, escaped_js);
+
+        match run_osascript(&script) {
+            Ok(r) if r == "ok" => return Ok(format!("YouTube Music: {}", action)),
+            _ => continue,
+        }
+    }
+
+    Err("YouTube Music tab not found in any browser".into())
 }
 

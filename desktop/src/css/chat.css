@@ -1082,9 +1082,9 @@ body.dragover::after {
 
 .welcome-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
 .welcome-stat {

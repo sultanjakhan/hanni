@@ -74,6 +74,7 @@ pub fn run() {
     migrate_activity_tracking(&conn);
     migrate_schedules(&conn);
     migrate_custom_projects(&conn);
+    migrate_body_records(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -199,6 +200,9 @@ pub fn run() {
             macos::get_calendar_events,
             macos::get_now_playing,
             macos::get_browser_tab,
+            macos::open_youtube_music,
+            macos::get_youtube_music_info,
+            macos::youtube_music_control,
             commands_meta::get_app_version,
             commands_meta::check_update,
             // Proactive
@@ -262,6 +266,9 @@ pub fn run() {
             commands_data::stop_activity,
             commands_data::get_current_activity,
             commands_data::get_activity_log,
+            commands_data::get_all_activities,
+            commands_data::update_activity,
+            commands_data::delete_activity,
             // Notes
             notes::create_note,
             notes::update_note,
@@ -279,6 +286,8 @@ pub fn run() {
             calendar::create_event,
             calendar::get_events,
             calendar::delete_event,
+            calendar::update_event,
+            calendar::get_all_events,
             // Calendar Sync
             calendar::sync_apple_calendar,
             calendar::sync_google_ics,
@@ -288,6 +297,7 @@ pub fn run() {
             commands_data::create_task,
             commands_data::get_tasks,
             commands_data::update_task_status,
+            commands_data::update_task_field,
             commands_data::archive_project,
             commands_data::get_archived_projects,
             commands_data::restore_project,
@@ -296,6 +306,8 @@ pub fn run() {
             commands_data::create_learning_item,
             commands_data::get_learning_items,
             commands_data::update_learning_item_status,
+            commands_data::update_learning_item,
+            commands_data::delete_learning_item,
             // Hobbies
             commands_data::create_hobby,
             commands_data::get_hobbies,
@@ -306,6 +318,7 @@ pub fn run() {
             commands_data::get_workouts,
             commands_data::get_workout_stats,
             commands_data::delete_workout,
+            commands_data::update_workout,
             // Schedules
             commands_data::create_schedule,
             commands_data::get_schedules,
@@ -325,6 +338,8 @@ pub fn run() {
             commands_data::create_habit,
             commands_data::check_habit,
             commands_data::get_habits_today,
+            commands_data::update_habit,
+            commands_data::delete_habit,
             // Dashboard
             commands_data::get_dashboard_data,
             commands_data::get_notifications,
@@ -357,9 +372,11 @@ pub fn run() {
             commands_data::log_food,
             commands_data::get_food_log,
             commands_data::delete_food_entry,
+            commands_data::update_food_entry,
             commands_data::get_food_stats,
             commands_data::create_recipe,
             commands_data::get_recipes,
+            commands_data::update_recipe,
             commands_data::delete_recipe,
             commands_data::add_product,
             commands_data::get_products,
@@ -370,9 +387,11 @@ pub fn run() {
             commands_data::add_transaction,
             commands_data::get_transactions,
             commands_data::delete_transaction,
+            commands_data::update_transaction,
             commands_data::get_transaction_stats,
             commands_data::create_budget,
             commands_data::get_budgets,
+            commands_data::update_budget,
             commands_data::delete_budget,
             commands_data::create_savings_goal,
             commands_data::get_savings_goals,
@@ -488,6 +507,11 @@ pub fn run() {
             vacancy::vacancy_search_now,
             // Automation API
             commands_meta::auto_eval_callback,
+            // Body Records (3D Body Tab)
+            commands_data::create_body_record,
+            commands_data::get_body_records,
+            commands_data::delete_body_record,
+            commands_data::get_body_zones_summary,
         ])
         .setup(move |app| {
             // Auto-updater

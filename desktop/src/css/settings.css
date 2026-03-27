@@ -674,38 +674,42 @@
   background: #fff;
 }
 
-/* ── Chat settings sub-tabs ── */
+/* ── Chat settings sub-tabs (unified with non-chat style) ── */
 
 .chat-settings-tabs {
   display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--space-5);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.chat-settings-tabs::-webkit-scrollbar { display: none; }
 
 .chat-settings-tab {
-  padding: 6px 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  transition: all var(--transition-fast);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   background: none;
   font-family: inherit;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .chat-settings-tab:hover {
   color: var(--text-secondary);
-  background: var(--bg-hover);
-  border-color: var(--border-hover);
 }
 
 .chat-settings-tab.active {
-  color: var(--user-msg-color);
-  background: var(--user-msg-bg);
-  border-color: var(--user-msg-bg);
+  color: var(--text-primary);
+  border-bottom-color: var(--text-primary);
 }
 
 .chat-settings-panel {
@@ -716,10 +720,6 @@
   display: block;
 }
 
-/* Hide horizontal tabs when sidebar settings nav is active */
-#sub-sidebar.settings-mode ~ #content-area .chat-settings-tabs {
-  display: none;
-}
 
 /* ── Per-tab settings horizontal tabs (browser-style) ── */
 

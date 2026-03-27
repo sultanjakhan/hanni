@@ -110,7 +110,19 @@ export class DatabaseView {
       for (const v of all) { if (!this._valuesMap[v.record_id]) this._valuesMap[v.record_id] = {}; this._valuesMap[v.record_id][v.property_id] = v.value; }
     } catch { this._valuesMap = {}; }
   }
-  _handleSort() { const r = getSortRules(this.schema.tabId); applySortRules(this._records, r, this.schema.idField, this._valuesMap); this.render(); }
+  _handleSort(key, dir) {
+    const tabId = this.schema.tabId;
+    if (key && dir) {
+      if (!S._dbvSortRules) S._dbvSortRules = {};
+      const rules = S._dbvSortRules[tabId] || [];
+      const idx = rules.findIndex(r => r.key === key);
+      if (idx >= 0) rules[idx].dir = dir; else rules.push({ key, dir });
+      S._dbvSortRules[tabId] = rules;
+    }
+    const r = getSortRules(tabId);
+    applySortRules(this._records, r, this.schema.idField, this._valuesMap);
+    this.render();
+  }
   _getHiddenColumns() {
     const s = this.schema, result = [], hiddenFixed = getHiddenFixedCols(s.tabId), deletedFixed = getDeletedFixedCols(s.tabId);
     for (const key of hiddenFixed) { if (deletedFixed.includes(key)) continue; const col = (s.fixedColumns || []).find(c => c.key === key); result.push({ id: key, name: col ? col.label : key, kind: 'fixed' }); }

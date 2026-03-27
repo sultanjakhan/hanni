@@ -2,7 +2,7 @@
 
 import { S } from '../state.js';
 import { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, highlightColumn, clearColumnHighlight } from './db-properties.js';
-import { selectColumn, clearSelection } from './db-selection.js';
+import { selectColumn, extendColumn, clearSelection } from './db-selection.js';
 
 /** Wire all column header interactions (click, inline edit, highlight) */
 export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRowClick, onAdd, onQuickAdd, filtered, idField, recordTable }) {
@@ -18,9 +18,11 @@ export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRow
       e.stopPropagation();
       const colIdx = Array.from(th.parentElement.children).indexOf(th);
       highlightColumn(tableEl, colIdx);
-      if (tableEl) selectColumn(colIdx, tableEl);
-      const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
-      if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reload, onSort);
+      if (tableEl) { e.shiftKey ? extendColumn(colIdx, tableEl) : selectColumn(colIdx, tableEl); }
+      if (!e.shiftKey) {
+        const prop = customProps.find(p => p.id === parseInt(th.dataset.propId));
+        if (prop) showColumnMenu(prop, th.getBoundingClientRect(), tabId, reload, onSort);
+      }
     });
   });
 
@@ -31,8 +33,8 @@ export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRow
       e.stopPropagation();
       const colIdx = Array.from(th.parentElement.children).indexOf(th);
       highlightColumn(tableEl, colIdx);
-      if (tableEl) selectColumn(colIdx, tableEl);
-      showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort);
+      if (tableEl) { e.shiftKey ? extendColumn(colIdx, tableEl) : selectColumn(colIdx, tableEl); }
+      if (!e.shiftKey) showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort);
     });
   });
 

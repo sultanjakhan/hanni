@@ -59,47 +59,59 @@ export function bindCheckboxes(container, tabId, filteredRecords, idField, ctx) 
   const sel = getSelection(tabId);
   let lastChecked = null;
 
-  // Header checkbox: select/deselect all
-  const headerCb = container.querySelector('.col-check-header input');
+  // Header: select/deselect all — click on the TH cell
+  const headerTh = container.querySelector('.col-check-header');
+  const headerCb = headerTh?.querySelector('input');
   if (headerCb) {
     headerCb.checked = filteredRecords.length > 0 && filteredRecords.every(r => sel.has(r[idField]));
-    headerCb.addEventListener('change', () => {
-      if (headerCb.checked) filteredRecords.forEach(r => sel.add(r[idField]));
-      else clearSelection(tabId);
+    headerTh.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const allSelected = filteredRecords.length > 0 && filteredRecords.every(r => sel.has(r[idField]));
+      if (allSelected) clearSelection(tabId);
+      else filteredRecords.forEach(r => sel.add(r[idField]));
+      headerCb.checked = !allSelected;
       renderBulkBar(container, tabId, ctx);
       updateRowCheckboxes(container, tabId);
     });
   }
 
-  // Row checkboxes with Shift+click range select
-  container.querySelectorAll('.col-check input[type="checkbox"]').forEach((cb, i) => {
-    const rid = parseInt(cb.closest('tr').dataset.id);
-    cb.checked = sel.has(rid);
-    cb.addEventListener('click', (e) => {
+  // Row select with Shift+click range — click anywhere in .col-check cell
+  const allTds = container.querySelectorAll('.col-check');
+  allTds.forEach((td, i) => {
+    const rid = parseInt(td.closest('tr').dataset.id);
+    if (sel.has(rid)) td.classList.add('row-checked');
+    td.addEventListener('click', (e) => {
       e.stopPropagation();
       if (e.shiftKey && lastChecked !== null) {
         const start = Math.min(lastChecked, i), end = Math.max(lastChecked, i);
-        const rows = container.querySelectorAll('.col-check input[type="checkbox"]');
         for (let j = start; j <= end; j++) {
-          const rowId = parseInt(rows[j].closest('tr').dataset.id);
+          const rowId = parseInt(allTds[j].closest('tr').dataset.id);
           sel.add(rowId);
-          rows[j].checked = true;
+          allTds[j].classList.add('row-checked');
         }
       } else {
-        if (cb.checked) sel.add(rid); else sel.delete(rid);
+        const isOn = sel.has(rid);
+        if (isOn) { sel.delete(rid); td.classList.remove('row-checked'); }
+        else { sel.add(rid); td.classList.add('row-checked'); }
       }
       lastChecked = i;
       renderBulkBar(container, tabId, ctx);
-      if (headerCb) headerCb.checked = filteredRecords.every(r => sel.has(r[idField]));
+      syncCheckAll(headerCb, filteredRecords, idField, sel);
     });
   });
 }
 
+/** Sync header "select all" state with current selection */
+function syncCheckAll(headerCb, filteredRecords, idField, sel) {
+  if (!headerCb) return;
+  headerCb.checked = filteredRecords.length > 0 && filteredRecords.every(r => sel.has(r[idField]));
+}
+
 function updateRowCheckboxes(container, tabId) {
   const sel = getSelection(tabId);
-  container.querySelectorAll('.col-check input[type="checkbox"]').forEach(cb => {
-    const rid = parseInt(cb.closest('tr').dataset.id);
-    cb.checked = sel.has(rid);
+  container.querySelectorAll('.col-check').forEach(td => {
+    const rid = parseInt(td.closest('tr').dataset.id);
+    td.classList.toggle('row-checked', sel.has(rid));
   });
 }
 

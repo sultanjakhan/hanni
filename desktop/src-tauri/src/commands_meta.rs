@@ -500,10 +500,11 @@ pub fn get_home_items(category: Option<String>, needed_only: bool, db: tauri::St
 }
 
 #[tauri::command]
-pub fn update_home_item(id: i64, name: Option<String>, quantity: Option<f64>, location: Option<String>, notes: Option<String>, needed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+pub fn update_home_item(id: i64, name: Option<String>, category: Option<String>, quantity: Option<f64>, location: Option<String>, notes: Option<String>, needed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
     let mut updates = vec!["updated_at=datetime('now')".to_string()];
     if let Some(v) = &name { updates.push(format!("name='{}'", v)); }
+    if let Some(v) = &category { updates.push(format!("category='{}'", v)); }
     if let Some(v) = quantity { updates.push(format!("quantity={}", v)); }
     if let Some(v) = &location { updates.push(format!("location='{}'", v)); }
     if let Some(v) = &notes { updates.push(format!("notes='{}'", v)); }

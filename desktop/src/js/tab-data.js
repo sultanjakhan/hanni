@@ -52,13 +52,14 @@ async function loadHome(subTab) {
     renderTable: async (paneEl) => {
       const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
       const categories = { cleaning: 'Уборка', hygiene: 'Гигиена', household: 'Дом', electronics: 'Техника', tools: 'Инструменты', other: 'Другое' };
+      const catOptions = Object.entries(categories).map(([k, v]) => ({ value: k, label: v }));
       const dbv = new DatabaseView(paneEl, {
         tabId: 'home', recordTable: 'home_items', records: items,
         fixedColumns: [
-          { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-          { key: 'category', label: 'Категория', render: r => `<span class="badge badge-gray">${categories[r.category] || r.category}</span>` },
-          { key: 'quantity', label: 'Кол-во', render: r => r.quantity != null ? `${r.quantity} ${r.unit || ''}` : '—' },
-          { key: 'location', label: 'Место', render: r => r.location || '—' },
+          { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions, render: r => `<span class="badge badge-gray">${categories[r.category] || r.category}</span>` },
+          { key: 'quantity', label: 'Кол-во', editable: true, editType: 'number', render: r => r.quantity != null ? `${r.quantity} ${r.unit || ''}` : '—' },
+          { key: 'location', label: 'Место', editable: true, editType: 'text', render: r => r.location || '—' },
           { key: 'needed', label: 'Статус', render: r => r.needed ? '<span class="badge badge-red">Нужно</span>' : '<span class="badge badge-green">Есть</span>' },
         ],
         addButton: '+ Добавить',
@@ -67,6 +68,14 @@ async function loadHome(subTab) {
           await invoke('add_home_item', { name: '', category: '', location: '' });
           loadHome();
         },
+        onCellEdit: async (recordId, key, value, skipReload) => {
+          const params = { id: recordId, name: null, category: null, quantity: null, location: null, notes: null, needed: null };
+          if (key === 'quantity') params.quantity = parseFloat(value) || null;
+          else params[key] = value;
+          await invoke('update_home_item', params);
+          if (!skipReload) loadHome();
+        },
+        onDelete: async (id) => { await invoke('delete_home_item', { id }); },
         reloadFn: () => loadHome(),
       });
       await dbv.render();
@@ -289,9 +298,12 @@ async function loadPrinciples(el) {
       records: principles,
       fixedColumns: [
         { key: 'active', label: '', render: r => `<div class="habit-check${r.active ? ' checked' : ''}" style="cursor:pointer;" data-pid="${r.id}">${r.active ? '&#10003;' : ''}</div>` },
-        { key: 'title', label: 'Принцип', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-        { key: 'category', label: 'Категория', render: r => `<span class="badge badge-gray">${r.category || '—'}</span>` },
-        { key: 'actions', label: '', render: r => `<button class="btn-secondary" style="padding:4px 8px;font-size:11px;color:var(--color-red);" data-pdel="${r.id}">✕</button>` },
+        { key: 'title', label: 'Принцип', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+        { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: [
+          { value: 'discipline', label: 'Дисциплина' }, { value: 'mindset', label: 'Мышление' },
+          { value: 'health', label: 'Здоровье' }, { value: 'relationships', label: 'Отношения' },
+          { value: 'work', label: 'Работа' }, { value: 'other', label: 'Другое' },
+        ], render: r => `<span class="badge badge-gray">${r.category || '—'}</span>` },
       ],
       idField: 'id',
       addButton: '+ Принцип',
@@ -303,17 +315,16 @@ async function loadPrinciples(el) {
         await invoke('create_principle', { title: '', description: '', category: '' });
         loadPrinciples(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, active: null, title: null };
+        params[key] = value;
+        await invoke('update_principle', params);
+        if (!skipReload) loadPrinciples(el);
+      },
+      onDelete: async (id) => { await invoke('delete_principle', { id }); },
       reloadFn: () => loadPrinciples(el),
     });
     await dbv.render();
-
-    // Delegate delete clicks
-    el.addEventListener('click', async (e) => {
-      const del = e.target.closest('[data-pdel]');
-      if (del) {
-        if (await confirmModal('Удалить?')) { await invoke('delete_principle', { id: parseInt(del.dataset.pdel) }).catch(()=>{}); loadPrinciples(el); }
-      }
-    });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -369,12 +380,15 @@ async function loadFoodLog(el) {
       recordTable: 'food_log',
       records: log,
       fixedColumns: [
-        { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-        { key: 'meal_type', label: 'Приём', render: r => `<span class="badge badge-gray">${mealLabels[r.meal_type] || r.meal_type}</span>` },
-        { key: 'calories', label: 'Калории', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.calories || 0} kcal</span>` },
-        { key: 'protein', label: 'Белок', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.protein || '—'}g</span>` },
-        { key: 'carbs', label: 'Углев.', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.carbs || '—'}g</span>` },
-        { key: 'fat', label: 'Жиры', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.fat || '—'}g</span>` },
+        { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'meal_type', label: 'Приём', editable: true, editType: 'select', editOptions: [
+          { value: 'breakfast', label: 'Завтрак' }, { value: 'lunch', label: 'Обед' },
+          { value: 'dinner', label: 'Ужин' }, { value: 'snack', label: 'Перекус' },
+        ], render: r => `<span class="badge badge-gray">${mealLabels[r.meal_type] || r.meal_type}</span>` },
+        { key: 'calories', label: 'Калории', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.calories || 0} kcal</span>` },
+        { key: 'protein', label: 'Белок', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.protein || '—'}g</span>` },
+        { key: 'carbs', label: 'Углев.', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.carbs || '—'}g</span>` },
+        { key: 'fat', label: 'Жиры', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.fat || '—'}g</span>` },
       ],
       idField: 'id',
       addButton: '+ Записать',
@@ -383,6 +397,16 @@ async function loadFoodLog(el) {
         await invoke('log_food', { mealType: '', name: '' });
         loadFoodLog(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, name: null, mealType: null, calories: null, protein: null, carbs: null, fat: null };
+        if (['calories'].includes(key)) params[key] = parseInt(value) || null;
+        else if (['protein', 'carbs', 'fat'].includes(key)) params[key] = parseFloat(value) || null;
+        else if (key === 'meal_type') params.mealType = value;
+        else params[key] = value;
+        await invoke('update_food_entry', params);
+        if (!skipReload) loadFoodLog(el);
+      },
+      onDelete: async (id) => { await invoke('delete_food_entry', { id }); },
       reloadFn: () => loadFoodLog(el),
     });
     await dbv.render();
@@ -433,10 +457,10 @@ async function loadRecipes(el) {
   try {
     const recipes = await invoke('get_recipes', { search: null, tags: null }).catch(() => []);
     const fixedColumns = [
-      { key: 'name', label: 'Name', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-      { key: 'prep_time', label: 'Prep', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.prep_time||0}+${r.cook_time||0} min</span>` },
-      { key: 'calories', label: 'Calories', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories||'\u2014'}</span>` },
-      { key: 'tags', label: 'Tags', render: r => r.tags ? r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join(' ') : '' },
+      { key: 'name', label: 'Name', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+      { key: 'prep_time', label: 'Prep', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.prep_time||0}+${r.cook_time||0} min</span>` },
+      { key: 'calories', label: 'Calories', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories||'\u2014'}</span>` },
+      { key: 'tags', label: 'Tags', editable: true, editType: 'text', render: r => r.tags ? r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join(' ') : '' },
     ];
     el.innerHTML = '<div id="recipes-dbv"></div>';
     const dbvEl = document.getElementById('recipes-dbv');
@@ -449,6 +473,15 @@ async function loadRecipes(el) {
         await invoke('create_recipe', { name: '', ingredients: '', instructions: '' });
         loadRecipes(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, name: null, prepTime: null, cookTime: null, servings: null, calories: null, tags: null };
+        if (key === 'prep_time') params.prepTime = parseInt(value) || null;
+        else if (key === 'calories') params.calories = parseInt(value) || null;
+        else params[key] = value;
+        await invoke('update_recipe', params);
+        if (!skipReload) loadRecipes(el);
+      },
+      onDelete: async (id) => { await invoke('delete_recipe', { id }); },
       reloadFn: () => loadRecipes(el),
     });
     await dbv.render();
@@ -496,10 +529,10 @@ async function loadProducts(el) {
   try {
     const products = await invoke('get_products', { location: null, expiringSoon: false }).catch(() => []);
     const fixedColumns = [
-      { key: 'name', label: 'Name', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-      { key: 'location', label: 'Location', render: r => `<span class="badge badge-gray">${r.location||''}</span>` },
-      { key: 'quantity', label: 'Qty', render: r => r.quantity ? `<span style="font-size:12px;color:var(--text-secondary);">${r.quantity} ${r.unit||''}</span>` : '' },
-      { key: 'expiry_date', label: 'Expiry', render: r => {
+      { key: 'name', label: 'Name', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+      { key: 'location', label: 'Location', editable: true, editType: 'text', render: r => `<span class="badge badge-gray">${r.location||''}</span>` },
+      { key: 'quantity', label: 'Qty', editable: true, editType: 'number', render: r => r.quantity ? `<span style="font-size:12px;color:var(--text-secondary);">${r.quantity} ${r.unit||''}</span>` : '' },
+      { key: 'expiry_date', label: 'Expiry', editable: true, editType: 'date', render: r => {
         if (!r.expiry_date) return '';
         const exp = new Date(r.expiry_date);
         const isExpiring = (exp - Date.now()) < 3 * 86400000;
@@ -517,6 +550,15 @@ async function loadProducts(el) {
         await invoke('add_product', { name: '' });
         loadProducts(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, name: null, quantity: null, expiryDate: null, location: null, notes: null };
+        if (key === 'quantity') params.quantity = parseFloat(value) || null;
+        else if (key === 'expiry_date') params.expiryDate = value;
+        else params[key] = value;
+        await invoke('update_product', params);
+        if (!skipReload) loadProducts(el);
+      },
+      onDelete: async (id) => { await invoke('delete_product', { id }); },
       reloadFn: () => loadProducts(el),
     });
     await dbv.render();
@@ -632,10 +674,12 @@ async function loadTransactions(el) {
 
     const fixedColumns = [
       { key: 'date', label: 'Date', render: r => `<span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;">${r.date}</span>` },
-      { key: 'description', label: 'Description', render: r => `<span class="data-table-title">${escapeHtml(r.description || r.category)}</span>` },
-      { key: 'category', label: 'Category', render: r => `<span class="badge badge-gray">${escapeHtml(r.category)}</span>` },
-      { key: 'tx_type', label: 'Type', render: r => `<span class="badge ${r.tx_type === 'income' ? 'badge-green' : 'badge-purple'}">${r.tx_type === 'income' ? 'Income' : 'Expense'}</span>` },
-      { key: 'amount', label: 'Amount', render: r => {
+      { key: 'description', label: 'Description', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.description || r.category)}</span>` },
+      { key: 'category', label: 'Category', editable: true, editType: 'text', render: r => `<span class="badge badge-gray">${escapeHtml(r.category)}</span>` },
+      { key: 'tx_type', label: 'Type', editable: true, editType: 'select', editOptions: [
+        { value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' },
+      ], render: r => `<span class="badge ${r.tx_type === 'income' ? 'badge-green' : 'badge-purple'}">${r.tx_type === 'income' ? 'Income' : 'Expense'}</span>` },
+      { key: 'amount', label: 'Amount', editable: true, editType: 'number', render: r => {
         const isIncome = r.tx_type === 'income';
         return `<span style="color:${isIncome ? 'var(--color-green)' : 'var(--text-secondary)'};font-variant-numeric:tabular-nums;font-weight:500;">${isIncome ? '+' : '-'} ${r.amount} ${r.currency || 'KZT'}</span>`;
       }},
@@ -658,6 +702,15 @@ async function loadTransactions(el) {
         await invoke('add_transaction', { transactionType: '', amount: 0, category: '' });
         loadTransactions(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, amount: null, category: null, description: null, txType: null };
+        if (key === 'amount') params.amount = parseFloat(value) || null;
+        else if (key === 'tx_type') params.txType = value;
+        else params[key] = value;
+        await invoke('update_transaction', params);
+        if (!skipReload) loadTransactions(el);
+      },
+      onDelete: async (id) => { await invoke('delete_transaction', { id }); },
       reloadFn: () => loadTransactions(el),
     });
     S.dbViews.transactions = dbv;
@@ -717,8 +770,8 @@ async function loadBudgets(el) {
       recordTable: 'budgets',
       records: budgets,
       fixedColumns: [
-        { key: 'category', label: 'Категория', render: r => `<span class="data-table-title">${escapeHtml(r.category)}</span>` },
-        { key: 'amount', label: 'Бюджет', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount}</span>` },
+        { key: 'category', label: 'Категория', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.category)}</span>` },
+        { key: 'amount', label: 'Бюджет', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount}</span>` },
         { key: 'spent', label: 'Потрачено', render: r => {
           const pct = r.amount > 0 ? Math.min(100, Math.round((r.spent||0) / r.amount * 100)) : 0;
           const warn = pct > 80;
@@ -729,7 +782,9 @@ async function loadBudgets(el) {
           const warn = pct > 80;
           return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'var(--color-yellow)':'var(--accent-blue)'}"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
         }},
-        { key: 'period', label: 'Период', render: r => `<span class="badge badge-gray">${r.period || 'monthly'}</span>` },
+        { key: 'period', label: 'Период', editable: true, editType: 'select', editOptions: [
+          { value: 'monthly', label: 'Месяц' }, { value: 'weekly', label: 'Неделя' }, { value: 'yearly', label: 'Год' },
+        ], render: r => `<span class="badge badge-gray">${r.period || 'monthly'}</span>` },
       ],
       idField: 'id',
       addButton: '+ Бюджет',
@@ -742,6 +797,14 @@ async function loadBudgets(el) {
         await invoke('create_budget', { category: '', amount: 0 });
         loadBudgets(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, category: null, amount: null, period: null };
+        if (key === 'amount') params.amount = parseFloat(value) || null;
+        else params[key] = value;
+        await invoke('update_budget', params);
+        if (!skipReload) loadBudgets(el);
+      },
+      onDelete: async (id) => { await invoke('delete_budget', { id }); },
       reloadFn: () => loadBudgets(el),
     });
     await dbv.render();
@@ -756,14 +819,14 @@ async function loadSavings(el) {
       recordTable: 'savings_goals',
       records: goals,
       fixedColumns: [
-        { key: 'name', label: 'Цель', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'name', label: 'Цель', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
         { key: 'current_amount', label: 'Накоплено', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.current_amount || 0}</span>` },
-        { key: 'target_amount', label: 'Цель', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.target_amount || 0}</span>` },
+        { key: 'target_amount', label: 'Цель', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.target_amount || 0}</span>` },
         { key: 'progress', label: 'Прогресс', render: r => {
           const pct = r.target_amount > 0 ? Math.min(100, Math.round(r.current_amount / r.target_amount * 100)) : 0;
           return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
         }},
-        { key: 'deadline', label: 'Дедлайн', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.deadline || '—'}</span>` },
+        { key: 'deadline', label: 'Дедлайн', editable: true, editType: 'date', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.deadline || '—'}</span>` },
         { key: 'actions', label: '', render: r => `<button class="btn-secondary" style="padding:4px 8px;font-size:11px;" data-sadd="${r.id}">+ Пополнить</button>` },
       ],
       idField: 'id',
@@ -777,6 +840,15 @@ async function loadSavings(el) {
         await invoke('create_savings_goal', { name: '', targetAmount: 0 });
         loadSavings(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, addAmount: null, targetAmount: null, name: null, deadline: null };
+        if (key === 'target_amount') params.targetAmount = parseFloat(value) || null;
+        else if (key === 'deadline') params.deadline = value;
+        else params[key] = value;
+        await invoke('update_savings_goal', params);
+        if (!skipReload) loadSavings(el);
+      },
+      onDelete: async (id) => { await invoke('delete_savings_goal', { id }); },
       reloadFn: () => loadSavings(el),
     });
     await dbv.render();
@@ -805,9 +877,11 @@ async function loadSubscriptions(el) {
       recordTable: 'subscriptions',
       records: subs,
       fixedColumns: [
-        { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-        { key: 'amount', label: 'Сумма', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount} ${r.currency || 'KZT'}</span>` },
-        { key: 'period', label: 'Период', render: r => `<span class="badge badge-gray">${r.period === 'yearly' ? 'Годовая' : 'Месячная'}</span>` },
+        { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'amount', label: 'Сумма', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount} ${r.currency || 'KZT'}</span>` },
+        { key: 'period', label: 'Период', editable: true, editType: 'select', editOptions: [
+          { value: 'monthly', label: 'Месячная' }, { value: 'yearly', label: 'Годовая' },
+        ], render: r => `<span class="badge badge-gray">${r.period === 'yearly' ? 'Годовая' : 'Месячная'}</span>` },
         { key: 'active', label: 'Статус', render: r => r.active ? '<span class="badge badge-green">Активна</span>' : '<span class="badge badge-gray">Пауза</span>' },
         { key: 'next_payment', label: 'Следующий платеж', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.next_payment || '—'}</span>` },
       ],
@@ -818,6 +892,14 @@ async function loadSubscriptions(el) {
         await invoke('add_subscription', { name: '', amount: 0 });
         loadSubscriptions(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, active: null, amount: null, name: null, period: null, category: null };
+        if (key === 'amount') params.amount = parseFloat(value) || null;
+        else params[key] = value;
+        await invoke('update_subscription', params);
+        if (!skipReload) loadSubscriptions(el);
+      },
+      onDelete: async (id) => { await invoke('delete_subscription', { id }); },
       reloadFn: () => loadSubscriptions(el),
     });
     await dbv.render();
@@ -864,9 +946,11 @@ async function loadDebts(el) {
       recordTable: 'debts',
       records: debts,
       fixedColumns: [
-        { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-        { key: 'type', label: 'Тип', render: r => `<span class="badge ${r.type === 'owe' ? 'badge-purple' : 'badge-green'}">${r.type === 'owe' ? 'Я должен' : 'Мне должны'}</span>` },
-        { key: 'remaining', label: 'Остаток', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.remaining || 0}</span>` },
+        { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+        { key: 'type', label: 'Тип', editable: true, editType: 'select', editOptions: [
+          { value: 'owe', label: 'Я должен' }, { value: 'owed', label: 'Мне должны' },
+        ], render: r => `<span class="badge ${r.type === 'owe' ? 'badge-purple' : 'badge-green'}">${r.type === 'owe' ? 'Я должен' : 'Мне должны'}</span>` },
+        { key: 'remaining', label: 'Остаток', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.remaining || 0}</span>` },
         { key: 'amount', label: 'Сумма', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;color:var(--text-muted);">${r.amount || 0}</span>` },
         { key: 'progress', label: 'Прогресс', render: r => {
           const pct = r.amount > 0 ? Math.min(100, Math.round((r.amount - r.remaining) / r.amount * 100)) : 0;
@@ -885,6 +969,15 @@ async function loadDebts(el) {
         await invoke('add_debt', { name: '', debtType: '', amount: 0 });
         loadDebts(el);
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, payAmount: null, name: null, remaining: null, debtType: null };
+        if (key === 'remaining') params.remaining = parseFloat(value) || null;
+        else if (key === 'type') params.debtType = value;
+        else params[key] = value;
+        await invoke('update_debt', params);
+        if (!skipReload) loadDebts(el);
+      },
+      onDelete: async (id) => { await invoke('delete_debt', { id }); },
       reloadFn: () => loadDebts(el),
     });
     await dbv.render();
@@ -935,15 +1028,14 @@ async function loadPeople(subTab) {
           recordTable: 'contacts',
           records: contacts,
           fixedColumns: [
-            { key: 'name', label: 'Имя', render: r => `<span class="data-table-title">${escapeHtml(r.name)}${r.favorite ? ' ★' : ''}</span>` },
-            { key: 'category', label: 'Категория', render: r => `<span class="badge badge-gray">${r.category || r.relationship || '—'}</span>` },
-            { key: 'phone', label: 'Телефон', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.phone || '—'}</span>` },
-            { key: 'email', label: 'Email', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.email || '—'}</span>` },
+            { key: 'name', label: 'Имя', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}${r.favorite ? ' ★' : ''}</span>` },
+            { key: 'category', label: 'Категория', editable: true, editType: 'text', render: r => `<span class="badge badge-gray">${r.category || r.relationship || '—'}</span>` },
+            { key: 'phone', label: 'Телефон', editable: true, editType: 'phone', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.phone || '—'}</span>` },
+            { key: 'email', label: 'Email', editable: true, editType: 'text', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.email || '—'}</span>` },
             { key: 'status', label: 'Статус', render: r => r.blocked ? '<span class="badge badge-red">Blocked</span>' : '<span class="badge badge-green">OK</span>' },
             { key: 'actions', label: '', render: r => `
               <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="toggleContactFav(${r.id})">${r.favorite ? '★' : '☆'}</button>
               <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="toggleContactBlock(${r.id})">${r.blocked ? '🔓' : '🚫'}</button>
-              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;color:var(--color-red);" onclick="deleteContact(${r.id})">✕</button>
             ` },
           ],
           idField: 'id',
@@ -955,6 +1047,13 @@ async function loadPeople(subTab) {
             await invoke('add_contact', { name: '' });
             loadPeople();
           },
+          onCellEdit: async (recordId, key, value, skipReload) => {
+            const params = { id: recordId, name: null, phone: null, email: null, category: null, relationship: null, notes: null, birthday: null, favorite: null, blocked: null };
+            params[key] = value;
+            await invoke('update_contact', params);
+            if (!skipReload) loadPeople();
+          },
+          onDelete: async (id) => { await invoke('delete_contact', { id }); },
           reloadFn: () => loadPeople(),
         });
         await dbv.render();
@@ -1673,10 +1772,15 @@ function renderDevelopment(el, items) {
   </div>`;
 
   const fixedColumns = [
-    { key: 'title', label: 'Title', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-    { key: 'type', label: 'Type', render: r => `<span class="badge badge-purple">${filterLabels[r.type] || r.type}</span>` },
-    { key: 'status', label: 'Status', render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
-    { key: 'progress', label: 'Progress', render: r => `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${r.progress || 0}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${r.progress || 0}%</span>` },
+    { key: 'title', label: 'Title', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+    { key: 'type', label: 'Type', editable: true, editType: 'select', editOptions: [
+      { value: 'course', label: 'Курс' }, { value: 'book', label: 'Книга' },
+      { value: 'skill', label: 'Навык' }, { value: 'article', label: 'Статья' },
+    ], render: r => `<span class="badge badge-purple">${filterLabels[r.type] || r.type}</span>` },
+    { key: 'status', label: 'Status', editable: true, editType: 'select', editOptions: [
+      { value: 'planned', label: 'Запланировано' }, { value: 'in_progress', label: 'В процессе' }, { value: 'completed', label: 'Завершено' },
+    ], render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
+    { key: 'progress', label: 'Progress', editable: true, editType: 'number', render: r => `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${r.progress || 0}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${r.progress || 0}%</span>` },
   ];
 
   el.innerHTML = filterBar + '<div id="dev-dbv"></div>';
@@ -1696,6 +1800,15 @@ function renderDevelopment(el, items) {
       await invoke('create_learning_item', { itemType: '', title: '', description: '', url: '' });
       loadDevelopment();
     },
+    onCellEdit: async (recordId, key, value, skipReload) => {
+      const params = { id: recordId, title: null, itemType: null, status: null, progress: null, url: null };
+      if (key === 'type') params.itemType = value;
+      else if (key === 'progress') params.progress = parseInt(value) || null;
+      else params[key] = value;
+      await invoke('update_learning_item', params);
+      if (!skipReload) loadDevelopment();
+    },
+    onDelete: async (id) => { await invoke('delete_learning_item', { id }); },
     reloadFn: () => loadDevelopment(),
     kanban: {
       groupByField: 'status',
@@ -1822,14 +1935,17 @@ async function loadMediaList(el, mediaType) {
     </div>`;
 
     const fixedColumns = [
-      { key: 'title', label: 'Title', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-      { key: 'status', label: 'Status', render: r => `<span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>` },
-      { key: 'rating', label: 'Rating', render: r => {
+      { key: 'title', label: 'Title', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
+      { key: 'status', label: 'Status', editable: true, editType: 'select', editOptions: [
+        { value: 'planned', label: 'Planned' }, { value: 'in_progress', label: 'In Progress' },
+        { value: 'completed', label: 'Completed' }, { value: 'on_hold', label: 'On Hold' }, { value: 'dropped', label: 'Dropped' },
+      ], render: r => `<span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>` },
+      { key: 'rating', label: 'Rating', editable: true, editType: 'number', render: r => {
         const stars = r.rating ? '\u2605'.repeat(Math.round(r.rating / 2)) + '\u2606'.repeat(5 - Math.round(r.rating / 2)) : '\u2014';
         return `<span style="color:var(--text-secondary);font-size:12px;">${stars}</span>`;
       }},
-      ...(hasEp ? [{ key: 'progress', label: 'Progress', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.total_episodes ? `${r.progress || 0}/${r.total_episodes}` : ''}</span>` }] : []),
-      { key: 'year', label: 'Year', render: r => `<span style="color:var(--text-muted);font-size:12px;">${r.year || '\u2014'}</span>` },
+      ...(hasEp ? [{ key: 'progress', label: 'Progress', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.total_episodes ? `${r.progress || 0}/${r.total_episodes}` : ''}</span>` }] : []),
+      { key: 'year', label: 'Year', editable: true, editType: 'number', render: r => `<span style="color:var(--text-muted);font-size:12px;">${r.year || '\u2014'}</span>` },
     ];
 
     el.innerHTML = filterBar + '<div id="media-dbv"></div>';
@@ -1850,6 +1966,16 @@ async function loadMediaList(el, mediaType) {
         loadMediaList(el, mediaType);
       },
       onRowClick: (record) => showMediaDetail(record, mediaType),
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, status: null, rating: null, progress: null, notes: null, title: null, description: null, coverUrl: null, totalEpisodes: null };
+        if (key === 'rating') params.rating = parseInt(value) || null;
+        else if (key === 'progress') params.progress = parseInt(value) || null;
+        else if (key === 'year') { /* year not in update_media_item, skip */ }
+        else params[key] = value;
+        await invoke('update_media_item', params);
+        if (!skipReload) loadMediaList(el, mediaType);
+      },
+      onDelete: async (id) => { await invoke('delete_media_item', { id }); },
       reloadFn: () => loadMediaList(el, mediaType),
       kanban: {
         groupByField: 'status',
@@ -2003,6 +2129,10 @@ async function loadSports(subTab) {
           <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.total_calories || 0}</div><div class="uni-dash-label">Калории</div></div>
         </div>`;
     },
+    renderBody: async (paneEl) => {
+      const { loadBodyInline } = await import('./tab-body.js');
+      await loadBodyInline(paneEl);
+    },
     renderTable: async (paneEl) => {
       const activeInner = S._sportsInner || 'workouts';
       paneEl.innerHTML = `
@@ -2037,9 +2167,9 @@ async function loadMartialArts(el) {
       records: ma,
       fixedColumns: [
         { key: 'date', label: 'Дата', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.date || '—'}</span>` },
-        { key: 'title', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.title || 'Единоборства')}</span>` },
-        { key: 'duration_minutes', label: 'Время', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
-        { key: 'calories', label: 'Калории', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
+        { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title || 'Единоборства')}</span>` },
+        { key: 'duration_minutes', label: 'Время', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
+        { key: 'calories', label: 'Калории', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
       ],
       idField: 'id',
       addButton: '+ Тренировка',
@@ -2051,6 +2181,15 @@ async function loadMartialArts(el) {
         await invoke('create_workout', { workoutType: '', title: '', durationMinutes: 0, notes: '' });
         loadSports();
       },
+      onCellEdit: async (recordId, key, value, skipReload) => {
+        const params = { id: recordId, title: null, workoutType: null, durationMinutes: null, calories: null };
+        if (key === 'duration_minutes') params.durationMinutes = parseInt(value) || null;
+        else if (key === 'calories') params.calories = parseInt(value) || null;
+        else params[key] = value;
+        await invoke('update_workout', params);
+        if (!skipReload) loadSports();
+      },
+      onDelete: async (id) => { await invoke('delete_workout', { id }); },
       reloadFn: () => loadSports(),
     });
     await dbv.render();
@@ -2091,10 +2230,13 @@ function renderSports(el, workouts, stats) {
     records: workouts,
     fixedColumns: [
       { key: 'date', label: 'Дата', render: r => `<span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;">${r.date || '—'}</span>` },
-      { key: 'title', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.title || typeLabels[r.type] || r.type)}</span>` },
-      { key: 'type', label: 'Тип', render: r => `<span class="badge badge-purple">${typeLabels[r.type] || r.type}</span>` },
-      { key: 'duration_minutes', label: 'Время', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
-      { key: 'calories', label: 'Калории', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
+      { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title || typeLabels[r.type] || r.type)}</span>` },
+      { key: 'type', label: 'Тип', editable: true, editType: 'select', editOptions: [
+        { value: 'gym', label: 'Зал' }, { value: 'cardio', label: 'Кардио' }, { value: 'yoga', label: 'Йога' },
+        { value: 'swimming', label: 'Плавание' }, { value: 'martial_arts', label: 'Единоборства' }, { value: 'other', label: 'Другое' },
+      ], render: r => `<span class="badge badge-purple">${typeLabels[r.type] || r.type}</span>` },
+      { key: 'duration_minutes', label: 'Время', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
+      { key: 'calories', label: 'Калории', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
     ],
     idField: 'id',
     availableViews: ['table', 'list'],
@@ -2105,6 +2247,16 @@ function renderSports(el, workouts, stats) {
       await invoke('create_workout', { workoutType: '', title: '', durationMinutes: 0, notes: '' });
       loadSports();
     },
+    onCellEdit: async (recordId, key, value, skipReload) => {
+      const params = { id: recordId, title: null, workoutType: null, durationMinutes: null, calories: null };
+      if (key === 'type') params.workoutType = value;
+      else if (key === 'duration_minutes') params.durationMinutes = parseInt(value) || null;
+      else if (key === 'calories') params.calories = parseInt(value) || null;
+      else params[key] = value;
+      await invoke('update_workout', params);
+      if (!skipReload) loadSports();
+    },
+    onDelete: async (id) => { await invoke('delete_workout', { id }); },
     reloadFn: () => loadSports(),
   });
   dbv.render();
@@ -2167,17 +2319,27 @@ async function loadHealth() {
       const today = await invoke('get_health_today').catch(() => ({}));
       paneEl.innerHTML = `
         <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${today.sleep ? today.sleep + 'ч' : '—'}</div><div class="uni-dash-label">Сон</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${today.water || '—'}</div><div class="uni-dash-label">Вода (стаканов)</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${today.mood ? today.mood + '/5' : '—'}</div><div class="uni-dash-label">Настроение</div></div>
-          <div class="uni-dash-card purple"><div class="uni-dash-value">${today.weight ? today.weight + 'кг' : '—'}</div><div class="uni-dash-label">Вес</div></div>
+          <div class="uni-dash-card blue" data-htype="sleep" style="cursor:pointer"><div class="uni-dash-value">${today.sleep ? today.sleep + 'ч' : '—'}</div><div class="uni-dash-label">Сон</div></div>
+          <div class="uni-dash-card green" data-htype="water" style="cursor:pointer"><div class="uni-dash-value">${today.water || '—'}</div><div class="uni-dash-label">Вода (стаканов)</div></div>
+          <div class="uni-dash-card yellow" data-htype="mood" style="cursor:pointer"><div class="uni-dash-value">${today.mood ? today.mood + '/5' : '—'}</div><div class="uni-dash-label">Настроение</div></div>
+          <div class="uni-dash-card purple" data-htype="weight" style="cursor:pointer"><div class="uni-dash-value">${today.weight ? today.weight + 'кг' : '—'}</div><div class="uni-dash-label">Вес</div></div>
         </div>`;
+      const labels = { sleep: 'Сон (часы)', water: 'Вода (стаканы)', mood: 'Настроение (1-5)', weight: 'Вес (кг)' };
+      paneEl.querySelectorAll('[data-htype]').forEach(card => {
+        card.addEventListener('click', () => {
+          const val = prompt(labels[card.dataset.htype] + ':');
+          if (val) invoke('log_health', { healthType: card.dataset.htype, value: parseFloat(val), notes: null }).then(() => loadHealth()).catch(e => alert(e));
+        });
+      });
+    },
+    renderBody: async (paneEl) => {
+      const { loadBodyInline } = await import('./tab-body.js');
+      await loadBodyInline(paneEl);
     },
     renderTable: async (paneEl) => {
       try {
-        const today = await invoke('get_health_today').catch(() => ({}));
         const habits = await invoke('get_habits_today').catch(() => []);
-        renderHealth(paneEl, today, habits);
+        renderHealth(paneEl, null, habits);
       } catch (e) {
         paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить данные здоровья</div>';
       }
@@ -2186,44 +2348,7 @@ async function loadHealth() {
 }
 
 function renderHealth(el, today, habits) {
-  const sleep = today.sleep || null;
-  const water = today.water || null;
-  const mood = today.mood || null;
-  const weight = today.weight || null;
-
-  function metricClass(type, val) {
-    if (val === null) return '';
-    if (type === 'sleep') return val >= 7 ? 'good' : val >= 5 ? 'warning' : 'bad';
-    if (type === 'water') return val >= 8 ? 'good' : val >= 4 ? 'warning' : 'bad';
-    if (type === 'mood') return val >= 4 ? 'good' : val >= 3 ? 'warning' : 'bad';
-    return '';
-  }
-
-  // Health metrics (clickable cards) + habits table via DatabaseView
-  el.innerHTML = `
-    <div class="health-metrics" style="margin-bottom:var(--space-4);">
-      <div class="health-metric ${metricClass('sleep', sleep)}" data-type="sleep">
-        <div class="health-metric-icon">&#x1F634;</div>
-        <div class="health-metric-value">${sleep !== null ? sleep + 'ч' : '\u2014'}</div>
-        <div class="health-metric-label">Сон</div>
-      </div>
-      <div class="health-metric ${metricClass('water', water)}" data-type="water">
-        <div class="health-metric-icon">&#x1F4A7;</div>
-        <div class="health-metric-value">${water !== null ? water : '\u2014'}</div>
-        <div class="health-metric-label">Вода (стаканов)</div>
-      </div>
-      <div class="health-metric ${metricClass('mood', mood)}" data-type="mood">
-        <div class="health-metric-icon">${mood >= 4 ? '&#x1F60A;' : mood >= 3 ? '&#x1F610;' : mood ? '&#x1F641;' : '&#x1F636;'}</div>
-        <div class="health-metric-value">${mood !== null ? mood + '/5' : '\u2014'}</div>
-        <div class="health-metric-label">Настроение</div>
-      </div>
-      <div class="health-metric" data-type="weight">
-        <div class="health-metric-icon">&#x2696;</div>
-        <div class="health-metric-value">${weight !== null ? weight + 'кг' : '\u2014'}</div>
-        <div class="health-metric-label">Вес</div>
-      </div>
-    </div>
-    <div id="habits-dbv"></div>`;
+  el.innerHTML = `<div id="habits-dbv"></div>`;
 
   // Habits as DatabaseView
   const dbvEl = el.querySelector('#habits-dbv');
@@ -2233,8 +2358,11 @@ function renderHealth(el, today, habits) {
     records: habits,
     fixedColumns: [
       { key: 'done', label: '', render: r => `<div class="habit-check${r.completed ? ' checked' : ''}" style="cursor:pointer;" data-hid="${r.id}">${r.completed ? '&#10003;' : ''}</div>` },
-      { key: 'name', label: 'Привычка', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-      { key: 'frequency', label: 'Частота', render: r => `<span class="badge badge-gray">${r.frequency || 'daily'}</span>` },
+      { key: 'name', label: 'Привычка', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
+      { key: 'frequency', label: 'Частота', editable: true, editType: 'select', editOptions: [
+        { value: 'daily', label: 'Ежедневно' }, { value: 'weekly', label: 'Еженедельно' },
+        { value: 'weekdays', label: 'Будни' }, { value: 'weekends', label: 'Выходные' },
+      ], render: r => `<span class="badge badge-gray">${r.frequency || 'daily'}</span>` },
       { key: 'streak', label: 'Серия', render: r => r.streak > 0 ? `<span class="badge badge-green">${r.streak} дн.</span>` : '<span style="color:var(--text-faint);font-size:12px;">—</span>' },
     ],
     idField: 'id',
@@ -2247,21 +2375,16 @@ function renderHealth(el, today, habits) {
       await invoke('create_habit', { name: '', icon: '', frequency: '' });
       loadHealth();
     },
+    onCellEdit: async (recordId, key, value, skipReload) => {
+      const params = { id: recordId, name: null, frequency: null, icon: null };
+      params[key] = value;
+      await invoke('update_habit', params);
+      if (!skipReload) loadHealth();
+    },
+    onDelete: async (id) => { await invoke('delete_habit', { id }); },
     reloadFn: () => loadHealth(),
   });
   dbv.render();
-
-  // Click on metric to log
-  el.querySelectorAll('.health-metric').forEach(m => {
-    m.addEventListener('click', () => {
-      const type = m.dataset.type;
-      const labels = { sleep: 'Сон (часы)', water: 'Вода (стаканы)', mood: 'Настроение (1-5)', weight: 'Вес (кг)' };
-      const val = prompt(labels[type] + ':');
-      if (val) {
-        invoke('log_health', { healthType: type, value: parseFloat(val), notes: null }).then(() => loadHealth()).catch(e => alert(e));
-      }
-    });
-  });
 
   // Delegate habit check clicks
   el.addEventListener('click', async (e) => {
@@ -2410,7 +2533,7 @@ async function loadCustomProject(tabId, subTab, el, reg) {
       const dbv = new DatabaseView(paneEl, {
         tabId, recordTable: 'project_records', records,
         fixedColumns: [
-          { key: 'name', label: 'Название', render: r => `<span class="data-table-title">${escapeHtml(r.name || '')}</span>` },
+          { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name || '')}</span>` },
         ],
         addButton: '+ Добавить',
         onAdd: async () => {
@@ -2421,6 +2544,11 @@ async function loadCustomProject(tabId, subTab, el, reg) {
           await invoke('create_project_record', { projectId, name: '' });
           loadCustomPage(tabId, subTab);
         },
+        onCellEdit: async (recordId, key, value, skipReload) => {
+          await invoke('update_project_record', { id: recordId, name: value });
+          if (!skipReload) loadCustomPage(tabId, subTab);
+        },
+        onDelete: async (id) => { await invoke('delete_project_record', { id }); },
         reloadFn: () => loadCustomPage(tabId, subTab),
       });
       S.dbViews[`project_${projectId}`] = dbv;

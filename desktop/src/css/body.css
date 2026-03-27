@@ -1,0 +1,245 @@
+/* ── Body tab — 3D skeleton viewer ── */
+
+.body-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 500px;
+  overflow: hidden;
+}
+
+.body-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+}
+
+.body-toolbar-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.body-layer-toggles {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.body-layer-btn {
+  padding: var(--btn-padding-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.body-layer-btn.active {
+  background: var(--accent-fill);
+  color: #fff;
+  border-color: var(--accent-fill);
+}
+.body-layer-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.body-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.body-viewer-container {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-page);
+  cursor: grab;
+}
+.body-viewer-container canvas {
+  display: block;
+}
+
+/* ── Right panel (zone info) ── */
+
+.body-panel {
+  width: 300px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border-default);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width var(--transition-normal);
+}
+.body-panel.hidden { display: none; }
+
+.body-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.body-panel-zone-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.body-panel-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+}
+.body-panel-close:hover { background: var(--bg-hover); }
+
+.body-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.body-panel-empty, .body-panel-loading {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: var(--space-6);
+}
+
+/* ── Records ── */
+
+.body-record {
+  position: relative;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-2);
+  font-size: 13px;
+}
+.body-record:hover { background: var(--bg-hover); }
+.body-record-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+.body-record-date {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.body-record-note {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: var(--space-1);
+}
+.body-record-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.body-record:hover .body-record-del { opacity: 1; }
+.body-record-del:hover { color: var(--color-red); background: var(--color-red-bg); }
+
+/* ── Context menu ── */
+
+.body-context-menu {
+  z-index: 9999;
+  min-width: 160px;
+}
+.body-ctx-header {
+  padding: var(--space-2) var(--space-3);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* ── Modal ── */
+
+.body-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.body-modal {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 380px;
+  max-width: 90vw;
+  padding: var(--space-5);
+}
+.body-modal-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: var(--space-4);
+  color: var(--text-primary);
+}
+.body-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.body-modal-body label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.body-modal-body select,
+.body-modal-body input[type="number"] {
+  padding: var(--btn-padding-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.body-modal-body input[type="range"] { width: 100%; }
+.body-modal-note {
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+.body-modal-hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 0;
+}
+.body-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.intensity-val { font-weight: 600; }

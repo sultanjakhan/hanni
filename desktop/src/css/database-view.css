@@ -168,48 +168,36 @@
   width: 32px; min-width: 32px; max-width: 32px;
   text-align: center;
   padding: 0 !important;
+  cursor: pointer;
+  user-select: none;
 }
-/* Style selection checkboxes like Notion */
+/* Row select: hide checkbox, show check icon via ::after on TD */
 .database-view .col-check input[type="checkbox"],
 .database-view .col-check-header input[type="checkbox"] {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 18px;
-  height: 18px;
-  border: 1.5px solid var(--border-default);
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-  vertical-align: middle;
+  display: none;
+}
+.database-view .col-check {
   position: relative;
-  transition: border-color 150ms, background 150ms, box-shadow 150ms;
-  background: transparent;
-  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11px;
 }
-.database-view .col-check input[type="checkbox"]:hover,
-.database-view .col-check-header input[type="checkbox"]:hover {
-  border-color: var(--accent-blue);
-  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+.database-view .col-check::after {
+  content: '';
+  display: block;
+  width: 16px; height: 16px;
+  margin: 0 auto;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid transparent;
+  transition: border-color 150ms, background 150ms;
 }
-.database-view .col-check input[type="checkbox"]:active,
-.database-view .col-check-header input[type="checkbox"]:active {
-  transform: scale(0.9);
+.data-table-row:hover .col-check::after {
+  border-color: var(--border-default);
 }
-.database-view .col-check input[type="checkbox"]:checked,
-.database-view .col-check-header input[type="checkbox"]:checked {
+.database-view .col-check.row-checked::after {
   background: var(--accent-blue);
   border-color: var(--accent-blue);
-}
-.database-view .col-check input[type="checkbox"]:checked:hover {
-  background: color-mix(in srgb, var(--accent-blue) 85%, black);
-}
-.database-view .col-check input[type="checkbox"]:checked::after {
-  content: '';
-  position: absolute;
-  top: 2px; left: 5px;
-  width: 5px; height: 9px;
-  border: solid #fff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 6l2.5 2.5L9.5 4' stroke='white' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 12px; background-position: center; background-repeat: no-repeat;
 }
 
 /* ── Toolbar / View Switcher + Actions ── */

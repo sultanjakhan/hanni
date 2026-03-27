@@ -879,3 +879,25 @@ pub fn migrate_custom_projects(conn: &rusqlite::Connection) {
         CREATE INDEX IF NOT EXISTS idx_project_records_project ON project_records(project_id);"
     ).ok();
 }
+
+pub fn migrate_body_records(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS body_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            zone TEXT NOT NULL,
+            zone_label TEXT NOT NULL DEFAULT '',
+            record_type TEXT NOT NULL,
+            intensity INTEGER,
+            pain_type TEXT,
+            goal_type TEXT,
+            value REAL,
+            unit TEXT,
+            treatment_type TEXT,
+            note TEXT NOT NULL DEFAULT '',
+            date TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_body_records_zone ON body_records(zone);
+        CREATE INDEX IF NOT EXISTS idx_body_records_date ON body_records(date);"
+    ).ok();
+}

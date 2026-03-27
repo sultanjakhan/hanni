@@ -41,11 +41,23 @@ async function saveTabMeta(tabId, meta) {
 /**
  * Render the unified tab layout into a container.
  */
+function loadPaneState() {
+  try { return JSON.parse(localStorage.getItem('hanni_panes') || '{}'); } catch { return {}; }
+}
+function savePaneState(tabId, pane) {
+  const state = loadPaneState();
+  state[tabId] = pane;
+  localStorage.setItem('hanni_panes', JSON.stringify(state));
+}
+
 export async function renderUnifiedLayout(el, tabId, config) {
-  const activePane = S._unifiedPane?.[tabId] || 'dash';
+  if (!S._unifiedPane) S._unifiedPane = {};
+  if (!S._unifiedPane[tabId]) S._unifiedPane[tabId] = loadPaneState()[tabId] || 'dash';
+  const activePane = S._unifiedPane[tabId];
 
   const panes = [...SUB_PANES];
-  if (config.renderTracking) panes.splice(2, 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
+  if (config.renderBody) panes.splice(1, 0, { id: 'body', icon: '🦴', label: 'Тело' });
+  if (config.renderTracking) panes.splice(config.renderBody ? 3 : 2, 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
 
   // Tab title header — merge defaults with user overrides
   const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };
@@ -80,6 +92,7 @@ export async function renderUnifiedLayout(el, tabId, config) {
     tab.addEventListener('click', () => {
       if (!S._unifiedPane) S._unifiedPane = {};
       S._unifiedPane[tabId] = tab.dataset.pane;
+      savePaneState(tabId, tab.dataset.pane);
       renderUnifiedLayout(el, tabId, config);
     });
   });
@@ -92,6 +105,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
     case 'dash':
       if (config.renderDash) await config.renderDash(paneEl);
       else paneEl.innerHTML = renderEmptyState('Дашборд', 'Настройте скиллы и триггеры, чтобы Ханни начала заполнять данные');
+      break;
+    case 'body':
+      if (config.renderBody) await config.renderBody(paneEl);
       break;
     case 'table':
       if (config.renderTable) await config.renderTable(paneEl);

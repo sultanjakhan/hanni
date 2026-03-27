@@ -1,6 +1,6 @@
 // ── db-view/db-selection.js — Cell range selection (Notion/Excel style) ──
 
-const sel = { anchor: null, extent: null, active: false };
+const sel = { anchor: null, extent: null, active: false, dragging: false };
 
 function cellCoords(cell) {
   const row = cell.closest('tr');
@@ -22,10 +22,8 @@ function applyClasses(table) {
   table.querySelectorAll('.cell-range-selected, .cell-range-top, .cell-range-bottom, .cell-range-left, .cell-range-right')
     .forEach(c => c.classList.remove('cell-range-selected', 'cell-range-top', 'cell-range-bottom', 'cell-range-left', 'cell-range-right'));
   table.querySelectorAll('th.col-range-selected').forEach(th => th.classList.remove('col-range-selected'));
-
   const r = getRange();
   if (!r) return;
-
   const rows = table.querySelectorAll('tbody tr.data-table-row');
   for (let ri = r.minRow; ri <= r.maxRow && ri < rows.length; ri++) {
     const cells = rows[ri].children;
@@ -38,11 +36,8 @@ function applyClasses(table) {
       if (ci === r.maxCol) td.classList.add('cell-range-right');
     }
   }
-  // Highlight selected column headers
   const ths = table.querySelectorAll('thead th');
-  for (let ci = r.minCol; ci <= r.maxCol && ci < ths.length; ci++) {
-    ths[ci].classList.add('col-range-selected');
-  }
+  for (let ci = r.minCol; ci <= r.maxCol && ci < ths.length; ci++) ths[ci].classList.add('col-range-selected');
 }
 
 export function setAnchor(cell, table) {
@@ -70,10 +65,20 @@ export function selectColumn(colIndex, table) {
   applyClasses(table);
 }
 
+export function extendColumn(colIndex, table) {
+  const rows = table.querySelectorAll('tbody tr.data-table-row');
+  if (rows.length === 0) return;
+  if (!sel.anchor) { selectColumn(colIndex, table); return; }
+  sel.anchor = { ...sel.anchor, row: 0 };
+  sel.extent = { row: rows.length - 1, col: colIndex };
+  applyClasses(table);
+}
+
 export function clearSelection(table) {
   if (!sel.active) return;
   sel.anchor = sel.extent = null;
   sel.active = false;
+  sel.dragging = false;
   if (table) applyClasses(table);
 }
 
@@ -97,4 +102,30 @@ export function buildTSV(table) {
     lines.push(vals.join('\t'));
   }
   return lines.join('\n');
+}
+
+/** Bind mouse drag selection on the table */
+export function bindDragSelection(table, focusFn) {
+  const isCell = (el) => el.closest('.cell-editable, .cell-fixed-edit, .cell-readonly');
+
+  table.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.target.closest('.inline-editor, .inline-dropdown, .col-check, input')) return;
+    const cell = isCell(e.target);
+    if (!cell) return;
+    if (e.shiftKey) return; // shift+click handled elsewhere
+    sel.dragging = true;
+    setAnchor(cell, table);
+    if (focusFn) focusFn(cell);
+    e.preventDefault(); // prevent text selection while dragging
+  });
+
+  table.addEventListener('mousemove', (e) => {
+    if (!sel.dragging) return;
+    const cell = isCell(e.target);
+    if (cell) extendTo(cell, table);
+  });
+
+  const stopDrag = () => { sel.dragging = false; };
+  document.addEventListener('mouseup', stopDrag);
+  table.addEventListener('mouseleave', stopDrag);
 }

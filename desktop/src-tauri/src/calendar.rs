@@ -48,6 +48,52 @@ pub fn delete_event(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String
     Ok(())
 }
 
+#[tauri::command]
+pub fn update_event(id: i64, title: Option<String>, description: Option<String>, date: Option<String>, time: Option<String>, duration_minutes: Option<i64>, category: Option<String>, color: Option<String>, completed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = title { updates.push(format!("title=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = description { updates.push(format!("description=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = date { updates.push(format!("date=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = time { updates.push(format!("time=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = duration_minutes { updates.push(format!("duration_minutes=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = color { updates.push(format!("color=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = completed { updates.push(format!("completed=?{}", idx)); params.push(Box::new(v as i64)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE events SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_all_events(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, title, description, date, time, duration_minutes, category, color, completed, source
+         FROM events ORDER BY date DESC, time DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "title": row.get::<_, String>(1)?,
+            "description": row.get::<_, String>(2)?,
+            "date": row.get::<_, String>(3)?,
+            "time": row.get::<_, String>(4)?,
+            "duration_minutes": row.get::<_, i64>(5)?,
+            "category": row.get::<_, String>(6)?,
+            "color": row.get::<_, String>(7)?,
+            "completed": row.get::<_, i64>(8)?,
+            "source": row.get::<_, Option<String>>(9)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
 // ── v0.8.3: Calendar Sync ──
 
 #[tauri::command]

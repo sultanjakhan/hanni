@@ -299,92 +299,51 @@ async function startPomodoro(title, category, focusMode) {
 async function renderFocusHistory(el) {
   el.innerHTML = skeletonPage();
   try {
-    // Load last 7 days
-    const days = [];
-    const today = new Date();
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const log = await invoke('get_activity_log', { date: dateStr }).catch(() => []);
-      const totalMin = log.reduce((sum, item) => {
-        const match = (item.duration || '').match(/(\d+)ч\s*(\d+)м|(\d+)м/);
-        if (match) return sum + (parseInt(match[1] || 0) * 60) + parseInt(match[2] || match[3] || 0);
-        return sum;
-      }, 0);
-      days.push({ date: dateStr, log, totalMin });
-    }
-
-    const maxMin = Math.max(1, ...days.map(d => d.totalMin));
-    const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-    const todayStr = today.toISOString().slice(0, 10);
-
-    // Weekly bar chart
-    const chartHtml = `<div class="focus-chart">
-      <div class="focus-chart-title">Последние 7 дней</div>
-      <div class="focus-chart-bars">
-        ${days.slice().reverse().map(d => {
-          const pct = Math.round((d.totalMin / maxMin) * 100);
-          const dayDate = new Date(d.date + 'T00:00:00');
-          const label = d.date === todayStr ? 'Сегодня' : dayNames[dayDate.getDay()];
-          const hours = Math.floor(d.totalMin / 60);
-          const mins = d.totalMin % 60;
-          const timeLabel = hours > 0 ? `${hours}ч${mins > 0 ? ` ${mins}м` : ''}` : `${mins}м`;
-          return `<div class="focus-chart-bar-col">
-            <div class="focus-chart-bar-value">${d.totalMin > 0 ? timeLabel : ''}</div>
-            <div class="focus-chart-bar-track"><div class="focus-chart-bar" style="height:${Math.max(2, pct)}%"></div></div>
-            <div class="focus-chart-bar-label">${label}</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-
-    // Category breakdown for this week
-    const allLogs = days.flatMap(d => d.log);
-    const catTotals = {};
+    const { DatabaseView } = await import('./db-view/db-view.js');
+    const activities = await invoke('get_all_activities').catch(() => []);
     const catLabels = { work: 'Работа', study: 'Учёба', sport: 'Спорт', rest: 'Отдых', hobby: 'Хобби', other: 'Другое' };
-    const catColors = { work: 'var(--color-blue)', study: 'var(--color-purple)', sport: 'var(--color-green)', rest: 'var(--color-yellow)', hobby: 'var(--color-pink)', other: 'var(--text-muted)' };
-    allLogs.forEach(item => {
-      const cat = item.category || 'other';
-      const match = (item.duration || '').match(/(\d+)ч\s*(\d+)м|(\d+)м/);
-      const min = match ? (parseInt(match[1] || 0) * 60) + parseInt(match[2] || match[3] || 0) : 0;
-      catTotals[cat] = (catTotals[cat] || 0) + min;
+    const catOptions = Object.entries(catLabels).map(([v, l]) => ({ value: v, label: l }));
+
+    const formatDuration = (min) => {
+      if (!min) return '—';
+      return min >= 60 ? `${Math.floor(min/60)}ч ${min%60}м` : `${min}м`;
+    };
+    const formatTime = (str) => str && str.length >= 16 ? str.slice(11, 16) : '—';
+    const formatDate = (str) => str ? str.slice(0, 10) : '—';
+
+    el.innerHTML = '';
+    const dbvEl = document.createElement('div');
+    el.appendChild(dbvEl);
+    const reload = () => renderFocusHistory(el);
+
+    const dbv = new DatabaseView(dbvEl, {
+      tabId: 'focus_activities',
+      recordTable: 'activities',
+      records: activities,
+      idField: 'id',
+      fixedColumns: [
+        { key: 'title', label: 'Название', editable: true, editType: 'text',
+          render: r => `<span class="data-table-title">${escapeHtml(r.title || '')}</span>` },
+        { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions,
+          render: r => `<span class="badge badge-${r.category || 'other'}">${catLabels[r.category] || r.category || '—'}</span>` },
+        { key: 'started_at', label: 'Начало',
+          render: r => `<span>${formatDate(r.started_at)} ${formatTime(r.started_at)}</span>` },
+        { key: 'duration_minutes', label: 'Длительность',
+          render: r => `<span>${formatDuration(r.duration_minutes)}</span>` },
+        { key: 'notes', label: 'Заметки', editable: true, editType: 'text',
+          render: r => `<span>${escapeHtml(r.notes || '') || '—'}</span>` },
+      ],
+      onCellEdit: async (recordId, key, value) => {
+        const params = { id: recordId, title: null, category: null, notes: null };
+        params[key] = value || null;
+        await invoke('update_activity', params);
+        reload();
+      },
+      onDelete: async (id) => { await invoke('delete_activity', { id }); },
+      reloadFn: reload,
+      availableViews: ['table'],
     });
-    const totalWeekMin = Object.values(catTotals).reduce((a, b) => a + b, 0);
-
-    const breakdownHtml = totalWeekMin > 0 ? `<div class="focus-breakdown">
-      <div class="focus-chart-title">По категориям</div>
-      ${Object.entries(catTotals).sort((a, b) => b[1] - a[1]).map(([cat, min]) => {
-        const pct = Math.round((min / totalWeekMin) * 100);
-        const hours = Math.floor(min / 60);
-        const mins = min % 60;
-        return `<div class="focus-breakdown-row">
-          <span class="focus-breakdown-label">${catLabels[cat] || cat}</span>
-          <div class="focus-breakdown-bar-track"><div class="focus-breakdown-bar" style="width:${pct}%;background:${catColors[cat] || 'var(--text-muted)'}"></div></div>
-          <span class="focus-breakdown-value">${hours > 0 ? `${hours}ч ${mins}м` : `${mins}м`}</span>
-        </div>`;
-      }).join('')}
-    </div>` : '';
-
-    // Daily logs
-    const logsHtml = days.filter(d => d.log.length > 0).map(d => {
-      const dayDate = new Date(d.date + 'T00:00:00');
-      const label = d.date === todayStr ? 'Сегодня' : `${dayDate.getDate()} ${['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'][dayDate.getMonth()]}, ${dayNames[dayDate.getDay()]}`;
-      return `<div class="focus-day-group">
-        <div class="focus-log-header">${label}</div>
-        <div class="focus-log">
-          ${d.log.map(item => `<div class="focus-log-item">
-            <span class="focus-log-time">${item.time || ''}</span>
-            <span class="focus-log-title">${escapeHtml(item.title)}</span>
-            <span class="focus-log-category">${item.category || ''}</span>
-            <span class="focus-log-duration">${item.duration || ''}</span>
-          </div>`).join('')}
-        </div>
-      </div>`;
-    }).join('');
-
-    el.innerHTML = `<div class="page-content">${chartHtml}${breakdownHtml}${logsHtml || '<div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">Нет данных за неделю</div></div>'}</div>`;
-
+    await dbv.render();
   } catch (e) {
     tabLoaders.showStub?.('focus-content', '📊', 'История', 'История активностей');
   }

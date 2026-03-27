@@ -8,7 +8,7 @@ import { loadColState } from './db-col-state.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
 import { bindRowContextMenu } from './db-row-menu.js';
 import { bindClipboard } from './db-clipboard.js';
-import { setAnchor, extendTo, clearSelection } from './db-selection.js';
+import { setAnchor, extendTo, clearSelection, bindDragSelection } from './db-selection.js';
 import { getNextCell, getPrevCell, getCellAbove, getCellBelow } from './db-cell-nav.js';
 import { enableRowDrag } from './db-drag-rows.js';
 import { enableColumnDrag } from './db-col-drag.js';
@@ -119,8 +119,9 @@ export async function renderTableView(el, ctx) {
   enableRowDrag(el, filtered, idField);
   const tableEl = el.querySelector('.data-table');
   if (tableEl) enableColumnDrag(tableEl, tabId, reload, visProps);
+  if (tableEl) bindDragSelection(tableEl, (cell) => focusCell(el, cell));
 
-  // Cell selection + inline editing (click=select, dblclick=edit)
+  // Cell selection + inline editing (click=edit for editable, click=select for readonly)
   const allCells = el.querySelectorAll('.cell-editable, .cell-fixed-edit, .cell-readonly');
   allCells.forEach(cell => {
     cell.setAttribute('tabindex', '0');
@@ -129,14 +130,10 @@ export async function renderTableView(el, ctx) {
       if (e.shiftKey && tableEl) { extendTo(cell, tableEl); return; }
       focusCell(el, cell);
       if (tableEl) setAnchor(cell, tableEl);
+      if (cell.classList.contains('cell-fixed-edit')) startFixedCellEdit(cell, reload);
+      else if (cell.classList.contains('cell-editable')) startInlineEdit(cell, recordTable, reload);
     });
     cell.addEventListener('focus', () => focusCell(el, cell));
-  });
-  el.querySelectorAll('.cell-editable').forEach(cell => {
-    cell.addEventListener('dblclick', (e) => { e.stopPropagation(); startInlineEdit(cell, recordTable, reload); });
-  });
-  el.querySelectorAll('.cell-fixed-edit').forEach(cell => {
-    cell.addEventListener('dblclick', (e) => { e.stopPropagation(); startFixedCellEdit(cell, reload); });
   });
   // Keyboard navigation + Escape
   el.addEventListener('keydown', (e) => {

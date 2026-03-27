@@ -37,25 +37,7 @@ listen('proactive-message', async (event) => {
   ts.textContent = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   chat.appendChild(ts);
 
-  // Add to history so user can reply naturally (marked as proactive for context)
-  const histIdx = S.history.length;
-  S.history.push({ role: 'assistant', content: text, proactive: true });
   scrollDown();
-
-  // P1: Execute any action blocks from proactive messages
-  const proactiveActions = tabLoaders.parseAndExecuteActions(text);
-  if (proactiveActions.length > 0) {
-    for (const actionJson of proactiveActions) {
-      const { success, result: actionResult } = await tabLoaders.executeAction(actionJson);
-      const actionDiv = document.createElement('div');
-      actionDiv.className = `action-result ${success ? 'success' : 'error'}`;
-      actionDiv.textContent = actionResult;
-      chat.appendChild(actionDiv);
-    }
-    S.history.push({ role: 'user', content: `[Action result: ${proactiveActions.map(() => 'ok').join('; ')}]` });
-  }
-
-  await autoSaveConversation();
 
   // Save to proactive_messages table for sidebar
   invoke('save_proactive_message', { text }).then(() => {
@@ -1645,15 +1627,19 @@ async function renderChatWelcomeCard() {
         const totalIdle = Math.round(act.idle_minutes + act.locked_minutes);
         const idleH = Math.floor(totalIdle / 60);
         const idleM = totalIdle % 60;
+        const totalUnknown = Math.round(act.unknown_minutes || 0);
+        const unknownH = Math.floor(totalUnknown / 60);
+        const unknownM = totalUnknown % 60;
         actHtml = `
         <div class="welcome-stat"><div class="welcome-stat-value">${activeH}ч ${activeM}м</div><div class="welcome-stat-label">Активность</div></div>
-        <div class="welcome-stat"><div class="welcome-stat-value">${idleH}ч ${idleM}м</div><div class="welcome-stat-label">AFK</div></div>`;
+        <div class="welcome-stat"><div class="welcome-stat-value">${idleH}ч ${idleM}м</div><div class="welcome-stat-label">AFK</div></div>
+        <div class="welcome-stat"><div class="welcome-stat-value">${unknownH}ч ${unknownM}м</div><div class="welcome-stat-label">Неизвестно</div></div>`;
       }
     } catch (_) {}
 
     statsHtml = `
+      <div class="welcome-stats">${actHtml}</div>
       <div class="welcome-stats">
-        ${actHtml}
         <div class="welcome-stat"><div class="welcome-stat-value">${data.focus_minutes || 0}м</div><div class="welcome-stat-label">Фокус</div></div>
         <div class="welcome-stat"><div class="welcome-stat-value">${data.notes_count || 0}</div><div class="welcome-stat-label">Заметки</div></div>
         <div class="welcome-stat"><div class="welcome-stat-value">${data.events_today || 0}</div><div class="welcome-stat-label">События</div></div>

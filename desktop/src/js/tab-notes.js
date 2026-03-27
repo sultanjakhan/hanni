@@ -133,7 +133,7 @@ async function renderNotesPage() {
   switch (S.notesView) {
     case 'kanban':   renderKanbanContent(content, filtered); break;
     case 'timeline': renderTimelineContent(content, filtered); break;
-    case 'table':    renderTableView(content, filtered); break;
+    case 'table':    await renderTableView(content, filtered); break;
     case 'gallery':  renderGalleryView(content, filtered); break;
     default:         renderListContent(content, filtered, allNotes); break;
   }
@@ -424,82 +424,61 @@ function renderTimelineContent(container, notes) {
   });
 }
 
-// ── Table View ──
-function renderTableView(container, notes) {
-  const sortedNotes = [...notes].sort((a, b) => {
-    const col = S.notesTableSort.col;
-    const dir = S.notesTableSort.dir === 'asc' ? 1 : -1;
-    const av = a[col] || '';
-    const bv = b[col] || '';
-    if (av < bv) return -1 * dir;
-    if (av > bv) return 1 * dir;
-    return 0;
-  });
-
-  const sortIcon = (col) => {
-    if (S.notesTableSort.col !== col) return '';
-    return S.notesTableSort.dir === 'asc' ? ' &uarr;' : ' &darr;';
-  };
-
-  const statusPill = (status) => {
-    if (status === 'done') return '<span class="table-status-pill table-status-done">Готово</span>';
-    if (status === 'task') return '<span class="table-status-pill table-status-task">Задача</span>';
+// ── Table View (DatabaseView) ──
+async function renderTableView(container, notes) {
+  const statusOptions = [
+    { value: 'note', label: 'Заметка' },
+    { value: 'task', label: 'Задача' },
+    { value: 'done', label: 'Готово' },
+  ];
+  const statusPill = (s) => {
+    if (s === 'done') return '<span class="table-status-pill table-status-done">Готово</span>';
+    if (s === 'task') return '<span class="table-status-pill table-status-task">Задача</span>';
     return '<span class="table-status-pill table-status-note">Заметка</span>';
   };
 
-  const rows = sortedNotes.map(n => {
-    const tagsHtml = (n.tags || '').split(',').map(t => t.trim()).filter(Boolean)
-      .map(t => `<span class="note-tag badge-${S.tagColorMap[t] || 'blue'}">${escapeHtml(t)}</span>`).join('');
-    const dueHtml = n.due_date ? formatDueDate(n.due_date) : '<span class="text-faint">—</span>';
-    return `<tr class="notes-table-row" data-note-id="${n.id}">
-      <td class="notes-table-title">${n.pinned ? '📌 ' : ''}${escapeHtml(n.title || 'Без названия')}</td>
-      <td>${statusPill(n.status)}</td>
-      <td>${dueHtml}</td>
-      <td class="notes-table-tags">${tagsHtml || '<span class="text-faint">—</span>'}</td>
-      <td class="text-faint">${formatNoteDate(n.updated_at || n.created_at)}</td>
-    </tr>`;
-  }).join('');
+  container.innerHTML = '';
+  const dbvEl = document.createElement('div');
+  container.appendChild(dbvEl);
+  const reload = () => renderNotesPage();
 
-  container.innerHTML = `<div class="notes-table-wrap">
-    <table class="notes-table">
-      <thead>
-        <tr>
-          <th class="notes-table-sortable" data-sort="title">Название${sortIcon('title')}</th>
-          <th class="notes-table-sortable" data-sort="status">Статус${sortIcon('status')}</th>
-          <th class="notes-table-sortable" data-sort="due_date">Дата${sortIcon('due_date')}</th>
-          <th>Теги</th>
-          <th class="notes-table-sortable" data-sort="updated_at">Обновлено${sortIcon('updated_at')}</th>
-        </tr>
-      </thead>
-      <tbody>${rows || '<tr><td colspan="5"><div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">Нет заметок</div></div></td></tr>'}</tbody>
-    </table>
-  </div>`;
-
-  // Sort clicks
-  container.querySelectorAll('.notes-table-sortable').forEach(th => {
-    th.addEventListener('click', () => {
-      const col = th.dataset.sort;
-      if (S.notesTableSort.col === col) {
-        S.notesTableSort.dir = S.notesTableSort.dir === 'asc' ? 'desc' : 'asc';
+  const dbv = new DatabaseView(dbvEl, {
+    tabId: 'notes_table',
+    recordTable: 'notes',
+    records: notes,
+    idField: 'id',
+    fixedColumns: [
+      { key: 'title', label: 'Название', editable: true, editType: 'text',
+        render: r => `<span class="data-table-title">${r.pinned ? '📌 ' : ''}${escapeHtml(r.title || 'Без названия')}</span>` },
+      { key: 'status', label: 'Статус', editable: true, editType: 'select', editOptions: statusOptions,
+        render: r => statusPill(r.status) },
+      { key: 'due_date', label: 'Дата', editable: true, editType: 'date',
+        render: r => r.due_date ? formatDueDate(r.due_date) : '<span class="text-faint">—</span>' },
+      { key: 'tags', label: 'Теги', editable: true, editType: 'text',
+        render: r => renderNoteTags(r.tags) || '<span class="text-faint">—</span>' },
+    ],
+    onCellEdit: async (recordId, key, value) => {
+      if (key === 'status') {
+        await invoke('update_note_status', { id: recordId, status: value });
       } else {
-        S.notesTableSort.col = col;
-        S.notesTableSort.dir = 'asc';
+        const params = { id: recordId, title: null, content: null, tags: null, status: null, dueDate: null, contentBlocks: null };
+        if (key === 'due_date') params.dueDate = value || null;
+        else params[key] = value || null;
+        await invoke('update_note', params);
       }
-      renderNotesPage();
-    });
-  });
-
-  // Row clicks
-  container.querySelectorAll('.notes-table-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const noteId = parseInt(row.dataset.noteId);
-      if (!noteId) return;
-      S.currentNoteId = noteId;
+      reload();
+    },
+    onDelete: async (id) => { await invoke('delete_note', { id }); },
+    onRowClick: (r) => {
+      S.currentNoteId = r.id;
       S.notesViewMode = 'edit';
       const el = document.getElementById('notes-content');
-      if (el) renderNoteEditor(el, noteId);
-    });
+      if (el) renderNoteEditor(el, r.id);
+    },
+    reloadFn: reload,
+    availableViews: ['table'],
   });
+  await dbv.render();
 }
 
 // ── Gallery View ──

@@ -144,6 +144,9 @@ function renderTabBar() {
       loadSubTabContent(S.activeTab, S.activeSubTab[S.activeTab] ?? (S.activeTab === 'chat' ? S.activeSubTab.chat : null));
       renderTabBar();
       renderSubSidebar();
+      if (S.activeTab === 'chat' && S.activeSubTab.chat !== 'Настройки') {
+        tabLoaders.loadConversationsList?.();
+      }
     });
     bottom.appendChild(gear);
   }
@@ -234,43 +237,11 @@ function renderSubSidebar() {
 
   if (isSettingsMode) {
     if (S.activeTab === 'chat') {
-      // Chat: keep vertical sidebar nav for settings sections
-      sidebar.classList.remove('hidden', 'collapsed');
-      sidebar.classList.add('settings-mode');
-      items.innerHTML = '';
+      // Chat: hide sidebar, use horizontal tabs in content (same as other tabs)
+      sidebar.classList.remove('settings-mode');
+      sidebar.classList.add('hidden');
       const convPanel = document.getElementById('conversations-panel');
       if (convPanel) convPanel.style.display = 'none';
-
-      const sections = SETTINGS_SECTIONS.chat;
-      if (!S.settingsSection || !sections.find(s => s.id === S.settingsSection)) {
-        S.settingsSection = sections[0]?.id || 'memory';
-      }
-
-      const title = document.createElement('div');
-      title.className = 'sidebar-settings-title';
-      title.textContent = 'Настройки';
-      items.appendChild(title);
-
-      for (const sec of sections) {
-        const item = document.createElement('div');
-        item.className = 'sub-sidebar-item' + (sec.id === S.settingsSection ? ' active' : '');
-        item.innerHTML = `<span class="sub-sidebar-dot"></span>${sec.label}`;
-        item.addEventListener('click', () => {
-          S.settingsSection = sec.id;
-          renderSubSidebar();
-          renderSettingsPage(S.activeTab, sec.id);
-        });
-        items.appendChild(item);
-      }
-
-      const settingsBottom = document.getElementById('sub-sidebar-settings');
-      if (settingsBottom) {
-        settingsBottom.innerHTML = '';
-        const ver = document.createElement('div');
-        ver.className = 'version-label';
-        ver.textContent = `v${S.APP_VERSION}`;
-        settingsBottom.appendChild(ver);
-      }
       const goalsSection = document.getElementById('sub-sidebar-goals');
       if (goalsSection) goalsSection.classList.add('hidden');
     } else {
@@ -603,7 +574,8 @@ function loadSubTabContent(tabId, subTab) {
 
   switch (tabId) {
     case 'chat':
-      hideChatSettingsMode(); renderSubSidebar(); tabLoaders.loadConversationsList?.(); tabLoaders.focusInput?.();
+      hideChatSettingsMode(); tabLoaders.focusInput?.();
+      if (!S.chatSidebarCollapsed) tabLoaders.loadConversationsList?.();
       break;
     case 'calendar': tabLoaders.loadCalendar?.(subTab); break;
     case 'focus': tabLoaders.loadFocus?.(subTab); break;

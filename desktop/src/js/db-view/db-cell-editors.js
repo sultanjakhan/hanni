@@ -65,8 +65,10 @@ export function startFixedCellEdit(cell, reloadFn) {
     return;
   }
 
+  const inputType = editType === 'number' ? 'number' : editType === 'date' ? 'date' : editType === 'phone' ? 'tel' : 'text';
   const cleanVal = rawVal === '\u2014' ? '' : rawVal;
-  const editor = overlayEditor(cell, 'text', cleanVal);
+  const editor = overlayEditor(cell, inputType, cleanVal);
+  if (inputType === 'number') { editor.step = 'any'; }
 
   const saveAndClose = () => {
     const val = editor.value || '';
@@ -76,16 +78,15 @@ export function startFixedCellEdit(cell, reloadFn) {
     const changed = val !== cleanVal;
     if (changed) {
       cell.dataset.rawValue = val;
-      const display = cell.querySelector('.data-table-title, span');
-      if (display) display.textContent = val || '\u2014';
       cell.dispatchEvent(new CustomEvent('fixed-cell-save', {
         bubbles: true,
-        detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val, skipReload: true },
+        detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val },
       }));
     }
     if (navTarget) setTimeout(() => navTarget.click(), 10);
   };
   editor.addEventListener('blur', saveAndClose);
+  if (inputType === 'date') editor.addEventListener('change', saveAndClose);
   editor.addEventListener('keydown', (e) => editorKeydown(e, editor, cell, () => removeEditor(cell)));
 }
 

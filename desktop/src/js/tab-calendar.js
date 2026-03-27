@@ -58,6 +58,7 @@ async function loadCalendar(subTab) {
         { id: 'week', label: 'Неделя' },
         { id: 'day', label: 'День' },
         { id: 'list', label: 'Список' },
+        { id: 'table', label: 'Таблица' },
       ];
       const activeView = S._calendarInner || 'month';
       paneEl.innerHTML = `
@@ -88,6 +89,8 @@ async function refreshCalendarInner() {
   const activeView = S._calendarInner || 'month';
   if (activeView === 'integrations') {
     await renderCalendarIntegrations(innerEl);
+  } else if (activeView === 'table') {
+    await renderCalendarTable(innerEl);
   } else if (activeView === 'list') {
     await renderCalendarList(innerEl);
   } else {
@@ -97,6 +100,49 @@ async function refreshCalendarInner() {
     else if (activeView === 'day') await renderDayCalendar(innerEl, events || []);
     else await renderCalendar(innerEl, events || [], tasks || []);
   }
+}
+
+async function renderCalendarTable(el) {
+  const { DatabaseView } = await import('./db-view/db-view.js');
+  const events = await invoke('get_all_events').catch(() => []);
+  const catOptions = ['general', 'work', 'personal', 'health', 'education', 'social', 'travel'].map(v => ({ value: v, label: v }));
+
+  el.innerHTML = '';
+  const dbvEl = document.createElement('div');
+  el.appendChild(dbvEl);
+  const reload = () => renderCalendarTable(el);
+
+  const dbv = new DatabaseView(dbvEl, {
+    tabId: 'calendar_events',
+    recordTable: 'events',
+    records: events,
+    idField: 'id',
+    fixedColumns: [
+      { key: 'title', label: 'Название', editable: true, editType: 'text',
+        render: r => `<span class="data-table-title">${escapeHtml(r.title || '')}</span>` },
+      { key: 'date', label: 'Дата', editable: true, editType: 'date',
+        render: r => `<span>${r.date || '—'}</span>` },
+      { key: 'time', label: 'Время', editable: true, editType: 'text',
+        render: r => `<span>${r.time || '—'}</span>` },
+      { key: 'duration_minutes', label: 'Длительность', editable: true, editType: 'number',
+        render: r => `<span>${r.duration_minutes ? r.duration_minutes + ' мин' : '—'}</span>` },
+      { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions,
+        render: r => `<span class="badge">${escapeHtml(r.category || '—')}</span>` },
+      { key: 'description', label: 'Описание', editable: true, editType: 'text',
+        render: r => `<span>${escapeHtml(r.description || '') || '—'}</span>` },
+    ],
+    onCellEdit: async (recordId, key, value) => {
+      const params = { id: recordId, title: null, description: null, date: null, time: null, durationMinutes: null, category: null, color: null, completed: null };
+      if (key === 'duration_minutes') params.durationMinutes = parseInt(value) || null;
+      else params[key] = value || null;
+      await invoke('update_event', params);
+      reload();
+    },
+    onDelete: async (id) => { await invoke('delete_event', { id }); },
+    reloadFn: reload,
+    availableViews: ['table'],
+  });
+  await dbv.render();
 }
 
 async function autoSyncCalendar(viewName) {
