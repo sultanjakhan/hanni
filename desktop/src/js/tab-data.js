@@ -2559,7 +2559,7 @@ async function loadCustomProject(tabId, subTab, el, reg) {
 
 // ── Schedule tab ──
 
-const SCHEDULE_CATEGORIES = { health: '💊 Здоровье', sport: '🏋️ Спорт', home: '🏠 Дом', practice: '🧠 Практика', challenge: '🚫 Челлендж', work: '💼 Работа', other: '📌 Другое' };
+const SCHEDULE_CATEGORIES = { health: 'Здоровье', sport: 'Спорт', home: 'Дом', practice: 'Практика', challenge: 'Челлендж', work: 'Работа', other: 'Другое' };
 const SCH_CAT_COLORS = { health: 'blue', sport: 'green', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'gray' };
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];

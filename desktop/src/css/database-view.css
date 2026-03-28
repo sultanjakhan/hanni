@@ -1464,7 +1464,9 @@
   cursor: pointer;
   padding: 2px 4px;
   border-radius: var(--radius-xs);
+  display: none;
 }
+.inline-dd-option:hover .inline-dd-rename-btn { display: inline; }
 .inline-dd-rename-btn:hover { color: var(--accent-blue); background: var(--bg-hover); }
 /* Inline rename input */
 .inline-dd-rename {
