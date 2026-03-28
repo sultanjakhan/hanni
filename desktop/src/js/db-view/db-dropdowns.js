@@ -4,6 +4,7 @@ import { escapeHtml } from '../utils.js';
 import { invoke } from '../state.js';
 
 const BADGE_COLORS = ['blue', 'green', 'yellow', 'red', 'purple', 'orange', 'pink', 'gray'];
+const stripEmoji = (s) => s.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').trim();
 function badgeColorFor(val, allOpts) {
   const idx = allOpts.indexOf(val);
   return BADGE_COLORS[idx >= 0 ? idx % BADGE_COLORS.length : 0];
@@ -40,6 +41,33 @@ function closeDropdown(dd, closeRef) {
   if (closeRef.fn) { document.removeEventListener('mousedown', closeRef.fn); closeRef.fn = null; }
 }
 
+// ── Inline rename for an option ──
+function startOptionRename(badgeEl, val, onRename) {
+  if (badgeEl.querySelector('.inline-dd-rename')) return;
+  const oldText = badgeEl.textContent.trim();
+  badgeEl.textContent = '';
+  const inp = document.createElement('input');
+  inp.className = 'inline-dd-rename';
+  inp.value = oldText;
+  badgeEl.appendChild(inp);
+  inp.focus();
+  inp.select();
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    const newName = inp.value.trim();
+    if (newName && newName !== oldText) onRename(val, newName);
+    else onRename(null, null);
+  };
+  inp.addEventListener('blur', finish);
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') { inp.value = oldText; inp.blur(); }
+    e.stopPropagation();
+  });
+}
+
 // ── Single Select ──
 
 export function showSelectDropdown(cell, options, currentVal, save, propId, onOptionsChange) {
@@ -51,7 +79,6 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
   dd.style.top = rect.bottom + 2 + 'px';
   dd.style.minWidth = Math.max(rect.width, 200) + 'px';
   let current = currentVal;
-  // Auto-add current value to catalog if missing
   if (current && !options.some(o => o.value === current)) {
     options.push({ value: current, label: current });
   }
@@ -77,11 +104,12 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
 
   const renderOptions = (filter) => {
     const list = dd.querySelector('.inline-dd-list');
-    const filtered = filter ? options.filter(o => o.label.toLowerCase().includes(filter.toLowerCase())) : options;
+    let filtered = filter ? options.filter(o => o.label.toLowerCase().includes(filter.toLowerCase())) : [...options];
+    filtered.sort((a, b) => stripEmoji(a.label).localeCompare(stripEmoji(b.label)));
     let html = filtered.map(o => {
       const color = badgeColorFor(o.value, allVals());
       return `<div class="inline-dd-option${o.value === current ? ' active' : ''}" data-val="${escapeHtml(o.value)}">
-        <span class="badge badge-${color}">${escapeHtml(o.label)}</span>
+        <span class="badge badge-${color} inline-dd-badge">${escapeHtml(o.label)}</span>
         ${canEdit ? `<span class="inline-dd-remove" data-remove="${escapeHtml(o.value)}" title="Удалить из каталога">✕</span>` : ''}
       </div>`;
     }).join('');
@@ -89,6 +117,25 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
       html += `<div class="inline-dd-option inline-dd-create" data-val="${escapeHtml(filter)}">+ Создать «${escapeHtml(filter)}»</div>`;
     }
     list.innerHTML = html;
+    if (canEdit) {
+      list.querySelectorAll('.inline-dd-badge').forEach(badge => {
+        badge.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const opt = badge.closest('.inline-dd-option');
+          const val = opt?.dataset.val;
+          if (!val) return;
+          startOptionRename(badge, val, (oldVal, newName) => {
+            if (oldVal && newName) {
+              const o = options.find(x => x.value === oldVal);
+              if (o) { o.label = newName; o.value = newName; }
+              if (current === oldVal) current = newName;
+              dopersist();
+            }
+            renderOptions(dd.querySelector('.inline-dd-search')?.value.trim() || '');
+          });
+        });
+      });
+    }
     list.querySelectorAll('.inline-dd-remove').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -102,7 +149,7 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
     });
     list.querySelectorAll('.inline-dd-option').forEach(opt => {
       opt.addEventListener('click', (e) => {
-        if (e.target.closest('.inline-dd-remove')) return;
+        if (e.target.closest('.inline-dd-remove') || e.target.closest('.inline-dd-rename')) return;
         const val = opt.dataset.val;
         if (opt.classList.contains('inline-dd-create')) {
           options.push({ value: val, label: val });
@@ -158,7 +205,6 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
   const dopersist = () => { if (persist) persist([...allOptions]); };
   const closeRef = { fn: null };
 
-  // Save immediately on every change (empty string for clear, not null — Rust ignores null)
   const doSave = () => { save(selected.length > 0 ? JSON.stringify(selected) : ''); };
 
   const rect = cell.getBoundingClientRect();
@@ -188,12 +234,13 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
 
   const renderOptions = (filter) => {
     const list = dd.querySelector('.inline-dd-list');
-    const filtered = filter ? allOptions.filter(o => label(o).toLowerCase().includes(filter.toLowerCase())) : allOptions;
+    let filtered = filter ? allOptions.filter(o => label(o).toLowerCase().includes(filter.toLowerCase())) : [...allOptions];
+    filtered.sort((a, b) => stripEmoji(label(a)).localeCompare(stripEmoji(label(b))));
     let html = filtered.map(o => {
       const color = badgeColorFor(o, allOptions);
       return `<div class="inline-dd-option${selected.includes(o) ? ' active' : ''}" data-val="${escapeHtml(o)}">
         <span class="inline-dd-check">${selected.includes(o) ? '\u2713' : ''}</span>
-        <span class="badge badge-${color}">${escapeHtml(label(o))}</span>
+        <span class="badge badge-${color} inline-dd-badge">${escapeHtml(label(o))}</span>
         ${canEdit ? `<span class="inline-dd-remove" data-remove="${escapeHtml(o)}" title="Удалить из каталога">✕</span>` : ''}
       </div>`;
     }).join('');
@@ -201,6 +248,29 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
       html += `<div class="inline-dd-option inline-dd-create" data-val="${escapeHtml(filter)}">+ Создать «${escapeHtml(filter)}»</div>`;
     }
     list.innerHTML = html;
+    if (canEdit) {
+      list.querySelectorAll('.inline-dd-badge').forEach(badge => {
+        badge.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const opt = badge.closest('.inline-dd-option');
+          const val = opt?.dataset.val;
+          if (!val) return;
+          startOptionRename(badge, val, (oldVal, newName) => {
+            if (oldVal && newName) {
+              const idx = allOptions.indexOf(oldVal);
+              if (idx >= 0) allOptions[idx] = newName;
+              labels[newName] = newName;
+              if (labels[oldVal]) delete labels[oldVal];
+              selected = selected.map(s => s === oldVal ? newName : s);
+              dopersist();
+              doSave();
+            }
+            renderOptions(dd.querySelector('.inline-dd-search')?.value.trim() || '');
+            renderSelected();
+          });
+        });
+      });
+    }
     list.querySelectorAll('.inline-dd-remove').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -216,7 +286,7 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
     });
     list.querySelectorAll('.inline-dd-option').forEach(opt => {
       opt.addEventListener('click', (e) => {
-        if (e.target.closest('.inline-dd-remove')) return;
+        if (e.target.closest('.inline-dd-remove') || e.target.closest('.inline-dd-rename')) return;
         e.stopPropagation();
         const v = opt.dataset.val;
         if (opt.classList.contains('inline-dd-create')) {
