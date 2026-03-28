@@ -977,42 +977,8 @@
   color: var(--text-faint);
 }
 
-/* Emoji picker */
 .custom-page-header {
   position: relative;
-}
-
-.custom-page-emoji-picker {
-  position: absolute;
-  top: 56px;
-  left: 0;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2);
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 2px;
-  box-shadow: var(--shadow-md);
-  z-index: 100;
-}
-
-.emoji-pick-btn {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.emoji-pick-btn:hover {
-  background: var(--bg-hover);
 }
 
 /* "New page" highlight in dropdown */

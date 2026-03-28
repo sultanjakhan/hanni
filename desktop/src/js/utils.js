@@ -1,6 +1,7 @@
 // ── js/utils.js — Shared utilities, Markdown, skeletons, helpers ──
 
-import { invoke, S, TAB_REGISTRY, TAB_SETTINGS_DEFS, PAGE_EMOJIS, saveTabCustom, getTabDesc, loadTabSetting, saveTabSetting, tabLoaders } from './state.js';
+import { invoke, S, TAB_REGISTRY, TAB_SETTINGS_DEFS, saveTabCustom, getTabDesc, loadTabSetting, saveTabSetting, tabLoaders } from './state.js';
+import { showEmojiPicker } from './emoji-picker.js';
 
 // ── Markdown rendering setup ──
 const markedInstance = new marked.Marked({
@@ -134,38 +135,23 @@ export function renderPageHeader(tabId, extra) {
     ${props.length ? `<div class="page-header-properties">${props.map(p =>
       `<span class="page-property"><span class="page-property-label">${p.label}</span><span class="page-property-value ${p.class || ''}">${p.value}</span></span>`
     ).join('')}</div>` : ''}
-    <div class="page-emoji-picker hidden" id="page-emoji-picker-${tabId}">
-      ${PAGE_EMOJIS.map(e => `<button class="emoji-pick-btn" data-emoji="${e}">${e}</button>`).join('')}
-    </div>
   </div>`;
 }
 
 export function setupPageHeaderControls(tabId) {
   const iconBtn = document.querySelector(`.page-header-icon-btn[data-tab-id="${tabId}"]`);
-  const picker = document.getElementById(`page-emoji-picker-${tabId}`);
-  if (iconBtn && picker) {
+  if (iconBtn) {
     iconBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      picker.classList.toggle('hidden');
-    });
-    picker.querySelectorAll('.emoji-pick-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const emoji = btn.dataset.emoji;
+      showEmojiPicker(iconBtn, (emoji) => {
         if (!S.tabCustomizations[tabId]) S.tabCustomizations[tabId] = {};
         S.tabCustomizations[tabId].icon = emoji;
         saveTabCustom();
         iconBtn.textContent = emoji;
         iconBtn.classList.remove('page-header-icon-svg');
-        picker.classList.add('hidden');
-        // Late-bound: renderTabBar
         tabLoaders._renderTabBar?.();
       });
     });
-    const closePicker = (e) => {
-      if (!picker.contains(e.target) && e.target !== iconBtn) picker.classList.add('hidden');
-    };
-    document.addEventListener('click', closePicker, { once: false });
   }
 
   const descInput = document.querySelector(`.page-header-desc-input[data-tab-id="${tabId}"]`);

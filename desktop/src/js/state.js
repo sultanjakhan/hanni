@@ -195,8 +195,6 @@ export const TAB_DESCRIPTIONS = {
 };
 
 // Page customization (Notion-like editable icon/description)
-export const PAGE_EMOJIS = ['📄','📝','📋','📌','📎','📁','💡','🎯','🔥','⭐','🏠','💼','🎨','🎮','📚','🎵','💰','🏋️','❤️','🧠','🍔','📅','🔧','🚀','🌟','✅','📊','🗂️','💬','🔔','🧪','🔬','📸','🎬','🎭','🎪','🏆','🗺️','🌍','🧩'];
-
 try { S.tabCustomizations = JSON.parse(localStorage.getItem('hanni_tab_custom') || '{}'); } catch(_) {}
 
 export function saveTabCustom() {
@@ -277,8 +275,6 @@ export { getTypeList as PROPERTY_TYPE_DEFS_FN, getTypeIcon, getTypeName, getType
 import { getTypeList } from './db-view/db-type-registry.js';
 export const PROPERTY_TYPE_DEFS = getTypeList();
 
-// ── Custom page emojis ──
-export const COMMON_EMOJIS = ['📄','📝','📋','📌','📎','📁','💡','🎯','🔥','⭐','🏠','💼','🎨','🎮','📚','🎵','💰','🏋️','❤️','🧠','🍔','📅','🔧','🚀','🌟','✅','📊','🗂️','💬','🔔'];
 
 // ── Call mode constants ──
 export const PHASE_LABELS = {

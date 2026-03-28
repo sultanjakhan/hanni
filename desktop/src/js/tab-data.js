@@ -1,6 +1,7 @@
 // ── js/tab-data.js — Data tab loaders: Home, Mindset, Food, Money, People, Memory, Work, Development, Hobbies, Sports, Health, About, Custom Pages ──
 
-import { S, invoke, tabLoaders, TAB_REGISTRY, TAB_ICONS, MEDIA_TYPES, MEDIA_LABELS, STATUS_LABELS, MEMORY_CATEGORIES, COMMON_EMOJIS } from './state.js';
+import { S, invoke, tabLoaders, TAB_REGISTRY, TAB_ICONS, MEDIA_TYPES, MEDIA_LABELS, STATUS_LABELS, MEMORY_CATEGORIES } from './state.js';
+import { showEmojiPicker } from './emoji-picker.js';
 import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks, loadTabBlockEditor } from './utils.js';
 import { renderTabBar, closeTab } from './tabs.js';
 import { DatabaseView } from './db-view/db-view.js';
@@ -2422,9 +2423,7 @@ async function loadCustomPage(tabId, subTab) {
       <div class="custom-page-content">
         <div id="cp-editor" class="block-editor-container"></div>
       </div>
-      <div class="custom-page-emoji-picker hidden" id="cp-emoji-picker">
-        ${COMMON_EMOJIS.map(e => `<button class="emoji-pick-btn">${e}</button>`).join('')}
-      </div>`;
+    `;
 
     // Auto-save helper for metadata fields
     const autoSaveMeta = (field, value) => {
@@ -2472,27 +2471,13 @@ async function loadCustomPage(tabId, subTab) {
     S.currentCpEditor = initBlockEditor('cp-editor', editorData, () => autoSaveContent());
 
     // Emoji picker
-    const emojiPicker = document.getElementById('cp-emoji-picker');
     document.getElementById('cp-icon-btn')?.addEventListener('click', (e) => {
       e.stopPropagation();
-      emojiPicker?.classList.toggle('hidden');
-    });
-    document.querySelectorAll('.emoji-pick-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const emoji = btn.textContent;
+      showEmojiPicker(e.target, (emoji) => {
         document.getElementById('cp-icon-btn').textContent = emoji;
-        emojiPicker?.classList.add('hidden');
         autoSaveMeta('icon', emoji);
       });
     });
-    // Close emoji picker on outside click
-    const closeEmojiPicker = (e) => {
-      if (!emojiPicker?.contains(e.target) && e.target.id !== 'cp-icon-btn') {
-        emojiPicker?.classList.add('hidden');
-      }
-    };
-    document.addEventListener('click', closeEmojiPicker);
 
     // Delete page
     document.getElementById('cp-delete-btn')?.addEventListener('click', async () => {
@@ -2646,6 +2631,11 @@ async function loadSchedule(subTab) {
           }},
           { key: 'time_of_day', label: 'Время', editable: true, editType: 'text', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.time_of_day || '—'}</span>` },
           { key: 'is_active', label: 'Статус', width: 60, render: r => `<div class="col-menu-toggle${r.is_active ? ' on' : ''}" data-toggle-id="${r.id}" style="cursor:pointer"></div>` },
+          { key: 'created_at', label: 'Создано', editType: 'created_time', render: r => {
+            if (!r.created_at) return '<span class="text-faint">—</span>';
+            const d = new Date(r.created_at);
+            return isNaN(d) ? '' : `<span class="cell-date text-faint">${d.toLocaleDateString('ru-RU')} ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>`;
+          }},
         ],
         idField: 'id',
         addButton: '+ Расписание',

@@ -3,6 +3,7 @@
 
 import { S, invoke, TAB_REGISTRY } from '../state.js';
 import { escapeHtml, confirmModal } from '../utils.js';
+import { showEmojiPicker } from '../emoji-picker.js';
 
 const SUB_PANES = [
   { id: 'dash',  icon: '📊', label: 'Дашборд' },
@@ -136,26 +137,13 @@ function wireHeaderEdit(el, tabId, config, meta, defaults) {
   const nameEl = el.querySelector('.uni-header-name');
   const descEl = el.querySelector('.uni-header-desc');
 
-  // Icon click → small input popup
+  // Icon click → emoji picker
   iconEl?.addEventListener('click', () => {
-    const popup = document.createElement('div');
-    popup.className = 'uni-icon-popup';
-    popup.innerHTML = `<input class="uni-icon-input" value="${meta.icon || defaults.icon}" maxlength="2" placeholder="🎯">`;
-    const rect = iconEl.getBoundingClientRect();
-    popup.style.left = rect.left + 'px';
-    popup.style.top = rect.bottom + 4 + 'px';
-    document.body.appendChild(popup);
-    const input = popup.querySelector('input');
-    input.focus();
-    input.select();
-    const save = async () => {
-      const val = input.value.trim();
-      if (val && val !== (meta.icon || defaults.icon)) { meta.icon = val; await saveTabMeta(tabId, meta); }
-      popup.remove();
+    showEmojiPicker(iconEl, async (emoji) => {
+      meta.icon = emoji;
+      await saveTabMeta(tabId, meta);
       renderUnifiedLayout(el, tabId, config);
-    };
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { popup.remove(); } e.stopPropagation(); });
-    input.addEventListener('blur', save);
+    });
   });
 
   // Name click → contenteditable

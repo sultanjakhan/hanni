@@ -411,21 +411,7 @@ body {
   line-height: 1.5;
 }
 
-/* Page emoji picker (shared across all tabs) */
-.page-emoji-picker {
-  position: absolute;
-  top: 90px;
-  left: 0;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-  padding: var(--space-2);
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 2px;
-  box-shadow: var(--shadow-md);
-  z-index: 100;
-}
+
 .page-header-properties {
   display: flex;
   flex-wrap: wrap;
