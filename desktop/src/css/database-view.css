@@ -1457,6 +1457,15 @@
   border-radius: var(--radius-xs);
 }
 .inline-dd-remove:hover { color: var(--color-red); background: var(--bg-hover); }
+.inline-dd-rename-btn {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+}
+.inline-dd-rename-btn:hover { color: var(--accent-blue); background: var(--bg-hover); }
 /* Inline rename input */
 .inline-dd-rename {
   border: none;

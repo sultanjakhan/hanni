@@ -111,6 +111,7 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
       const color = badgeColorFor(o.value, allVals());
       return `<div class="inline-dd-option${o.value === current ? ' active' : ''}" data-val="${escapeHtml(o.value)}">
         <span class="badge badge-${color} inline-dd-badge">${escapeHtml(o.label)}</span>
+        ${canEdit ? `<span class="inline-dd-rename-btn" data-rename="${escapeHtml(o.value)}" title="Переименовать">✎</span>` : ''}
         ${canEdit ? `<span class="inline-dd-remove" data-remove="${escapeHtml(o.value)}" title="Удалить из каталога">✕</span>` : ''}
       </div>`;
     }).join('');
@@ -119,12 +120,13 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
     }
     list.innerHTML = html;
     if (canEdit) {
-      list.querySelectorAll('.inline-dd-badge').forEach(badge => {
-        badge.addEventListener('dblclick', (e) => {
+      list.querySelectorAll('.inline-dd-rename-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const opt = badge.closest('.inline-dd-option');
+          const opt = btn.closest('.inline-dd-option');
+          const badge = opt?.querySelector('.inline-dd-badge');
           const val = opt?.dataset.val;
-          if (!val) return;
+          if (!badge || !val) return;
           startOptionRename(badge, val, (oldVal, newName) => {
             if (oldVal && newName) {
               const o = options.find(x => x.value === oldVal);
@@ -150,7 +152,7 @@ export function showSelectDropdown(cell, options, currentVal, save, propId, onOp
     });
     list.querySelectorAll('.inline-dd-option').forEach(opt => {
       opt.addEventListener('click', (e) => {
-        if (e.target.closest('.inline-dd-remove') || e.target.closest('.inline-dd-rename')) return;
+        if (e.target.closest('.inline-dd-remove') || e.target.closest('.inline-dd-rename') || e.target.closest('.inline-dd-rename-btn')) return;
         const val = opt.dataset.val;
         if (opt.classList.contains('inline-dd-create')) {
           options.push({ value: val, label: val });
@@ -242,6 +244,7 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
       return `<div class="inline-dd-option${selected.includes(o) ? ' active' : ''}" data-val="${escapeHtml(o)}">
         <span class="inline-dd-check">${selected.includes(o) ? '\u2713' : ''}</span>
         <span class="badge badge-${color} inline-dd-badge">${escapeHtml(label(o))}</span>
+        ${canEdit ? `<span class="inline-dd-rename-btn" data-rename="${escapeHtml(o)}" title="Переименовать">✎</span>` : ''}
         ${canEdit ? `<span class="inline-dd-remove" data-remove="${escapeHtml(o)}" title="Удалить из каталога">✕</span>` : ''}
       </div>`;
     }).join('');
@@ -250,12 +253,13 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
     }
     list.innerHTML = html;
     if (canEdit) {
-      list.querySelectorAll('.inline-dd-badge').forEach(badge => {
-        badge.addEventListener('dblclick', (e) => {
+      list.querySelectorAll('.inline-dd-rename-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const opt = badge.closest('.inline-dd-option');
+          const opt = btn.closest('.inline-dd-option');
+          const badge = opt?.querySelector('.inline-dd-badge');
           const val = opt?.dataset.val;
-          if (!val) return;
+          if (!badge || !val) return;
           startOptionRename(badge, val, (oldVal, newName) => {
             if (oldVal && newName) {
               const idx = allOptions.indexOf(oldVal);
@@ -287,7 +291,7 @@ export function showMultiSelectDropdown(cell, options, rawVal, save, propId, lab
     });
     list.querySelectorAll('.inline-dd-option').forEach(opt => {
       opt.addEventListener('click', (e) => {
-        if (e.target.closest('.inline-dd-remove') || e.target.closest('.inline-dd-rename')) return;
+        if (e.target.closest('.inline-dd-remove') || e.target.closest('.inline-dd-rename') || e.target.closest('.inline-dd-rename-btn')) return;
         e.stopPropagation();
         const v = opt.dataset.val;
         if (opt.classList.contains('inline-dd-create')) {
