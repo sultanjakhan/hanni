@@ -36,11 +36,13 @@ export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallbac
 }
 
 /** Show column menu for a fixed column */
-export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadFn, sortCallback, filterCallback) {
+export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadFn, sortCallback, filterCallback, editType) {
   const displayName = getFixedColName(tabId, colKey, colLabel || colKey);
   const wrapped = isColumnWrapped(tabId, colKey);
+  const typeMap = { select: 'select', number: 'number', date: 'date', phone: 'phone', text: 'text' };
+  const fixedType = typeMap[editType] || 'text';
   const menu = openMenu(anchorRect, buildMenuHTML({
-    name: displayName, typeIcon: getTypeIcon('text'), typeName: 'Текст',
+    name: displayName, typeIcon: getTypeIcon(fixedType), typeName: getTypeName(fixedType),
     canChangeType: false, wrapped, canHide: true, canInsert: false, canDelete: true,
   }));
 

@@ -2631,7 +2631,16 @@ async function loadSchedule(subTab) {
         fixedColumns: [
           { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
           { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v })), render: r => r.category ? `<span class="badge badge-${SCH_CAT_COLORS[r.category] || 'gray'}">${SCHEDULE_CATEGORIES[r.category] || r.category}</span>` : '' },
+          { key: 'category', label: 'Категория', editable: true, editType: 'multi_select', editOptions: (() => {
+            const defaults = Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v }));
+            try { const saved = JSON.parse(localStorage.getItem('fixedOpts_category') || '[]'); saved.forEach(v => { if (!defaults.some(d => d.value === v)) defaults.push({ value: v, label: v }); }); } catch {}
+            return defaults;
+          })(), render: r => {
+            if (!r.category) return '';
+            let cats = [r.category];
+            try { const p = JSON.parse(r.category); if (Array.isArray(p)) cats = p; } catch {}
+            return cats.map(c => `<span class="badge badge-${SCH_CAT_COLORS[c] || 'gray'}">${SCHEDULE_CATEGORIES[c] || c}</span>`).join(' ');
+          }},
           { key: 'frequency', label: 'Частота', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_FREQ).map(([k, v]) => ({ value: k, label: v })), render: r => {
             if (!r.frequency) return '';
             if (r.frequency === 'custom' && r.frequency_days) {

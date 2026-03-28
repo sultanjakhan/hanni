@@ -34,7 +34,7 @@ export function wireColumnClicks(el, { tabId, customProps, reload, onSort, onRow
       const colIdx = Array.from(th.parentElement.children).indexOf(th);
       highlightColumn(tableEl, colIdx);
       if (tableEl) { e.shiftKey ? extendColumn(colIdx, tableEl) : selectColumn(colIdx, tableEl); }
-      if (!e.shiftKey) showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort);
+      if (!e.shiftKey) showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reload, onSort, null, th.dataset.editType);
     });
   });
 

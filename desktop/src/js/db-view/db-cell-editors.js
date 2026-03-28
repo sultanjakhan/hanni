@@ -55,13 +55,38 @@ export function startFixedCellEdit(cell, reloadFn) {
 
   const rawVal = cell.dataset.rawValue || cell.textContent.trim();
 
+  const colKey = cell.dataset.editKey;
+  const storageKey = `fixedOpts_${colKey}`;
+  const saveCellVal = (val) => {
+    cell.dispatchEvent(new CustomEvent('fixed-cell-save', {
+      bubbles: true,
+      detail: { recordId: cell.dataset.recordId, key: colKey, value: val },
+    }));
+  };
+
+  // Merge saved custom options from localStorage with default editOptions
+  const mergeStoredOpts = (baseOpts) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const existing = new Set(baseOpts.map(o => typeof o === 'object' ? o.value : o));
+      saved.forEach(v => { if (!existing.has(v)) baseOpts.push(typeof baseOpts[0] === 'object' ? { value: v, label: v } : v); });
+    } catch {}
+  };
+
   if (editType === 'select') {
-    showSelectDropdown(cell, options.map(o => typeof o === 'object' ? o : { value: o, label: o }), rawVal, (val) => {
-      cell.dispatchEvent(new CustomEvent('fixed-cell-save', {
-        bubbles: true,
-        detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val },
-      }));
-    });
+    const mapped = options.map(o => typeof o === 'object' ? o : { value: o, label: o });
+    mergeStoredOpts(mapped);
+    const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
+    showSelectDropdown(cell, mapped, rawVal, saveCellVal, null, onOptsChange);
+    return;
+  }
+  if (editType === 'multi_select') {
+    const optList = options.map(o => typeof o === 'object' ? o.value : o);
+    const labelMap = {};
+    options.forEach(o => { if (typeof o === 'object') labelMap[o.value] = o.label; });
+    mergeStoredOpts(optList);
+    const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
+    showMultiSelectDropdown(cell, optList, rawVal, saveCellVal, null, labelMap, onOptsChange);
     return;
   }
 
@@ -111,10 +136,10 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
       save(rawVal === 'true' ? 'false' : 'true');
       return;
     case 'select':
-      showSelectDropdown(cell, options.map(o => ({ value: o, label: o })), rawVal, save);
+      showSelectDropdown(cell, options.map(o => ({ value: o, label: o })), rawVal, save, propId);
       return;
     case 'multi_select':
-      showMultiSelectDropdown(cell, options, rawVal, save);
+      showMultiSelectDropdown(cell, options, rawVal, save, propId);
       return;
     case 'time':
       renderTimeEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });
@@ -143,7 +168,7 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
         removeEditor(cell);
         if (val !== origVal) {
           cell.dataset.rawValue = val;
-          save(val || null, true);
+          save(val || null);
         }
         if (navTarget) setTimeout(() => navTarget.click(), 10);
       };
