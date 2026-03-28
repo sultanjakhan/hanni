@@ -52,18 +52,19 @@ function startOptionRename(badgeEl, val, onRename) {
   badgeEl.appendChild(inp);
   inp.focus();
   inp.select();
-  let done = false;
-  const finish = () => {
-    if (done) return;
-    done = true;
+  let saved = false;
+  const save = () => {
+    if (saved) return;
+    saved = true;
     const newName = inp.value.trim();
     if (newName && newName !== oldText) onRename(val, newName);
     else onRename(null, null);
   };
-  inp.addEventListener('blur', finish);
+  const cancel = () => { if (!saved) onRename(null, null); };
+  inp.addEventListener('blur', cancel);
   inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
-    if (e.key === 'Escape') { inp.value = oldText; inp.blur(); }
+    if (e.key === 'Enter') { e.preventDefault(); save(); inp.blur(); }
+    if (e.key === 'Escape') { inp.blur(); }
     e.stopPropagation();
   });
 }
