@@ -25,6 +25,7 @@ export const TYPE_REGISTRY = {
                   validate: v => { const n = parseInt(v); return v === '' || (n >= 0 && n <= 100); } },
   rating:       { id: 'rating',       icon: '★', name: 'Рейтинг',      editor: 'rating',   filters: F_NUM,
                   validate: v => { const n = parseInt(v); return v === '' || (n >= 1 && n <= 5); } },
+  recurrence:   { id: 'recurrence',   icon: '🔁', name: 'Повторение',   editor: 'recurrence', filters: F_TEXT },
   created_time: { id: 'created_time', icon: '⏱', name: 'Создано',      editor: 'readonly', filters: F_DATE, auto: true },
   last_edited:  { id: 'last_edited',  icon: '✎', name: 'Изменено',     editor: 'readonly', filters: F_DATE, auto: true },
   unique_id:    { id: 'unique_id',    icon: '#',  name: 'ID',           editor: 'readonly', filters: F_NUM,  auto: true },

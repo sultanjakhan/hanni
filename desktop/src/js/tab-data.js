@@ -199,22 +199,7 @@ async function loadMindset(subTab) {
         </div>`;
     },
     renderTable: async (paneEl) => {
-      // Internal sub-navigation for Journal / Mood / Principles
-      const activeInner = S._mindsetInner || 'journal';
-      paneEl.innerHTML = `
-        <div class="dev-filters" style="margin-bottom:var(--space-3);">
-          <button class="pill${activeInner === 'journal' ? ' active' : ''}" data-inner="journal">Дневник</button>
-          <button class="pill${activeInner === 'mood' ? ' active' : ''}" data-inner="mood">Настроение</button>
-          <button class="pill${activeInner === 'principles' ? ' active' : ''}" data-inner="principles">Принципы</button>
-        </div>
-        <div id="mindset-inner-content"></div>`;
-      const innerEl = paneEl.querySelector('#mindset-inner-content');
-      if (activeInner === 'mood') await loadMoodLog(innerEl);
-      else if (activeInner === 'principles') await loadPrinciples(innerEl);
-      else await loadJournal(innerEl);
-      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
-        btn.addEventListener('click', () => { S._mindsetInner = btn.dataset.inner; loadMindset(); });
-      });
+      await loadJournal(paneEl);
     },
   });
 }
@@ -259,76 +244,6 @@ async function loadJournal(el) {
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
-async function loadMoodLog(el) {
-  try {
-    const history = await invoke('get_mood_history', { days: 14 }).catch(() => []);
-    const moods = ['😤','😕','😐','🙂','😊'];
-    el.innerHTML = `
-      <div class="module-header"><h2>Mood Log</h2></div>
-      <div style="display:flex;gap:12px;justify-content:center;margin:20px 0;">
-        ${moods.map((m,i) => `<button class="mood-btn" data-mood="${i+1}" style="font-size:32px;background:none;border:none;cursor:pointer;opacity:0.5;transition:opacity 0.1s;" title="Mood ${i+1}">${m}</button>`).join('')}
-      </div>
-      <input class="form-input" id="mood-note" placeholder="Note (optional)..." style="max-width:400px;margin:0 auto 16px;display:block;">
-      <div class="module-card-title">Recent</div>
-      <div id="mood-history">
-        ${history.map(m => `<div class="focus-log-item">
-          <span class="focus-log-time">${m.date} ${m.time||''}</span>
-          <span style="font-size:18px;">${moods[(m.mood||3)-1]}</span>
-          <span class="focus-log-title">${escapeHtml(m.note||'')}</span>
-        </div>`).join('')}
-      </div>`;
-    el.querySelectorAll('.mood-btn').forEach(btn => {
-      btn.addEventListener('mouseenter', () => btn.style.opacity = '1');
-      btn.addEventListener('mouseleave', () => btn.style.opacity = '0.5');
-      btn.addEventListener('click', async () => {
-        try {
-          await invoke('log_mood', { mood: parseInt(btn.dataset.mood), note: document.getElementById('mood-note')?.value||null, trigger: null });
-          loadMoodLog(el);
-        } catch (err) { alert('Error: ' + err); }
-      });
-    });
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-async function loadPrinciples(el) {
-  try {
-    const principles = await invoke('get_principles').catch(() => []);
-    const dbv = new DatabaseView(el, {
-      tabId: 'mindset',
-      recordTable: 'principles',
-      records: principles,
-      fixedColumns: [
-        { key: 'active', label: '', render: r => `<div class="habit-check${r.active ? ' checked' : ''}" style="cursor:pointer;" data-pid="${r.id}">${r.active ? '&#10003;' : ''}</div>` },
-        { key: 'title', label: 'Принцип', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-        { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: [
-          { value: 'discipline', label: 'Дисциплина' }, { value: 'mindset', label: 'Мышление' },
-          { value: 'health', label: 'Здоровье' }, { value: 'relationships', label: 'Отношения' },
-          { value: 'work', label: 'Работа' }, { value: 'other', label: 'Другое' },
-        ], render: r => `<span class="badge badge-gray">${r.category || '—'}</span>` },
-      ],
-      idField: 'id',
-      addButton: '+ Принцип',
-      onAdd: () => {
-        const title = prompt('Принцип:');
-        if (title) invoke('create_principle', { title, description: '', category: 'discipline' }).then(() => loadPrinciples(el)).catch(e => alert(e));
-      },
-      onQuickAdd: async () => {
-        await invoke('create_principle', { title: '', description: '', category: '' });
-        loadPrinciples(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, active: null, title: null };
-        params[key] = value;
-        await invoke('update_principle', params);
-        if (!skipReload) loadPrinciples(el);
-      },
-      onDelete: async (id) => { await invoke('delete_principle', { id }); },
-      reloadFn: () => loadPrinciples(el),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
 // ── Food ──
 async function loadFood(subTab) {
   const el = document.getElementById('food-content');
@@ -351,21 +266,7 @@ async function loadFood(subTab) {
         </div>`;
     },
     renderTable: async (paneEl) => {
-      const activeInner = S._foodInner || 'log';
-      paneEl.innerHTML = `
-        <div class="dev-filters" style="margin-bottom:var(--space-3);">
-          <button class="pill${activeInner === 'log' ? ' active' : ''}" data-inner="log">Дневник</button>
-          <button class="pill${activeInner === 'recipes' ? ' active' : ''}" data-inner="recipes">Рецепты</button>
-          <button class="pill${activeInner === 'products' ? ' active' : ''}" data-inner="products">Продукты</button>
-        </div>
-        <div id="food-inner-content"></div>`;
-      const innerEl = paneEl.querySelector('#food-inner-content');
-      if (activeInner === 'recipes') await loadRecipes(innerEl);
-      else if (activeInner === 'products') await loadProducts(innerEl);
-      else await loadFoodLog(innerEl);
-      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
-        btn.addEventListener('click', () => { S._foodInner = btn.dataset.inner; loadFood(); });
-      });
+      await loadFoodLog(paneEl);
     },
   });
 }
@@ -454,157 +355,6 @@ function showAddFoodModal(el) {
   });
 }
 
-async function loadRecipes(el) {
-  try {
-    const recipes = await invoke('get_recipes', { search: null, tags: null }).catch(() => []);
-    const fixedColumns = [
-      { key: 'name', label: 'Name', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-      { key: 'prep_time', label: 'Prep', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.prep_time||0}+${r.cook_time||0} min</span>` },
-      { key: 'calories', label: 'Calories', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories||'\u2014'}</span>` },
-      { key: 'tags', label: 'Tags', editable: true, editType: 'text', render: r => r.tags ? r.tags.split(',').map(t => `<span class="badge badge-gray">${t.trim()}</span>`).join(' ') : '' },
-    ];
-    el.innerHTML = '<div id="recipes-dbv"></div>';
-    const dbvEl = document.getElementById('recipes-dbv');
-    const dbv = new DatabaseView(dbvEl, {
-      tabId: 'food', recordTable: 'recipes', records: recipes,
-      fixedColumns, idField: 'id',
-      addButton: '+ Рецепт',
-      onAdd: () => showAddRecipeModal(el),
-      onQuickAdd: async () => {
-        await invoke('create_recipe', { name: '', ingredients: '', instructions: '' });
-        loadRecipes(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, name: null, prepTime: null, cookTime: null, servings: null, calories: null, tags: null };
-        if (key === 'prep_time') params.prepTime = parseInt(value) || null;
-        else if (key === 'calories') params.calories = parseInt(value) || null;
-        else params[key] = value;
-        await invoke('update_recipe', params);
-        if (!skipReload) loadRecipes(el);
-      },
-      onDelete: async (id) => { await invoke('delete_recipe', { id }); },
-      reloadFn: () => loadRecipes(el),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-function showAddRecipeModal(el) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal">
-    <div class="modal-title">Add Recipe</div>
-    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="rcp-name"></div>
-    <div class="form-group"><label class="form-label">Ingredients</label><textarea class="form-textarea" id="rcp-ing" rows="3"></textarea></div>
-    <div class="form-group"><label class="form-label">Instructions</label><textarea class="form-textarea" id="rcp-inst" rows="3"></textarea></div>
-    <div class="form-group"><label class="form-label">Prep time (min)</label><input class="form-input" id="rcp-prep" type="number"></div>
-    <div class="form-group"><label class="form-label">Calories</label><input class="form-input" id="rcp-cal" type="number"></div>
-    <div class="form-group"><label class="form-label">Tags (comma-separated)</label><input class="form-input" id="rcp-tags"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-      <button class="btn-primary" id="rcp-save">Save</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById('rcp-save')?.addEventListener('click', async () => {
-    const name = document.getElementById('rcp-name')?.value?.trim();
-    if (!name) return;
-    try {
-      await invoke('create_recipe', {
-        name, description: null,
-        ingredients: document.getElementById('rcp-ing')?.value||'',
-        instructions: document.getElementById('rcp-inst')?.value||'',
-        prepTime: parseInt(document.getElementById('rcp-prep')?.value)||null,
-        cookTime: null, servings: null,
-        calories: parseInt(document.getElementById('rcp-cal')?.value)||null,
-        tags: document.getElementById('rcp-tags')?.value||null,
-      });
-      overlay.remove();
-      loadRecipes(el);
-    } catch (err) { alert('Error: ' + err); }
-  });
-}
-
-async function loadProducts(el) {
-  try {
-    const products = await invoke('get_products', { location: null, expiringSoon: false }).catch(() => []);
-    const fixedColumns = [
-      { key: 'name', label: 'Name', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-      { key: 'location', label: 'Location', editable: true, editType: 'text', render: r => `<span class="badge badge-gray">${r.location||''}</span>` },
-      { key: 'quantity', label: 'Qty', editable: true, editType: 'number', render: r => r.quantity ? `<span style="font-size:12px;color:var(--text-secondary);">${r.quantity} ${r.unit||''}</span>` : '' },
-      { key: 'expiry_date', label: 'Expiry', editable: true, editType: 'date', render: r => {
-        if (!r.expiry_date) return '';
-        const exp = new Date(r.expiry_date);
-        const isExpiring = (exp - Date.now()) < 3 * 86400000;
-        return `<span style="color:${isExpiring?'var(--color-red)':'var(--text-secondary)'};font-size:12px;">${r.expiry_date}</span>`;
-      }},
-    ];
-    el.innerHTML = '<div id="products-dbv"></div>';
-    const dbvEl = document.getElementById('products-dbv');
-    const dbv = new DatabaseView(dbvEl, {
-      tabId: 'food', recordTable: 'products', records: products,
-      fixedColumns, idField: 'id',
-      addButton: '+ Продукт',
-      onAdd: () => showAddProductModal(el),
-      onQuickAdd: async () => {
-        await invoke('add_product', { name: '' });
-        loadProducts(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, name: null, quantity: null, expiryDate: null, location: null, notes: null };
-        if (key === 'quantity') params.quantity = parseFloat(value) || null;
-        else if (key === 'expiry_date') params.expiryDate = value;
-        else params[key] = value;
-        await invoke('update_product', params);
-        if (!skipReload) loadProducts(el);
-      },
-      onDelete: async (id) => { await invoke('delete_product', { id }); },
-      reloadFn: () => loadProducts(el),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-function showAddProductModal(el) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal">
-    <div class="modal-title">Add Product</div>
-    <div class="form-group"><label class="form-label">Name</label><input class="form-input" id="prod-name"></div>
-    <div class="form-group"><label class="form-label">Location</label>
-      <select class="form-select" id="prod-loc" style="width:100%;">
-        <option value="fridge">Fridge</option><option value="freezer">Freezer</option>
-        <option value="pantry">Pantry</option><option value="other">Other</option>
-      </select></div>
-    <div class="form-group"><label class="form-label">Quantity</label><input class="form-input" id="prod-qty" type="number"></div>
-    <div class="form-group"><label class="form-label">Unit</label><input class="form-input" id="prod-unit" placeholder="pcs, kg, L..."></div>
-    <div class="form-group"><label class="form-label">Expiry Date</label><input class="form-input" id="prod-exp" type="date"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-      <button class="btn-primary" id="prod-save">Save</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById('prod-save')?.addEventListener('click', async () => {
-    const name = document.getElementById('prod-name')?.value?.trim();
-    if (!name) return;
-    try {
-      await invoke('add_product', {
-        name, category: null,
-        quantity: parseFloat(document.getElementById('prod-qty')?.value)||null,
-        unit: document.getElementById('prod-unit')?.value||null,
-        expiryDate: document.getElementById('prod-exp')?.value||null,
-        location: document.getElementById('prod-loc')?.value||'fridge',
-        barcode: null, notes: null,
-      });
-      overlay.remove();
-      loadProducts(el);
-    } catch (err) { alert('Error: ' + err); }
-  });
-}
-
 // ── Money ──
 async function loadMoney(subTab) {
   const el = document.getElementById('money-content');
@@ -629,25 +379,7 @@ async function loadMoney(subTab) {
         </div>`;
     },
     renderTable: async (paneEl) => {
-      const activeInner = S._moneyInner || 'transactions';
-      paneEl.innerHTML = `
-        <div class="dev-filters" style="margin-bottom:var(--space-3);">
-          <button class="pill${activeInner === 'transactions' ? ' active' : ''}" data-inner="transactions">Транзакции</button>
-          <button class="pill${activeInner === 'budgets' ? ' active' : ''}" data-inner="budgets">Бюджет</button>
-          <button class="pill${activeInner === 'savings' ? ' active' : ''}" data-inner="savings">Накопления</button>
-          <button class="pill${activeInner === 'subscriptions' ? ' active' : ''}" data-inner="subscriptions">Подписки</button>
-          <button class="pill${activeInner === 'debts' ? ' active' : ''}" data-inner="debts">Долги</button>
-        </div>
-        <div id="money-inner-content"></div>`;
-      const innerEl = paneEl.querySelector('#money-inner-content');
-      if (activeInner === 'budgets') await loadBudgets(innerEl);
-      else if (activeInner === 'savings') await loadSavings(innerEl);
-      else if (activeInner === 'subscriptions') await loadSubscriptions(innerEl);
-      else if (activeInner === 'debts') await loadDebts(innerEl);
-      else await loadTransactions(innerEl);
-      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
-        btn.addEventListener('click', () => { S._moneyInner = btn.dataset.inner; loadMoney(); });
-      });
+      await loadTransactions(paneEl);
     },
   });
 }
@@ -763,228 +495,6 @@ function showAddTransactionModal(parentEl) {
   });
 }
 
-async function loadBudgets(el) {
-  try {
-    const budgets = await invoke('get_budgets').catch(() => []);
-    const dbv = new DatabaseView(el, {
-      tabId: 'money',
-      recordTable: 'budgets',
-      records: budgets,
-      fixedColumns: [
-        { key: 'category', label: 'Категория', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.category)}</span>` },
-        { key: 'amount', label: 'Бюджет', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount}</span>` },
-        { key: 'spent', label: 'Потрачено', render: r => {
-          const pct = r.amount > 0 ? Math.min(100, Math.round((r.spent||0) / r.amount * 100)) : 0;
-          const warn = pct > 80;
-          return `<span style="color:${warn?'var(--color-yellow)':'var(--text-secondary)'};font-size:12px;">${r.spent||0}</span>`;
-        }},
-        { key: 'progress', label: 'Прогресс', render: r => {
-          const pct = r.amount > 0 ? Math.min(100, Math.round((r.spent||0) / r.amount * 100)) : 0;
-          const warn = pct > 80;
-          return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%;background:${warn?'var(--color-yellow)':'var(--accent-blue)'}"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
-        }},
-        { key: 'period', label: 'Период', editable: true, editType: 'select', editOptions: [
-          { value: 'monthly', label: 'Месяц' }, { value: 'weekly', label: 'Неделя' }, { value: 'yearly', label: 'Год' },
-        ], render: r => `<span class="badge badge-gray">${r.period || 'monthly'}</span>` },
-      ],
-      idField: 'id',
-      addButton: '+ Бюджет',
-      onAdd: () => {
-        const cat = prompt('Категория:');
-        const amt = prompt('Сумма:');
-        if (cat && amt) invoke('create_budget', { category: cat, amount: parseFloat(amt), period: 'monthly' }).then(() => loadBudgets(el)).catch(e => alert(e));
-      },
-      onQuickAdd: async () => {
-        await invoke('create_budget', { category: '', amount: 0 });
-        loadBudgets(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, category: null, amount: null, period: null };
-        if (key === 'amount') params.amount = parseFloat(value) || null;
-        else params[key] = value;
-        await invoke('update_budget', params);
-        if (!skipReload) loadBudgets(el);
-      },
-      onDelete: async (id) => { await invoke('delete_budget', { id }); },
-      reloadFn: () => loadBudgets(el),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-async function loadSavings(el) {
-  try {
-    const goals = await invoke('get_savings_goals').catch(() => []);
-    const dbv = new DatabaseView(el, {
-      tabId: 'money',
-      recordTable: 'savings_goals',
-      records: goals,
-      fixedColumns: [
-        { key: 'name', label: 'Цель', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-        { key: 'current_amount', label: 'Накоплено', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.current_amount || 0}</span>` },
-        { key: 'target_amount', label: 'Цель', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.target_amount || 0}</span>` },
-        { key: 'progress', label: 'Прогресс', render: r => {
-          const pct = r.target_amount > 0 ? Math.min(100, Math.round(r.current_amount / r.target_amount * 100)) : 0;
-          return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
-        }},
-        { key: 'deadline', label: 'Дедлайн', editable: true, editType: 'date', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.deadline || '—'}</span>` },
-        { key: 'actions', label: '', render: r => `<button class="btn-secondary" style="padding:4px 8px;font-size:11px;" data-sadd="${r.id}">+ Пополнить</button>` },
-      ],
-      idField: 'id',
-      addButton: '+ Цель',
-      onAdd: () => {
-        const name = prompt('Название цели:');
-        const target = prompt('Целевая сумма:');
-        if (name && target) invoke('create_savings_goal', { name, targetAmount: parseFloat(target), currentAmount: 0, deadline: null, color: '#9B9B9B' }).then(() => loadSavings(el)).catch(e => alert(e));
-      },
-      onQuickAdd: async () => {
-        await invoke('create_savings_goal', { name: '', targetAmount: 0 });
-        loadSavings(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, addAmount: null, targetAmount: null, name: null, deadline: null };
-        if (key === 'target_amount') params.targetAmount = parseFloat(value) || null;
-        else if (key === 'deadline') params.deadline = value;
-        else params[key] = value;
-        await invoke('update_savings_goal', params);
-        if (!skipReload) loadSavings(el);
-      },
-      onDelete: async (id) => { await invoke('delete_savings_goal', { id }); },
-      reloadFn: () => loadSavings(el),
-    });
-    await dbv.render();
-
-    // Add funds buttons (delegated)
-    el.addEventListener('click', async (e) => {
-      const btn = e.target.closest('[data-sadd]');
-      if (!btn) return;
-      const amount = prompt('Сумма пополнения:');
-      if (amount) {
-        const goal = goals.find(g => g.id === parseInt(btn.dataset.sadd));
-        if (goal) {
-          await invoke('update_savings_goal', { id: goal.id, currentAmount: (goal.current_amount||0) + parseFloat(amount), name: null, targetAmount: null, deadline: null }).catch(e => alert(e));
-          loadSavings(el);
-        }
-      }
-    });
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-async function loadSubscriptions(el) {
-  try {
-    const subs = await invoke('get_subscriptions').catch(() => []);
-    const dbv = new DatabaseView(el, {
-      tabId: 'money',
-      recordTable: 'subscriptions',
-      records: subs,
-      fixedColumns: [
-        { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-        { key: 'amount', label: 'Сумма', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.amount} ${r.currency || 'KZT'}</span>` },
-        { key: 'period', label: 'Период', editable: true, editType: 'select', editOptions: [
-          { value: 'monthly', label: 'Месячная' }, { value: 'yearly', label: 'Годовая' },
-        ], render: r => `<span class="badge badge-gray">${r.period === 'yearly' ? 'Годовая' : 'Месячная'}</span>` },
-        { key: 'active', label: 'Статус', render: r => r.active ? '<span class="badge badge-green">Активна</span>' : '<span class="badge badge-gray">Пауза</span>' },
-        { key: 'next_payment', label: 'Следующий платеж', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.next_payment || '—'}</span>` },
-      ],
-      idField: 'id',
-      addButton: '+ Добавить',
-      onAdd: () => showAddSubscriptionModal(el),
-      onQuickAdd: async () => {
-        await invoke('add_subscription', { name: '', amount: 0 });
-        loadSubscriptions(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, active: null, amount: null, name: null, period: null, category: null };
-        if (key === 'amount') params.amount = parseFloat(value) || null;
-        else params[key] = value;
-        await invoke('update_subscription', params);
-        if (!skipReload) loadSubscriptions(el);
-      },
-      onDelete: async (id) => { await invoke('delete_subscription', { id }); },
-      reloadFn: () => loadSubscriptions(el),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-function showAddSubscriptionModal(parentEl) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal">
-    <div class="modal-title">Добавить подписку</div>
-    <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="sub-name"></div>
-    <div class="form-group"><label class="form-label">Сумма</label><input class="form-input" id="sub-amount" type="number"></div>
-    <div class="form-group"><label class="form-label">Период</label>
-      <select class="form-select" id="sub-period" style="width:100%;"><option value="monthly">Месячная</option><option value="yearly">Годовая</option></select></div>
-    <div class="form-group"><label class="form-label">Категория</label><input class="form-input" id="sub-cat" placeholder="entertainment, tools..."></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
-      <button class="btn-primary" id="sub-save">Сохранить</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById('sub-save')?.addEventListener('click', async () => {
-    const name = document.getElementById('sub-name')?.value?.trim();
-    if (!name) return;
-    try {
-      await invoke('add_subscription', {
-        name, amount: parseFloat(document.getElementById('sub-amount')?.value)||0,
-        currency: 'KZT', period: document.getElementById('sub-period')?.value||'monthly',
-        nextPayment: null, category: document.getElementById('sub-cat')?.value||'other', active: true,
-      });
-      overlay.remove();
-      loadSubscriptions(parentEl);
-    } catch (err) { alert('Error: ' + err); }
-  });
-}
-
-async function loadDebts(el) {
-  try {
-    const debts = await invoke('get_debts').catch(() => []);
-    const dbv = new DatabaseView(el, {
-      tabId: 'money',
-      recordTable: 'debts',
-      records: debts,
-      fixedColumns: [
-        { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-        { key: 'type', label: 'Тип', editable: true, editType: 'select', editOptions: [
-          { value: 'owe', label: 'Я должен' }, { value: 'owed', label: 'Мне должны' },
-        ], render: r => `<span class="badge ${r.type === 'owe' ? 'badge-purple' : 'badge-green'}">${r.type === 'owe' ? 'Я должен' : 'Мне должны'}</span>` },
-        { key: 'remaining', label: 'Остаток', editable: true, editType: 'number', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;">${r.remaining || 0}</span>` },
-        { key: 'amount', label: 'Сумма', render: r => `<span style="font-variant-numeric:tabular-nums;font-size:12px;color:var(--text-muted);">${r.amount || 0}</span>` },
-        { key: 'progress', label: 'Прогресс', render: r => {
-          const pct = r.amount > 0 ? Math.min(100, Math.round((r.amount - r.remaining) / r.amount * 100)) : 0;
-          return `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${pct}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${pct}%</span>`;
-        }},
-      ],
-      idField: 'id',
-      addButton: '+ Долг',
-      onAdd: () => {
-        const name = prompt('Название:');
-        const type = prompt('Тип (owe/owed):') || 'owe';
-        const amount = prompt('Сумма:');
-        if (name && amount) invoke('add_debt', { name, debtType: type, amount: parseFloat(amount), remaining: parseFloat(amount), interestRate: null, dueDate: null, description: '' }).then(() => loadDebts(el)).catch(e => alert(e));
-      },
-      onQuickAdd: async () => {
-        await invoke('add_debt', { name: '', debtType: '', amount: 0 });
-        loadDebts(el);
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, payAmount: null, name: null, remaining: null, debtType: null };
-        if (key === 'remaining') params.remaining = parseFloat(value) || null;
-        else if (key === 'type') params.debtType = value;
-        else params[key] = value;
-        await invoke('update_debt', params);
-        if (!skipReload) loadDebts(el);
-      },
-      onDelete: async (id) => { await invoke('delete_debt', { id }); },
-      reloadFn: () => loadDebts(el),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
 // ── People Tab ──
 async function loadPeople(subTab) {
   const el = document.getElementById('people-content');
@@ -1008,20 +518,11 @@ async function loadPeople(subTab) {
         </div>`;
     },
     renderTable: async (paneEl) => {
-      const activeInner = S._peopleInner || 'all';
-      const filter = activeInner === 'blocked' ? { blocked: true } : {};
       try {
-        const items = await invoke('get_contacts', filter);
-        let contacts = Array.isArray(items) ? items : [];
-        if (activeInner === 'favorites') contacts = contacts.filter(c => c.favorite);
+        const items = await invoke('get_contacts', {});
+        const contacts = Array.isArray(items) ? items : [];
 
-        paneEl.innerHTML = `
-          <div class="dev-filters" style="margin-bottom:var(--space-3);">
-            <button class="pill${activeInner === 'all' ? ' active' : ''}" data-inner="all">Все</button>
-            <button class="pill${activeInner === 'favorites' ? ' active' : ''}" data-inner="favorites">Избранные</button>
-            <button class="pill${activeInner === 'blocked' ? ' active' : ''}" data-inner="blocked">Заблокированные</button>
-          </div>
-          <div id="people-dbv"></div>`;
+        paneEl.innerHTML = '<div id="people-dbv"></div>';
 
         const dbvEl = paneEl.querySelector('#people-dbv');
         const dbv = new DatabaseView(dbvEl, {
@@ -1058,10 +559,6 @@ async function loadPeople(subTab) {
           reloadFn: () => loadPeople(),
         });
         await dbv.render();
-
-        paneEl.querySelectorAll('[data-inner]').forEach(btn => {
-          btn.addEventListener('click', () => { S._peopleInner = btn.dataset.inner; loadPeople(); });
-        });
       } catch (e) {
         paneEl.innerHTML = `<div class="uni-empty">Ошибка: ${e}</div>`;
       }
@@ -2135,91 +1632,11 @@ async function loadSports(subTab) {
       await loadBodyInline(paneEl);
     },
     renderTable: async (paneEl) => {
-      const activeInner = S._sportsInner || 'workouts';
-      paneEl.innerHTML = `
-        <div class="dev-filters" style="margin-bottom:var(--space-3);">
-          <button class="pill${activeInner === 'workouts' ? ' active' : ''}" data-inner="workouts">Тренировки</button>
-          <button class="pill${activeInner === 'martial_arts' ? ' active' : ''}" data-inner="martial_arts">Единоборства</button>
-          <button class="pill${activeInner === 'stats' ? ' active' : ''}" data-inner="stats">Статистика</button>
-        </div>
-        <div id="sports-inner-content"></div>`;
-      const innerEl = paneEl.querySelector('#sports-inner-content');
-      if (activeInner === 'martial_arts') await loadMartialArts(innerEl);
-      else if (activeInner === 'stats') await loadSportsStats(innerEl);
-      else {
-        const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
-        const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
-        renderSports(innerEl, workouts || [], stats);
-      }
-      paneEl.querySelectorAll('[data-inner]').forEach(btn => {
-        btn.addEventListener('click', () => { S._sportsInner = btn.dataset.inner; loadSports(); });
-      });
+      const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
+      const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
+      renderSports(paneEl, workouts || [], stats);
     },
   });
-}
-
-async function loadMartialArts(el) {
-  try {
-    const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
-    const ma = (workouts || []).filter(w => w.type === 'martial_arts');
-    const dbv = new DatabaseView(el, {
-      tabId: 'sports',
-      recordTable: 'workouts',
-      records: ma,
-      fixedColumns: [
-        { key: 'date', label: 'Дата', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.date || '—'}</span>` },
-        { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title || 'Единоборства')}</span>` },
-        { key: 'duration_minutes', label: 'Время', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
-        { key: 'calories', label: 'Калории', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
-      ],
-      idField: 'id',
-      addButton: '+ Тренировка',
-      onAdd: () => {
-        showAddWorkoutModal();
-        setTimeout(() => { const sel = document.getElementById('workout-type'); if (sel) sel.value = 'martial_arts'; }, 50);
-      },
-      onQuickAdd: async () => {
-        await invoke('create_workout', { workoutType: '', title: '', durationMinutes: 0, notes: '' });
-        loadSports();
-      },
-      onCellEdit: async (recordId, key, value, skipReload) => {
-        const params = { id: recordId, title: null, workoutType: null, durationMinutes: null, calories: null };
-        if (key === 'duration_minutes') params.durationMinutes = parseInt(value) || null;
-        else if (key === 'calories') params.calories = parseInt(value) || null;
-        else params[key] = value;
-        await invoke('update_workout', params);
-        if (!skipReload) loadSports();
-      },
-      onDelete: async (id) => { await invoke('delete_workout', { id }); },
-      reloadFn: () => loadSports(),
-    });
-    await dbv.render();
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);">Error: ${e}</div>`; }
-}
-
-async function loadSportsStats(el) {
-  try {
-    const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
-    const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
-    const typeLabels = { gym: 'Зал', cardio: 'Кардио', yoga: 'Йога', swimming: 'Плавание', martial_arts: 'Единоборства', other: 'Другое' };
-    const byType = {};
-    for (const w of (workouts || [])) {
-      byType[w.type] = (byType[w.type] || 0) + 1;
-    }
-    el.innerHTML = `
-      <div class="module-header"><h2>Статистика</h2></div>
-      <div class="sports-stats">
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.count || 0}</div><div class="dashboard-stat-label">Тренировок</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_minutes || 0}м</div><div class="dashboard-stat-label">Общее время</div></div>
-        <div class="dashboard-stat"><div class="dashboard-stat-value">${stats.total_calories || 0}</div><div class="dashboard-stat-label">Калории</div></div>
-      </div>
-      <div style="margin-top:16px;">
-        <h3 style="font-size:14px;color:var(--text-muted);margin-bottom:8px;">По типам</h3>
-        ${Object.entries(byType).map(([t, c]) => `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:14px;color:var(--text-secondary);border-bottom:1px solid var(--bg-hover);">
-          <span>${typeLabels[t] || t}</span><span style="color:var(--text-muted);">${c}</span>
-        </div>`).join('') || '<div style="color:var(--text-faint);font-size:14px;">No data yet</div>'}
-      </div>`;
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);">Error: ${e}</div>`; }
 }
 
 function renderSports(el, workouts, stats) {

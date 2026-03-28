@@ -642,9 +642,9 @@ pub fn create_schedule(title: String, category: String, frequency: String, frequ
 pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let sql = if category.is_some() {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active FROM schedules WHERE category=?1 ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at FROM schedules WHERE category=?1 ORDER BY title"
     } else {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active FROM schedules ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at FROM schedules ORDER BY title"
     };
     let mut stmt = conn.prepare(sql).map_err(|e| format!("DB error: {}", e))?;
     let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cat) = category {
@@ -660,6 +660,7 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
             "time_of_day": row.get::<_, Option<String>>(5)?,
             "details": row.get::<_, String>(6)?,
             "is_active": row.get::<_, i64>(7)? == 1,
+            "created_at": row.get::<_, Option<String>>(8)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -1136,7 +1137,7 @@ pub fn save_proactive_message(text: String, db: tauri::State<'_, HanniDb>) -> Re
 pub fn get_proactive_messages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, text, created_at, read FROM proactive_messages WHERE archived = 0 ORDER BY id DESC LIMIT 5"
+        "SELECT id, text, created_at, read, rating FROM proactive_messages WHERE archived = 0 ORDER BY id DESC LIMIT 5"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| {
         Ok(serde_json::json!({
@@ -1144,9 +1145,19 @@ pub fn get_proactive_messages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde
             "text": row.get::<_, String>(1)?,
             "created_at": row.get::<_, String>(2)?,
             "read": row.get::<_, bool>(3)?,
+            "rating": row.get::<_, i64>(4).unwrap_or(0),
         }))
     }).map_err(|e| format!("DB error: {}", e))?;
     Ok(rows.flatten().collect())
+}
+
+#[tauri::command]
+pub fn rate_proactive_message(id: i64, rating: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    db.conn().execute(
+        "UPDATE proactive_messages SET rating = ?1 WHERE id = ?2",
+        rusqlite::params![rating, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
 }
 
 #[tauri::command]

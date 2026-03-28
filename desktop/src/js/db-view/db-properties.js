@@ -27,10 +27,10 @@ export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallbac
     'sort-desc': () => { if (sortCallback) sortCallback(`prop_${propDef.id}`, 'desc'); menu.remove(); },
     'filter': () => { menu.remove(); if (filterCallback) filterCallback(`prop_${propDef.id}`); },
     'wrap': () => { toggleWrap(tabId, colId); if (reloadFn) reloadFn(); menu.remove(); },
-    'hide': () => { invoke('update_property_definition', { id: propDef.id, name: null, propType: null, position: null, color: null, options: null, visible: false }).then(() => { if (reloadFn) reloadFn(); }).catch(() => {}); menu.remove(); },
+    'hide': () => { invoke('update_property_definition', { id: propDef.id, name: null, propType: null, position: null, color: null, options: null, visible: false }).then(() => { surgicalColRemove(document.querySelector('.dbv-content'), colId); }).catch(() => {}); menu.remove(); },
     'insert-left': () => { menu.remove(); showAddPropertyPopover(tabId, menu, reloadFn); },
     'insert-right': () => { menu.remove(); showAddPropertyPopover(tabId, menu, reloadFn); },
-    'delete': async () => { menu.remove(); if (await confirmModal(`Удалить свойство "${propDef.name}"?`)) { try { await invoke('delete_property_definition', { id: propDef.id }); if (reloadFn) reloadFn(); } catch {} } },
+    'delete': async () => { menu.remove(); if (await confirmModal(`Удалить свойство "${propDef.name}"?`)) { try { await invoke('delete_property_definition', { id: propDef.id }); surgicalColRemove(document.querySelector('.dbv-content'), colId); } catch {} } },
   });
   wireClose(menu);
 }
@@ -56,8 +56,8 @@ export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadF
     'sort-desc': () => { if (sortCallback) sortCallback(colKey, 'desc'); menu.remove(); },
     'filter': () => { menu.remove(); if (filterCallback) filterCallback(colKey); },
     'wrap': () => { toggleWrap(tabId, colKey); if (reloadFn) reloadFn(); menu.remove(); },
-    'hide': async () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); await setHiddenFixedCols(tabId, hidden); } if (reloadFn) reloadFn(); },
-    'delete': async () => { menu.remove(); if (await confirmModal(`Удалить столбец "${displayName}"? Данные будут потеряны.`)) { await addDeletedFixedCol(tabId, colKey); if (reloadFn) reloadFn(); } },
+    'hide': async () => { menu.remove(); const hidden = getHiddenFixedCols(tabId); if (!hidden.includes(colKey)) { hidden.push(colKey); await setHiddenFixedCols(tabId, hidden); } surgicalColRemove(document.querySelector('.dbv-content'), colKey); },
+    'delete': async () => { menu.remove(); if (await confirmModal(`Удалить столбец "${displayName}"? Данные будут потеряны.`)) { await addDeletedFixedCol(tabId, colKey); surgicalColRemove(document.querySelector('.dbv-content'), colKey); } },
   });
   wireClose(menu);
 }
@@ -112,6 +112,19 @@ function wireActions(menu, handlers) {
   menu.querySelectorAll('.col-menu-item:not(.disabled)').forEach(item => {
     item.addEventListener('click', () => { const fn = handlers[item.dataset.action]; if (fn) fn(); });
   });
+}
+
+/** Remove a column from DOM without full re-render */
+function surgicalColRemove(container, colId) {
+  if (!container) return;
+  const th = container.querySelector(`th[data-col-id="${colId}"]`);
+  if (!th) return;
+  const idx = Array.from(th.parentNode.children).indexOf(th);
+  th.remove();
+  container.querySelectorAll('tbody tr').forEach(tr => {
+    if (tr.children[idx]) tr.children[idx].remove();
+  });
+  clearColumnHighlight(container.querySelector('.data-table'));
 }
 
 function wireClose(menu) {

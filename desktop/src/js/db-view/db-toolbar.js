@@ -67,6 +67,23 @@ export function renderToolbar(container, availableViews, activeView, onViewChang
   }
 
   if (actions.onFilter) addActionBtn(actionsBar, _s('<path d="M2 4h12M4 8h8M6 12h4"/>') + 'Фильтр', () => actions.onFilter(actionsBar.lastChild));
+
+  if (actions.onQuickFilter) {
+    const qf = actions.quickFilter || null;
+    const grp = document.createElement('div');
+    grp.className = 'dbv-quick-filter-group';
+    const mkBtn = (mode, label) => {
+      const b = document.createElement('button');
+      b.className = 'dbv-quick-filter-btn' + (qf === mode ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => actions.onQuickFilter(qf === mode ? null : mode));
+      return b;
+    };
+    grp.appendChild(mkBtn('week', 'Н'));
+    grp.appendChild(mkBtn('month', 'М'));
+    actionsBar.appendChild(grp);
+  }
+
   if (actions.onSort) addActionBtn(actionsBar, _s('<path d="M4 3v10M4 3L2 5M4 3l2 2M12 13V3M12 13l-2-2M12 13l2-2"/>') + 'Сорт', () => actions.onSort(actionsBar.lastChild));
 
   if (actions.hiddenColumns?.length > 0) {

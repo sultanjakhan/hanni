@@ -43,16 +43,20 @@ export async function loadConversationsList(searchQuery) {
           item.classList.remove('unread');
           const badge = item.querySelector('.proactive-chat-badge');
           if (badge) badge.remove();
+          // Reset state — proactive view is not a real conversation
+          S.currentConversationId = null;
+          S.history = [];
           // Open proactive chat view
           chat.innerHTML = '';
-          // Show all messages in chronological order (oldest first)
           const sorted = [...proMsgs].reverse();
           for (const m of sorted) {
             const msgDiv = tabLoaders.addMsg('bot', m.text);
             if (msgDiv) {
               const wrapper = msgDiv.closest('.msg-wrapper') || msgDiv.parentElement;
-              if (wrapper && tabLoaders.addFeedbackButtons) {
-                tabLoaders.addFeedbackButtons(wrapper, 0, 0, m.text);
+              if (wrapper && tabLoaders.addProactiveFeedbackButtons) {
+                const { thumbUp, thumbDown } = tabLoaders.addProactiveFeedbackButtons(wrapper, m.id, m.text, true);
+                if (m.rating === 1 && thumbUp) thumbUp.classList.add('active');
+                if (m.rating === -1 && thumbDown) thumbDown.classList.add('active');
               }
               const ts = document.createElement('div');
               ts.className = 'proactive-time';

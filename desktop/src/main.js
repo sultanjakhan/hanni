@@ -259,27 +259,11 @@ document.addEventListener('keydown', (e) => {
   createChatOverlay();
   updateChatOverlayVisibility();
 
-  // Auto-restore last conversation
+  // Auto-restore last conversation (reuse loadConversation to get feedback buttons + ratings)
   try {
     const convs = await invoke('get_conversations', { limit: 1 });
-    if (convs.length > 0) {
-      const latest = convs[0];
-      const conv = await invoke('get_conversation', { id: latest.id });
-      if (conv.messages && conv.messages.length > 0) {
-        S.currentConversationId = latest.id;
-        S.history = conv.messages;
-        for (const [role, content] of S.history) {
-          if (role === 'user' && content.startsWith('[Action result:')) {
-            const div = document.createElement('div');
-            div.className = 'action-result success';
-            div.textContent = content;
-            chat.appendChild(div);
-          } else {
-            addMsg(role === 'assistant' ? 'bot' : role, content);
-          }
-        }
-        scrollDown();
-      }
+    if (convs.length > 0 && convs[0].id) {
+      await loadConversation(convs[0].id);
     }
   } catch (_) {}
   if (chat.children.length === 0) renderChatWelcomeCard();

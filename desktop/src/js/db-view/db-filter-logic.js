@@ -52,6 +52,14 @@ function matchCondition(val, condition, target) {
   }
 }
 
+/** Quick date filter on created_at field */
+export function applyQuickDateFilter(records, mode) {
+  if (!mode) return records;
+  const fn = mode === 'week' ? isThisWeek : mode === 'month' ? isThisMonth : null;
+  if (!fn) return records;
+  return records.filter(r => fn(r.created_at));
+}
+
 function isThisWeek(val) {
   if (!val) return false;
   const d = new Date(val), now = new Date();

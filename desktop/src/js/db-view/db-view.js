@@ -56,9 +56,12 @@ export class DatabaseView {
   _renderToolbar(allFields, contentEl) {
     const s = this.schema, visProp = () => this._customProps.filter(p => p.visible !== false);
     const hiddenCols = this._getHiddenColumns();
+    if (!S._dbvQuickFilter) S._dbvQuickFilter = {};
     renderToolbar(this.el, s.availableViews, this._currentView, (vt) => this._switchView(vt), {
       onSearch: (q) => { this._searchQuery = q; this._renderView(contentEl, allFields); },
       onFilter: (a) => showFilterDropdown(a, s.tabId, allFields, () => this.render()),
+      onQuickFilter: (mode) => { S._dbvQuickFilter[s.tabId] = mode; this.render(); },
+      quickFilter: S._dbvQuickFilter[s.tabId] || null,
       onSort: (a) => showSortDropdown(a, s.tabId, this._customProps, s.fixedColumns || [], () => this._handleSort()),
       onAdd: s.onQuickAdd ? () => { this._searchQuery = ''; s.onQuickAdd(); } : null,
       onExport: () => exportToCsv(this._applySearch(this._records), s.fixedColumns || [], visProp(), this._valuesMap, s.idField, s.tabId),

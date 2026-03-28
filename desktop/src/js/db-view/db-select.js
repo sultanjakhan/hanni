@@ -2,6 +2,7 @@
 
 import { S } from '../state.js';
 import { confirmModal } from '../utils.js';
+import { surgicalRowRemove } from './db-row-menu.js';
 
 /** Get or init selection set for a tab */
 function getSelection(tabId) {
@@ -35,9 +36,11 @@ export function renderBulkBar(container, tabId, ctx) {
 
   bar.querySelector('.dbv-bulk-delete')?.addEventListener('click', async () => {
     if (!(await confirmModal(`Удалить ${sel.size} записей?`))) return;
-    for (const id of sel) await ctx.onDelete(id);
+    const ids = [...sel];
+    for (const id of ids) await ctx.onDelete(id);
     clearSelection(tabId);
-    if (ctx.reloadFn) ctx.reloadFn();
+    for (const id of ids) surgicalRowRemove(container, id);
+    bar.remove();
   });
 
   bar.querySelector('.dbv-bulk-dup')?.addEventListener('click', async () => {

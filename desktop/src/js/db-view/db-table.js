@@ -3,6 +3,7 @@ import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit, startFixedCellEdit } from './db-cell-editors.js';
 import { getType } from './db-type-registry.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
+import { applyQuickDateFilter } from './db-filter-logic.js';
 import { getHiddenFixedCols, getDeletedFixedCols, getFixedColName, buildUnifiedColumns } from './db-properties.js';
 import { loadColState } from './db-col-state.js';
 import { bindCheckboxes, renderBulkBar } from './db-select.js';
@@ -24,7 +25,9 @@ export async function renderTableView(el, ctx) {
 
   await loadColState(tabId);
   if (!S.dbvFilters[tabId]) await loadFiltersFromViewConfig(tabId);
-  const filtered = applyFilters(records, valuesMap, S.dbvFilters[tabId], idField, tabId);
+  const quickMode = S._dbvQuickFilter?.[tabId] || null;
+  const afterQuick = applyQuickDateFilter(records, quickMode);
+  const filtered = applyFilters(afterQuick, valuesMap, S.dbvFilters[tabId], idField, tabId);
   const visProps = customProps.filter(p => p.visible !== false);
   const hiddenFixed = getHiddenFixedCols(tabId);
   const deletedFixed = getDeletedFixedCols(tabId);
@@ -137,7 +140,9 @@ export async function renderTableView(el, ctx) {
         cats = cats.filter(c => c !== cat);
         const val = cats.length > 0 ? JSON.stringify(cats) : '';
         cell.dataset.rawValue = val;
-        cell.dispatchEvent(new CustomEvent('fixed-cell-save', { bubbles: true, detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val } }));
+        const badge = removeBtn.closest('.cell-badge-removable');
+        if (badge) badge.remove();
+        cell.dispatchEvent(new CustomEvent('fixed-cell-save', { bubbles: true, detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val, skipReload: true } }));
         return;
       }
       if (e.shiftKey && tableEl) { extendTo(cell, tableEl); return; }

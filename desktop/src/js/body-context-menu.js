@@ -2,13 +2,13 @@
 import { invoke } from './state.js';
 
 const RECORD_TYPES = [
-  { id: 'pain',        icon: '🔴', label: 'Боль' },
-  { id: 'workout',     icon: '💪', label: 'Тренировка' },
-  { id: 'goal',        icon: '🎯', label: 'Цель' },
-  { id: 'treatment',   icon: '💊', label: 'Лечение' },
-  { id: 'measurement', icon: '📏', label: 'Замер' },
-  { id: 'note',        icon: '📝', label: 'Заметка' },
-  { id: 'history',     icon: '📋', label: 'История' },
+  { id: 'pain',        icon: '🔴', label: 'Боль',        for: ['bone', 'muscle', 'organ'] },
+  { id: 'workout',     icon: '💪', label: 'Тренировка',  for: ['muscle'] },
+  { id: 'goal',        icon: '🎯', label: 'Цель',        for: ['muscle', 'organ'] },
+  { id: 'treatment',   icon: '💊', label: 'Лечение',     for: ['bone', 'muscle', 'organ'] },
+  { id: 'measurement', icon: '📏', label: 'Замер',       for: ['bone', 'muscle', 'organ'] },
+  { id: 'note',        icon: '📝', label: 'Заметка',     for: ['bone', 'muscle', 'organ'] },
+  { id: 'history',     icon: '📋', label: 'История',     for: ['bone', 'muscle', 'organ'] },
 ];
 
 const PAIN_TYPES = ['острая', 'тупая', 'ноющая', 'стреляющая', 'жгучая'];
@@ -16,7 +16,7 @@ const GOAL_TYPES = ['накачать', 'растянуть', 'вылечить'
 const TREATMENT_TYPES = ['таблетки', 'упражнения', 'визит к врачу', 'массаж', 'другое'];
 
 /** Show context menu at mouse position for a body zone */
-export function showBodyContextMenu(x, y, zone, zoneLabel, callbacks) {
+export function showBodyContextMenu(x, y, zone, zoneLabel, callbacks, partType = 'bone') {
   closeBodyContextMenu();
   const menu = document.createElement('div');
   menu.className = 'inline-dropdown body-context-menu';
@@ -28,7 +28,8 @@ export function showBodyContextMenu(x, y, zone, zoneLabel, callbacks) {
   header.textContent = zoneLabel || zone;
   menu.appendChild(header);
 
-  RECORD_TYPES.forEach(rt => {
+  const filtered = RECORD_TYPES.filter(rt => rt.for.includes(partType));
+  filtered.forEach(rt => {
     const opt = document.createElement('div');
     opt.className = 'inline-dd-option';
     opt.dataset.action = rt.id;

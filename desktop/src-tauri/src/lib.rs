@@ -69,6 +69,7 @@ pub fn run() {
     migrate_facts_decay(&conn);
     migrate_conversations_category(&conn);
     migrate_proactive_history_v2(&conn);
+    migrate_proactive_messages_rating(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
@@ -200,9 +201,6 @@ pub fn run() {
             macos::get_calendar_events,
             macos::get_now_playing,
             macos::get_browser_tab,
-            macos::open_youtube_music,
-            macos::get_youtube_music_info,
-            macos::youtube_music_control,
             commands_meta::get_app_version,
             commands_meta::check_update,
             // Proactive
@@ -345,6 +343,7 @@ pub fn run() {
             commands_data::get_notifications,
             commands_data::save_proactive_message,
             commands_data::get_proactive_messages,
+            commands_data::rate_proactive_message,
             commands_data::mark_proactive_read,
             commands_data::archive_old_proactive,
             // Activity tracking

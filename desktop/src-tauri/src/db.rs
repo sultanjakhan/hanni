@@ -779,6 +779,13 @@ pub fn migrate_proactive_history_v2(conn: &rusqlite::Connection) {
     }
 }
 
+pub fn migrate_proactive_messages_rating(conn: &rusqlite::Connection) {
+    let has_rating = conn.prepare("SELECT rating FROM proactive_messages LIMIT 1").is_ok();
+    if !has_rating {
+        let _ = conn.execute("ALTER TABLE proactive_messages ADD COLUMN rating INTEGER DEFAULT 0", []);
+    }
+}
+
 pub fn migrate_facts_decay(conn: &rusqlite::Connection) {
     // ME1: Add access tracking columns for memory decay
     let has_access_count = conn.prepare("SELECT access_count FROM facts LIMIT 1").is_ok();

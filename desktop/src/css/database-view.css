@@ -246,6 +246,38 @@
 }
 .dbv-action-btn svg { flex-shrink: 0; }
 
+/* ── Quick date filter ── */
+.dbv-quick-filter-group {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 2px;
+}
+.dbv-quick-filter-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: all 100ms;
+}
+.dbv-quick-filter-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
+.dbv-quick-filter-btn.active {
+  background: var(--color-accent, #3b82f6);
+  color: #fff;
+  border-color: var(--color-accent, #3b82f6);
+}
+
 /* ── Search wrap ── */
 .dbv-search-wrap {
   display: flex;

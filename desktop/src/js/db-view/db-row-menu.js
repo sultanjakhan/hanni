@@ -43,7 +43,10 @@ function showRowMenu(e, rid, record, ctx) {
       } else if (action === 'duplicate') {
         if (onDuplicate) { await onDuplicate(record); if (reloadFn) reloadFn(); }
       } else if (action === 'delete') {
-        if (onDelete && await confirmModal('Удалить запись?')) { await onDelete(rid); if (reloadFn) reloadFn(); }
+        if (onDelete && await confirmModal('Удалить запись?')) {
+          await onDelete(rid);
+          surgicalRowRemove(container, rid);
+        }
       }
     });
   });
@@ -52,3 +55,22 @@ function showRowMenu(e, rid, record, ctx) {
     if (!menu.contains(ev.target)) menu.remove();
   }, { once: true }), 10);
 }
+
+/** Remove a single row from DOM without full re-render */
+function surgicalRowRemove(container, rid) {
+  const tr = container.querySelector(`tr.data-table-row[data-id="${rid}"]`);
+  if (tr) tr.remove();
+  const remaining = container.querySelectorAll('.data-table-row');
+  const footer = container.querySelector('.dbv-table-footer span');
+  if (footer) footer.textContent = `Записей: ${remaining.length}`;
+  if (remaining.length === 0) {
+    const tbody = container.querySelector('tbody');
+    const colCount = container.querySelector('thead tr')?.children.length || 1;
+    const addRow = tbody?.querySelector('.dbv-add-row');
+    const emptyRow = document.createElement('tr');
+    emptyRow.innerHTML = `<td colspan="${colCount}" style="text-align:center;color:var(--text-faint);padding:24px;">Пока пусто</td>`;
+    if (addRow) addRow.before(emptyRow); else if (tbody) tbody.appendChild(emptyRow);
+  }
+}
+
+export { surgicalRowRemove };

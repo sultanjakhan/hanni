@@ -48,6 +48,31 @@
   cursor: not-allowed;
 }
 
+.body-zoom-btns {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+.body-zoom-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+.body-zoom-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
 .body-main {
   display: flex;
   flex: 1;
@@ -60,6 +85,7 @@
   min-height: 0;
   background: var(--bg-page);
   cursor: grab;
+  overflow: hidden;
 }
 .body-viewer-container canvas {
   display: block;

@@ -921,11 +921,10 @@ function addFeedbackButtons(wrapper, conversationId, messageIndex, botText) {
   return { thumbUp, thumbDown };
 }
 
-function addProactiveFeedbackButtons(wrapper, proactiveId, botText) {
+function addProactiveFeedbackButtons(wrapper, proactiveId, botText, useMessageTable = false) {
   const actions = document.createElement('div');
   actions.className = 'msg-actions';
 
-  // Copy button
   const copyBtn = document.createElement('button');
   copyBtn.className = 'feedback-btn copy-btn';
   copyBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
@@ -951,19 +950,16 @@ function addProactiveFeedbackButtons(wrapper, proactiveId, botText) {
     const isActive = btn.classList.contains('active');
     thumbUp.classList.remove('active');
     thumbDown.classList.remove('active');
-    if (!isActive) {
-      btn.classList.add('active');
-      try {
-        await invoke('rate_proactive', { proactiveId, rating });
-      } catch (e) {
-        console.error('Rate proactive error:', e);
+    const r = isActive ? 0 : rating;
+    if (!isActive) btn.classList.add('active');
+    try {
+      if (useMessageTable) {
+        await invoke('rate_proactive_message', { id: proactiveId, rating: r });
+      } else {
+        await invoke('rate_proactive', { proactiveId, rating: r });
       }
-    } else {
-      try {
-        await invoke('rate_proactive', { proactiveId, rating: 0 });
-      } catch (e) {
-        console.error('Rate proactive error:', e);
-      }
+    } catch (e) {
+      console.error('Rate proactive error:', e);
     }
   };
 
@@ -974,6 +970,7 @@ function addProactiveFeedbackButtons(wrapper, proactiveId, botText) {
   actions.appendChild(thumbUp);
   actions.appendChild(thumbDown);
   wrapper.appendChild(actions);
+  return { thumbUp, thumbDown };
 }
 
 // ── File attachment ──

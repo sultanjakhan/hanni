@@ -1,6 +1,6 @@
 // ── tab-body.js — Body tab: 3D skeleton viewer with records ──
 import { invoke } from './state.js';
-import { initViewer, disposeViewer, getZoneInfo, setZoneHighlights } from './body-viewer.js';
+import { initViewer, disposeViewer, getZoneInfo, setZoneHighlights, zoomCamera } from './body-viewer.js';
 import { showBodyContextMenu } from './body-context-menu.js';
 
 let currentZone = null;
@@ -21,6 +21,10 @@ export async function loadBodyInline(el) {
           <button class="body-layer-btn active" data-layer="bone">Скелет</button>
           <button class="body-layer-btn" data-layer="muscle" disabled>Мышцы</button>
           <button class="body-layer-btn" data-layer="organ" disabled>Органы</button>
+        </div>
+        <div class="body-zoom-btns">
+          <button class="body-zoom-btn" id="body-zoom-in" title="Приблизить">+</button>
+          <button class="body-zoom-btn" id="body-zoom-out" title="Отдалить">&minus;</button>
         </div>
       </div>
       <div class="body-main">
@@ -51,11 +55,13 @@ export async function loadBodyInline(el) {
       showBodyContextMenu(x, y, info.zone, info.label, {
         onHistory: () => showPanel(panelEl, info),
         onSaved: () => { refreshPanel(panelEl); refreshHighlights(); },
-      });
+      }, info.type);
     },
   });
 
   el.querySelector('.body-panel-close').onclick = () => { hidePanel(panelEl); currentZone = null; };
+  el.querySelector('#body-zoom-in').onclick = () => zoomCamera(0.8);
+  el.querySelector('#body-zoom-out').onclick = () => zoomCamera(1.25);
   refreshHighlights();
 }
 
