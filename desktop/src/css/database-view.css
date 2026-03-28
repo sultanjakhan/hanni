@@ -1474,6 +1474,17 @@
 }
 .inline-dd-tag-x:hover { opacity: 1; }
 
+/* ── Badge remove button in table cells ── */
+.cell-badge-x {
+  display: none;
+  cursor: pointer;
+  margin-left: 2px;
+  font-size: 9px;
+  opacity: 0.5;
+}
+.cell-badge-removable:hover .cell-badge-x { display: inline; }
+.cell-badge-x:hover { opacity: 1; }
+
 /* ── Filter/Sort Dropdowns (Notion-neutral) ── */
 .dbv-filter-dropdown,
 .dbv-sort-dropdown {

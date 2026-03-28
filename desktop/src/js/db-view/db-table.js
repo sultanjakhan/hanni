@@ -127,6 +127,19 @@ export async function renderTableView(el, ctx) {
     cell.setAttribute('tabindex', '0');
     cell.addEventListener('click', (e) => {
       e.stopPropagation();
+      // Handle ✕ click on badge inside multi_select cell
+      const removeBtn = e.target.closest('.cell-badge-x');
+      if (removeBtn && cell.dataset.editType === 'multi_select') {
+        e.preventDefault();
+        const cat = removeBtn.dataset.removeCat;
+        const raw = cell.dataset.rawValue || '';
+        let cats = []; try { cats = JSON.parse(raw); if (!Array.isArray(cats)) cats = []; } catch { cats = raw ? [raw] : []; }
+        cats = cats.filter(c => c !== cat);
+        const val = cats.length > 0 ? JSON.stringify(cats) : '';
+        cell.dataset.rawValue = val;
+        cell.dispatchEvent(new CustomEvent('fixed-cell-save', { bubbles: true, detail: { recordId: cell.dataset.recordId, key: cell.dataset.editKey, value: val } }));
+        return;
+      }
       if (e.shiftKey && tableEl) { extendTo(cell, tableEl); return; }
       focusCell(el, cell);
       if (tableEl) setAnchor(cell, tableEl);

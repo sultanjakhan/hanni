@@ -64,18 +64,22 @@ export function startFixedCellEdit(cell, reloadFn) {
     }));
   };
 
-  // Merge saved custom options from localStorage with default editOptions
-  const mergeStoredOpts = (baseOpts) => {
+  // Load catalog from localStorage (source of truth after first edit) or keep defaults
+  const loadStoredCatalog = (baseOpts) => {
+    const raw = localStorage.getItem(storageKey);
+    if (raw === null) return; // first use — keep defaults
     try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      const existing = new Set(baseOpts.map(o => typeof o === 'object' ? o.value : o));
-      saved.forEach(v => { if (!existing.has(v)) baseOpts.push(typeof baseOpts[0] === 'object' ? { value: v, label: v } : v); });
+      const stored = JSON.parse(raw);
+      if (!Array.isArray(stored) || stored.length === 0) return;
+      const isObj = typeof baseOpts[0] === 'object';
+      baseOpts.length = 0;
+      stored.forEach(v => baseOpts.push(isObj ? { value: v, label: v } : v));
     } catch {}
   };
 
   if (editType === 'select') {
     const mapped = options.map(o => typeof o === 'object' ? o : { value: o, label: o });
-    mergeStoredOpts(mapped);
+    loadStoredCatalog(mapped);
     const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
     showSelectDropdown(cell, mapped, rawVal, saveCellVal, null, onOptsChange);
     return;
@@ -84,7 +88,7 @@ export function startFixedCellEdit(cell, reloadFn) {
     const optList = options.map(o => typeof o === 'object' ? o.value : o);
     const labelMap = {};
     options.forEach(o => { if (typeof o === 'object') labelMap[o.value] = o.label; });
-    mergeStoredOpts(optList);
+    loadStoredCatalog(optList);
     const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
     showMultiSelectDropdown(cell, optList, rawVal, saveCellVal, null, labelMap, onOptsChange);
     return;
