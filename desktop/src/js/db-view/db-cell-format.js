@@ -1,6 +1,7 @@
 // ── db-view/db-cell-format.js — Cell display formatting ──
 
 import { escapeHtml } from '../utils.js';
+import { formatRecurrence } from './db-recurrence-editor.js';
 
 const BADGE_COLORS = ['blue', 'green', 'yellow', 'red', 'purple', 'orange', 'pink', 'gray'];
 
@@ -25,6 +26,7 @@ export function formatPropValue(val, prop) {
   if (prop.type === 'created_time' || prop.type === 'last_edited') {
     const d = new Date(val); return isNaN(d) ? escapeHtml(val) : `<span class="cell-date text-faint">${d.toLocaleDateString('ru-RU')} ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>`;
   }
+  if (prop.type === 'recurrence') return `<span class="cell-recurrence">${escapeHtml(formatRecurrence(val))}</span>`;
   if (prop.type === 'time') return `<span class="cell-time">${escapeHtml(val)}</span>`;
   if (prop.type === 'progress') {
     const n = parseInt(val) || 0;

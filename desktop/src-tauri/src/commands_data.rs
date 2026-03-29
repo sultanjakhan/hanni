@@ -268,144 +268,192 @@ pub fn get_activity_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> 
 // ── Projects, Tasks, Learning, Hobbies, Workouts, Health, Dashboard, Memory Browser, Media, Food, Money ──
 // ── v0.7.0: Projects & Tasks (Work) commands ──
 
+// ── Job Sources ──
+
 #[tauri::command]
-pub fn create_project(name: String, description: String, color: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn get_job_sources(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
-    let now = chrono::Local::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO projects (name, description, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
-        rusqlite::params![name, description, color, now],
-    ).map_err(|e| format!("DB error: {}", e))?;
+    let mut stmt = conn.prepare("SELECT id, name, type, url, active, created_at FROM job_sources ORDER BY name")
+        .map_err(|e| format!("DB error: {e}"))?;
+    let rows = stmt.query_map([], |row| Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+        "type": row.get::<_, String>(2)?, "url": row.get::<_, String>(3)?,
+        "active": row.get::<_, i64>(4)? == 1, "created_at": row.get::<_, String>(5)?,
+    }))).map_err(|e| format!("Query error: {e}"))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn add_job_source(name: String, source_type: String, url: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    conn.execute("INSERT INTO job_sources (name, type, url) VALUES (?1, ?2, ?3)",
+        rusqlite::params![name, source_type, url]).map_err(|e| format!("DB error: {e}"))?;
     Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-pub fn get_projects(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+pub fn update_job_source(id: i64, name: Option<String>, source_type: Option<String>, url: Option<String>, active: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    let mut stmt = conn.prepare(
-        "SELECT p.id, p.name, p.description, p.status, p.color, p.created_at,
-                (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as task_count
-         FROM projects p WHERE p.status='active' ORDER BY p.created_at DESC"
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "description": row.get::<_, String>(2)?,
-            "status": row.get::<_, String>(3)?,
-            "color": row.get::<_, String>(4)?,
-            "task_count": row.get::<_, i64>(6)?,
-        }))
-    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    if let Some(v) = name { conn.execute("UPDATE job_sources SET name=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = source_type { conn.execute("UPDATE job_sources SET type=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = url { conn.execute("UPDATE job_sources SET url=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = active { conn.execute("UPDATE job_sources SET active=?1 WHERE id=?2", rusqlite::params![v as i64, id]).map_err(|e| format!("DB error: {e}"))?; }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_job_source(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    db.conn().execute("DELETE FROM job_sources WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {e}"))?;
+    Ok(())
+}
+
+// ── Job Roles ──
+
+#[tauri::command]
+pub fn get_job_roles(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare("SELECT id, title, keywords, salary_min, priority, created_at FROM job_roles ORDER BY priority, title")
+        .map_err(|e| format!("DB error: {e}"))?;
+    let rows = stmt.query_map([], |row| Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "title": row.get::<_, String>(1)?,
+        "keywords": row.get::<_, String>(2)?, "salary_min": row.get::<_, Option<i64>>(3)?,
+        "priority": row.get::<_, String>(4)?, "created_at": row.get::<_, String>(5)?,
+    }))).map_err(|e| format!("Query error: {e}"))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn create_task(project_id: i64, title: String, description: String, priority: String, due_date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn add_job_role(title: String, keywords: String, salary_min: Option<i64>, priority: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
-    let now = chrono::Local::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO tasks (project_id, title, description, priority, due_date, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![project_id, title, description, priority, due_date, now],
-    ).map_err(|e| format!("DB error: {}", e))?;
+    conn.execute("INSERT INTO job_roles (title, keywords, salary_min, priority) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![title, keywords, salary_min, priority]).map_err(|e| format!("DB error: {e}"))?;
     Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-pub fn get_tasks(project_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+pub fn update_job_role(id: i64, title: Option<String>, keywords: Option<String>, salary_min: Option<i64>, priority: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    let mut stmt = conn.prepare(
-        "SELECT id, title, description, status, priority, due_date, completed_at FROM tasks
-         WHERE project_id=?1 ORDER BY CASE status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END, created_at DESC"
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map(rusqlite::params![project_id], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "title": row.get::<_, String>(1)?,
-            "description": row.get::<_, String>(2)?,
-            "status": row.get::<_, String>(3)?,
-            "priority": row.get::<_, String>(4)?,
-            "due_date": row.get::<_, Option<String>>(5)?,
-            "completed_at": row.get::<_, Option<String>>(6)?,
-        }))
-    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
-    Ok(rows)
+    if let Some(v) = title { conn.execute("UPDATE job_roles SET title=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = keywords { conn.execute("UPDATE job_roles SET keywords=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = salary_min { conn.execute("UPDATE job_roles SET salary_min=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = priority { conn.execute("UPDATE job_roles SET priority=?1 WHERE id=?2", rusqlite::params![v, id]).map_err(|e| format!("DB error: {e}"))?; }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn update_task_status(id: i64, status: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn delete_job_role(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    db.conn().execute("DELETE FROM job_roles WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {e}"))?;
+    Ok(())
+}
+
+// ── Job Vacancies ──
+
+#[tauri::command]
+pub fn get_job_vacancies(stage: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let base = "SELECT v.id, v.company, v.position, v.source_id, v.role_id, v.salary, v.url, v.stage, v.notes, v.found_at, v.updated_at,
+                COALESCE(s.name, '') as source_name, COALESCE(r.title, '') as role_title
+         FROM job_vacancies v LEFT JOIN job_sources s ON v.source_id=s.id LEFT JOIN job_roles r ON v.role_id=r.id";
+    let sql = if stage.is_some() { format!("{base} WHERE v.stage=?1 ORDER BY v.updated_at DESC") }
+              else { format!("{base} ORDER BY v.updated_at DESC") };
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("DB error: {e}"))?;
+    let rows: Vec<serde_json::Value> = if let Some(ref s) = stage {
+        stmt.query_map(rusqlite::params![s], |row| vacancy_row(row))
+            .map_err(|e| format!("Query error: {e}"))?.filter_map(|r| r.ok()).collect()
+    } else {
+        stmt.query_map([], |row| vacancy_row(row))
+            .map_err(|e| format!("Query error: {e}"))?.filter_map(|r| r.ok()).collect()
+    };
+    Ok(rows)
+}
+
+fn vacancy_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "company": row.get::<_, String>(1)?,
+        "position": row.get::<_, String>(2)?, "source_id": row.get::<_, Option<i64>>(3)?,
+        "role_id": row.get::<_, Option<i64>>(4)?, "salary": row.get::<_, String>(5)?,
+        "url": row.get::<_, String>(6)?, "stage": row.get::<_, String>(7)?,
+        "notes": row.get::<_, String>(8)?, "found_at": row.get::<_, String>(9)?,
+        "updated_at": row.get::<_, String>(10)?,
+        "source_name": row.get::<_, String>(11)?, "role_title": row.get::<_, String>(12)?,
+    }))
+}
+
+#[tauri::command]
+pub fn add_job_vacancy(company: String, position: String, source_id: Option<i64>, role_id: Option<i64>, salary: String, url: String, stage: String, notes: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    conn.execute(
+        "INSERT INTO job_vacancies (company, position, source_id, role_id, salary, url, stage, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![company, position, source_id, role_id, salary, url, stage, notes],
+    ).map_err(|e| format!("DB error: {e}"))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn update_job_vacancy(id: i64, company: Option<String>, position: Option<String>, source_id: Option<i64>, role_id: Option<i64>, salary: Option<String>, url: Option<String>, stage: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    let completed_at = if status == "done" { Some(now.clone()) } else { None };
-    conn.execute(
-        "UPDATE tasks SET status=?1, completed_at=?2 WHERE id=?3",
-        rusqlite::params![status, completed_at, id],
-    ).map_err(|e| format!("DB error: {}", e))?;
+    if let Some(v) = company { conn.execute("UPDATE job_vacancies SET company=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = position { conn.execute("UPDATE job_vacancies SET position=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = source_id { conn.execute("UPDATE job_vacancies SET source_id=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = role_id { conn.execute("UPDATE job_vacancies SET role_id=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = salary { conn.execute("UPDATE job_vacancies SET salary=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = url { conn.execute("UPDATE job_vacancies SET url=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = stage { conn.execute("UPDATE job_vacancies SET stage=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
+    if let Some(v) = notes { conn.execute("UPDATE job_vacancies SET notes=?1, updated_at=?2 WHERE id=?3", rusqlite::params![v, now, id]).map_err(|e| format!("DB error: {e}"))?; }
     Ok(())
 }
 
 #[tauri::command]
-pub fn update_task_field(id: i64, field: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let allowed = ["title", "priority", "status", "description", "due_date"];
-    if !allowed.contains(&field.as_str()) {
-        return Err(format!("Field '{}' not allowed", field));
-    }
+pub fn delete_job_vacancy(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    db.conn().execute("DELETE FROM job_vacancies WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {e}"))?;
+    Ok(())
+}
+
+// ── Job Stats ──
+
+#[tauri::command]
+pub fn get_job_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
-    let sql = format!("UPDATE tasks SET {}=?1 WHERE id=?2", field);
-    conn.execute(&sql, rusqlite::params![value, id]).map_err(|e| format!("DB error: {}", e))?;
-    if field == "status" && value == "done" {
-        let now = chrono::Local::now().to_rfc3339();
-        conn.execute("UPDATE tasks SET completed_at=?1 WHERE id=?2", rusqlite::params![now, id]).map_err(|e| format!("DB error: {}", e))?;
-    }
-    Ok(())
+    let total: i64 = conn.query_row("SELECT COUNT(*) FROM job_vacancies", [], |r| r.get(0)).unwrap_or(0);
+    let applied_week: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM job_vacancies WHERE stage='applied' AND updated_at >= date('now', '-7 days')", [], |r| r.get(0)
+    ).unwrap_or(0);
+    let sources: i64 = conn.query_row("SELECT COUNT(*) FROM job_sources WHERE active=1", [], |r| r.get(0)).unwrap_or(0);
+    let mut by_stage = serde_json::Map::new();
+    let mut stmt = conn.prepare("SELECT stage, COUNT(*) FROM job_vacancies GROUP BY stage").map_err(|e| format!("DB error: {e}"))?;
+    let _ = stmt.query_map([], |row| {
+        let stage: String = row.get(0)?;
+        let count: i64 = row.get(1)?;
+        by_stage.insert(stage, serde_json::json!(count));
+        Ok(())
+    }).map_err(|e| format!("Query error: {e}"))?.filter_map(|r| r.ok()).count();
+    Ok(serde_json::json!({ "total": total, "by_stage": by_stage, "applied_this_week": applied_week, "sources_count": sources }))
 }
 
+// ── Job Search Log ──
+
 #[tauri::command]
-pub fn archive_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn add_job_search_log(source_id: Option<i64>, found_count: i64, notes: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
-    conn.execute("UPDATE projects SET status='archived', updated_at=?1 WHERE id=?2",
-        rusqlite::params![chrono::Local::now().to_rfc3339(), id],
-    ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(())
+    conn.execute("INSERT INTO job_search_log (source_id, found_count, notes) VALUES (?1, ?2, ?3)",
+        rusqlite::params![source_id, found_count, notes]).map_err(|e| format!("DB error: {e}"))?;
+    Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-pub fn get_archived_projects(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_job_search_log(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.name, p.color, p.updated_at,
-                (SELECT COUNT(*) FROM tasks WHERE project_id=p.id) as task_count
-         FROM projects p WHERE p.status='archived' ORDER BY p.updated_at DESC"
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "color": row.get::<_, String>(2)?,
-            "updated_at": row.get::<_, String>(3)?,
-            "task_count": row.get::<_, i64>(4)?,
-        }))
-    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        "SELECT l.id, l.source_id, l.searched_at, l.found_count, l.notes, COALESCE(s.name, '') as source_name
+         FROM job_search_log l LEFT JOIN job_sources s ON l.source_id=s.id ORDER BY l.searched_at DESC LIMIT 100"
+    ).map_err(|e| format!("DB error: {e}"))?;
+    let rows = stmt.query_map([], |row| Ok(serde_json::json!({
+        "id": row.get::<_, i64>(0)?, "source_id": row.get::<_, Option<i64>>(1)?,
+        "searched_at": row.get::<_, String>(2)?, "found_count": row.get::<_, i64>(3)?,
+        "notes": row.get::<_, String>(4)?, "source_name": row.get::<_, String>(5)?,
+    }))).map_err(|e| format!("Query error: {e}"))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
-}
-
-#[tauri::command]
-pub fn restore_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.conn();
-    conn.execute("UPDATE projects SET status='active', updated_at=?1 WHERE id=?2",
-        rusqlite::params![chrono::Local::now().to_rfc3339(), id],
-    ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_project_permanent(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.conn();
-    conn.execute("DELETE FROM tasks WHERE project_id=?1", rusqlite::params![id])
-        .map_err(|e| format!("DB error: {}", e))?;
-    conn.execute("DELETE FROM projects WHERE id=?1", rusqlite::params![id])
-        .map_err(|e| format!("DB error: {}", e))?;
-    Ok(())
 }
 
 // ── v0.7.0: Learning Items (Development) commands ──

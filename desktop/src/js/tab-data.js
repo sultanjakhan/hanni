@@ -5,6 +5,7 @@ import { showEmojiPicker } from './emoji-picker.js';
 import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks, loadTabBlockEditor } from './utils.js';
 import { renderTabBar, closeTab } from './tabs.js';
 import { DatabaseView } from './db-view/db-view.js';
+import { formatRecurrence } from './db-view/db-recurrence-editor.js';
 
 // Legacy helper: backward-compat wrapper (still used by Recipes, Products)
 function renderDatabaseView(el, tabId, recordTable, records, options) {
@@ -988,242 +989,97 @@ async function loadWork() {
   const el = document.getElementById('work-content');
   if (!el) return;
 
-  // Use unified layout
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'work', {
     title: 'Work',
-    subtitle: 'Проекты и задачи',
+    subtitle: 'Поиск работы',
     icon: '💼',
     renderDash: async (paneEl) => {
-      // Dashboard with stats
-      const projects = await invoke('get_projects').catch(() => []);
-      const totalTasks = projects.reduce((sum, p) => sum + (p.task_count || 0), 0);
+      const stats = await invoke('get_job_stats').catch(() => ({}));
+      const s = stats.by_stage || {};
       paneEl.innerHTML = `
         <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${projects.length}</div><div class="uni-dash-label">Проекты</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${totalTasks}</div><div class="uni-dash-label">Всего задач</div></div>
+          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.total || 0}</div><div class="uni-dash-label">Вакансий</div></div>
+          <div class="uni-dash-card green"><div class="uni-dash-value">${s.applied || 0}</div><div class="uni-dash-label">Откликов</div></div>
+          <div class="uni-dash-card yellow"><div class="uni-dash-value">${s.interview || 0}</div><div class="uni-dash-label">Интервью</div></div>
+          <div class="uni-dash-card purple"><div class="uni-dash-value">${stats.applied_this_week || 0}</div><div class="uni-dash-label">За неделю</div></div>
         </div>`;
     },
     renderTable: async (paneEl) => {
-      // Simple tasks table (all tasks across projects)
-      try {
-        const projects = await invoke('get_projects').catch(() => []);
-        let allTasks = [];
-        for (const p of projects) {
-          const tasks = await invoke('get_tasks', { projectId: p.id }).catch(() => []);
-          allTasks.push(...tasks.map(t => ({ ...t, projectName: p.name, projectColor: p.color })));
-        }
-        renderWorkTasks(paneEl, allTasks, projects);
-      } catch (e) {
-        paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить задачи</div>';
-      }
+      const vacancies = await invoke('get_job_vacancies', { stage: null }).catch(() => []);
+      renderVacanciesTable(paneEl, vacancies);
     },
   });
 }
 
-// ── Projects tab ──
-async function loadProjects() {
-  const el = document.getElementById('projects-content');
-  if (!el) return;
-
-  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
-  await renderUnifiedLayout(el, 'projects', {
-    title: 'Projects',
-    subtitle: 'Проекты и их задачи',
-    icon: '📁',
-    renderDash: async (paneEl) => {
-      const projects = await invoke('get_projects').catch(() => []);
-      const totalTasks = projects.reduce((sum, p) => sum + (p.task_count || 0), 0);
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${projects.length}</div><div class="uni-dash-label">Проекты</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${totalTasks}</div><div class="uni-dash-label">Всего задач</div></div>
-        </div>`;
-    },
-    renderTable: async (paneEl) => {
-      const projects = await invoke('get_projects').catch(() => []);
-      await renderProjectsView(paneEl, projects || []);
-    },
-  });
-}
-
-async function renderProjectsView(el, projects) {
-  if (!S.currentProjectId && projects.length > 0) S.currentProjectId = projects[0].id;
-  const tasks = S.currentProjectId ? await invoke('get_tasks', { projectId: S.currentProjectId }).catch(() => []) : [];
-
-  el.innerHTML = `<div class="work-layout">
-    <div class="work-projects">
-      <div class="work-projects-header">
-        <button class="btn-primary" id="new-project-btn" style="width:100%;">+ Проект</button>
-      </div>
-      <div class="work-projects-list" id="work-projects-list"></div>
-    </div>
-    <div class="work-tasks">
-      <div class="work-tasks-header">
-        <h2 style="font-size:16px;color:var(--text-primary);">${S.currentProjectId ? escapeHtml(projects.find(p => p.id === S.currentProjectId)?.name || '') : 'Выберите проект'}</h2>
-        ${S.currentProjectId ? '<button class="btn-primary" id="new-task-btn">+ Задача</button>' : ''}
-      </div>
-      <div id="work-tasks-list"></div>
-    </div>
-  </div>`;
-
-  const projectList = document.getElementById('work-projects-list');
-  for (const p of projects) {
-    const item = document.createElement('div');
-    item.className = 'work-project-item' + (p.id === S.currentProjectId ? ' active' : '');
-    const taskCount = (p.task_count || 0);
-    item.innerHTML = `<span class="work-project-dot" style="background:${p.color || 'var(--accent-blue)'}"></span>
-      <span class="work-project-name">${escapeHtml(p.name)}</span>
-      <span class="work-project-count">${taskCount}</span>`;
-    item.addEventListener('click', () => { S.currentProjectId = p.id; loadProjects(); });
-    projectList.appendChild(item);
-  }
-
-  const taskList = document.getElementById('work-tasks-list');
-  for (const t of (tasks || [])) {
-    const item = document.createElement('div');
-    item.className = 'work-task-item';
-    const isDone = t.status === 'done';
-    const priorityClass = `priority-${t.priority || 'normal'}`;
-    item.innerHTML = `
-      <div class="work-task-check${isDone ? ' done' : ''}" data-id="${t.id}"></div>
-      <span class="work-task-title${isDone ? ' done' : ''}">${escapeHtml(t.title)}</span>
-      <span class="work-task-priority ${priorityClass}">${t.priority || 'normal'}</span>`;
-    item.querySelector('.work-task-check').addEventListener('click', async () => {
-      const newStatus = isDone ? 'todo' : 'done';
-      await invoke('update_task_status', { id: t.id, status: newStatus }).catch(() => {});
-      loadProjects();
-    });
-    taskList.appendChild(item);
-  }
-
-  document.getElementById('new-project-btn')?.addEventListener('click', () => {
-    const name = prompt('Название проекта:');
-    if (name) invoke('create_project', { name, description: '', color: '#9B9B9B' }).then(() => loadProjects()).catch(e => alert(e));
-  });
-
-  document.getElementById('new-task-btn')?.addEventListener('click', () => {
-    const title = prompt('Задача:');
-    if (title) invoke('create_task', { projectId: S.currentProjectId, title, description: '', priority: 'normal', dueDate: null }).then(() => loadProjects()).catch(e => alert(e));
-  });
-}
-
-// ── Work: simple tasks table ──
-function renderWorkTasks(el, tasks, projects) {
-  const statusLabels = { todo: 'To Do', in_progress: 'В работе', done: 'Готово' };
-  const statusColors = { todo: 'badge-yellow', in_progress: 'badge-blue', done: 'badge-green' };
-  const priorityColors = { high: 'badge-red', normal: 'badge-blue', low: 'badge-gray' };
+function renderVacanciesTable(el, vacancies) {
+  const stageLabels = { found: 'Найдена', saved: 'Сохранена', applied: 'Отклик', responded: 'Ответ', interview: 'Интервью', offer: 'Оффер', accepted: 'Принято', rejected: 'Отказ', ignored: 'Пропущена' };
+  const stageColors = { found: 'badge-gray', saved: 'badge-blue', applied: 'badge-yellow', responded: 'badge-purple', interview: 'badge-green', offer: 'badge-green', accepted: 'badge-green', rejected: 'badge-red', ignored: 'badge-gray' };
+  const stageOptions = Object.entries(stageLabels).map(([k, v]) => ({ value: k, label: v }));
 
   const dbv = new DatabaseView(el, {
-    tabId: 'work',
-    recordTable: 'tasks',
-    records: tasks,
+    tabId: 'work', recordTable: 'job_vacancies', records: vacancies,
     fixedColumns: [
-      { key: 'done', label: '', render: r => `<div class="work-task-check${r.status === 'done' ? ' done' : ''}" data-tid="${r.id}" style="cursor:pointer;"></div>` },
-      { key: 'title', label: 'Задача', editable: true, editType: 'text', render: r => `<span class="data-table-title" style="${r.status === 'done' ? 'text-decoration:line-through;opacity:0.5;' : ''}">${escapeHtml(r.title)}</span>` },
-      { key: 'projectName', label: 'Проект', render: r => {
-        if (!r.projectName) return '<span class="text-faint">—</span>';
-        const c = r.projectColor || '#6b6b6b';
-        const hex = c.replace('#', '');
-        const rr = parseInt(hex.slice(0,2),16)||107, gg = parseInt(hex.slice(2,4),16)||107, bb = parseInt(hex.slice(4,6),16)||107;
-        return `<span class="badge" style="background:rgba(${rr},${gg},${bb},0.14);color:${c}">${escapeHtml(r.projectName)}</span>`;
-      }},
-      { key: 'priority', label: 'Приоритет', editable: true, editType: 'select', editOptions: [
-        { value: 'low', label: 'low' }, { value: 'normal', label: 'normal' }, { value: 'high', label: 'high' },
-      ], render: r => `<span class="badge ${priorityColors[r.priority] || 'badge-gray'}">${r.priority || 'normal'}</span>` },
-      { key: 'status', label: 'Статус', editable: true, editType: 'select', editOptions: [
-        { value: 'todo', label: 'To Do' }, { value: 'in_progress', label: 'В работе' }, { value: 'done', label: 'Готово' },
-      ], render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
+      { key: 'company', label: 'Компания', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.company || '')}</span>` },
+      { key: 'position', label: 'Позиция', editable: true, editType: 'text', render: r => escapeHtml(r.position || '') },
+      { key: 'stage', label: 'Этап', editable: true, editType: 'select', editOptions: stageOptions, render: r => `<span class="badge ${stageColors[r.stage] || 'badge-gray'}">${stageLabels[r.stage] || r.stage}</span>` },
+      { key: 'salary', label: 'Зарплата', editable: true, editType: 'text', render: r => r.salary || '—' },
+      { key: 'source_name', label: 'Источник', render: r => r.source_name ? `<span class="badge badge-blue">${escapeHtml(r.source_name)}</span>` : '—' },
+      { key: 'url', label: 'Ссылка', render: r => r.url ? `<a href="${r.url}" target="_blank" class="text-link">Открыть</a>` : '—' },
     ],
-    idField: 'id',
-    availableViews: ['table', 'kanban', 'list', 'gallery'],
+    availableViews: ['table', 'kanban', 'list'],
     defaultView: 'table',
-    addButton: '+ Задача',
-    onAdd: () => showAddTaskModal(projects),
-    onQuickAdd: async (title) => {
-      let pid = projects[0]?.id;
-      if (!pid) pid = await invoke('create_project', { name: 'Входящие', description: '', color: '#9B9B9B' });
-      await invoke('create_task', { projectId: pid, title: title || '', description: '', priority: 'normal', dueDate: null });
+    addButton: '+ Вакансия',
+    onQuickAdd: async () => {
+      await invoke('add_job_vacancy', { company: '', position: '', sourceId: null, roleId: null, salary: '', url: '', stage: 'found', notes: '' });
       loadWork();
     },
     onCellEdit: async (recordId, key, value, skipReload) => {
-      await invoke('update_task_field', { id: recordId, field: key, value });
+      const params = { id: recordId, company: null, position: null, sourceId: null, roleId: null, salary: null, url: null, stage: null, notes: null };
+      params[key] = value;
+      await invoke('update_job_vacancy', params);
       if (!skipReload) loadWork();
     },
-    onDelete: async (recordId) => {
-      await invoke('delete_task', { id: recordId });
-      loadWork();
-    },
-    onDuplicate: async (recordId) => {
-      const t = tasks.find(r => r.id === recordId);
-      if (!t) return;
-      await invoke('create_task', { projectId: t.project_id, title: t.title + ' (копия)', description: t.description || '', priority: t.priority || 'normal', dueDate: t.due_date || null });
-      loadWork();
-    },
+    onDelete: async (id) => { await invoke('delete_job_vacancy', { id }); },
     reloadFn: () => loadWork(),
     kanban: {
-      groupByField: 'status',
+      groupByField: 'stage',
       columns: [
-        { key: 'todo', label: 'To Do', icon: '📋' },
-        { key: 'in_progress', label: 'В работе', icon: '▶' },
-        { key: 'done', label: 'Готово', icon: '✅' },
+        { key: 'found', label: 'Найдена', icon: '🔍' },
+        { key: 'saved', label: 'Сохранена', icon: '📌' },
+        { key: 'applied', label: 'Отклик', icon: '📤' },
+        { key: 'interview', label: 'Интервью', icon: '🎤' },
+        { key: 'offer', label: 'Оффер', icon: '🎉' },
       ],
     },
     onDrop: async (recordId, field, newValue) => {
-      await invoke('update_task_status', { id: parseInt(recordId), status: newValue }).catch(() => {});
+      await invoke('update_job_vacancy', { id: parseInt(recordId), stage: newValue, company: null, position: null, sourceId: null, roleId: null, salary: null, url: null, notes: null });
       loadWork();
     },
   });
   dbv.render();
-
-  // Delegate click for task checkboxes
-  el.addEventListener('click', async (e) => {
-    const check = e.target.closest('[data-tid]');
-    if (!check) return;
-    const id = parseInt(check.dataset.tid);
-    const task = tasks.find(t => t.id === id);
-    const newStatus = task?.status === 'done' ? 'todo' : 'done';
-    await invoke('update_task_status', { id, status: newStatus }).catch(() => {});
-    loadWork();
-  });
 }
 
-function showAddTaskModal(projects) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal modal-compact">
-    <div class="modal-title">Новая задача</div>
-    <div class="form-group"><label class="form-label">Задача</label><input class="form-input" id="wt-title" placeholder="Название задачи"></div>
-    <div class="form-group"><label class="form-label">Проект</label>
-      <select class="form-input" id="wt-project">
-        ${projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
-        ${projects.length === 0 ? '<option value="">Нет проектов</option>' : ''}
-      </select>
-    </div>
-    <div class="form-group"><label class="form-label">Приоритет</label>
-      <select class="form-input" id="wt-priority">
-        <option value="normal">Normal</option>
-        <option value="high">High</option>
-        <option value="low">Low</option>
-      </select>
-    </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="wt-cancel">Отмена</button>
-      <button class="btn-primary" id="wt-save">Создать</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById('wt-cancel')?.addEventListener('click', () => overlay.remove());
-  document.getElementById('wt-save')?.addEventListener('click', async () => {
-    const title = document.getElementById('wt-title')?.value?.trim();
-    if (!title) return;
-    const projectId = parseInt(document.getElementById('wt-project')?.value);
-    const priority = document.getElementById('wt-priority')?.value || 'normal';
-    if (!projectId) { alert('Сначала создайте проект'); return; }
-    await invoke('create_task', { projectId, title, description: '', priority, dueDate: null }).catch(e => alert(e));
-    overlay.remove();
-    loadWork();
+// ── Projects tab (custom pages) ──
+async function loadProjects() {
+  const el = document.getElementById('projects-content');
+  if (!el) return;
+  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  await renderUnifiedLayout(el, 'projects', {
+    title: 'Projects',
+    subtitle: 'Пользовательские проекты',
+    icon: '📁',
+    renderDash: async (paneEl) => {
+      const pages = await invoke('get_custom_pages').catch(() => []);
+      paneEl.innerHTML = `<div class="uni-dash-grid">
+        <div class="uni-dash-card blue"><div class="uni-dash-value">${pages.length}</div><div class="uni-dash-label">Проектов</div></div>
+      </div>`;
+    },
+    renderTable: async (paneEl) => {
+      const pages = await invoke('get_custom_pages').catch(() => []);
+      if (!pages.length) { paneEl.innerHTML = '<div class="uni-empty">Нет проектов</div>'; return; }
+      paneEl.innerHTML = '<div class="uni-empty">Выберите проект в боковой панели</div>';
+    },
   });
 }
 
@@ -1966,6 +1822,16 @@ const SCH_CAT_COLORS = { health: 'blue', sport: 'green', practice: 'purple', cha
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
+function buildRecurrenceJson(r) {
+  if (!r.frequency) return '';
+  const obj = { every: 1, unit: 'day' };
+  if (r.frequency === 'daily') { obj.unit = 'day'; }
+  else if (r.frequency === 'weekly') { obj.unit = 'week'; }
+  else if (r.frequency === 'custom' && r.frequency_days) { obj.unit = 'week'; obj.days = r.frequency_days.split(',').map(Number); }
+  if (r.time_of_day) obj.time = r.time_of_day;
+  return JSON.stringify(obj);
+}
+
 async function loadSchedule(subTab) {
   const el = document.getElementById('schedule-content');
   if (!el) return;
@@ -2039,14 +1905,11 @@ async function loadSchedule(subTab) {
             try { const p = JSON.parse(r.category); if (Array.isArray(p)) cats = p; } catch {}
             return cats.map(c => `<span class="badge badge-${SCH_CAT_COLORS[c] || 'gray'} cell-badge-removable">${SCHEDULE_CATEGORIES[c] || c}<span class="cell-badge-x" data-remove-cat="${c}">✕</span></span>`).join(' ');
           }},
-          { key: 'frequency', label: 'Частота', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_FREQ).map(([k, v]) => ({ value: k, label: v })), render: r => {
-            if (!r.frequency) return '';
-            if (r.frequency === 'custom' && r.frequency_days) {
-              return r.frequency_days.split(',').map(d => DAYS_SHORT[parseInt(d)-1] || d).join(', ');
-            }
-            return `<span style="font-size:12px;color:var(--text-muted);">${SCHEDULE_FREQ[r.frequency] || r.frequency}</span>`;
+          { key: 'recurrence', label: 'Повторение', editable: true, editType: 'recurrence', render: r => {
+            const json = r.recurrence || buildRecurrenceJson(r);
+            if (!json) return '<span class="text-faint">—</span>';
+            return `<span class="cell-recurrence">${escapeHtml(formatRecurrence(json))}</span>`;
           }},
-          { key: 'time_of_day', label: 'Время', editable: true, editType: 'text', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.time_of_day || '—'}</span>` },
           { key: 'is_active', label: 'Статус', width: 60, render: r => `<div class="col-menu-toggle${r.is_active ? ' on' : ''}" data-toggle-id="${r.id}" style="cursor:pointer"></div>` },
           { key: 'created_at', label: 'Создано', editType: 'created_time', render: r => {
             if (!r.created_at) return '<span class="text-faint">—</span>';
@@ -2062,11 +1925,25 @@ async function loadSchedule(subTab) {
           reloadTable();
         },
         onCellEdit: async (recordId, key, value, skipReload) => {
-          const keyMap = { title: 'title', category: 'category', frequency: 'frequency', time_of_day: 'timeOfDay' };
-          const params = { id: recordId };
-          const paramKey = keyMap[key];
-          if (paramKey) params[paramKey] = value;
-          await invoke('update_schedule', params);
+          if (key === 'recurrence') {
+            try {
+              const r = JSON.parse(value);
+              const params = { id: recordId };
+              if (r.unit === 'day') { params.frequency = 'daily'; }
+              else if (r.unit === 'week' && r.days?.length > 0) { params.frequency = 'custom'; params.frequencyDays = r.days.join(','); }
+              else if (r.unit === 'week') { params.frequency = 'weekly'; }
+              else if (r.unit === 'hour') { params.frequency = `every_${r.every}h`; }
+              else if (r.unit === 'month') { params.frequency = 'monthly'; }
+              if (r.time) params.timeOfDay = r.time;
+              await invoke('update_schedule', params);
+            } catch {}
+          } else {
+            const keyMap = { title: 'title', category: 'category' };
+            const params = { id: recordId };
+            const paramKey = keyMap[key];
+            if (paramKey) params[paramKey] = value;
+            await invoke('update_schedule', params);
+          }
           if (!skipReload) reloadTable();
         },
         reloadFn: reloadTable,

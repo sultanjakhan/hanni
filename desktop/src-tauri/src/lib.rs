@@ -76,6 +76,7 @@ pub fn run() {
     migrate_schedules(&conn);
     migrate_custom_projects(&conn);
     migrate_body_records(&conn);
+    migrate_job_search(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -289,17 +290,22 @@ pub fn run() {
             // Calendar Sync
             calendar::sync_apple_calendar,
             calendar::sync_google_ics,
-            // Projects & Tasks (Work)
-            commands_data::create_project,
-            commands_data::get_projects,
-            commands_data::create_task,
-            commands_data::get_tasks,
-            commands_data::update_task_status,
-            commands_data::update_task_field,
-            commands_data::archive_project,
-            commands_data::get_archived_projects,
-            commands_data::restore_project,
-            commands_data::delete_project_permanent,
+            // Job Search CRM (Work)
+            commands_data::get_job_sources,
+            commands_data::add_job_source,
+            commands_data::update_job_source,
+            commands_data::delete_job_source,
+            commands_data::get_job_roles,
+            commands_data::add_job_role,
+            commands_data::update_job_role,
+            commands_data::delete_job_role,
+            commands_data::get_job_vacancies,
+            commands_data::add_job_vacancy,
+            commands_data::update_job_vacancy,
+            commands_data::delete_job_vacancy,
+            commands_data::get_job_stats,
+            commands_data::add_job_search_log,
+            commands_data::get_job_search_log,
             // Learning Items (Development)
             commands_data::create_learning_item,
             commands_data::get_learning_items,

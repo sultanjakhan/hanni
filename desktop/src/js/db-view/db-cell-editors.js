@@ -2,6 +2,7 @@
 
 import { invoke } from '../state.js';
 import { showSelectDropdown, showMultiSelectDropdown } from './db-dropdowns.js';
+import { showRecurrenceEditor } from './db-recurrence-editor.js';
 import { getNextCell, getPrevCell, getCellBelow } from './db-cell-nav.js';
 import { renderTimeEditor, renderProgressEditor, renderRatingEditor } from './db-type-editors.js';
 import { getType } from './db-type-registry.js';
@@ -93,6 +94,10 @@ export function startFixedCellEdit(cell, reloadFn) {
     showMultiSelectDropdown(cell, optList, rawVal, saveCellVal, null, labelMap, onOptsChange);
     return;
   }
+  if (editType === 'recurrence') {
+    showRecurrenceEditor(cell, rawVal, saveCellVal);
+    return;
+  }
 
   const inputType = editType === 'number' ? 'number' : editType === 'date' ? 'date' : editType === 'phone' ? 'tel' : 'text';
   const cleanVal = rawVal === '\u2014' ? '' : rawVal;
@@ -153,6 +158,9 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
       return;
     case 'rating':
       renderRatingEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });
+      return;
+    case 'recurrence':
+      showRecurrenceEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });
       return;
     default: {
       const inputType = propType === 'date' ? 'date' : propType === 'number' ? 'number' : 'text';

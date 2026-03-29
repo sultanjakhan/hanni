@@ -908,3 +908,51 @@ pub fn migrate_body_records(conn: &rusqlite::Connection) {
         CREATE INDEX IF NOT EXISTS idx_body_records_date ON body_records(date);"
     ).ok();
 }
+
+pub fn migrate_job_search(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS job_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'other',
+            url TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS job_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            keywords TEXT NOT NULL DEFAULT '',
+            salary_min INTEGER,
+            priority TEXT NOT NULL DEFAULT 'medium',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS job_vacancies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company TEXT NOT NULL DEFAULT '',
+            position TEXT NOT NULL DEFAULT '',
+            source_id INTEGER,
+            role_id INTEGER,
+            salary TEXT NOT NULL DEFAULT '',
+            url TEXT NOT NULL DEFAULT '',
+            stage TEXT NOT NULL DEFAULT 'found',
+            notes TEXT NOT NULL DEFAULT '',
+            found_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (source_id) REFERENCES job_sources(id),
+            FOREIGN KEY (role_id) REFERENCES job_roles(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_job_vacancies_stage ON job_vacancies(stage);
+        CREATE INDEX IF NOT EXISTS idx_job_vacancies_source ON job_vacancies(source_id);
+        CREATE TABLE IF NOT EXISTS job_search_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id INTEGER,
+            searched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            found_count INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (source_id) REFERENCES job_sources(id)
+        );
+        DROP TABLE IF EXISTS projects;
+        DROP TABLE IF EXISTS tasks;"
+    ).ok();
+}
