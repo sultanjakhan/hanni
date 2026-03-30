@@ -269,6 +269,13 @@ pub fn build_tool_definitions() -> Vec<serde_json::Value> {
             },
             "required": ["title", "project_id"]
         })),
+        tool("get_tasks", "Получить список активных задач. Используй когда спрашивают о задачах, планах, что делать", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "Filter: active (default), completed, overdue"},
+                "query": {"type": "string", "description": "Search by title"}
+            }
+        })),
         // Focus
         tool("start_focus", "Start focus mode — block distracting sites/apps", serde_json::json!({
             "type": "object",

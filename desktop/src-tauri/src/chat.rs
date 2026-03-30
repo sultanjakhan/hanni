@@ -126,12 +126,70 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
         parts.join("\n")
     }).await.unwrap_or_default();
 
+    // Gather active tasks & goals from DB
+    let task_context = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut lines: Vec<String> = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, title, due_date FROM notes WHERE status = 'task' AND archived = 0 ORDER BY due_date ASC LIMIT 10"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))
+            }) {
+                for r in rows.flatten() {
+                    let overdue = r.2.as_ref().map(|d| !d.is_empty() && d.as_str() < today.as_str()).unwrap_or(false);
+                    let due = r.2.as_deref().unwrap_or("");
+                    let mark = if overdue { " [просрочена]" } else { "" };
+                    lines.push(format!("- [#{}] {}{}{}", r.0, r.1,
+                        if due.is_empty() { String::new() } else { format!(" (до {})", due) }, mark));
+                }
+            }
+        }
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, title, due_date FROM tasks WHERE (completed_at IS NULL OR completed_at = '') AND status != 'done' AND project_id NOT IN (SELECT id FROM projects WHERE name = 'Вакансии') ORDER BY due_date ASC LIMIT 10"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))
+            }) {
+                for r in rows.flatten() {
+                    let overdue = r.2.as_ref().map(|d| !d.is_empty() && d.as_str() < today.as_str()).unwrap_or(false);
+                    let due = r.2.as_deref().unwrap_or("");
+                    let mark = if overdue { " [просрочена]" } else { "" };
+                    lines.push(format!("- [work#{}] {}{}{}", r.0, r.1,
+                        if due.is_empty() { String::new() } else { format!(" (до {})", due) }, mark));
+                }
+            }
+        }
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT title, current_value, target_value, deadline FROM tab_goals WHERE status = 'active' AND deadline IS NOT NULL AND deadline != '' LIMIT 5"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, f64>(2)?, row.get::<_, String>(3)?))
+            }) {
+                for r in rows.flatten() {
+                    lines.push(format!("- Цель: {} ({}/{}{})", r.0, r.1, r.2,
+                        if r.3.is_empty() { String::new() } else { format!(", до {}", r.3) }));
+                }
+            }
+        }
+        if lines.is_empty() { String::new() } else { format!("\n\n[Активные задачи]\n{}", lines.join("\n")) }
+    };
+
     // Build messages: inject context as system message, then user/assistant history
     let mut chat_messages: Vec<serde_json::Value> = Vec::new();
+    let mut sys_content = String::new();
     if !context.is_empty() {
+        sys_content.push_str(&format!("[Контекст пользователя]\n{}", context));
+    }
+    if !task_context.is_empty() {
+        sys_content.push_str(&task_context);
+    }
+    if !sys_content.is_empty() {
         chat_messages.push(serde_json::json!({
             "role": "system",
-            "content": format!("[Контекст пользователя]\n{}", context)
+            "content": sys_content
         }));
     }
     for m in messages.iter() {
@@ -423,6 +481,66 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         }
         if !memory_block.is_empty() {
             system_parts.push(memory_block);
+        }
+    }
+
+    // Inject active tasks & goals so chat knows about them
+    if !call_mode {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut task_lines: Vec<String> = Vec::new();
+
+        // Active tasks from notes (status='task')
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, title, due_date FROM notes WHERE status = 'task' AND archived = 0 ORDER BY due_date ASC LIMIT 10"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))
+            }) {
+                for r in rows.flatten() {
+                    let overdue = r.2.as_ref().map(|d| !d.is_empty() && d.as_str() < today.as_str()).unwrap_or(false);
+                    let due = r.2.as_deref().unwrap_or("");
+                    let mark = if overdue { " [просрочена]" } else { "" };
+                    task_lines.push(format!("- [#{}] {}{}{}", r.0, r.1,
+                        if due.is_empty() { String::new() } else { format!(" (до {})", due) }, mark));
+                }
+            }
+        }
+
+        // Active tasks from work tab
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, title, due_date FROM tasks WHERE (completed_at IS NULL OR completed_at = '') AND status != 'done' AND project_id NOT IN (SELECT id FROM projects WHERE name = 'Вакансии') ORDER BY due_date ASC LIMIT 10"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?))
+            }) {
+                for r in rows.flatten() {
+                    let overdue = r.2.as_ref().map(|d| !d.is_empty() && d.as_str() < today.as_str()).unwrap_or(false);
+                    let due = r.2.as_deref().unwrap_or("");
+                    let mark = if overdue { " [просрочена]" } else { "" };
+                    task_lines.push(format!("- [work#{}] {}{}{}", r.0, r.1,
+                        if due.is_empty() { String::new() } else { format!(" (до {})", due) }, mark));
+                }
+            }
+        }
+
+        // Active goals near deadline
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT title, current_value, target_value, deadline FROM tab_goals WHERE status = 'active' AND deadline IS NOT NULL AND deadline != '' LIMIT 5"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, f64>(2)?, row.get::<_, String>(3)?))
+            }) {
+                for r in rows.flatten() {
+                    task_lines.push(format!("- Цель: {} ({}/{}{})", r.0, r.1, r.2,
+                        if r.3.is_empty() { String::new() } else { format!(", до {}", r.3) }));
+                }
+            }
+        }
+
+        if !task_lines.is_empty() {
+            system_parts.push(format!("[Активные задачи]\n{}", task_lines.join("\n")));
         }
     }
 

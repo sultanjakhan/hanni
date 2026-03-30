@@ -42,15 +42,6 @@ async function loadHome(subTab) {
     title: 'Home',
     subtitle: 'Дом и хозяйство',
     icon: '🏠',
-    renderDash: async (paneEl) => {
-      const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
-      const needed = items.filter(i => i.needed).length;
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${items.length}</div><div class="uni-dash-label">Предметов</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${needed}</div><div class="uni-dash-label">Нужно купить</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
       const categories = { cleaning: 'Уборка', hygiene: 'Гигиена', household: 'Дом', electronics: 'Техника', tools: 'Инструменты', other: 'Другое' };
@@ -188,17 +179,6 @@ async function loadMindset(subTab) {
     title: 'Mindset',
     subtitle: 'Дневник, настроение, принципы',
     icon: '🧠',
-    renderDash: async (paneEl) => {
-      const today = await invoke('get_journal_entry', { date: null }).catch(() => null);
-      const history = await invoke('get_mood_history', { days: 7 }).catch(() => []);
-      const avgMood = history.length > 0 ? (history.reduce((s, m) => s + (m.mood || 3), 0) / history.length).toFixed(1) : '—';
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${today ? today.mood + '/5' : '—'}</div><div class="uni-dash-label">Настроение сегодня</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${avgMood}</div><div class="uni-dash-label">Ср. за неделю</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${today?.energy || '—'}</div><div class="uni-dash-label">Энергия</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       await loadJournal(paneEl);
     },
@@ -255,17 +235,6 @@ async function loadFood(subTab) {
     title: 'Food',
     subtitle: 'Питание и продукты',
     icon: '🍔',
-    renderDash: async (paneEl) => {
-      const today = new Date().toISOString().split('T')[0];
-      const stats = await invoke('get_food_stats', { days: 1 }).catch(() => ({}));
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.avg_calories || 0}</div><div class="uni-dash-label">Калории</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.avg_protein || 0}g</div><div class="uni-dash-label">Белок</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.avg_carbs || 0}g</div><div class="uni-dash-label">Углеводы</div></div>
-          <div class="uni-dash-card purple"><div class="uni-dash-value">${stats.avg_fat || 0}g</div><div class="uni-dash-label">Жиры</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       await loadFoodLog(paneEl);
     },
@@ -366,19 +335,6 @@ async function loadMoney(subTab) {
     title: 'Money',
     subtitle: 'Финансы и бюджет',
     icon: '💰',
-    renderDash: async (paneEl) => {
-      const stats = await invoke('get_transaction_stats', { days: 30 }).catch(() => ({}));
-      const balance = (stats.total_income || 0) - (stats.total_expenses || 0);
-      const subs = await invoke('get_subscriptions').catch(() => []);
-      const monthly = subs.filter(s => s.active).reduce((sum, s) => sum + (s.period === 'yearly' ? s.amount / 12 : s.amount), 0);
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card ${balance >= 0 ? 'green' : 'red'}"><div class="uni-dash-value">${balance}</div><div class="uni-dash-label">Баланс (30д)</div></div>
-          <div class="uni-dash-card purple"><div class="uni-dash-value">${stats.total_expenses || 0}</div><div class="uni-dash-label">Расходы</div></div>
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.total_income || 0}</div><div class="uni-dash-label">Доходы</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${Math.round(monthly)}</div><div class="uni-dash-label">Подписки/мес</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       await loadTransactions(paneEl);
     },
@@ -506,18 +462,6 @@ async function loadPeople(subTab) {
     title: 'People',
     subtitle: 'Контакты и связи',
     icon: '👥',
-    renderDash: async (paneEl) => {
-      const items = await invoke('get_contacts', {}).catch(() => []);
-      const contacts = Array.isArray(items) ? items : [];
-      const favs = contacts.filter(c => c.favorite).length;
-      const blocked = contacts.filter(c => c.blocked).length;
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${contacts.length}</div><div class="uni-dash-label">Контактов</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${favs}</div><div class="uni-dash-label">Избранных</div></div>
-          <div class="uni-dash-card purple"><div class="uni-dash-value">${blocked}</div><div class="uni-dash-label">Заблокировано</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       try {
         const items = await invoke('get_contacts', {});
@@ -984,30 +928,23 @@ async function loadAbout(el) {
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Ошибка: ${e}</div>`; }
 }
 
-// ── Work ──
-async function loadWork() {
-  const el = document.getElementById('work-content');
+// ── Jobs ──
+async function loadJobs() {
+  const el = document.getElementById('jobs-content');
   if (!el) return;
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
-  await renderUnifiedLayout(el, 'work', {
-    title: 'Work',
+  await renderUnifiedLayout(el, 'jobs', {
+    title: 'Jobs',
     subtitle: 'Поиск работы',
     icon: '💼',
-    renderDash: async (paneEl) => {
-      const stats = await invoke('get_job_stats').catch(() => ({}));
-      const s = stats.by_stage || {};
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.total || 0}</div><div class="uni-dash-label">Вакансий</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${s.applied || 0}</div><div class="uni-dash-label">Откликов</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${s.interview || 0}</div><div class="uni-dash-label">Интервью</div></div>
-          <div class="uni-dash-card purple"><div class="uni-dash-value">${stats.applied_this_week || 0}</div><div class="uni-dash-label">За неделю</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       const vacancies = await invoke('get_job_vacancies', { stage: null }).catch(() => []);
       renderVacanciesTable(paneEl, vacancies);
+    },
+    renderStore: async (paneEl) => {
+      const { renderJobsMemory } = await import('./jobs-memory.js');
+      await renderJobsMemory(paneEl);
     },
   });
 }
@@ -1018,7 +955,7 @@ function renderVacanciesTable(el, vacancies) {
   const stageOptions = Object.entries(stageLabels).map(([k, v]) => ({ value: k, label: v }));
 
   const dbv = new DatabaseView(el, {
-    tabId: 'work', recordTable: 'job_vacancies', records: vacancies,
+    tabId: 'jobs', recordTable: 'job_vacancies', records: vacancies,
     fixedColumns: [
       { key: 'company', label: 'Компания', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.company || '')}</span>` },
       { key: 'position', label: 'Позиция', editable: true, editType: 'text', render: r => escapeHtml(r.position || '') },
@@ -1032,16 +969,16 @@ function renderVacanciesTable(el, vacancies) {
     addButton: '+ Вакансия',
     onQuickAdd: async () => {
       await invoke('add_job_vacancy', { company: '', position: '', sourceId: null, roleId: null, salary: '', url: '', stage: 'found', notes: '' });
-      loadWork();
+      loadJobs();
     },
     onCellEdit: async (recordId, key, value, skipReload) => {
       const params = { id: recordId, company: null, position: null, sourceId: null, roleId: null, salary: null, url: null, stage: null, notes: null };
       params[key] = value;
       await invoke('update_job_vacancy', params);
-      if (!skipReload) loadWork();
+      if (!skipReload) loadJobs();
     },
     onDelete: async (id) => { await invoke('delete_job_vacancy', { id }); },
-    reloadFn: () => loadWork(),
+    reloadFn: () => loadJobs(),
     kanban: {
       groupByField: 'stage',
       columns: [
@@ -1054,7 +991,7 @@ function renderVacanciesTable(el, vacancies) {
     },
     onDrop: async (recordId, field, newValue) => {
       await invoke('update_job_vacancy', { id: parseInt(recordId), stage: newValue, company: null, position: null, sourceId: null, roleId: null, salary: null, url: null, notes: null });
-      loadWork();
+      loadJobs();
     },
   });
   dbv.render();
@@ -1069,12 +1006,6 @@ async function loadProjects() {
     title: 'Projects',
     subtitle: 'Пользовательские проекты',
     icon: '📁',
-    renderDash: async (paneEl) => {
-      const pages = await invoke('get_custom_pages').catch(() => []);
-      paneEl.innerHTML = `<div class="uni-dash-grid">
-        <div class="uni-dash-card blue"><div class="uni-dash-value">${pages.length}</div><div class="uni-dash-label">Проектов</div></div>
-      </div>`;
-    },
     renderTable: async (paneEl) => {
       const pages = await invoke('get_custom_pages').catch(() => []);
       if (!pages.length) { paneEl.innerHTML = '<div class="uni-empty">Нет проектов</div>'; return; }
@@ -1093,17 +1024,6 @@ async function loadDevelopment() {
     title: 'Development',
     subtitle: 'Обучение и навыки',
     icon: '🚀',
-    renderDash: async (paneEl) => {
-      const items = await invoke('get_learning_items', { typeFilter: null }).catch(() => []);
-      const inProgress = items.filter(i => i.status === 'in_progress').length;
-      const completed = items.filter(i => i.status === 'completed').length;
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${items.length}</div><div class="uni-dash-label">Всего</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${inProgress}</div><div class="uni-dash-label">В процессе</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${completed}</div><div class="uni-dash-label">Завершено</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       try {
         const items = await invoke('get_learning_items', { typeFilter: S.devFilter === 'all' ? null : S.devFilter }).catch(() => []);
@@ -1233,9 +1153,6 @@ async function loadHobbies(subTab) {
     title: 'Hobbies',
     subtitle: 'Медиа-коллекции',
     icon: '🎮',
-    renderDash: async (paneEl) => {
-      await loadHobbiesOverview(paneEl);
-    },
     renderTable: async (paneEl) => {
       const activeMedia = S._hobbiesMedia || 'music';
       paneEl.innerHTML = `
@@ -1474,15 +1391,6 @@ async function loadSports(subTab) {
     title: 'Sports',
     subtitle: 'Тренировки и физическая активность',
     icon: '💪',
-    renderDash: async (paneEl) => {
-      const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.count || 0}</div><div class="uni-dash-label">Тренировок</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.total_minutes || 0}м</div><div class="uni-dash-label">Общее время</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.total_calories || 0}</div><div class="uni-dash-label">Калории</div></div>
-        </div>`;
-    },
     renderBody: async (paneEl) => {
       const { loadBodyInline } = await import('./tab-body.js');
       await loadBodyInline(paneEl);
@@ -1589,23 +1497,6 @@ async function loadHealth() {
     title: 'Health',
     subtitle: 'Здоровье и привычки',
     icon: '❤️',
-    renderDash: async (paneEl) => {
-      const today = await invoke('get_health_today').catch(() => ({}));
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue" data-htype="sleep" style="cursor:pointer"><div class="uni-dash-value">${today.sleep ? today.sleep + 'ч' : '—'}</div><div class="uni-dash-label">Сон</div></div>
-          <div class="uni-dash-card green" data-htype="water" style="cursor:pointer"><div class="uni-dash-value">${today.water || '—'}</div><div class="uni-dash-label">Вода (стаканов)</div></div>
-          <div class="uni-dash-card yellow" data-htype="mood" style="cursor:pointer"><div class="uni-dash-value">${today.mood ? today.mood + '/5' : '—'}</div><div class="uni-dash-label">Настроение</div></div>
-          <div class="uni-dash-card purple" data-htype="weight" style="cursor:pointer"><div class="uni-dash-value">${today.weight ? today.weight + 'кг' : '—'}</div><div class="uni-dash-label">Вес</div></div>
-        </div>`;
-      const labels = { sleep: 'Сон (часы)', water: 'Вода (стаканы)', mood: 'Настроение (1-5)', weight: 'Вес (кг)' };
-      paneEl.querySelectorAll('[data-htype]').forEach(card => {
-        card.addEventListener('click', () => {
-          const val = prompt(labels[card.dataset.htype] + ':');
-          if (val) invoke('log_health', { healthType: card.dataset.htype, value: parseFloat(val), notes: null }).then(() => loadHealth()).catch(e => alert(e));
-        });
-      });
-    },
     renderBody: async (paneEl) => {
       const { loadBodyInline } = await import('./tab-body.js');
       await loadBodyInline(paneEl);
@@ -1779,13 +1670,6 @@ async function loadCustomProject(tabId, subTab, el, reg) {
     title: reg.label || 'Новый проект',
     subtitle: '',
     icon: reg.icon || '📁',
-    renderDash: async (paneEl) => {
-      const records = await invoke('get_project_records', { projectId }).catch(() => []);
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${records.length}</div><div class="uni-dash-label">Записей</div></div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
       const records = await invoke('get_project_records', { projectId }).catch(() => []);
       const dbv = new DatabaseView(paneEl, {
@@ -1817,8 +1701,8 @@ async function loadCustomProject(tabId, subTab, el, reg) {
 
 // ── Schedule tab ──
 
-const SCHEDULE_CATEGORIES = { health: 'Здоровье', sport: 'Спорт', home: 'Дом', practice: 'Практика', challenge: 'Челлендж', work: 'Работа', other: 'Другое' };
-const SCH_CAT_COLORS = { health: 'blue', sport: 'green', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'gray' };
+const SCHEDULE_CATEGORIES = { health: 'Здоровье', sport: 'Спорт', hygiene: 'Гигиена', home: 'Дом', practice: 'Практика', challenge: 'Челлендж', work: 'Работа', other: 'Другое' };
+const SCH_CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'gray' };
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
@@ -1840,15 +1724,6 @@ async function loadSchedule(subTab) {
     title: 'Schedule',
     subtitle: 'Расписание и повторяющиеся события',
     icon: '📅',
-    renderDash: async (paneEl) => {
-      const stats = await invoke('get_schedule_stats').catch(() => ({ total_active: 0, completed_week: 0, completed_today: 0 }));
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.total_active}</div><div class="uni-dash-label">Активных</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.completed_today}</div><div class="uni-dash-label">Сегодня ✓</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.completed_week}</div><div class="uni-dash-label">За неделю ✓</div></div>
-        </div>`;
-    },
     renderTracking: async (paneEl) => {
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
       const active = schedules.filter(s => s.is_active);
@@ -1899,7 +1774,7 @@ async function loadSchedule(subTab) {
         fixedColumns: [
           { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
           { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
-          { key: 'category', label: 'Категория', editable: true, editType: 'multi_select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v })), render: r => {
+          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v, color: SCH_CAT_COLORS[k] || 'gray' })), render: r => {
             if (!r.category) return '';
             let cats = [r.category];
             try { const p = JSON.parse(r.category); if (Array.isArray(p)) cats = p; } catch {}
@@ -1950,6 +1825,22 @@ async function loadSchedule(subTab) {
         onDelete: async (id) => { await invoke('delete_schedule', { id }); },
       });
       await dbv.render();
+      // Templates button next to add-row
+      const addRow = paneEl.querySelector('.dbv-add-row');
+      if (addRow) {
+        const tplCell = addRow.querySelector('td');
+        if (tplCell) {
+          const tplBtn = document.createElement('span');
+          tplBtn.style.cssText = 'margin-left:12px;cursor:pointer;color:var(--text-muted);font-size:13px;';
+          tplBtn.textContent = '📋 Шаблоны';
+          tplBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const { showScheduleTemplatesModal } = await import('./schedule-templates.js');
+            await showScheduleTemplatesModal(reloadTable);
+          });
+          tplCell.querySelector('.dbv-add-row-label').appendChild(tplBtn);
+        }
+      }
       paneEl.addEventListener('click', async (e) => {
         const chk = e.target.closest('[data-schid]');
         if (chk) {
@@ -2078,29 +1969,25 @@ async function loadDanKoe(subTab) {
   const el = document.getElementById('dankoe-content');
   if (!el) return;
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  const today = new Date().toISOString().slice(0, 10);
+  const schedules = await invoke('get_schedules', { category: 'practice' }).catch(() => []);
+  const completions = await invoke('get_schedule_completions', { date: today }).catch(() => []);
+  const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
+  const schByLabel = {};
+  for (const s of schedules) schByLabel[s.title.toLowerCase()] = s;
+
   await renderUnifiedLayout(el, 'dankoe', {
     title: 'Dan Koe Protocol',
     subtitle: 'Ежедневная практика осознанности',
     icon: '🧠',
-    renderDash: async (paneEl) => {
-      const stats = await invoke('get_dan_koe_stats').catch(() => ({ week_entries: 0, week_complete: 0, streak: 0 }));
-      paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${stats.streak}</div><div class="uni-dash-label">Streak 🔥</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${stats.week_complete}/7</div><div class="uni-dash-label">Полных дней</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${stats.week_entries}/7</div><div class="uni-dash-label">Записей</div></div>
-        </div>
-        <div style="margin-top:20px;padding:16px;border-radius:var(--radius-2);background:var(--bg-hover);">
-          <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Как это работает</div>
-          <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">
-            Протокол Dan Koe — 4 ежедневные практики для осознанной жизни.
-            Каждая занимает 5-15 минут. Выполняй по порядку, лучше утром.
-            Отмечай выполнение в <b>Schedule</b> → они появятся в <b>Календаре</b>.
-          </div>
-        </div>`;
-    },
     renderTable: async (paneEl) => {
-      paneEl.innerHTML = DK_PRACTICES.map(p => `
+      paneEl.innerHTML = DK_PRACTICES.map(p => {
+        const sch = schByLabel[p.label.toLowerCase()];
+        const done = sch && completedIds.has(sch.id);
+        const statusHtml = sch
+          ? `<div style="margin-top:12px;padding:6px 10px;border-radius:var(--radius-1);background:${done ? 'var(--color-green-bg)' : 'var(--bg-hover)'};font-size:12px;color:${done ? 'var(--color-green)' : 'var(--text-muted)'};">${done ? '✓ Выполнено сегодня' : '○ Не выполнено сегодня'}</div>`
+          : '<div style="margin-top:12px;font-size:12px;color:var(--text-faint);">⚠ Нет в Schedule — добавьте через Шаблоны</div>';
+        return `
         <div style="margin-bottom:24px;padding:16px;border-radius:var(--radius-2);border:1px solid var(--border-subtle);">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
             <span style="font-size:20px;">${p.icon}</span>
@@ -2120,7 +2007,9 @@ async function loadDanKoe(subTab) {
               ${p.questions.map(q => `<li>${q}</li>`).join('')}
             </ul>` : ''}
           ${p.examples ? `<div style="font-size:12px;color:var(--text-faint);margin-top:8px;">💡 <i>${p.examples}</i></div>` : ''}
-        </div>`).join('');
+          ${statusHtml}
+        </div>`;
+      }).join('');
     },
   });
 }
@@ -2135,7 +2024,7 @@ export {
   loadMemoryInSettings,
   renderMemoryList,
   loadAbout,
-  loadWork,
+  loadJobs,
   loadProjects,
   loadDevelopment,
   loadHobbies,
@@ -2150,7 +2039,7 @@ export {
 // Register in tabLoaders for tabs.js switchTab()
 Object.assign(tabLoaders, {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
-  loadWork, loadProjects, loadDevelopment,
+  loadJobs, loadProjects, loadDevelopment,
   loadHobbies, loadSports, loadHealth,
   loadCustomPage, loadSchedule, loadDanKoe,
   loadMemoryTab, loadAbout,

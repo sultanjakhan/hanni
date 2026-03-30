@@ -1,7 +1,7 @@
 // ── db-view/db-cell-editors.js — Inline cell editing (Notion-style, no popups) ──
 
 import { invoke } from '../state.js';
-import { showSelectDropdown, showMultiSelectDropdown } from './db-dropdowns.js';
+import { showSelectDropdown, normalizeOptions } from './db-dropdowns.js';
 import { showRecurrenceEditor } from './db-recurrence-editor.js';
 import { getNextCell, getPrevCell, getCellBelow } from './db-cell-nav.js';
 import { renderTimeEditor, renderProgressEditor, renderRatingEditor } from './db-type-editors.js';
@@ -78,20 +78,27 @@ export function startFixedCellEdit(cell, reloadFn) {
     } catch {}
   };
 
-  if (editType === 'select') {
-    const mapped = options.map(o => typeof o === 'object' ? o : { value: o, label: o });
-    loadStoredCatalog(mapped);
-    const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
-    showSelectDropdown(cell, mapped, rawVal, saveCellVal, null, onOptsChange);
-    return;
-  }
-  if (editType === 'multi_select') {
-    const optList = options.map(o => typeof o === 'object' ? o.value : o);
+  if (editType === 'select' || editType === 'multi_select') {
+    const baseOpts = normalizeOptions(options);
+    const colorMap = {};
+    baseOpts.forEach(o => { colorMap[o.value] = o.color; });
+    const stored = localStorage.getItem(storageKey);
+    if (stored) {
+      try {
+        const s = JSON.parse(stored);
+        if (Array.isArray(s) && s.length > 0) {
+          const storedNorm = normalizeOptions(s);
+          storedNorm.forEach(o => { if (colorMap[o.value]) o.color = colorMap[o.value]; });
+          baseOpts.length = 0;
+          storedNorm.forEach(o => baseOpts.push(o));
+          baseOpts.forEach(o => { if (!storedNorm.some(s2 => s2.value === o.value)) baseOpts.push(o); });
+        }
+      } catch {}
+    }
     const labelMap = {};
-    options.forEach(o => { if (typeof o === 'object') labelMap[o.value] = o.label; });
-    loadStoredCatalog(optList);
+    options.forEach(o => { if (typeof o === 'object' && o.label) labelMap[o.value] = o.label; });
     const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
-    showMultiSelectDropdown(cell, optList, rawVal, saveCellVal, null, labelMap, onOptsChange);
+    showSelectDropdown(cell, baseOpts, rawVal, saveCellVal, null, labelMap, onOptsChange);
     return;
   }
   if (editType === 'recurrence') {
@@ -145,10 +152,9 @@ export function startInlineEdit(cell, recordTable, reloadFn) {
       save(rawVal === 'true' ? 'false' : 'true');
       return;
     case 'select':
-      showSelectDropdown(cell, options.map(o => ({ value: o, label: o })), rawVal, save, propId);
-      return;
     case 'multi_select':
-      showMultiSelectDropdown(cell, options, rawVal, save, propId);
+    case 'status':
+      showSelectDropdown(cell, options, rawVal, save, propId);
       return;
     case 'time':
       renderTimeEditor(cell, rawVal, (val) => { save(val); if (reloadFn) reloadFn(); });

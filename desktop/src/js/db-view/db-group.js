@@ -45,7 +45,7 @@ export function toggleGroupCollapse(tabId, label) {
 
 /** Render group by selector in toolbar area */
 export function renderGroupBySelector(container, tabId, customProps, reloadFn) {
-  const groupable = customProps.filter(p => ['select', 'status', 'multi_select', 'date'].includes(p.type));
+  const groupable = customProps.filter(p => ['select', 'status', 'date'].includes(p.type));
   if (groupable.length === 0) return;
 
   const current = S.dbvGroupBy?.[tabId];

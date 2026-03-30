@@ -1233,6 +1233,26 @@ async function send() {
 
   removeChatWelcomeCard();
 
+  // ── Proactive reply: transition from proactive view to new chat ──
+  if (S.inProactiveView && S.lastProactiveText) {
+    const proactiveText = S.lastProactiveText;
+    S.inProactiveView = false;
+    S.lastProactiveText = null;
+
+    // Fade out old proactive view
+    chat.style.opacity = '0';
+    chat.style.transition = 'opacity 150ms ease';
+    await new Promise(r => setTimeout(r, 150));
+
+    // Rebuild: proactive msg as first bot message in new chat
+    chat.innerHTML = '';
+    addMsg('bot', proactiveText);
+    S.history.push({ role: 'assistant', content: `[Автономное сообщение Ханни]: ${proactiveText}` });
+
+    // Fade in
+    chat.style.opacity = '1';
+  }
+
   let userContent = text;
   if (S.attachedFile) {
     userContent += `\n\n\u{1F4CE} Файл: ${S.attachedFile.name}\n\`\`\`\n${S.attachedFile.content}\n\`\`\``;
@@ -1434,6 +1454,8 @@ async function newChat() {
   // Save current conversation before clearing
   await autoSaveConversation();
   S.currentConversationId = null;
+  S.inProactiveView = false;
+  S.lastProactiveText = null;
   S.history = [];
   chat.innerHTML = '';
   renderChatWelcomeCard();

@@ -15,6 +15,7 @@ mod commands_meta;
 mod mcp;
 mod agent;
 mod vacancy;
+mod dashboard;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -77,6 +78,7 @@ pub fn run() {
     migrate_custom_projects(&conn);
     migrate_body_records(&conn);
     migrate_job_search(&conn);
+    migrate_dashboard_widgets(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -517,6 +519,10 @@ pub fn run() {
             commands_data::get_body_records,
             commands_data::delete_body_record,
             commands_data::get_body_zones_summary,
+            // Dashboard Widgets
+            dashboard::get_dashboard_widgets,
+            dashboard::save_dashboard_widgets,
+            dashboard::seed_dashboard_defaults,
         ])
         .setup(move |app| {
             // Auto-updater

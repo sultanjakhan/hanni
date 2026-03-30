@@ -28,10 +28,33 @@ import { initMusicWidget } from './js/music-widget.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
-  loadMemoryTab, loadAbout, loadWork, loadProjects, loadDevelopment,
+  loadMemoryTab, loadAbout, loadJobs, loadProjects, loadDevelopment,
   loadHobbies, loadSports, loadHealth, loadCustomPage,
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
+
+// ── One-time migration: work → jobs tab rename ──
+(() => {
+  ['dbv_view_', 'dbv_colwidths_', 'dbv_removed_', 'dbv_hidden_fixed_', 'dbv_deleted_fixed_', 'dbv_fixed_names_', 'dbv_col_order_', 'dbv_wrap_', 'dbv_frozen_'].forEach(prefix => {
+    const old = localStorage.getItem(prefix + 'work');
+    if (old && !localStorage.getItem(prefix + 'jobs')) {
+      localStorage.setItem(prefix + 'jobs', old);
+      localStorage.removeItem(prefix + 'work');
+    }
+  });
+  try {
+    const panes = JSON.parse(localStorage.getItem('hanni_panes') || '{}');
+    if (panes.work && !panes.jobs) { panes.jobs = panes.work; delete panes.work; localStorage.setItem('hanni_panes', JSON.stringify(panes)); }
+  } catch {}
+  try {
+    const tabs = JSON.parse(localStorage.getItem('hanni_tabs') || '{}');
+    let changed = false;
+    if (tabs.open?.includes('work')) { tabs.open = tabs.open.map(t => t === 'work' ? 'jobs' : t); changed = true; }
+    if (tabs.active === 'work') { tabs.active = 'jobs'; changed = true; }
+    if (tabs.sub?.work) { tabs.sub.jobs = tabs.sub.work; delete tabs.sub.work; changed = true; }
+    if (changed) localStorage.setItem('hanni_tabs', JSON.stringify(tabs));
+  } catch {}
+})();
 
 // ══════════════════════════════════════════════
 //  Register tabLoaders (late-binding registry)
@@ -90,7 +113,7 @@ tabLoaders.stopWakeWordSSE = stopWakeWordSSE;
 tabLoaders.loadCalendar = loadCalendar;
 tabLoaders.loadFocus = loadFocus;
 tabLoaders.loadNotes = loadNotes;
-tabLoaders.loadWork = loadWork;
+tabLoaders.loadJobs = loadJobs;
 tabLoaders.loadProjects = loadProjects;
 tabLoaders.loadDevelopment = loadDevelopment;
 tabLoaders.loadHome = loadHome;

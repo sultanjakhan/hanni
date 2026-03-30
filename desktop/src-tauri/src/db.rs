@@ -956,3 +956,17 @@ pub fn migrate_job_search(conn: &rusqlite::Connection) {
         DROP TABLE IF EXISTS tasks;"
     ).ok();
 }
+
+pub fn migrate_dashboard_widgets(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS dashboard_widgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tab_id TEXT NOT NULL,
+            widget_type TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            config TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_dw_tab ON dashboard_widgets(tab_id);"
+    ).ok();
+}

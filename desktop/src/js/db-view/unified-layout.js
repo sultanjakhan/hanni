@@ -14,7 +14,7 @@ const SUB_PANES = [
 ];
 
 const TAB_LABELS = {
-  work: { name: 'Работа', icon: '💼', desc: 'Проекты и задачи' },
+  jobs: { name: 'Вакансии', icon: '💼', desc: 'Поиск работы и вакансии' },
   development: { name: 'Развитие', icon: '🚀', desc: 'Обучение и навыки' },
   home: { name: 'Дом', icon: '🏠', desc: 'Дом и хозяйство' },
   hobbies: { name: 'Хобби', icon: '🎮', desc: 'Медиа и коллекции' },
@@ -104,8 +104,12 @@ export async function renderUnifiedLayout(el, tabId, config) {
 
   switch (activePane) {
     case 'dash':
-      if (config.renderDash) await config.renderDash(paneEl);
-      else paneEl.innerHTML = renderEmptyState('Дашборд', 'Настройте скиллы и триггеры, чтобы Ханни начала заполнять данные');
+      if (config.renderDash) {
+        await config.renderDash(paneEl);
+      } else {
+        const { renderDashboard } = await import('../dashboard-builder.js');
+        await renderDashboard(paneEl, tabId);
+      }
       break;
     case 'body':
       if (config.renderBody) await config.renderBody(paneEl);
@@ -383,7 +387,7 @@ function showEditNoteModal(parentEl, tabId, config, note) {
 
 // ── Store (Memory) Pane ──
 const STORE_HINTS = {
-  work: { examples: ['Резюме', 'Портфолио', 'Навыки', 'Сопроводительное письмо'], placeholder: 'резюме, навыки...' },
+  jobs: { examples: ['Резюме', 'Портфолио', 'Навыки', 'Сопроводительное письмо'], placeholder: 'резюме, навыки...' },
   health: { examples: ['Лекарства', 'Анализы', 'Диагнозы', 'Врачи'], placeholder: 'лекарства, анализы...' },
   food: { examples: ['Что есть дома', 'Аллергии', 'Любимые продукты'], placeholder: 'продукты, аллергии...' },
   sports: { examples: ['Личные рекорды', 'Программа тренировок', 'Замеры'], placeholder: 'рекорды, замеры...' },

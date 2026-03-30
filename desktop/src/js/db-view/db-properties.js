@@ -39,7 +39,7 @@ export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallbac
 export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadFn, sortCallback, filterCallback, editType) {
   const displayName = getFixedColName(tabId, colKey, colLabel || colKey);
   const wrapped = isColumnWrapped(tabId, colKey);
-  const typeMap = { select: 'select', multi_select: 'multi_select', number: 'number', date: 'date', phone: 'phone', text: 'text' };
+  const typeMap = { select: 'select', multi_select: 'select', number: 'number', date: 'date', phone: 'phone', text: 'text' };
   const fixedType = typeMap[editType] || 'text';
   const menu = openMenu(anchorRect, buildMenuHTML({
     name: displayName, typeIcon: getTypeIcon(fixedType), typeName: getTypeName(fixedType),

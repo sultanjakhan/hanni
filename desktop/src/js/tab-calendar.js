@@ -19,7 +19,7 @@ function scheduleMatchesDate(sch, dateStr) {
   return false;
 }
 
-const SCH_CAT_ICONS = { health: '💊', sport: '🏋️', home: '🏠', practice: '🧠', challenge: '🚫', work: '💼', other: '📌' };
+const SCH_CAT_ICONS = { health: '💊', sport: '🏋️', hygiene: '🪥', home: '🏠', practice: '🧠', challenge: '🚫', work: '💼', other: '📌' };
 
 // ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
@@ -164,7 +164,7 @@ async function autoSyncCalendar(viewName) {
 
 
 // Category → color class mapping
-const CAT_COLORS = { health: 'blue', sport: 'green', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'blue' };
+const CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'blue' };
 
 async function renderCalendar(el, events, tasks) {
   tasks = tasks || [];

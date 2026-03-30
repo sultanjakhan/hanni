@@ -116,7 +116,10 @@ For architectural decisions or large features, use `architect` or the Plan agent
 - **Click/type/navigate**: `element.click()`, `dispatchEvent(new MouseEvent('dblclick'))`, `KeyboardEvent` — all via `/auto/eval`
 - **Token**: `cat ~/Library/Application\ Support/Hanni/api_token.txt`
 - **NEVER** use MCP screenshot (hangs on macOS) or tauri-automation (broken on macOS)
-- **NEVER** run 2 Hanni instances (dev + production). Kill one before starting the other
+- **NEVER** run 2 Hanni instances (dev + production). Ask the user to stop one before starting the other
+- **NEVER** activate/focus Hanni window (`osascript activate`, `open -a Hanni`, etc.) — it interrupts the user's workflow
+- **NEVER** touch production Hanni — only use `cargo tauri dev` for testing
+- If a screenshot requires window focus — **ask the user** to take it manually, do NOT activate
 - **After UI changes** — take screenshot and show the user for verification
 
 ## Architecture Quick Reference
@@ -130,10 +133,11 @@ For architectural decisions or large features, use `architect` or the Plan agent
 - **MCP hanni**: Python MCP server (`hanni-mcp/server.py`) — CRUD for SQLite (facts, events, SQL)
 - **Voice**: `voice_server.py` — background LaunchAgent for speech
 - **Build**: `UPDATER_GITHUB_TOKEN=dummy cargo check` for dev
-- **Graceful restart**: `osascript -e 'tell application "Hanni" to quit'` + `open -a Hanni`. Never `kill -9`
+- **Graceful restart**: `osascript -e 'tell application "Hanni" to quit'` + `open -a Hanni`. Never kill/pkill/killall
 
 ## Safety & Rollback
 
+- **NEVER use `kill`, `pkill`, `killall` or any process-killing commands.** This can kill system processes and crash/reboot macOS. To stop Hanni: `osascript -e 'tell application "Hanni" to quit'`. To stop cargo dev: ask the user to Ctrl+C it. No exceptions.
 - **Before risky changes** (multi-file refactor, migration, delete) — `git stash` or commit current state first
 - **If something breaks** — `git diff` to see what changed, revert the broken part, don't pile fixes on top of fixes
 - **Never force-push to main**

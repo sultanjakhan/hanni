@@ -222,7 +222,7 @@ pub fn gather_evening_context() -> Result<String, String> {
 
     // Tasks completed today
     let completed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE date(completed_at) = ?1",
+        "SELECT COUNT(*) FROM tasks WHERE date(completed_at) = ?1 AND project_id NOT IN (SELECT id FROM projects WHERE name = 'Вакансии')",
         rusqlite::params![&today], |row| row.get(0),
     ).unwrap_or(0);
     if completed > 0 {
@@ -315,7 +315,7 @@ pub fn gather_smart_triggers() -> Vec<String> {
 
     // 1. Overdue tasks (due_date < today, not completed) — from both notes and tasks tables
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT title, due_date FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done' ORDER BY due_date DESC LIMIT 3"
+        "SELECT title, due_date FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done' AND project_id NOT IN (SELECT id FROM projects WHERE name = 'Вакансии') ORDER BY due_date DESC LIMIT 3"
     ) {
         if let Ok(rows) = stmt.query_map(rusqlite::params![&today], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -443,7 +443,7 @@ pub fn gather_morning_digest() -> Result<String, String> {
 
     // Overdue tasks (from tasks table)
     let overdue_tasks: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done'",
+        "SELECT COUNT(*) FROM tasks WHERE due_date < ?1 AND due_date != '' AND completed_at IS NULL AND status != 'done' AND project_id NOT IN (SELECT id FROM projects WHERE name = 'Вакансии')",
         rusqlite::params![today], |row| row.get(0),
     ).unwrap_or(0);
     // Also from notes table
@@ -459,7 +459,7 @@ pub fn gather_morning_digest() -> Result<String, String> {
     // Today's tasks
     let mut today_tasks: Vec<String> = Vec::new();
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT title FROM tasks WHERE due_date = ?1 AND completed_at IS NULL AND status != 'done' LIMIT 5"
+        "SELECT title FROM tasks WHERE due_date = ?1 AND completed_at IS NULL AND status != 'done' AND project_id NOT IN (SELECT id FROM projects WHERE name = 'Вакансии') LIMIT 5"
     ) {
         if let Ok(rows) = stmt.query_map(rusqlite::params![today], |row| row.get::<_, String>(0)) {
             today_tasks.extend(rows.flatten());

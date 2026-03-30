@@ -239,7 +239,7 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
         let is_night = hour >= 22 || hour < 8;
         let auto_quiet = (screen_locked && is_night)  // locked at night = sleeping
             || (idle_min > 15.0 && is_night)          // 15 min idle at night
-            || idle_min > 30.0;                        // 30 min idle anytime = away
+            || idle_min > 15.0;                        // 15 min idle anytime = AFK
 
         // Emit event on state change
         if auto_quiet != prev_auto_quiet {
@@ -323,7 +323,28 @@ pub async fn proactive_loop(proactive_handle: AppHandle, proactive_state_ref: Ar
             Ok(p) => p,
             Err(_) => continue,
         };
-        let proactive_result = proactive_llm_call(&client, &context, &recent_msgs, skips, &mem_ctx, &delta, &all_triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles, &recent_styles).await;
+        // When user is AFK, strip Screen Time and app info to prevent LLM from commenting on them
+        let context_with_idle = if idle_secs >= 120.0 {
+            let mut cleaned = String::new();
+            let mut skip_section = false;
+            for line in context.lines() {
+                if line.starts_with("--- Screen Time ---") || line.starts_with("--- Active App ---") || line.starts_with("--- Browser ---") {
+                    skip_section = true;
+                    continue;
+                }
+                if skip_section && line.starts_with("---") {
+                    skip_section = false;
+                }
+                if !skip_section {
+                    cleaned.push_str(line);
+                    cleaned.push('\n');
+                }
+            }
+            format!("{}\n⚠ ПОЛЬЗОВАТЕЛЬ AFK уже {:.0} мин — НЕ трогает мышь/клавиатуру. НЕ комментируй приложения или экранное время.", cleaned.trim(), idle_min)
+        } else {
+            context.clone()
+        };
+        let proactive_result = proactive_llm_call(&client, &context_with_idle, &recent_msgs, skips, &mem_ctx, &delta, &all_triggers, &chat_snippet, engagement, &user_name, &todays_msgs, &enabled_styles, &recent_styles).await;
         drop(_proactive_permit);
 
         // P4: Re-check typing after LLM call — discard proactive if user started chatting

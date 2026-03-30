@@ -79,6 +79,16 @@
   --color-pink: #c14c8a;
   --color-pink-bg: #f5e0e9;
 
+  /* Badge dot colors (solid) */
+  --badge-blue: #2383e2;
+  --badge-green: #448361;
+  --badge-yellow: #cb8a05;
+  --badge-red: #d44c47;
+  --badge-purple: #9065b0;
+  --badge-orange: #d9730d;
+  --badge-pink: #c14c8a;
+  --badge-gray: #9b9b9b;
+
   /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
@@ -157,6 +167,16 @@
   --color-purple-bg: #332B40;
   --color-pink: #BA4A78;
   --color-pink-bg: #3D2B33;
+
+  /* Badge dot colors (solid) */
+  --badge-blue: #447ACB;
+  --badge-green: #4F9768;
+  --badge-yellow: #C19138;
+  --badge-red: #BE524B;
+  --badge-purple: #865DBB;
+  --badge-orange: #CB7B37;
+  --badge-pink: #BA4A78;
+  --badge-gray: #6B6B6B;
 
   /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
@@ -667,10 +687,10 @@ body {
 
 .badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: 10px;
+  padding: 3px 6px;
+  border-radius: 3px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.2px;
 }
 

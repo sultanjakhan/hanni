@@ -2,22 +2,21 @@
 
 import { escapeHtml } from '../utils.js';
 import { formatRecurrence } from './db-recurrence-editor.js';
+import { normalizeOptions, colorForValue } from './db-dropdowns.js';
 
-const BADGE_COLORS = ['blue', 'green', 'yellow', 'red', 'purple', 'orange', 'pink', 'gray'];
-
-function badgeColor(val, prop) {
-  let opts = []; try { opts = JSON.parse(prop.options || '[]'); } catch {}
-  const idx = opts.indexOf(val);
-  return BADGE_COLORS[idx >= 0 ? idx % BADGE_COLORS.length : 0];
+function selectBadgeColor(val, prop) {
+  let raw = [];
+  try { raw = JSON.parse(prop.options || '[]'); } catch {}
+  return colorForValue(val, normalizeOptions(raw));
 }
 
 export function formatPropValue(val, prop) {
   if (!val && val !== 0) return '<span class="text-faint">\u2014</span>';
   if (prop.type === 'checkbox') return `<span class="cell-check-round${val === 'true' ? ' checked' : ''}"></span>`;
-  if (prop.type === 'select') return `<span class="badge badge-${badgeColor(val, prop)}">${escapeHtml(val)}</span>`;
-  if (prop.type === 'multi_select') {
-    try { return JSON.parse(val).map(i => `<span class="badge badge-${badgeColor(i, prop)}">${escapeHtml(i)}</span>`).join(' '); }
-    catch { return escapeHtml(val); }
+  if (prop.type === 'select' || prop.type === 'multi_select' || prop.type === 'status') {
+    let items = [];
+    try { items = JSON.parse(val); if (!Array.isArray(items)) items = [val]; } catch { items = [val]; }
+    return items.map(i => `<span class="badge badge-${selectBadgeColor(i, prop)}">${escapeHtml(i)}</span>`).join(' ');
   }
   if (prop.type === 'url') return `<a href="${escapeHtml(val)}" target="_blank" class="cell-link">${escapeHtml(val.length > 30 ? val.substring(0, 30) + '...' : val)}</a>`;
   if (prop.type === 'email') return `<a href="mailto:${escapeHtml(val)}" class="cell-link">${escapeHtml(val)}</a>`;

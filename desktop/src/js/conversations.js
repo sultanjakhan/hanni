@@ -46,6 +46,8 @@ export async function loadConversationsList(searchQuery) {
           // Reset state — proactive view is not a real conversation
           S.currentConversationId = null;
           S.history = [];
+          S.inProactiveView = true;
+          S.lastProactiveText = proMsgs[0].text;
           // Open proactive chat view
           chat.innerHTML = '';
           const sorted = [...proMsgs].reverse();
@@ -134,6 +136,8 @@ export async function loadConversationsList(searchQuery) {
 // ── Load a single conversation ──
 
 export async function loadConversation(id) {
+  S.inProactiveView = false;
+  S.lastProactiveText = null;
   try {
     // Allow switching even during active LLM stream — save & reset busy state
     const wasBusy = S.busy;

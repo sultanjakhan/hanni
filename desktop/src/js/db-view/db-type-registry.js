@@ -11,14 +11,13 @@ export const TYPE_REGISTRY = {
   text:         { id: 'text',         icon: 'Aa', name: 'Текст',        editor: 'text',     filters: F_TEXT },
   number:       { id: 'number',       icon: '#',  name: 'Число',        editor: 'number',   filters: F_NUM,
                   validate: v => v === '' || !isNaN(parseFloat(v)) },
-  select:       { id: 'select',       icon: '◉', name: 'Выбор',        editor: 'select',   filters: F_CHOICE },
-  multi_select: { id: 'multi_select', icon: '☰', name: 'Мульти-выбор', editor: 'multi_select', filters: F_CHOICE },
+  select:       { id: 'select',       icon: '◉', name: 'Select',       editor: 'select',   filters: F_CHOICE },
   date:         { id: 'date',         icon: '◫', name: 'Дата',         editor: 'date',     filters: F_DATE },
   time:         { id: 'time',         icon: '⏰', name: 'Время',       editor: 'time',     filters: F_TIME,
                   validate: v => v === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(v) },
   checkbox:     { id: 'checkbox',     icon: '☑', name: 'Чекбокс',      editor: 'checkbox', filters: F_BOOL },
   url:          { id: 'url',          icon: '↗', name: 'Ссылка',       editor: 'text',     filters: F_TEXT },
-  status:       { id: 'status',       icon: '◔', name: 'Статус',       editor: 'select',   filters: F_CHOICE },
+  status:       { id: 'status',       icon: '◔', name: 'Status',       editor: 'select',   filters: F_CHOICE },
   email:        { id: 'email',        icon: '@',  name: 'Email',        editor: 'text',     filters: F_TEXT },
   phone:        { id: 'phone',        icon: '☎', name: 'Телефон',      editor: 'text',     filters: F_TEXT },
   progress:     { id: 'progress',     icon: '◐', name: 'Прогресс',     editor: 'progress', filters: F_NUM,
@@ -31,19 +30,22 @@ export const TYPE_REGISTRY = {
   unique_id:    { id: 'unique_id',    icon: '#',  name: 'ID',           editor: 'readonly', filters: F_NUM,  auto: true },
 };
 
+const TYPE_ALIASES = { multi_select: 'select' };
+
 /** Get type definition by id */
 export function getType(typeId) {
-  return TYPE_REGISTRY[typeId] || TYPE_REGISTRY.text;
+  const resolved = TYPE_ALIASES[typeId] || typeId;
+  return TYPE_REGISTRY[resolved] || TYPE_REGISTRY.text;
 }
 
 /** Get type icon */
 export function getTypeIcon(typeId) {
-  return (TYPE_REGISTRY[typeId] || TYPE_REGISTRY.text).icon;
+  return getType(typeId).icon;
 }
 
 /** Get type display name */
 export function getTypeName(typeId) {
-  return (TYPE_REGISTRY[typeId] || TYPE_REGISTRY.text).name;
+  return getType(typeId).name;
 }
 
 /** Get type list for UI (add property popover, type changer) */
@@ -53,5 +55,5 @@ export function getTypeList() {
 
 /** Get filter condition IDs for a type */
 export function getFilterConditions(typeId) {
-  return (TYPE_REGISTRY[typeId] || TYPE_REGISTRY.text).filters;
+  return getType(typeId).filters;
 }

@@ -130,9 +130,9 @@ export async function renderTableView(el, ctx) {
     cell.setAttribute('tabindex', '0');
     cell.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Handle ✕ click on badge inside multi_select cell
+      // Handle ✕ click on badge inside select cell
       const removeBtn = e.target.closest('.cell-badge-x');
-      if (removeBtn && cell.dataset.editType === 'multi_select') {
+      if (removeBtn && (cell.dataset.editType === 'select' || cell.dataset.editType === 'multi_select')) {
         e.preventDefault();
         const cat = removeBtn.dataset.removeCat;
         const raw = cell.dataset.rawValue || '';
