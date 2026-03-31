@@ -4,11 +4,13 @@ import { renderResume } from './jobs-resume.js';
 import { renderSources } from './jobs-sources.js';
 import { showEditModal, EDIT_ICON } from './jobs-edit.js';
 import { escapeHtml } from './utils.js';
+import { renderBlacklist, renderGenericStore } from './jobs-stores.js';
 
 const INNER_TABS = [
   { id: 'resume', label: 'Резюме' },
   { id: 'sources', label: 'Источники' },
   { id: 'positions', label: 'Позиции' },
+  { id: 'blacklist', label: 'Блэклист' },
   { id: 'cover', label: 'Письма' },
 ];
 
@@ -34,6 +36,7 @@ export async function renderJobsMemory(paneEl) {
     case 'resume': await renderResume(pane); break;
     case 'sources': await renderSources(pane); break;
     case 'positions': await renderPositions(pane); break;
+    case 'blacklist': await renderBlacklist(pane); break;
     case 'cover': await renderGenericStore(pane, 'jobs_cover', 'Письма', ['Общее письмо', 'PM позиция', 'Data позиция']); break;
   }
 }
@@ -136,34 +139,3 @@ async function seedPositions() {
   }
 }
 
-async function renderGenericStore(el, category, title, hints) {
-  let entries = [];
-  try { entries = await invoke('memory_list', { category, limit: 100 }); } catch {}
-
-  if (entries.length === 0) {
-    el.innerHTML = `<div class="jm-empty">
-      <div class="jm-empty-icon">📋</div>
-      <div class="jm-empty-title">${title} пусто</div>
-      <div class="jm-empty-hints">Примеры: ${hints.map(h => `<span class="jm-hint">${h}</span>`).join('')}</div>
-    </div>`;
-    return;
-  }
-
-  const rows = entries.map(e => `<div class="jm-store-row">
-    <div class="jm-store-key">${escapeHtml(e.key)}</div>
-    <div class="jm-store-val">${escapeHtml((e.value || '').substring(0, 200))}</div>
-    <button class="jm-edit-btn" data-edit="generic" data-cat="${category}" data-key="${escapeHtml(e.key)}">${EDIT_ICON}</button>
-  </div>`).join('');
-
-  el.innerHTML = `<div class="jm-store-list">${rows}</div>`;
-
-  el.querySelectorAll('[data-edit="generic"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const entry = entries.find(en => en.key === btn.dataset.key);
-      showEditModal(category, btn.dataset.key, {
-        key: { label: 'Ключ', value: entry?.key || '' },
-        value: { label: 'Значение', value: entry?.value || '', type: 'textarea' },
-      }, () => renderGenericStore(el, category, title, hints));
-    });
-  });
-}
