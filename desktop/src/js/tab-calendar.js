@@ -19,7 +19,7 @@ function scheduleMatchesDate(sch, dateStr) {
   return false;
 }
 
-const SCH_CAT_ICONS = { health: '💊', sport: '🏋️', hygiene: '🪥', home: '🏠', practice: '🧠', challenge: '🚫', growth: '📈', work: '💼', other: '📌' };
+const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
 
 // ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
@@ -177,6 +177,14 @@ async function renderCalendar(el, events, tasks) {
   const selDate = S.selectedCalendarDate;
   const selCompletions = selDate ? await invoke('get_schedule_completions', { date: selDate }).catch(() => []) : [];
   const completedIds = new Set(selCompletions.filter(c => c.completed).map(c => c.schedule_id));
+  // Challenges: load completions for previous day
+  let challengeDoneIds = completedIds;
+  if (selDate) {
+    const prevD = new Date(selDate + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
+    const prevDate = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}-${String(prevD.getDate()).padStart(2,'0')}`;
+    const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
+    challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
+  }
 
   const firstDay = new Date(S.calendarYear, S.calendarMonth, 1);
   const lastDay = new Date(S.calendarYear, S.calendarMonth + 1, 0);
@@ -238,9 +246,9 @@ async function renderCalendar(el, events, tasks) {
     const dateLabel = `${panelDate.getDate()} ${monthNames[panelDate.getMonth()].toLowerCase().slice(0,-1)}я · ${dayNames[panelDate.getDay()]}`;
 
     const schHtml = dayScheds.map(s => {
-      const done = completedIds.has(s.id);
-      const icon = SCH_CAT_ICONS[s.category] || '📌';
-      return `<div class="cal-panel-item" data-sch-toggle="${s.id}">
+      const done = s.category === 'challenge' ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+      const icon = SCH_CAT_ICONS[s.category] || '◽';
+      return `<div class="cal-panel-item" data-sch-toggle="${s.id}" data-sch-cat="${s.category || ''}">
         <div class="cal-panel-check${done ? ' done' : ''}">${done ? '✓' : ''}</div>
         <span class="cal-panel-time">${s.time_of_day || ''}</span>
         <span class="cal-panel-icon">${icon}</span>
@@ -319,7 +327,12 @@ async function renderCalendar(el, events, tasks) {
   el.querySelectorAll('[data-sch-toggle]').forEach(item => {
     item.addEventListener('click', async () => {
       const schId = parseInt(item.dataset.schToggle);
-      await invoke('toggle_schedule_completion', { scheduleId: schId, date: selDate }).catch(e => console.error('toggle schedule:', e));
+      let date = selDate;
+      if (item.dataset.schCat === 'challenge') {
+        const prev = new Date(selDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
+        date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
+      }
+      await invoke('toggle_schedule_completion', { scheduleId: schId, date }).catch(e => console.error('toggle schedule:', e));
       refreshCalendarInner();
     });
   });
@@ -400,8 +413,8 @@ async function renderWeekCalendar(el, events) {
     allDayHtml += `<div class="wk-allday-cell${isToday ? ' wk-col-today' : ''}">${cellHtml}</div>`;
   }
 
-  // Hour grid (6:00 - 22:00)
-  const hours = Array.from({length: 17}, (_, i) => i + 6);
+  // Hour grid (0:00 - 23:00)
+  const hours = Array.from({length: 24}, (_, i) => i);
   let gridHtml = '';
   for (const h of hours) {
     gridHtml += `<div class="wk-time">${String(h).padStart(2,'0')}:00</div>`;
@@ -536,8 +549,13 @@ async function renderDayCalendar(el, events) {
   const dayScheds = schedules.filter(s => scheduleMatchesDate(s, S.calDayDate));
   const completions = await invoke('get_schedule_completions', { date: S.calDayDate }).catch(() => []);
   const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
+  // Challenges mark completion for previous day
+  const prevD = new Date(S.calDayDate + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
+  const prevDate = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}-${String(prevD.getDate()).padStart(2,'0')}`;
+  const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
+  const challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
 
-  const hours = Array.from({length: 17}, (_, i) => i + 6); // 6:00 - 22:00
+  const hours = Array.from({length: 24}, (_, i) => i); // 0:00 - 23:00
   let timelineHtml = hours.map(h => {
     const timeStr = `${String(h).padStart(2,'0')}:`;
     const hourEvents = dayEvents.filter(e => e.time && e.time.startsWith(timeStr.slice(0,2)));
@@ -553,9 +571,9 @@ async function renderDayCalendar(el, events) {
       </div>`;
     }).join('');
     const schHtml = hourScheds.map(s => {
-      const done = completedIds.has(s.id);
-      const icon = SCH_CAT_ICONS[s.category] || '📌';
-      return `<div class="day-event" data-day-sch="${s.id}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
+      const done = s.category === 'challenge' ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+      const icon = SCH_CAT_ICONS[s.category] || '◽';
+      return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
         <span class="day-event-time">${s.time_of_day} ${icon}</span>
         <span class="day-event-title" style="${done ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
         <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
@@ -573,9 +591,9 @@ async function renderDayCalendar(el, events) {
   // All-day events (no time)
   const allDay = dayEvents.filter(e => !e.time);
   const noTimeSchHtml = noTimeScheds.map(s => {
-    const done = completedIds.has(s.id);
-    const icon = SCH_CAT_ICONS[s.category] || '📌';
-    return `<div class="day-event" data-day-sch="${s.id}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
+    const done = s.category === 'challenge' ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+    const icon = SCH_CAT_ICONS[s.category] || '◽';
+    return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
       <span class="day-event-time">${icon}</span>
       <span class="day-event-title" style="${done ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
       <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
@@ -599,14 +617,14 @@ async function renderDayCalendar(el, events) {
     <div class="day-timeline">${timelineHtml}</div>`;
 
   document.getElementById('day-prev')?.addEventListener('click', () => {
-    const dd = new Date(S.calDayDate + 'T00:00:00'); dd.setDate(dd.getDate() - 1);
-    S.calDayDate = dd.toISOString().slice(0, 10);
+    const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() - 1);
+    S.calDayDate = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
     S.calendarMonth = dd.getMonth(); S.calendarYear = dd.getFullYear();
     refreshCalendarInner();
   });
   document.getElementById('day-next')?.addEventListener('click', () => {
-    const dd = new Date(S.calDayDate + 'T00:00:00'); dd.setDate(dd.getDate() + 1);
-    S.calDayDate = dd.toISOString().slice(0, 10);
+    const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() + 1);
+    S.calDayDate = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
     S.calendarMonth = dd.getMonth(); S.calendarYear = dd.getFullYear();
     refreshCalendarInner();
   });
@@ -634,7 +652,12 @@ async function renderDayCalendar(el, events) {
     item.addEventListener('click', async (e) => {
       e.stopPropagation();
       const schId = parseInt(item.dataset.daySch);
-      await invoke('toggle_schedule_completion', { scheduleId: schId, date: S.calDayDate }).catch(err => console.error('day sch:', err));
+      let date = S.calDayDate;
+      if (item.dataset.schCat === 'challenge') {
+        const prev = new Date(S.calDayDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
+        date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
+      }
+      await invoke('toggle_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('day sch:', err));
       refreshCalendarInner();
     });
   });
