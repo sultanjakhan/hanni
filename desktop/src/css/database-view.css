@@ -2157,8 +2157,22 @@ th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
 .rec-footer {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   padding-top: 4px;
   border-top: 1px solid var(--border-light, var(--border-default));
+}
+.rec-clear {
+  all: unset;
+  padding: 7px 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.rec-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .rec-save {
   all: unset;
@@ -2187,6 +2201,8 @@ th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
 .jm-tab { padding: 6px 14px; font-size: 13px; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: color var(--transition-fast), border-color var(--transition-fast); }
 .jm-tab:hover { color: var(--text-primary); }
 .jm-tab.active { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+.jm-tabs-sub { margin-bottom: var(--space-2); }
+.jm-tabs-sub .jm-tab { font-size: 12px; padding: 4px 10px; }
 
 /* ── Resume cards ── */
 .jm-resume { display: flex; flex-direction: column; gap: var(--space-4); max-width: 700px; }
@@ -2201,10 +2217,13 @@ th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
 .jm-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); }
 .jm-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .jm-card-dates { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.jm-card-schedule { font-size: 11px; color: var(--accent); background: var(--bg-hover); padding: 1px 6px; border-radius: var(--radius-full); white-space: nowrap; margin-left: auto; }
 .jm-card-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 .jm-card-bullets { margin: var(--space-1) 0 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .jm-card-bullets li { margin-bottom: 2px; }
 .jm-card-courses { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.jm-card-link { font-size: 11px; color: var(--accent); text-decoration: none; display: block; margin-top: 2px; }
+.jm-card-link:hover { text-decoration: underline; }
 
 /* ── Contact grid ── */
 .jm-contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-2); }

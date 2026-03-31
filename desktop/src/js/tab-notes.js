@@ -427,9 +427,9 @@ function renderTimelineContent(container, notes) {
 // ── Table View (DatabaseView) ──
 async function renderTableView(container, notes) {
   const statusOptions = [
-    { value: 'note', label: 'Заметка' },
-    { value: 'task', label: 'Задача' },
-    { value: 'done', label: 'Готово' },
+    { value: 'note', label: 'Заметка', color: 'gray' },
+    { value: 'task', label: 'Задача', color: 'blue' },
+    { value: 'done', label: 'Готово', color: 'green' },
   ];
   const statusPill = (s) => {
     if (s === 'done') return '<span class="table-status-pill table-status-done">Готово</span>';

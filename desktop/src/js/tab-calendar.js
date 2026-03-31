@@ -19,7 +19,7 @@ function scheduleMatchesDate(sch, dateStr) {
   return false;
 }
 
-const SCH_CAT_ICONS = { health: '💊', sport: '🏋️', hygiene: '🪥', home: '🏠', practice: '🧠', challenge: '🚫', work: '💼', other: '📌' };
+const SCH_CAT_ICONS = { health: '💊', sport: '🏋️', hygiene: '🪥', home: '🏠', practice: '🧠', challenge: '🚫', growth: '📈', work: '💼', other: '📌' };
 
 // ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
@@ -105,7 +105,8 @@ async function refreshCalendarInner() {
 async function renderCalendarTable(el) {
   const { DatabaseView } = await import('./db-view/db-view.js');
   const events = await invoke('get_all_events').catch(() => []);
-  const catOptions = ['general', 'work', 'personal', 'health', 'education', 'social', 'travel'].map(v => ({ value: v, label: v }));
+  const calCatColors = { general: 'gray', work: 'yellow', personal: 'blue', health: 'green', education: 'purple', social: 'pink', travel: 'orange' };
+  const catOptions = ['general', 'work', 'personal', 'health', 'education', 'social', 'travel'].map(v => ({ value: v, label: v, color: calCatColors[v] || 'gray' }));
 
   el.innerHTML = '';
   const dbvEl = document.createElement('div');
@@ -127,7 +128,7 @@ async function renderCalendarTable(el) {
       { key: 'duration_minutes', label: 'Длительность', editable: true, editType: 'number',
         render: r => `<span>${r.duration_minutes ? r.duration_minutes + ' мин' : '—'}</span>` },
       { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions,
-        render: r => `<span class="badge">${escapeHtml(r.category || '—')}</span>` },
+        render: r => `<span class="badge badge-${calCatColors[r.category] || 'gray'}">${escapeHtml(r.category || '—')}</span>` },
       { key: 'description', label: 'Описание', editable: true, editType: 'text',
         render: r => `<span>${escapeHtml(r.description || '') || '—'}</span>` },
     ],
@@ -164,7 +165,7 @@ async function autoSyncCalendar(viewName) {
 
 
 // Category → color class mapping
-const CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'blue' };
+const CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', growth: 'orange', work: 'yellow', home: 'gray', other: 'blue' };
 
 async function renderCalendar(el, events, tasks) {
   tasks = tasks || [];

@@ -10,30 +10,58 @@ const TEMPLATES = [
   ]},
   { cat: 'challenge', label: 'Челлендж', items: [
     { title: 'Без мастурбации', freq: 'daily' },
-    { title: 'Без сладкого', freq: 'daily' },
-    { title: 'Без соцсетей', freq: 'daily' },
     { title: 'Без порно', freq: 'daily' },
+    { title: 'Без соцсетей', freq: 'daily' },
+    { title: 'Без YouTube Shorts/TikTok', freq: 'daily' },
+    { title: 'Без шоколада', freq: 'daily' },
+    { title: 'Без газировки', freq: 'daily' },
+    { title: 'Без выпечки', freq: 'daily' },
+    { title: 'Без фастфуда', freq: 'daily' },
+    { title: 'Без чипсов/снеков', freq: 'daily' },
+    { title: 'Без мороженого', freq: 'daily' },
+    { title: 'Без конфет', freq: 'daily' },
+    { title: 'Без печенья', freq: 'daily' },
+    { title: 'Без сахара в чай/кофе', freq: 'daily' },
+    { title: 'Без энергетиков', freq: 'daily' },
+    { title: 'Телефон < 1ч в день', freq: 'daily' },
+    { title: 'Без телефона перед сном', freq: 'daily' },
   ]},
   { cat: 'hygiene', label: 'Гигиена', items: [
     { title: 'Зубы утром', freq: 'daily' },
     { title: 'Зубы вечером', freq: 'daily' },
-    { title: 'Душ утром', freq: 'daily' },
+    { title: 'Контрастный душ', freq: 'daily' },
     { title: 'Душ вечером', freq: 'daily' },
   ]},
   { cat: 'health', label: 'Здоровье', items: [
     { title: 'Витамины', freq: 'daily' },
     { title: 'Вода (8 стаканов)', freq: 'daily' },
+    { title: 'Ел 3+ раза в день', freq: 'daily' },
+    { title: 'Готовил сам', freq: 'daily' },
   ]},
   { cat: 'sport', label: 'Спорт', items: [
     { title: 'Тренировка', freq: 'daily' },
     { title: 'Растяжка', freq: 'daily' },
     { title: 'Прогулка', freq: 'daily' },
   ]},
+  { cat: 'growth', label: 'Развитие', items: [
+    { title: 'Изучил что-то новое', freq: 'daily' },
+    { title: 'Применил новый навык', freq: 'daily' },
+    { title: 'Научил/объяснил другому', freq: 'daily' },
+    { title: 'Получил фидбек и осмыслил', freq: 'daily' },
+  ]},
+  { cat: 'home', label: 'Порядок', items: [
+    { title: 'Заправил кровать', freq: 'daily' },
+    { title: 'Уборка: кухня', freq: 'weekly' },
+    { title: 'Уборка: ванная', freq: 'weekly' },
+    { title: 'Уборка: пылесос', freq: 'weekly' },
+    { title: 'Уборка: протёр пыль', freq: 'weekly' },
+    { title: 'Уборка: мусор', freq: 'weekly' },
+  ]},
 ];
 
 const CAT_COLORS = {
   practice: 'purple', challenge: 'red', hygiene: 'pink',
-  health: 'blue', sport: 'green',
+  health: 'blue', sport: 'green', growth: 'yellow', home: 'orange',
 };
 
 export async function showScheduleTemplatesModal(reloadFn) {
@@ -42,7 +70,7 @@ export async function showScheduleTemplatesModal(reloadFn) {
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal" style="max-width:480px;">
+  overlay.innerHTML = `<div class="modal" style="max-width:480px;max-height:80vh;overflow-y:auto;">
     <div class="modal-title">Шаблоны расписания</div>
     <div class="modal-subtitle" style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">
       Выберите записи для добавления. Уже существующие отмечены серым.

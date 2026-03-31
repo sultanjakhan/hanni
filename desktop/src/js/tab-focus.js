@@ -302,7 +302,8 @@ async function renderFocusHistory(el) {
     const { DatabaseView } = await import('./db-view/db-view.js');
     const activities = await invoke('get_all_activities').catch(() => []);
     const catLabels = { work: 'Работа', study: 'Учёба', sport: 'Спорт', rest: 'Отдых', hobby: 'Хобби', other: 'Другое' };
-    const catOptions = Object.entries(catLabels).map(([v, l]) => ({ value: v, label: l }));
+    const focusCatColors = { work: 'yellow', study: 'blue', sport: 'green', rest: 'orange', hobby: 'purple', other: 'gray' };
+    const catOptions = Object.entries(catLabels).map(([v, l]) => ({ value: v, label: l, color: focusCatColors[v] || 'gray' }));
 
     const formatDuration = (min) => {
       if (!min) return '—';
@@ -325,7 +326,7 @@ async function renderFocusHistory(el) {
         { key: 'title', label: 'Название', editable: true, editType: 'text',
           render: r => `<span class="data-table-title">${escapeHtml(r.title || '')}</span>` },
         { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions,
-          render: r => `<span class="badge badge-${r.category || 'other'}">${catLabels[r.category] || r.category || '—'}</span>` },
+          render: r => `<span class="badge badge-${focusCatColors[r.category] || 'gray'}">${catLabels[r.category] || r.category || '—'}</span>` },
         { key: 'started_at', label: 'Начало',
           render: r => `<span>${formatDate(r.started_at)} ${formatTime(r.started_at)}</span>` },
         { key: 'duration_minutes', label: 'Длительность',

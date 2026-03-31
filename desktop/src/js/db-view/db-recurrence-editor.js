@@ -1,7 +1,5 @@
 // ── db-view/db-recurrence-editor.js — Recurrence picker popover ──
 
-import { escapeHtml } from '../utils.js';
-
 const UNITS = [
   { value: 'hour', label: 'час', labelN: 'часов' },
   { value: 'day', label: 'день', labelN: 'дней' },
@@ -95,10 +93,11 @@ export function showRecurrenceEditor(cell, currentVal, save) {
         <div class="rec-section-label">До даты <span class="rec-hint">(необязательно)</span></div>
         <input type="date" class="rec-until" value="${r.until || ''}">
       </div>
-      <div class="rec-footer"><button class="rec-save">Готово</button></div>`;
+      <div class="rec-footer"><button class="rec-clear">Очистить</button><button class="rec-save">Готово</button></div>`;
 
     dd.querySelector('.rec-every').addEventListener('input', (e) => {
       r.every = Math.max(1, parseInt(e.target.value) || 1);
+      markEdited();
       dd.querySelector('.rec-unit').innerHTML = UNITS.map(u =>
         `<option value="${u.value}"${u.value === r.unit ? ' selected' : ''}>${r.every > 1 ? u.labelN : u.label}</option>`
       ).join('');
@@ -106,6 +105,7 @@ export function showRecurrenceEditor(cell, currentVal, save) {
     dd.querySelector('.rec-unit').addEventListener('change', (e) => {
       r.unit = e.target.value;
       if (r.unit !== 'week') r.days = [];
+      markEdited();
       render();
     });
     dd.querySelectorAll('.rec-day-btn').forEach(btn => {
@@ -114,27 +114,56 @@ export function showRecurrenceEditor(cell, currentVal, save) {
         const idx = r.days.indexOf(d);
         if (idx >= 0) r.days.splice(idx, 1); else r.days.push(d);
         btn.classList.toggle('active');
+        markEdited();
       });
     });
-    dd.querySelector('.rec-time')?.addEventListener('change', (e) => { r.time = e.target.value; });
-    dd.querySelector('.rec-until')?.addEventListener('change', (e) => { r.until = e.target.value; });
+    dd.querySelector('.rec-time')?.addEventListener('change', (e) => { r.time = e.target.value; markEdited(); });
+    dd.querySelector('.rec-until')?.addEventListener('change', (e) => { r.until = e.target.value; markEdited(); });
+    dd.querySelector('.rec-clear').addEventListener('click', () => {
+      save('');
+      closeDd();
+    });
     dd.querySelector('.rec-save').addEventListener('click', () => {
       const val = { every: r.every, unit: r.unit };
       if (r.unit === 'week' && r.days.length > 0) val.days = r.days.sort((a, b) => a - b);
       if (r.unit !== 'hour' && r.time) val.time = r.time;
       if (r.until) val.until = r.until;
       save(JSON.stringify(val));
-      dd.remove();
-      if (closeRef.fn) { document.removeEventListener('mousedown', closeRef.fn); closeRef.fn = null; }
+      closeDd();
     });
   };
 
+  const origJson = currentVal || '';
+  let userEdited = false;
+  const markEdited = () => { userEdited = true; };
   const closeRef = { fn: null };
+  const closeDd = () => {
+    dd.remove();
+    if (closeRef.fn) { document.removeEventListener('mousedown', closeRef.fn); closeRef.fn = null; }
+    if (closeRef.esc) { document.removeEventListener('keydown', closeRef.esc); closeRef.esc = null; }
+  };
   render();
   document.body.appendChild(dd);
+  const ddRect = dd.getBoundingClientRect();
+  if (ddRect.bottom > window.innerHeight - 8) {
+    dd.style.top = Math.max(4, rect.top - ddRect.height - 4) + 'px';
+  }
+  if (ddRect.right > window.innerWidth - 8) {
+    dd.style.left = Math.max(4, window.innerWidth - ddRect.width - 8) + 'px';
+  }
+  closeRef.esc = (e) => { if (e.key === 'Escape') closeDd(); };
+  document.addEventListener('keydown', closeRef.esc);
 
   setTimeout(() => {
-    closeRef.fn = (e) => { if (!dd.contains(e.target)) { dd.remove(); document.removeEventListener('mousedown', closeRef.fn); } };
+    closeRef.fn = (e) => {
+      if (dd.contains(e.target)) return;
+      const val = { every: r.every, unit: r.unit };
+      if (r.unit === 'week' && r.days.length > 0) val.days = r.days.sort((a, b) => a - b);
+      if (r.unit !== 'hour' && r.time) val.time = r.time;
+      if (r.until) val.until = r.until;
+      if (userEdited) save(JSON.stringify(val));
+      closeDd();
+    };
     document.addEventListener('mousedown', closeRef.fn);
   }, 10);
 }

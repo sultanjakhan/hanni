@@ -45,12 +45,13 @@ async function loadHome(subTab) {
     renderTable: async (paneEl) => {
       const items = await invoke('get_home_items', { category: null, neededOnly: false }).catch(() => []);
       const categories = { cleaning: 'Уборка', hygiene: 'Гигиена', household: 'Дом', electronics: 'Техника', tools: 'Инструменты', other: 'Другое' };
-      const catOptions = Object.entries(categories).map(([k, v]) => ({ value: k, label: v }));
+      const homeCatColors = { cleaning: 'blue', hygiene: 'pink', household: 'orange', electronics: 'purple', tools: 'yellow', other: 'gray' };
+      const catOptions = Object.entries(categories).map(([k, v]) => ({ value: k, label: v, color: homeCatColors[k] || 'gray' }));
       const dbv = new DatabaseView(paneEl, {
         tabId: 'home', recordTable: 'home_items', records: items,
         fixedColumns: [
           { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
-          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions, render: r => `<span class="badge badge-gray">${categories[r.category] || r.category}</span>` },
+          { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions, render: r => `<span class="badge badge-${homeCatColors[r.category] || 'gray'}">${categories[r.category] || r.category}</span>` },
           { key: 'quantity', label: 'Кол-во', editable: true, editType: 'number', render: r => r.quantity != null ? `${r.quantity} ${r.unit || ''}` : '—' },
           { key: 'location', label: 'Место', editable: true, editType: 'text', render: r => r.location || '—' },
           { key: 'needed', label: 'Статус', render: r => r.needed ? '<span class="badge badge-red">Нужно</span>' : '<span class="badge badge-green">Есть</span>' },
@@ -254,9 +255,12 @@ async function loadFoodLog(el) {
       fixedColumns: [
         { key: 'name', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
         { key: 'meal_type', label: 'Приём', editable: true, editType: 'select', editOptions: [
-          { value: 'breakfast', label: 'Завтрак' }, { value: 'lunch', label: 'Обед' },
-          { value: 'dinner', label: 'Ужин' }, { value: 'snack', label: 'Перекус' },
-        ], render: r => `<span class="badge badge-gray">${mealLabels[r.meal_type] || r.meal_type}</span>` },
+          { value: 'breakfast', label: 'Завтрак', color: 'yellow' }, { value: 'lunch', label: 'Обед', color: 'green' },
+          { value: 'dinner', label: 'Ужин', color: 'purple' }, { value: 'snack', label: 'Перекус', color: 'orange' },
+        ], render: r => {
+          const mc = { breakfast: 'yellow', lunch: 'green', dinner: 'purple', snack: 'orange' };
+          return `<span class="badge badge-${mc[r.meal_type] || 'gray'}">${mealLabels[r.meal_type] || r.meal_type}</span>`;
+        }},
         { key: 'calories', label: 'Калории', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.calories || 0} kcal</span>` },
         { key: 'protein', label: 'Белок', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.protein || '—'}g</span>` },
         { key: 'carbs', label: 'Углев.', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.carbs || '—'}g</span>` },
@@ -367,7 +371,7 @@ async function loadTransactions(el) {
       { key: 'description', label: 'Description', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.description || r.category)}</span>` },
       { key: 'category', label: 'Category', editable: true, editType: 'text', render: r => `<span class="badge badge-gray">${escapeHtml(r.category)}</span>` },
       { key: 'tx_type', label: 'Type', editable: true, editType: 'select', editOptions: [
-        { value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' },
+        { value: 'expense', label: 'Expense', color: 'purple' }, { value: 'income', label: 'Income', color: 'green' },
       ], render: r => `<span class="badge ${r.tx_type === 'income' ? 'badge-green' : 'badge-purple'}">${r.tx_type === 'income' ? 'Income' : 'Expense'}</span>` },
       { key: 'amount', label: 'Amount', editable: true, editType: 'number', render: r => {
         const isIncome = r.tx_type === 'income';
@@ -952,7 +956,8 @@ async function loadJobs() {
 function renderVacanciesTable(el, vacancies) {
   const stageLabels = { found: 'Найдена', saved: 'Сохранена', applied: 'Отклик', responded: 'Ответ', interview: 'Интервью', offer: 'Оффер', accepted: 'Принято', rejected: 'Отказ', ignored: 'Пропущена' };
   const stageColors = { found: 'badge-gray', saved: 'badge-blue', applied: 'badge-yellow', responded: 'badge-purple', interview: 'badge-green', offer: 'badge-green', accepted: 'badge-green', rejected: 'badge-red', ignored: 'badge-gray' };
-  const stageOptions = Object.entries(stageLabels).map(([k, v]) => ({ value: k, label: v }));
+  const stageColorMap = { found: 'gray', saved: 'blue', applied: 'yellow', responded: 'purple', interview: 'green', offer: 'green', accepted: 'green', rejected: 'red', ignored: 'gray' };
+  const stageOptions = Object.entries(stageLabels).map(([k, v]) => ({ value: k, label: v, color: stageColorMap[k] || 'gray' }));
 
   const dbv = new DatabaseView(el, {
     tabId: 'jobs', recordTable: 'job_vacancies', records: vacancies,
@@ -1048,11 +1053,14 @@ function renderDevelopment(el, items) {
   const fixedColumns = [
     { key: 'title', label: 'Title', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
     { key: 'type', label: 'Type', editable: true, editType: 'select', editOptions: [
-      { value: 'course', label: 'Курс' }, { value: 'book', label: 'Книга' },
-      { value: 'skill', label: 'Навык' }, { value: 'article', label: 'Статья' },
-    ], render: r => `<span class="badge badge-purple">${filterLabels[r.type] || r.type}</span>` },
+      { value: 'course', label: 'Курс', color: 'blue' }, { value: 'book', label: 'Книга', color: 'green' },
+      { value: 'skill', label: 'Навык', color: 'orange' }, { value: 'article', label: 'Статья', color: 'purple' },
+    ], render: r => {
+      const devTypeColors = { course: 'blue', book: 'green', skill: 'orange', article: 'purple' };
+      return `<span class="badge badge-${devTypeColors[r.type] || 'purple'}">${filterLabels[r.type] || r.type}</span>`;
+    }},
     { key: 'status', label: 'Status', editable: true, editType: 'select', editOptions: [
-      { value: 'planned', label: 'Запланировано' }, { value: 'in_progress', label: 'В процессе' }, { value: 'completed', label: 'Завершено' },
+      { value: 'planned', label: 'Запланировано', color: 'gray' }, { value: 'in_progress', label: 'В процессе', color: 'blue' }, { value: 'completed', label: 'Завершено', color: 'green' },
     ], render: r => `<span class="badge ${statusColors[r.status] || 'badge-gray'}">${statusLabels[r.status] || r.status}</span>` },
     { key: 'progress', label: 'Progress', editable: true, editType: 'number', render: r => `<div class="dev-progress" style="width:80px;display:inline-block;"><div class="dev-progress-bar" style="width:${r.progress || 0}%"></div></div> <span style="font-size:11px;color:var(--text-faint);">${r.progress || 0}%</span>` },
   ];
@@ -1208,9 +1216,9 @@ async function loadMediaList(el, mediaType) {
     const fixedColumns = [
       { key: 'title', label: 'Title', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
       { key: 'status', label: 'Status', editable: true, editType: 'select', editOptions: [
-        { value: 'planned', label: 'Planned' }, { value: 'in_progress', label: 'In Progress' },
-        { value: 'completed', label: 'Completed' }, { value: 'on_hold', label: 'On Hold' }, { value: 'dropped', label: 'Dropped' },
-      ], render: r => `<span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>` },
+        { value: 'planned', label: 'Planned', color: 'gray' }, { value: 'in_progress', label: 'In Progress', color: 'blue' },
+        { value: 'completed', label: 'Completed', color: 'green' }, { value: 'on_hold', label: 'On Hold', color: 'yellow' }, { value: 'dropped', label: 'Dropped', color: 'red' },
+      ], render: r => `<span class="badge ${r.status === 'completed' ? 'badge-green' : r.status === 'in_progress' ? 'badge-blue' : r.status === 'on_hold' ? 'badge-yellow' : r.status === 'dropped' ? 'badge-red' : 'badge-gray'}">${STATUS_LABELS[r.status] || r.status}</span>` },
       { key: 'rating', label: 'Rating', editable: true, editType: 'number', render: r => {
         const stars = r.rating ? '\u2605'.repeat(Math.round(r.rating / 2)) + '\u2606'.repeat(5 - Math.round(r.rating / 2)) : '\u2014';
         return `<span style="color:var(--text-secondary);font-size:12px;">${stars}</span>`;
@@ -1414,9 +1422,12 @@ function renderSports(el, workouts, stats) {
       { key: 'date', label: 'Дата', render: r => `<span style="font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;">${r.date || '—'}</span>` },
       { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title || typeLabels[r.type] || r.type)}</span>` },
       { key: 'type', label: 'Тип', editable: true, editType: 'select', editOptions: [
-        { value: 'gym', label: 'Зал' }, { value: 'cardio', label: 'Кардио' }, { value: 'yoga', label: 'Йога' },
-        { value: 'swimming', label: 'Плавание' }, { value: 'martial_arts', label: 'Единоборства' }, { value: 'other', label: 'Другое' },
-      ], render: r => `<span class="badge badge-purple">${typeLabels[r.type] || r.type}</span>` },
+        { value: 'gym', label: 'Зал', color: 'blue' }, { value: 'cardio', label: 'Кардио', color: 'red' }, { value: 'yoga', label: 'Йога', color: 'green' },
+        { value: 'swimming', label: 'Плавание', color: 'purple' }, { value: 'martial_arts', label: 'Единоборства', color: 'orange' }, { value: 'other', label: 'Другое', color: 'gray' },
+      ], render: r => {
+        const sportColors = { gym: 'blue', cardio: 'red', yoga: 'green', swimming: 'purple', martial_arts: 'orange', other: 'gray' };
+        return `<span class="badge badge-${sportColors[r.type] || 'purple'}">${typeLabels[r.type] || r.type}</span>`;
+      }},
       { key: 'duration_minutes', label: 'Время', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.duration_minutes || 0} мин</span>` },
       { key: 'calories', label: 'Калории', editable: true, editType: 'number', render: r => `<span style="font-size:12px;color:var(--text-muted);">${r.calories || '—'}</span>` },
     ],
@@ -1525,9 +1536,12 @@ function renderHealth(el, today, habits) {
       { key: 'done', label: '', render: r => `<div class="habit-check${r.completed ? ' checked' : ''}" style="cursor:pointer;" data-hid="${r.id}">${r.completed ? '&#10003;' : ''}</div>` },
       { key: 'name', label: 'Привычка', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
       { key: 'frequency', label: 'Частота', editable: true, editType: 'select', editOptions: [
-        { value: 'daily', label: 'Ежедневно' }, { value: 'weekly', label: 'Еженедельно' },
-        { value: 'weekdays', label: 'Будни' }, { value: 'weekends', label: 'Выходные' },
-      ], render: r => `<span class="badge badge-gray">${r.frequency || 'daily'}</span>` },
+        { value: 'daily', label: 'Ежедневно', color: 'blue' }, { value: 'weekly', label: 'Еженедельно', color: 'green' },
+        { value: 'weekdays', label: 'Будни', color: 'yellow' }, { value: 'weekends', label: 'Выходные', color: 'purple' },
+      ], render: r => {
+        const freqColors = { daily: 'blue', weekly: 'green', weekdays: 'yellow', weekends: 'purple' };
+        return `<span class="badge badge-${freqColors[r.frequency] || 'gray'}">${r.frequency || 'daily'}</span>`;
+      }},
       { key: 'streak', label: 'Серия', render: r => r.streak > 0 ? `<span class="badge badge-green">${r.streak} дн.</span>` : '<span style="color:var(--text-faint);font-size:12px;">—</span>' },
     ],
     idField: 'id',
@@ -1701,8 +1715,8 @@ async function loadCustomProject(tabId, subTab, el, reg) {
 
 // ── Schedule tab ──
 
-const SCHEDULE_CATEGORIES = { health: 'Здоровье', sport: 'Спорт', hygiene: 'Гигиена', home: 'Дом', practice: 'Практика', challenge: 'Челлендж', work: 'Работа', other: 'Другое' };
-const SCH_CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', work: 'yellow', home: 'orange', other: 'gray' };
+const SCHEDULE_CATEGORIES = { health: 'Здоровье', sport: 'Спорт', hygiene: 'Гигиена', home: 'Дом', practice: 'Практика', challenge: 'Челлендж', growth: 'Развитие', work: 'Работа', other: 'Другое' };
+const SCH_CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', growth: 'yellow', work: 'orange', home: 'orange', other: 'gray' };
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
@@ -1725,10 +1739,14 @@ async function loadSchedule(subTab) {
     subtitle: 'Расписание и повторяющиеся события',
     icon: '📅',
     renderTracking: async (paneEl) => {
+      if (!S._schedTrackMode) S._schedTrackMode = 'week';
+      const mode = S._schedTrackMode;
+      const numDays = mode === 'month' ? 30 : 7;
+
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
       const active = schedules.filter(s => s.is_active);
       const days = [];
-      for (let i = 6; i >= 0; i--) {
+      for (let i = numDays - 1; i >= 0; i--) {
         const d = new Date(); d.setDate(d.getDate() - i);
         days.push(d.toISOString().slice(0, 10));
       }
@@ -1737,22 +1755,52 @@ async function loadSchedule(subTab) {
         const comps = await invoke('get_schedule_completions', { date }).catch(() => []);
         for (const c of comps) { if (c.completed) { if (!compMap[c.schedule_id]) compMap[c.schedule_id] = new Set(); compMap[c.schedule_id].add(date); } }
       }
-      const dayLabels = days.map(d => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('ru', { weekday: 'short', day: 'numeric' }); });
-      const headerCols = dayLabels.map(l => `<th style="text-align:center;font-size:12px;min-width:50px;">${l}</th>`).join('');
+      const dayFmt = mode === 'month' ? { day: 'numeric' } : { weekday: 'short', day: 'numeric' };
+      const dayLabels = days.map(d => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('ru', dayFmt); });
+      const thWidth = mode === 'month' ? 'min-width:28px;max-width:32px;' : 'min-width:50px;';
+      const headerCols = dayLabels.map(l => `<th style="text-align:center;font-size:${mode === 'month' ? '10' : '12'}px;${thWidth}">${l}</th>`).join('');
       const rows = active.map(s => {
         const cells = days.map(d => {
           const done = compMap[s.id]?.has(d);
-          return `<td style="text-align:center;">${done ? '<span style="color:var(--color-green);font-size:16px;">✓</span>' : '<span style="color:var(--text-faint);">·</span>'}</td>`;
+          const sz = mode === 'month' ? '12' : '16';
+          return `<td style="text-align:center;">${done ? `<span style="color:var(--color-green);font-size:${sz}px;">✓</span>` : '<span style="color:var(--text-faint);">·</span>'}</td>`;
         }).join('');
         const streak = days.reduce((acc, d) => compMap[s.id]?.has(d) ? acc + 1 : 0, 0);
-        return `<tr><td style="font-size:13px;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
+        return `<tr data-id="${s.id}"><td class="col-check"><input type="checkbox"></td><td style="font-size:13px;white-space:nowrap;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
       }).join('');
+
+      // Toggle buttons (neutral style matching toolbar)
+      const mkBtn = (m, label) => {
+        const isActive = mode === m;
+        const style = isActive
+          ? 'background:var(--bg-hover);color:var(--text-primary);border-color:var(--border-subtle);'
+          : 'color:var(--text-muted);';
+        return `<button class="dbv-quick-filter-btn" style="${style}" data-track-mode="${m}">${label}</button>`;
+      };
+      const toolbar = `<div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:8px;">
+        <div class="dbv-quick-filter-group">${mkBtn('week', 'Н')}${mkBtn('month', 'М')}</div>
+      </div>`;
+
       paneEl.innerHTML = active.length === 0
         ? '<div style="text-align:center;color:var(--text-faint);padding:40px;">Нет активных расписаний</div>'
-        : `<div style="overflow-x:auto;"><table class="data-table" style="font-size:13px;">
-            <thead><tr><th style="min-width:150px;">Практика</th>${headerCols}<th style="text-align:center;font-size:12px;">Streak</th></tr></thead>
+        : `${toolbar}<div style="overflow-x:auto;"><table class="data-table" style="font-size:13px;">
+            <thead><tr><th class="col-check-header"><input type="checkbox"></th><th style="min-width:150px;">Практика</th>${headerCols}<th style="text-align:center;font-size:12px;">Streak</th></tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`;
+      paneEl.querySelectorAll('[data-track-mode]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          S._schedTrackMode = btn.dataset.trackMode;
+          loadSchedule('tracking');
+        });
+      });
+      const { bindCheckboxes, renderBulkBar } = await import('./db-view/db-select.js');
+      const trackCtx = {
+        tabId: 'schedule_tracking', idField: 'id', records: active,
+        onDelete: async (id) => { await invoke('delete_schedule', { id }); },
+        reloadFn: () => loadSchedule('tracking'),
+      };
+      bindCheckboxes(paneEl, 'schedule_tracking', active, 'id', trackCtx);
+      renderBulkBar(paneEl, 'schedule_tracking', trackCtx);
     },
     renderTable: async (paneEl) => {
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
@@ -1785,11 +1833,9 @@ async function loadSchedule(subTab) {
             if (!json) return '<span class="text-faint">—</span>';
             return `<span class="cell-recurrence">${escapeHtml(formatRecurrence(json))}</span>`;
           }},
-          { key: 'is_active', label: 'Статус', width: 60, render: r => `<div class="col-menu-toggle${r.is_active ? ' on' : ''}" data-toggle-id="${r.id}" style="cursor:pointer"></div>` },
-          { key: 'created_at', label: 'Создано', editType: 'created_time', render: r => {
-            if (!r.created_at) return '<span class="text-faint">—</span>';
-            const d = new Date(r.created_at);
-            return isNaN(d) ? '' : `<span class="cell-date text-faint">${d.toLocaleDateString('ru-RU')} ${d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>`;
+          { key: 'details', label: 'Детали', editable: true, editType: 'text', render: r => {
+            if (!r.details) return '<span class="text-faint">—</span>';
+            return `<span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(r.details)}</span>`;
           }},
         ],
         idField: 'id',
@@ -1804,16 +1850,18 @@ async function loadSchedule(subTab) {
             try {
               const r = JSON.parse(value);
               const params = { id: recordId };
-              if (r.unit === 'day') { params.frequency = 'daily'; }
+              if (r.unit === 'day' && (r.every || 1) === 1) { params.frequency = 'daily'; }
+              else if (r.unit === 'day') { params.frequency = `every_${r.every}d`; }
               else if (r.unit === 'week' && r.days?.length > 0) { params.frequency = 'custom'; params.frequencyDays = r.days.join(','); }
               else if (r.unit === 'week') { params.frequency = 'weekly'; }
               else if (r.unit === 'hour') { params.frequency = `every_${r.every}h`; }
-              else if (r.unit === 'month') { params.frequency = 'monthly'; }
+              else if (r.unit === 'month' && (r.every || 1) === 1) { params.frequency = 'monthly'; }
+              else if (r.unit === 'month') { params.frequency = `every_${r.every}m`; }
               if (r.time) params.timeOfDay = r.time;
               await invoke('update_schedule', params);
             } catch {}
           } else {
-            const keyMap = { title: 'title', category: 'category' };
+            const keyMap = { title: 'title', category: 'category', details: 'details' };
             const params = { id: recordId };
             const paramKey = keyMap[key];
             if (paramKey) params[paramKey] = value;
