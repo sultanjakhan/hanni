@@ -157,6 +157,14 @@ async fn execute_tool_call(app: &AppHandle, name: &str, arguments_raw: &str, con
             let conn = db.conn();
             let company = args.get("company").and_then(|v| v.as_str()).unwrap_or("");
             let position = args.get("position").and_then(|v| v.as_str()).unwrap_or("");
+            // Check blacklist
+            let company_lower = company.to_lowercase();
+            let bl: Vec<String> = conn.prepare("SELECT value FROM facts WHERE category='jobs_blacklist'")
+                .and_then(|mut s| { let r: Vec<String> = s.query_map([], |row| row.get(0))?.flatten().collect(); Ok(r) })
+                .unwrap_or_default();
+            if bl.iter().any(|b| company_lower.contains(&b.to_lowercase())) {
+                return format!("Skipped (blacklisted): {}", company);
+            }
             let salary = args.get("salary").and_then(|v| v.as_str()).unwrap_or("");
             let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
             let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");

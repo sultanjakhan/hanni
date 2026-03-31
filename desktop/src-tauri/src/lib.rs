@@ -512,6 +512,7 @@ pub fn run() {
             mcp::mcp_list_tools,
             // Vacancy
             vacancy::vacancy_search_now,
+            vacancy::vacancy_search_source,
             // Automation API
             commands_meta::auto_eval_callback,
             // Body Records (3D Body Tab)
