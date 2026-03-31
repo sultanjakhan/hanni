@@ -171,8 +171,8 @@ async fn execute_tool_call(app: &AppHandle, name: &str, arguments_raw: &str, con
             let notes = args.get("notes").and_then(|v| v.as_str()).unwrap_or("");
             let now = chrono::Local::now().to_rfc3339();
             match conn.execute(
-                "INSERT INTO job_vacancies (company, position, salary, url, stage, notes, found_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'found', ?5, ?6, ?6)",
-                rusqlite::params![company, position, salary, url, format!("{}{}", if source.is_empty() { "" } else { source }, if notes.is_empty() { String::new() } else { format!("\n{}", notes) }), now],
+                "INSERT INTO job_vacancies (company, position, salary, url, stage, source, notes, found_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'found', ?5, ?6, ?7, ?7)",
+                rusqlite::params![company, position, salary, url, source, notes, now],
             ) {
                 Ok(_) => format!("Vacancy saved: {} — {}", company, position),
                 Err(e) => format!("DB error: {}", e),

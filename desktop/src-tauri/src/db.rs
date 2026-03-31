@@ -955,6 +955,10 @@ pub fn migrate_job_search(conn: &rusqlite::Connection) {
         DROP TABLE IF EXISTS projects;
         DROP TABLE IF EXISTS tasks;"
     ).ok();
+    // New columns for simplified vacancy table
+    conn.execute("ALTER TABLE job_vacancies ADD COLUMN contact TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE job_vacancies ADD COLUMN applied_at TEXT", []).ok();
+    conn.execute("ALTER TABLE job_vacancies ADD COLUMN source TEXT NOT NULL DEFAULT ''", []).ok();
 }
 
 pub fn migrate_dashboard_widgets(conn: &rusqlite::Connection) {

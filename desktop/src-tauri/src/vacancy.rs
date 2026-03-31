@@ -170,11 +170,11 @@ async fn search_hh_api(app: &AppHandle) -> Result<usize, String> {
             let req = item["snippet"]["requirement"].as_str().unwrap_or("");
             let resp_text = item["snippet"]["responsibility"].as_str().unwrap_or("");
             let city = item["area"]["name"].as_str().unwrap_or("");
-            let notes = format!("hh.kz | {}\nТребования: {}\nОбязанности: {}", city, req, resp_text);
+            let notes = format!("{}\nТребования: {}\nОбязанности: {}", city, req, resp_text);
             let now = chrono::Local::now().to_rfc3339();
 
             match conn.execute(
-                "INSERT INTO job_vacancies (company, position, salary, url, stage, notes, found_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'found', ?5, ?6, ?6)",
+                "INSERT INTO job_vacancies (company, position, salary, url, stage, source, notes, found_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'found', 'hh.kz', ?5, ?6, ?6)",
                 rusqlite::params![company, position, salary_full, vacancy_url, notes, now],
             ) {
                 Ok(_) => { saved += 1; eprintln!("[vacancy/hh] Saved: {} — {}", company, position); }

@@ -962,23 +962,23 @@ function renderVacanciesTable(el, vacancies) {
   const dbv = new DatabaseView(el, {
     tabId: 'jobs', recordTable: 'job_vacancies', records: vacancies,
     fixedColumns: [
-      { key: 'company', label: 'Компания', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.company || '')}</span>` },
-      { key: 'position', label: 'Позиция', editable: true, editType: 'text', render: r => escapeHtml(r.position || '') },
+      { key: 'position', label: 'Позиция', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.company && r.position ? `${r.company} — ${r.position}` : r.position || r.company || '')}</span>` },
       { key: 'stage', label: 'Этап', editable: true, editType: 'select', editOptions: stageOptions, render: r => `<span class="badge ${stageColors[r.stage] || 'badge-gray'}">${stageLabels[r.stage] || r.stage}</span>` },
-      { key: 'salary', label: 'Зарплата', editable: true, editType: 'text', render: r => r.salary || '—' },
-      { key: 'source_name', label: 'Источник', render: r => r.source_name ? `<span class="badge badge-blue">${escapeHtml(r.source_name)}</span>` : '—' },
-      { key: 'url', label: 'Ссылка', render: r => r.url ? `<a href="${r.url}" target="_blank" class="text-link">Открыть</a>` : '—' },
+      { key: 'url', label: 'Ссылка', editable: true, editType: 'text', render: r => r.url ? `<a href="${r.url}" target="_blank" class="text-link">Открыть</a>` : '—' },
+      { key: 'contact', label: 'Контакт', editable: true, editType: 'text', render: r => escapeHtml(r.contact || '') || '—' },
+      { key: 'applied_at', label: 'Подача', editable: true, editType: 'date', render: r => r.applied_at ? r.applied_at.slice(0, 10) : '—' },
+      { key: 'source', label: 'Источник', editable: true, editType: 'text', render: r => r.source ? `<span class="badge badge-blue">${escapeHtml(r.source)}</span>` : '—' },
     ],
     availableViews: ['table', 'kanban', 'list'],
     defaultView: 'table',
     addButton: '+ Вакансия',
     onQuickAdd: async () => {
-      await invoke('add_job_vacancy', { company: '', position: '', sourceId: null, roleId: null, salary: '', url: '', stage: 'found', notes: '' });
+      await invoke('add_job_vacancy', { company: '', position: '', url: '', stage: 'found', contact: null, source: null });
       loadJobs();
     },
     onCellEdit: async (recordId, key, value, skipReload) => {
-      const params = { id: recordId, company: null, position: null, sourceId: null, roleId: null, salary: null, url: null, stage: null, notes: null };
-      params[key] = value;
+      const params = { id: recordId, company: null, position: null, url: null, stage: null, contact: null, appliedAt: null, source: null };
+      params[key === 'applied_at' ? 'appliedAt' : key] = value;
       await invoke('update_job_vacancy', params);
       if (!skipReload) loadJobs();
     },
@@ -988,14 +988,14 @@ function renderVacanciesTable(el, vacancies) {
       groupByField: 'stage',
       columns: [
         { key: 'found', label: 'Найдена', icon: '🔍' },
-        { key: 'saved', label: 'Сохранена', icon: '📌' },
         { key: 'applied', label: 'Отклик', icon: '📤' },
         { key: 'interview', label: 'Интервью', icon: '🎤' },
         { key: 'offer', label: 'Оффер', icon: '🎉' },
+        { key: 'rejected', label: 'Отказ', icon: '❌' },
       ],
     },
     onDrop: async (recordId, field, newValue) => {
-      await invoke('update_job_vacancy', { id: parseInt(recordId), stage: newValue, company: null, position: null, sourceId: null, roleId: null, salary: null, url: null, notes: null });
+      await invoke('update_job_vacancy', { id: parseInt(recordId), stage: newValue, company: null, position: null, url: null, contact: null, appliedAt: null, source: null });
       loadJobs();
     },
   });
