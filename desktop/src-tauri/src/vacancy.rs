@@ -118,7 +118,7 @@ async fn search_hh_api(app: &AppHandle) -> Result<usize, String> {
         // Wrap in quotes for exact phrase match
         let query = format!("\"{}\"", role);
         let mut url = format!(
-            "https://api.hh.kz/vacancies?text={}&per_page=20&order_by=publication_time&experience=noExperience&experience=between1And3&professional_role=73&professional_role=107",
+            "https://api.hh.kz/vacancies?text={}&per_page=20&order_by=publication_time&experience=noExperience&experience=between1And3&professional_role=73&professional_role=107&industry=7&industry=9&industry=11&industry=41&industry=43&industry=44",
             encode_uri(&query),
         );
         if let Some(a) = area { url.push_str(&format!("&area={}", a)); }
