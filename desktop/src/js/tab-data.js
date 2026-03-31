@@ -1766,7 +1766,7 @@ async function loadSchedule(subTab) {
           return `<td style="text-align:center;">${done ? `<span style="color:var(--color-green);font-size:${sz}px;">✓</span>` : '<span style="color:var(--text-faint);">·</span>'}</td>`;
         }).join('');
         const streak = days.reduce((acc, d) => compMap[s.id]?.has(d) ? acc + 1 : 0, 0);
-        return `<tr data-id="${s.id}"><td class="col-check"><input type="checkbox"></td><td style="font-size:13px;white-space:nowrap;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
+        return `<tr class="data-table-row" data-id="${s.id}"><td class="col-check"><input type="checkbox"></td><td style="font-size:13px;white-space:nowrap;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
       }).join('');
 
       // Toggle buttons (neutral style matching toolbar)
@@ -1783,7 +1783,7 @@ async function loadSchedule(subTab) {
 
       paneEl.innerHTML = active.length === 0
         ? '<div style="text-align:center;color:var(--text-faint);padding:40px;">Нет активных расписаний</div>'
-        : `${toolbar}<div style="overflow-x:auto;"><table class="data-table" style="font-size:13px;">
+        : `${toolbar}<div class="database-view" style="overflow-x:auto;"><table class="data-table" style="font-size:13px;">
             <thead><tr><th class="col-check-header"><input type="checkbox"></th><th style="min-width:150px;">Практика</th>${headerCols}<th style="text-align:center;font-size:12px;">Streak</th></tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`;

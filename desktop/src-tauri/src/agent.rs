@@ -6,7 +6,7 @@ use crate::mcp::McpState;
 use std::collections::HashMap;
 use tauri::{AppHandle, Manager};
 
-const MAX_AGENT_ITERATIONS: usize = 8;
+const MAX_AGENT_ITERATIONS: usize = 25;
 
 /// Context overrides for tool execution (e.g. force project_id for vacancy tasks).
 pub type AgentContext = HashMap<String, serde_json::Value>;
@@ -96,8 +96,8 @@ pub async fn run_agent_task(
         // Execute each tool call
         for tc in &tool_calls {
             let result = execute_tool_call(app, &tc.function.name, &tc.function.arguments, &context).await;
-            eprintln!("[agent] tool {} → {}",
-                tc.function.name, &result[..result.len().min(150)]);
+            let preview: String = result.chars().take(150).collect();
+            eprintln!("[agent] tool {} → {}", tc.function.name, preview);
 
             messages.push(ChatMessage {
                 role: "tool".into(),
@@ -149,6 +149,24 @@ async fn execute_tool_call(app: &AppHandle, name: &str, arguments_raw: &str, con
                 rusqlite::params![project_id, title, description, priority, due_date, now],
             ) {
                 Ok(_) => format!("Task created: {}", title),
+                Err(e) => format!("DB error: {}", e),
+            }
+        }
+        "save_vacancy" => {
+            let db = app.state::<HanniDb>();
+            let conn = db.conn();
+            let company = args.get("company").and_then(|v| v.as_str()).unwrap_or("");
+            let position = args.get("position").and_then(|v| v.as_str()).unwrap_or("");
+            let salary = args.get("salary").and_then(|v| v.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
+            let notes = args.get("notes").and_then(|v| v.as_str()).unwrap_or("");
+            let now = chrono::Local::now().to_rfc3339();
+            match conn.execute(
+                "INSERT INTO job_vacancies (company, position, salary, url, stage, notes, found_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'found', ?5, ?6, ?6)",
+                rusqlite::params![company, position, salary, url, format!("{}{}", if source.is_empty() { "" } else { source }, if notes.is_empty() { String::new() } else { format!("\n{}", notes) }), now],
+            ) {
+                Ok(_) => format!("Vacancy saved: {} — {}", company, position),
                 Err(e) => format!("DB error: {}", e),
             }
         }
