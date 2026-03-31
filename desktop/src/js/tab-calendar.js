@@ -246,9 +246,9 @@ async function renderCalendar(el, events, tasks) {
     const dateLabel = `${panelDate.getDate()} ${monthNames[panelDate.getMonth()].toLowerCase().slice(0,-1)}я · ${dayNames[panelDate.getDay()]}`;
 
     const schHtml = dayScheds.map(s => {
-      const done = s.category === 'challenge' ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+      const done = s.marks_previous_day ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
       const icon = SCH_CAT_ICONS[s.category] || '◽';
-      return `<div class="cal-panel-item" data-sch-toggle="${s.id}" data-sch-cat="${s.category || ''}">
+      return `<div class="cal-panel-item" data-sch-toggle="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}">
         <div class="cal-panel-check${done ? ' done' : ''}">${done ? '✓' : ''}</div>
         <span class="cal-panel-time">${s.time_of_day || ''}</span>
         <span class="cal-panel-icon">${icon}</span>
@@ -328,7 +328,7 @@ async function renderCalendar(el, events, tasks) {
     item.addEventListener('click', async () => {
       const schId = parseInt(item.dataset.schToggle);
       let date = selDate;
-      if (item.dataset.schCat === 'challenge') {
+      if (item.dataset.schPrev === '1') {
         const prev = new Date(selDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
         date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
       }
@@ -571,9 +571,9 @@ async function renderDayCalendar(el, events) {
       </div>`;
     }).join('');
     const schHtml = hourScheds.map(s => {
-      const done = s.category === 'challenge' ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+      const done = s.marks_previous_day ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
       const icon = SCH_CAT_ICONS[s.category] || '◽';
-      return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
+      return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
         <span class="day-event-time">${s.time_of_day} ${icon}</span>
         <span class="day-event-title" style="${done ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
         <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
@@ -591,9 +591,9 @@ async function renderDayCalendar(el, events) {
   // All-day events (no time)
   const allDay = dayEvents.filter(e => !e.time);
   const noTimeSchHtml = noTimeScheds.map(s => {
-    const done = s.category === 'challenge' ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+    const done = s.marks_previous_day ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
     const icon = SCH_CAT_ICONS[s.category] || '◽';
-    return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
+    return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
       <span class="day-event-time">${icon}</span>
       <span class="day-event-title" style="${done ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
       <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
@@ -653,7 +653,7 @@ async function renderDayCalendar(el, events) {
       e.stopPropagation();
       const schId = parseInt(item.dataset.daySch);
       let date = S.calDayDate;
-      if (item.dataset.schCat === 'challenge') {
+      if (item.dataset.schPrev === '1') {
         const prev = new Date(S.calDayDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
         date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
       }

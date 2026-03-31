@@ -687,9 +687,9 @@ pub fn create_schedule(title: String, category: String, frequency: String, frequ
 pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let sql = if category.is_some() {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at FROM schedules WHERE category=?1 ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day FROM schedules WHERE category=?1 ORDER BY title"
     } else {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at FROM schedules ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day FROM schedules ORDER BY title"
     };
     let mut stmt = conn.prepare(sql).map_err(|e| format!("DB error: {}", e))?;
     let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cat) = category {
@@ -706,13 +706,14 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
             "details": row.get::<_, String>(6)?,
             "is_active": row.get::<_, i64>(7)? == 1,
             "created_at": row.get::<_, Option<String>>(8)?,
+            "marks_previous_day": row.get::<_, i64>(9).unwrap_or(0) == 1,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(v) = title { conn.execute("UPDATE schedules SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = category { conn.execute("UPDATE schedules SET category=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
@@ -721,6 +722,7 @@ pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>,
     if let Some(v) = time_of_day { conn.execute("UPDATE schedules SET time_of_day=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = details { conn.execute("UPDATE schedules SET details=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = is_active { conn.execute("UPDATE schedules SET is_active=?1 WHERE id=?2", rusqlite::params![v as i64, id]).ok(); }
+    if let Some(v) = marks_previous_day { conn.execute("UPDATE schedules SET marks_previous_day=?1 WHERE id=?2", rusqlite::params![v as i64, id]).ok(); }
     Ok(())
 }
 

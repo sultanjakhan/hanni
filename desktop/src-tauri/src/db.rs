@@ -840,6 +840,7 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
             completed_at TEXT,
             UNIQUE(schedule_id, date)
         );
+        ALTER TABLE schedules ADD COLUMN marks_previous_day INTEGER DEFAULT 0;
         CREATE TABLE IF NOT EXISTS dan_koe_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL UNIQUE,
