@@ -766,7 +766,7 @@ pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::Sta
 pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day
+        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day, sc.completed_at
          FROM schedule_completions sc JOIN schedules s ON s.id = sc.schedule_id
          WHERE sc.date=?1"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -777,6 +777,7 @@ pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> 
             "title": row.get::<_, String>(2)?,
             "category": row.get::<_, String>(3)?,
             "time_of_day": row.get::<_, Option<String>>(4)?,
+            "completed_at": row.get::<_, Option<String>>(5)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)

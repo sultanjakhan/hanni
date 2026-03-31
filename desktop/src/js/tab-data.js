@@ -1753,19 +1753,21 @@ async function loadSchedule(subTab) {
       const compMap = {};
       for (const date of days) {
         const comps = await invoke('get_schedule_completions', { date }).catch(() => []);
-        for (const c of comps) { if (c.completed) { if (!compMap[c.schedule_id]) compMap[c.schedule_id] = new Set(); compMap[c.schedule_id].add(date); } }
+        for (const c of comps) { if (c.completed) { if (!compMap[c.schedule_id]) compMap[c.schedule_id] = {}; compMap[c.schedule_id][date] = c.completed_at || true; } }
       }
       const dayFmt = mode === 'month' ? { day: 'numeric' } : { weekday: 'short', day: 'numeric' };
       const dayLabels = days.map(d => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('ru', dayFmt); });
-      const thWidth = mode === 'month' ? 'min-width:28px;max-width:32px;' : 'min-width:50px;';
+      const thWidth = 'min-width:50px;';
       const headerCols = dayLabels.map(l => `<th style="text-align:center;font-size:${mode === 'month' ? '10' : '12'}px;${thWidth}">${l}</th>`).join('');
       const rows = active.map(s => {
         const cells = days.map(d => {
-          const done = compMap[s.id]?.has(d);
-          const sz = mode === 'month' ? '12' : '16';
-          return `<td style="text-align:center;">${done ? `<span style="color:var(--color-green);font-size:${sz}px;">✓</span>` : '<span style="color:var(--text-faint);">·</span>'}</td>`;
+          const val = compMap[s.id]?.[d];
+          if (!val) return '<td style="text-align:center;"><span style="color:var(--text-faint);">·</span></td>';
+          let timeStr = '';
+          if (typeof val === 'string') { try { const dt = new Date(val); timeStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; } catch {} }
+          return `<td style="text-align:center;"><span style="color:var(--color-green);font-size:11px;font-weight:500;">${timeStr || '✓'}</span></td>`;
         }).join('');
-        const streak = days.reduce((acc, d) => compMap[s.id]?.has(d) ? acc + 1 : 0, 0);
+        const streak = days.reduce((acc, d) => compMap[s.id]?.[d] ? acc + 1 : 0, 0);
         return `<tr class="data-table-row" data-id="${s.id}"><td class="col-check"><input type="checkbox"></td><td style="font-size:13px;white-space:nowrap;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
       }).join('');
 
