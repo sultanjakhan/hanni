@@ -5,6 +5,10 @@ mod prompts;
 mod db;
 mod chat;
 mod memory;
+#[cfg(not(target_os = "android"))]
+mod voice;
+#[cfg(target_os = "android")]
+#[path = "voice_stubs.rs"]
 mod voice;
 mod proactive;
 mod macos;
@@ -16,20 +20,29 @@ mod mcp;
 mod agent;
 mod vacancy;
 mod dashboard;
+mod commands_timeline;
+mod timeline_stats;
 
 // Re-export types used by run() for state setup
 use types::*;
 use prompts::SYSTEM_PROMPT;
 use db::*;
-use memory::{load_proactive_settings, embed_texts, store_fact_embedding};
+use memory::load_proactive_settings;
+#[cfg(not(target_os = "android"))]
+use memory::{embed_texts, store_fact_embedding};
+#[cfg(not(target_os = "android"))]
 use voice::speak_silero_core;
+#[cfg(not(target_os = "android"))]
 use proactive::{
     get_frontmost_app, get_browser_url, get_now_playing_sync,
     get_upcoming_events_soon, proactive_loop,
 };
+#[cfg(not(target_os = "android"))]
 use macos::run_osascript;
+use commands_meta::spawn_api_server;
+#[cfg(not(target_os = "android"))]
 use commands_meta::{
-    spawn_api_server, start_mlx_server, updater_with_headers,
+    start_mlx_server, updater_with_headers,
     ensure_voice_server_launchagent, ensure_openclaw_gateway,
 };
 
@@ -38,6 +51,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tauri::{Emitter, Manager};
+#[cfg(not(target_os = "android"))]
 use chrono::{Timelike, Datelike};
 
 pub fn run() {
@@ -79,6 +93,7 @@ pub fn run() {
     migrate_body_records(&conn);
     migrate_job_search(&conn);
     migrate_dashboard_widgets(&conn);
+    migrate_timeline(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -101,21 +116,24 @@ pub fn run() {
     }
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
-    // Start MLX server if not already running
+    // Desktop-only: MLX server, OpenClaw gateway, voice server
+    #[cfg(not(target_os = "android"))]
     let mlx_child = start_mlx_server();
+    #[cfg(not(target_os = "android"))]
     let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
+    #[cfg(not(target_os = "android"))]
     let mlx_cleanup = mlx_process.clone();
 
-    // Ensure OpenClaw gateway is running (LaunchAgent or fallback subprocess)
+    #[cfg(not(target_os = "android"))]
     let openclaw_child = ensure_openclaw_gateway();
+    #[cfg(not(target_os = "android"))]
     let openclaw_process = Arc::new(OpenClawProcess(std::sync::Mutex::new(openclaw_child)));
+    #[cfg(not(target_os = "android"))]
     let openclaw_cleanup = openclaw_process.clone();
 
-    // Install voice server as LaunchAgent (mic permission stays with Python's stable signature)
-    // After ensuring the server is running, warm up TTS cache
+    #[cfg(not(target_os = "android"))]
     std::thread::spawn(|| {
         ensure_voice_server_launchagent();
-        // Wait for voice server to be ready, then warm up TTS
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let ok = reqwest::blocking::Client::builder()
@@ -176,10 +194,12 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        .plugin(tauri_plugin_process::init());
 
-    #[cfg(debug_assertions)]
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
+    #[cfg(all(debug_assertions, not(target_os = "android")))]
     let builder = builder.plugin(tauri_plugin_webdriver_automation::init());
 
     builder
@@ -524,26 +544,45 @@ pub fn run() {
             dashboard::get_dashboard_widgets,
             dashboard::save_dashboard_widgets,
             dashboard::seed_dashboard_defaults,
+            // Timeline
+            commands_timeline::create_activity_type,
+            commands_timeline::get_activity_types,
+            commands_timeline::update_activity_type,
+            commands_timeline::delete_activity_type,
+            commands_timeline::create_timeline_block,
+            commands_timeline::get_timeline_blocks,
+            commands_timeline::update_timeline_block,
+            commands_timeline::delete_timeline_block,
+            timeline_stats::create_timeline_goal,
+            timeline_stats::get_timeline_goals,
+            timeline_stats::update_timeline_goal,
+            timeline_stats::delete_timeline_goal,
+            timeline_stats::get_timeline_day_stats,
+            timeline_stats::get_timeline_range_stats,
+            timeline_stats::sync_afk_blocks,
         ])
         .setup(move |app| {
-            // Auto-updater
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let updater = match updater_with_headers(&handle) {
-                    Ok(u) => u,
-                    Err(_) => return,
-                };
-                match updater.check().await {
-                    Ok(Some(update)) => {
-                        let version = update.version.clone();
-                        let _ = handle.emit("update-available", &version);
-                        if let Ok(()) = update.download_and_install(|_, _| {}, || {}).await {
-                            handle.restart();
+            // Auto-updater (desktop only)
+            #[cfg(not(target_os = "android"))]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let updater = match updater_with_headers(&handle) {
+                        Ok(u) => u,
+                        Err(_) => return,
+                    };
+                    match updater.check().await {
+                        Ok(Some(update)) => {
+                            let version = update.version.clone();
+                            let _ = handle.emit("update-available", &version);
+                            if let Ok(()) = update.download_and_install(|_, _| {}, || {}).await {
+                                handle.restart();
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
-                }
-            });
+                });
+            }
 
             // Save system prompt for nightly training script
             let prompt_path = hanni_data_dir().join("system_prompt.txt");
@@ -571,75 +610,65 @@ pub fn run() {
                 eprintln!("[mcp] Initialization complete — {} tools loaded", tool_count);
             });
 
-            // Backfill: embed existing facts that don't have vector embeddings yet
-            let backfill_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                // Wait for voice server to be ready (embed endpoint)
-                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-                let client = &backfill_handle.state::<HttpClient>().0;
-
-                // Check if embed endpoint is available
-                let health = client.get(&format!("{}/health", VOICE_SERVER_URL))
-                    .timeout(std::time::Duration::from_secs(3))
-                    .send().await;
-                if health.is_err() {
-                    eprintln!("[backfill] Voice server not available, skipping embedding backfill");
-                    return;
-                }
-
-                // Get facts without embeddings
-                let facts: Vec<(i64, String)> = {
-                    let db = backfill_handle.state::<HanniDb>();
-                    let conn = db.conn();
-                    let mut result = Vec::new();
-                    if let Ok(mut stmt) = conn.prepare(
-                        "SELECT f.id, '[' || f.category || '] ' || f.key || ': ' || f.value
-                         FROM facts f
-                         WHERE f.id NOT IN (SELECT fact_id FROM vec_facts)
-                         ORDER BY f.id"
-                    ) {
-                        if let Ok(rows) = stmt.query_map([], |row| {
-                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                        }) {
-                            for row in rows.flatten() {
-                                result.push(row);
+            // Backfill: embed existing facts (desktop only — needs voice server)
+            #[cfg(not(target_os = "android"))]
+            {
+                let backfill_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                    let client = &backfill_handle.state::<HttpClient>().0;
+                    let health = client.get(&format!("{}/health", VOICE_SERVER_URL))
+                        .timeout(std::time::Duration::from_secs(3))
+                        .send().await;
+                    if health.is_err() {
+                        eprintln!("[backfill] Voice server not available, skipping");
+                        return;
+                    }
+                    let facts: Vec<(i64, String)> = {
+                        let db = backfill_handle.state::<HanniDb>();
+                        let conn = db.conn();
+                        let mut result = Vec::new();
+                        if let Ok(mut stmt) = conn.prepare(
+                            "SELECT f.id, '[' || f.category || '] ' || f.key || ': ' || f.value
+                             FROM facts f
+                             WHERE f.id NOT IN (SELECT fact_id FROM vec_facts)
+                             ORDER BY f.id"
+                        ) {
+                            if let Ok(rows) = stmt.query_map([], |row| {
+                                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                            }) {
+                                for row in rows.flatten() { result.push(row); }
                             }
                         }
-                    }
-                    result
-                };
-
-                if facts.is_empty() {
-                    eprintln!("[backfill] All facts already have embeddings");
-                    return;
-                }
-                eprintln!("[backfill] Embedding {} facts...", facts.len());
-
-                // Process in batches of 32
-                for chunk in facts.chunks(32) {
-                    let texts: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
-                    match embed_texts(client, &texts).await {
-                        Ok(embeddings) => {
-                            let db = backfill_handle.state::<HanniDb>();
-                            let conn = db.conn();
-                            for (i, (fact_id, _)) in chunk.iter().enumerate() {
-                                if let Some(emb) = embeddings.get(i) {
-                                    store_fact_embedding(&conn, *fact_id, emb);
+                        result
+                    };
+                    if facts.is_empty() { return; }
+                    eprintln!("[backfill] Embedding {} facts...", facts.len());
+                    for chunk in facts.chunks(32) {
+                        let texts: Vec<String> = chunk.iter().map(|(_, t)| t.clone()).collect();
+                        match embed_texts(client, &texts).await {
+                            Ok(embeddings) => {
+                                let db = backfill_handle.state::<HanniDb>();
+                                let conn = db.conn();
+                                for (i, (fact_id, _)) in chunk.iter().enumerate() {
+                                    if let Some(emb) = embeddings.get(i) {
+                                        store_fact_embedding(&conn, *fact_id, emb);
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                eprintln!("[backfill] Embed failed: {}, retry on next startup", e);
+                                return;
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("[backfill] Embed batch failed: {}, will retry on next startup", e);
-                            return;
-                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
-                    // Small delay between batches to avoid overloading
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-                eprintln!("[backfill] Embedding backfill complete");
-            });
+                    eprintln!("[backfill] Embedding backfill complete");
+                });
+            }
 
-            // Global shortcut: Cmd+Shift+H to toggle Call Mode
+            // Global shortcut: Cmd+Shift+H to toggle Call Mode (desktop only)
+            #[cfg(not(target_os = "android"))]
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;
                 let shortcut_handle = app.handle().clone();
@@ -650,7 +679,9 @@ pub fn run() {
                 });
             }
 
-            // Focus mode monitor loop
+            // Focus mode monitor loop (desktop only — uses osascript)
+            #[cfg(not(target_os = "android"))]
+            {
             let focus_handle = app.handle().clone();
             let focus_flag = focus_monitor_flag.clone();
             tauri::async_runtime::spawn(async move {
@@ -699,7 +730,7 @@ pub fn run() {
                 }
             });
 
-            // Activity snapshot collector — OS data every 30 sec for activity tracking
+            // Activity snapshot collector — OS data every 30 sec
             let snapshot_handle = app.handle().clone();
             let snapshot_proactive_ref = proactive_state.clone();
             tauri::async_runtime::spawn(async move {
@@ -1093,12 +1124,14 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 vacancy::vacancy_search_loop(vacancy_handle).await;
             });
+            } // end #[cfg(not(target_os = "android"))] block
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building Hanni")
         .run(move |_app, event| {
+            #[cfg(not(target_os = "android"))]
             if let tauri::RunEvent::Exit = event {
                 // Kill MLX server process on app exit
                 {

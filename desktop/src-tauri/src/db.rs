@@ -975,3 +975,56 @@ pub fn migrate_dashboard_widgets(conn: &rusqlite::Connection) {
         CREATE INDEX IF NOT EXISTS idx_dw_tab ON dashboard_widgets(tab_id);"
     ).ok();
 }
+
+pub fn migrate_timeline(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS timeline_activity_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#2383e2',
+            icon TEXT NOT NULL DEFAULT '',
+            is_system INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS timeline_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type_id INTEGER NOT NULL REFERENCES timeline_activity_types(id),
+            date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            duration_minutes INTEGER NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_tl_blocks_date ON timeline_blocks(date);
+        CREATE INDEX IF NOT EXISTS idx_tl_blocks_type ON timeline_blocks(type_id);
+        CREATE TABLE IF NOT EXISTS timeline_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type_id INTEGER NOT NULL REFERENCES timeline_activity_types(id),
+            operator TEXT NOT NULL DEFAULT '<=',
+            target_minutes INTEGER NOT NULL,
+            period TEXT NOT NULL DEFAULT 'daily',
+            active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );"
+    ).ok();
+    // Seed default system types (idempotent — skips if already exist)
+    let defaults = [
+        ("Сон", "#6366f1", "🌙", 1),
+        ("Фокус", "#22c55e", "💻", 2),
+        ("АФК", "#9ca3af", "💤", 3),
+        ("Еда", "#f97316", "🍽️", 4),
+        ("Спорт", "#ef4444", "🏋️", 5),
+    ];
+    for (name, color, icon, order) in defaults {
+        conn.execute(
+            "INSERT OR IGNORE INTO timeline_activity_types (name, color, icon, is_system, sort_order)
+             SELECT ?1, ?2, ?3, 1, ?4 WHERE NOT EXISTS (
+                 SELECT 1 FROM timeline_activity_types WHERE name=?1 AND is_system=1
+             )",
+            rusqlite::params![name, color, icon, order],
+        ).ok();
+    }
+}

@@ -1,17 +1,12 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main", "focus-overlay"],
-  "platforms": ["macOS", "windows", "linux"],
+  "identifier": "mobile",
+  "description": "Capability for Android",
+  "platforms": ["android", "iOS"],
   "permissions": [
     "core:default",
     "opener:default",
     "fs:default",
-    "shell:default",
-    "updater:default",
     "process:default",
-    "global-shortcut:default",
     {
       "identifier": "fs:allow-read-text-file",
       "allow": [{ "path": "$HOME/**" }]

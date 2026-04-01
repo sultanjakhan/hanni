@@ -1,0 +1,161 @@
+/* ── Mobile Layout — bottom tab bar, touch targets, responsive ── */
+
+/* Hide drag region on mobile */
+.mobile #drag-region { display: none; }
+
+/* App body: vertical flow on mobile */
+.mobile #app-body {
+  flex-direction: column;
+}
+
+/* Tab bar: bottom navigation */
+.mobile #tab-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  min-width: unset;
+  height: 56px;
+  flex-direction: row;
+  border-right: none;
+  border-top: 1px solid var(--border-subtle);
+  padding: 0 var(--space-2);
+  z-index: 100;
+  background: var(--bg-sidebar);
+}
+
+.mobile #tab-list {
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 0;
+  padding: 0;
+  flex: 1;
+  justify-content: space-around;
+}
+
+.mobile .tab-item {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+/* Active indicator: bottom dot instead of left bar */
+.mobile .tab-item.active::after {
+  left: 12px;
+  right: 12px;
+  top: unset;
+  bottom: 0;
+  width: unset;
+  height: 3px;
+  border-radius: 2px 2px 0 0;
+}
+
+/* Hide tab add button and bottom section on mobile */
+.mobile #tab-add { display: none; }
+.mobile #tab-bar-bottom { display: none; }
+
+/* Sub-sidebar: hidden by default on mobile, shown as overlay */
+.mobile #sub-sidebar {
+  display: none;
+}
+.mobile #sub-sidebar.mobile-open {
+  display: flex;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 56px;
+  width: 280px;
+  z-index: 200;
+  box-shadow: var(--shadow-lg);
+}
+
+/* Content area: full width, account for bottom bar */
+.mobile #content-area {
+  padding-bottom: 56px;
+}
+
+/* Touch-friendly targets */
+.mobile .sub-tab-pill {
+  padding: 8px 16px;
+  font-size: 13px;
+  min-height: 36px;
+}
+
+/* Wider content padding */
+.mobile .tab-content {
+  padding-left: var(--space-4) !important;
+  padding-right: var(--space-4) !important;
+}
+
+.mobile .page-content {
+  padding: 0 var(--space-4);
+}
+
+/* Page headers: smaller on mobile */
+.mobile .page-header-title {
+  font-size: 24px;
+}
+
+/* Settings page: full width */
+.mobile .settings-page {
+  padding: var(--space-4);
+  max-width: 100%;
+}
+
+/* Command palette: full width on mobile */
+.mobile .cmd-palette {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 0;
+  margin-top: 0;
+}
+.mobile .cmd-palette-overlay {
+  padding-top: 0;
+  align-items: flex-start;
+}
+
+/* Modals: full screen on mobile */
+.mobile .modal-overlay {
+  align-items: flex-end;
+}
+.mobile .modal-content {
+  width: 100%;
+  max-width: 100%;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  max-height: 90vh;
+}
+
+/* Tab dropdown: full screen on mobile */
+.mobile #tab-dropdown {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 56px;
+  max-width: 100%;
+  max-height: unset;
+  border-radius: 0;
+  border: none;
+}
+
+/* Chat input: sticky with safe area */
+.mobile #input-area {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Data tables: horizontal scroll */
+.mobile .data-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Grid layouts: single column */
+.mobile .module-grid {
+  grid-template-columns: 1fr;
+}
+
+/* Hide desktop-only elements */
+.mobile .desktop-only { display: none !important; }
+.desktop .mobile-only { display: none !important; }

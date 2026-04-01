@@ -391,23 +391,26 @@ pub fn delete_project_record(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(
 
 #[tauri::command]
 pub fn toggle_focus_overlay(app: AppHandle) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("focus-overlay") {
-        let _ = win.close();
-        return Ok(());
+    #[cfg(not(target_os = "android"))]
+    {
+        if let Some(win) = app.get_webview_window("focus-overlay") {
+            let _ = win.close();
+            return Ok(());
+        }
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "focus-overlay",
+            tauri::WebviewUrl::App("focus-overlay.html".into()),
+        )
+        .title("Focus")
+        .inner_size(220.0, 56.0)
+        .decorations(false)
+        .always_on_top(true)
+        .resizable(false)
+        .skip_taskbar(true)
+        .build()
+        .map_err(|e| format!("Window error: {}", e))?;
     }
-    tauri::WebviewWindowBuilder::new(
-        &app,
-        "focus-overlay",
-        tauri::WebviewUrl::App("focus-overlay.html".into()),
-    )
-    .title("Focus")
-    .inner_size(220.0, 56.0)
-    .decorations(false)
-    .always_on_top(true)
-    .resizable(false)
-    .skip_taskbar(true)
-    .build()
-    .map_err(|e| format!("Window error: {}", e))?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 // ── js/tabs.js — Tab navigation, sub-sidebar, sub-tab bar, goals, dropdown, shortcuts, router ──
 
-import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders, loadTabSetting, saveTabSetting } from './state.js';
+import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders, loadTabSetting, saveTabSetting, IS_MOBILE } from './state.js';
 import { escapeHtml, confirmModal, renderTabSettingsPage, setupPageHeaderControls, renderPageHeader } from './utils.js';
 
 // ── Settings sections per tab ──
@@ -31,7 +31,11 @@ const SETTINGS_SECTIONS = {
 function renderTabBar() {
   const tabList = document.getElementById('tab-list');
   tabList.innerHTML = '';
-  for (const tabId of S.openTabs) {
+
+  const MOBILE_MAX_TABS = 5;
+  const visibleTabs = IS_MOBILE ? S.openTabs.slice(0, MOBILE_MAX_TABS) : S.openTabs;
+
+  for (const tabId of visibleTabs) {
     const reg = TAB_REGISTRY[tabId];
     if (!reg) continue;
     const item = document.createElement('div');
@@ -52,72 +56,83 @@ function renderTabBar() {
       switchTab(tabId);
     });
 
-    // Drag-to-reorder (mouse events — reliable in WebKit/Tauri)
-    item.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      const startY = e.clientY;
-      let dragging = false;
+    if (!IS_MOBILE) {
+      // Drag-to-reorder (desktop only)
+      item.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        const startY = e.clientY;
+        let dragging = false;
 
-      const onMove = (ev) => {
-        if (!dragging && Math.abs(ev.clientY - startY) > 5) {
-          dragging = true;
-          item.classList.add('dragging');
-          S.tabDragState = { tabId, el: item };
-        }
-        if (!dragging) return;
-        // Find drop target
-        tabList.querySelectorAll('.tab-item').forEach(el => {
-          el.classList.remove('drag-over-above', 'drag-over-below');
-          if (el === item) return;
-          const rect = el.getBoundingClientRect();
-          if (ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
-            const mid = rect.top + rect.height / 2;
-            el.classList.toggle('drag-over-above', ev.clientY < mid);
-            el.classList.toggle('drag-over-below', ev.clientY >= mid);
+        const onMove = (ev) => {
+          if (!dragging && Math.abs(ev.clientY - startY) > 5) {
+            dragging = true;
+            item.classList.add('dragging');
+            S.tabDragState = { tabId, el: item };
           }
-        });
-      };
+          if (!dragging) return;
+          tabList.querySelectorAll('.tab-item').forEach(el => {
+            el.classList.remove('drag-over-above', 'drag-over-below');
+            if (el === item) return;
+            const rect = el.getBoundingClientRect();
+            if (ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
+              const mid = rect.top + rect.height / 2;
+              el.classList.toggle('drag-over-above', ev.clientY < mid);
+              el.classList.toggle('drag-over-below', ev.clientY >= mid);
+            }
+          });
+        };
 
-      const onUp = (ev) => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        tabList.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over-above', 'drag-over-below', 'dragging'));
-        S.tabDragState = null;
-        if (!dragging) return;
-        item.dataset.wasDragged = '1';
-        // Find target
-        const target = [...tabList.querySelectorAll('.tab-item')].find(el => {
-          if (el === item) return false;
-          const rect = el.getBoundingClientRect();
-          return ev.clientY >= rect.top && ev.clientY <= rect.bottom;
-        });
-        if (!target) return;
-        const targetId = target.dataset.tabId;
-        const fromIdx = S.openTabs.indexOf(tabId);
-        if (fromIdx === -1) return;
-        S.openTabs.splice(fromIdx, 1);
-        const targetRect = target.getBoundingClientRect();
-        let toIdx = S.openTabs.indexOf(targetId);
-        if (ev.clientY >= targetRect.top + targetRect.height / 2) toIdx++;
-        S.openTabs.splice(toIdx, 0, tabId);
-        saveTabs();
-        renderTabBar();
-      };
+        const onUp = (ev) => {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          tabList.querySelectorAll('.tab-item').forEach(el => el.classList.remove('drag-over-above', 'drag-over-below', 'dragging'));
+          S.tabDragState = null;
+          if (!dragging) return;
+          item.dataset.wasDragged = '1';
+          const target = [...tabList.querySelectorAll('.tab-item')].find(el => {
+            if (el === item) return false;
+            const rect = el.getBoundingClientRect();
+            return ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+          });
+          if (!target) return;
+          const targetId = target.dataset.tabId;
+          const fromIdx = S.openTabs.indexOf(tabId);
+          if (fromIdx === -1) return;
+          S.openTabs.splice(fromIdx, 1);
+          const targetRect = target.getBoundingClientRect();
+          let toIdx = S.openTabs.indexOf(targetId);
+          if (ev.clientY >= targetRect.top + targetRect.height / 2) toIdx++;
+          S.openTabs.splice(toIdx, 0, tabId);
+          saveTabs();
+          renderTabBar();
+        };
 
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
 
-    // Context menu (right click)
-    item.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      showTabContextMenu(tabId, e.clientX, e.clientY);
-    });
+      // Context menu (desktop only)
+      item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showTabContextMenu(tabId, e.clientX, e.clientY);
+      });
+    }
 
     tabList.appendChild(item);
   }
 
-  // Bottom area: settings gear (context-aware)
+  // Mobile: "More" button to show all tabs
+  if (IS_MOBILE) {
+    const more = document.createElement('div');
+    const isMoreActive = S.openTabs.indexOf(S.activeTab) >= MOBILE_MAX_TABS;
+    more.className = 'tab-item' + (isMoreActive ? ' active' : '');
+    more.title = 'Ещё';
+    more.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.more || '⋯'}</span>`;
+    more.addEventListener('click', () => showMobileTabPicker());
+    tabList.appendChild(more);
+  }
+
+  // Bottom area: settings gear (desktop only, hidden on mobile via CSS)
   const bottom = document.getElementById('tab-bar-bottom');
   if (bottom) {
     bottom.innerHTML = '';
@@ -150,6 +165,29 @@ function renderTabBar() {
     });
     bottom.appendChild(gear);
   }
+}
+
+// ── Mobile tab picker (full-screen grid of all tabs) ──
+
+function showMobileTabPicker() {
+  const dropdown = document.getElementById('tab-dropdown');
+  const list = document.getElementById('tab-dropdown-list');
+  list.innerHTML = '';
+  for (const tabId of S.openTabs) {
+    const reg = TAB_REGISTRY[tabId];
+    if (!reg) continue;
+    const customIcon = S.tabCustomizations[tabId]?.icon;
+    const icon = customIcon || reg.icon || '';
+    const item = document.createElement('div');
+    item.className = 'tab-dropdown-item' + (tabId === S.activeTab ? ' active' : '');
+    item.innerHTML = `<span class="tab-item-icon">${icon}</span> ${reg.label}`;
+    item.addEventListener('click', () => {
+      dropdown.classList.add('hidden');
+      switchTab(tabId);
+    });
+    list.appendChild(item);
+  }
+  dropdown.classList.remove('hidden');
 }
 
 // ── showTabContextMenu ──
