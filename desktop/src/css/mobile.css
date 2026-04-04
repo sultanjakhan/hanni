@@ -1,4 +1,4 @@
-/* ── Mobile Layout — bottom tab bar, touch targets, responsive ── */
+/* ── Mobile Layout — bottom tab bar, touch targets, core responsive ── */
 
 /* Hide drag region on mobile */
 .mobile #drag-region { display: none; }
@@ -71,6 +71,15 @@
   box-shadow: var(--shadow-lg);
 }
 
+/* Sub-sidebar drawer backdrop */
+.mobile .sub-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  bottom: 56px;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 199;
+}
+
 /* Content area: full width, account for bottom bar */
 .mobile #content-area {
   padding-bottom: 56px;
@@ -88,7 +97,6 @@
   padding-left: var(--space-4) !important;
   padding-right: var(--space-4) !important;
 }
-
 .mobile .page-content {
   padding: 0 var(--space-4);
 }
@@ -96,12 +104,6 @@
 /* Page headers: smaller on mobile */
 .mobile .page-header-title {
   font-size: 24px;
-}
-
-/* Settings page: full width */
-.mobile .settings-page {
-  padding: var(--space-4);
-  max-width: 100%;
 }
 
 /* Command palette: full width on mobile */
@@ -140,20 +142,23 @@
   border: none;
 }
 
-/* Chat input: sticky with safe area */
-.mobile #input-area {
-  padding-bottom: env(safe-area-inset-bottom, 0);
-}
-
 /* Data tables: horizontal scroll */
 .mobile .data-table-wrapper {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Grid layouts: single column */
-.mobile .module-grid {
-  grid-template-columns: 1fr;
+/* Keyboard avoidance: use visual viewport to resize */
+.mobile #app-body {
+  height: 100dvh;
+}
+
+/* Safe area insets for notch/gesture bar */
+.mobile #tab-bar {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.mobile #content-area {
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0));
 }
 
 /* Hide desktop-only elements */

@@ -1523,6 +1523,10 @@ async function loadHealth() {
       const { loadBodyInline } = await import('./tab-body.js');
       await loadBodyInline(paneEl);
     },
+    renderSleep: async (paneEl) => {
+      const { renderSleepPane } = await import('./tab-sleep.js');
+      await renderSleepPane(paneEl);
+    },
     renderTable: async (paneEl) => {
       try {
         const habits = await invoke('get_habits_today').catch(() => []);

@@ -157,6 +157,27 @@ async fn search_hh_api(app: &AppHandle) -> Result<usize, String> {
                 eprintln!("[vacancy/hh] Skipped (blacklist): {}", company);
                 continue;
             }
+            // Skip non-PM titles and senior roles
+            let pos_lower = position.to_lowercase();
+            let is_pm = ["product", "продакт", "продукт", "project", "проект", "delivery", "growth", "owner", "scrum", "agile"]
+                .iter().any(|kw| pos_lower.contains(kw));
+            if !is_pm {
+                eprintln!("[vacancy/hh] Skipped (not PM): {}", position);
+                continue;
+            }
+            let is_senior = ["senior", "старший", "ведущий", "lead", "head", "chief", "руководител", "директор", "principal", "staff"]
+                .iter().any(|kw| pos_lower.contains(kw));
+            if is_senior {
+                eprintln!("[vacancy/hh] Skipped (senior): {}", position);
+                continue;
+            }
+            // Skip irrelevant specializations
+            let is_irrelevant = ["1с", "битрикс", "sap", "erp", "qa", "тестиров", "аналитик", "сервис-менеджер", "service delivery", "architectural", "мультимедиа", "операционный менеджер"]
+                .iter().any(|kw| pos_lower.contains(kw));
+            if is_irrelevant {
+                eprintln!("[vacancy/hh] Skipped (irrelevant): {}", position);
+                continue;
+            }
 
             let salary = match (item["salary"]["from"].as_u64(), item["salary"]["to"].as_u64()) {
                 (Some(from), Some(to)) => format!("{}-{}", from, to),

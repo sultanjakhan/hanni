@@ -376,6 +376,18 @@ pub fn run() {
             commands_data::update_learning_item_status,
             commands_data::update_learning_item,
             commands_data::delete_learning_item,
+            // Dev Projects / Skills / Cases
+            commands_data::get_dev_projects,
+            commands_data::create_dev_project,
+            commands_data::delete_dev_project,
+            commands_data::get_dev_skills,
+            commands_data::create_dev_skill,
+            commands_data::update_dev_skill,
+            commands_data::delete_dev_skill,
+            commands_data::get_dev_cases,
+            commands_data::create_dev_case,
+            commands_data::update_dev_case,
+            commands_data::delete_dev_case,
             // Hobbies
             commands_data::create_hobby,
             commands_data::get_hobbies,

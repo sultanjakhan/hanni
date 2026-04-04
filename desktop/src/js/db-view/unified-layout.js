@@ -61,6 +61,8 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderBody) panes.splice(1, 0, { id: 'body', icon: '🦴', label: 'Тело' });
   if (config.renderSleep) panes.splice(config.renderBody ? 2 : 1, 0, { id: 'sleep', icon: '🌙', label: 'Сон' });
   if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
+  if (config.renderSkills) panes.splice(1, 0, { id: 'skills', icon: '💡', label: 'Навыки' });
+  if (config.renderCases) panes.splice(panes.findIndex(p => p.id === 'goals'), 0, { id: 'cases', icon: '📝', label: 'Кейсы' });
 
   // Tab title header — merge defaults with user overrides
   const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };
@@ -126,6 +128,12 @@ export async function renderUnifiedLayout(el, tabId, config) {
     case 'tracking':
       if (config.renderTracking) await config.renderTracking(paneEl);
       else paneEl.innerHTML = renderEmptyState('Трекинг', 'Скоро здесь появится трекинг');
+      break;
+    case 'skills':
+      if (config.renderSkills) await config.renderSkills(paneEl);
+      break;
+    case 'cases':
+      if (config.renderCases) await config.renderCases(paneEl);
       break;
     case 'goals':
       await renderGoalsPane(paneEl, tabId, config);

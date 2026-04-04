@@ -1,0 +1,86 @@
+/* ── Mobile Tab-specific Responsive — grids, tables, components ── */
+
+/* ── Grid layouts: single column ── */
+.mobile .module-grid,
+.mobile .integrations-grid,
+.mobile .proactive-styles-grid,
+.mobile .prop-type-grid {
+  grid-template-columns: 1fr;
+}
+
+/* ── Calendar: 7-col → 3-col on mobile ── */
+.mobile .cal-weekdays,
+.mobile .cal-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+.mobile .cal-day {
+  min-height: 70px;
+}
+
+/* Week view: narrower on mobile */
+.mobile .wk-header,
+.mobile .wk-allday,
+.mobile .wk-grid {
+  grid-template-columns: 48px repeat(3, 1fr);
+}
+
+/* DatabaseView completion calendar — keep 7 cols but smaller */
+.mobile .dbv-cal-grid {
+  grid-template-columns: repeat(7, 1fr);
+  font-size: 11px;
+}
+
+/* ── Stats grids: 2 columns on mobile ── */
+.mobile .dashboard-stats,
+.mobile .health-metrics {
+  grid-template-columns: repeat(2, 1fr);
+}
+.mobile .sports-stats,
+.mobile .welcome-stats {
+  grid-template-columns: 1fr;
+}
+
+/* ── Gallery grids: smaller minmax on mobile ── */
+.mobile .dbv-gallery-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+/* ── DatabaseView tables: horizontal scroll ── */
+.mobile .dbv-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile .database-view {
+  min-width: 600px;
+}
+
+/* ── Chat: full width messages ── */
+.mobile .chat-message {
+  max-width: 100%;
+}
+.mobile #input-area {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* ── Focus ring: smaller on mobile ── */
+.mobile .focus-ring-container {
+  width: 150px;
+  height: 150px;
+}
+.mobile .focus-current-timer {
+  font-size: 28px;
+}
+
+/* ── Settings: full width on mobile ── */
+.mobile .settings-page {
+  padding: var(--space-4);
+  max-width: 100%;
+}
+.mobile .settings-grid {
+  grid-template-columns: 1fr;
+}
+
+/* ── Emoji picker: fewer columns ── */
+.mobile .emoji-grid {
+  grid-template-columns: repeat(7, 1fr);
+}
