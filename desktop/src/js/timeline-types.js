@@ -8,7 +8,6 @@ export async function showTypesModal() {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
 
     const renderList = (list) => list.map(t => `
       <div class="tl-type-row" data-id="${t.id}">
@@ -19,20 +18,20 @@ export async function showTypesModal() {
       </div>`).join('');
 
     overlay.innerHTML = `
-      <div class="modal-content" style="background:var(--bg-primary);border-radius:var(--radius-lg);padding:20px;min-width:360px;max-width:440px;border:1px solid var(--border-default);max-height:80vh;overflow:auto;">
-        <h3 style="margin:0 0 12px;font-size:15px;">Типы активности</h3>
+      <div class="modal modal-compact">
+        <div class="modal-title">Типы активности</div>
         <div id="tl-types-list">${renderList(types)}</div>
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-default);">
-          <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">Добавить тип</div>
-          <div style="display:flex;gap:6px;">
-            <input id="tl-new-icon" type="text" placeholder="🎯" maxlength="4" style="width:40px;padding:6px;border-radius:var(--radius-sm);border:1px solid var(--border-default);background:var(--bg-secondary);color:var(--text-primary);text-align:center;">
-            <input id="tl-new-name" type="text" placeholder="Название" style="flex:1;padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--border-default);background:var(--bg-secondary);color:var(--text-primary);">
+        <div class="form-group" style="margin-top:var(--space-4);padding-top:var(--space-3);border-top:1px solid var(--border-default);">
+          <div class="form-label">Добавить тип</div>
+          <div class="form-row">
+            <input id="tl-new-icon" class="form-input" type="text" placeholder="🎯" maxlength="4" style="width:40px;flex:none;text-align:center;">
+            <input id="tl-new-name" class="form-input" type="text" placeholder="Название">
             <input id="tl-new-color" type="color" value="#2383e2" style="width:36px;height:32px;padding:0;border:1px solid var(--border-default);border-radius:var(--radius-sm);cursor:pointer;">
-            <button id="tl-add-type" style="padding:6px 12px;border-radius:var(--radius-sm);border:none;background:var(--accent-blue);color:#fff;cursor:pointer;white-space:nowrap;">+</button>
+            <button id="tl-add-type" class="btn-primary" style="padding:6px 12px;">+</button>
           </div>
         </div>
-        <div style="text-align:right;margin-top:12px;">
-          <button id="tl-types-close" style="padding:6px 16px;border-radius:var(--radius-sm);border:1px solid var(--border-default);background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;">Закрыть</button>
+        <div class="modal-actions">
+          <button id="tl-types-close" class="btn-secondary">Закрыть</button>
         </div>
       </div>`;
 
@@ -52,10 +51,10 @@ export async function showTypesModal() {
       overlay.querySelector('#tl-types-list').innerHTML = renderList(fresh);
       overlay.querySelector('#tl-new-name').value = '';
       overlay.querySelector('#tl-new-icon').value = '';
-      bindDeletes(overlay, close);
+      bindDeletes(overlay);
     });
 
-    bindDeletes(overlay, close);
+    bindDeletes(overlay);
 
     async function bindDeletes(ov) {
       ov.querySelectorAll('.tl-type-del').forEach(btn => {
