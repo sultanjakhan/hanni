@@ -1,8 +1,9 @@
 // ── db-view/unified-layout.js — Unified tab layout with sub-panes ──
 // Every data tab gets: [Дашборд] [Таблица] [Цели] [Заметки] [Память]
 
-import { S, invoke, TAB_REGISTRY } from '../state.js';
+import { S, invoke, TAB_REGISTRY, saveTabCustom } from '../state.js';
 import { escapeHtml, confirmModal } from '../utils.js';
+import { renderTabBar } from '../tabs.js';
 import { showEmojiPicker } from '../emoji-picker.js';
 
 const SUB_PANES = [
@@ -159,6 +160,10 @@ function wireHeaderEdit(el, tabId, config, meta, defaults) {
     showEmojiPicker(iconEl, async (emoji) => {
       meta.icon = emoji;
       await saveTabMeta(tabId, meta);
+      if (!S.tabCustomizations[tabId]) S.tabCustomizations[tabId] = {};
+      S.tabCustomizations[tabId].icon = emoji;
+      saveTabCustom();
+      renderTabBar();
       renderUnifiedLayout(el, tabId, config);
     });
   });

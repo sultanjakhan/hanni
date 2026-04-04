@@ -1035,11 +1035,22 @@ async function loadDevelopment() {
   const el = document.getElementById('development-content');
   if (!el) return;
 
+  // Load projects for selector
+  const projects = await invoke('get_dev_projects').catch(() => []);
+  if (!S.devProject && projects.length) S.devProject = projects[0].id;
+
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
+  const { renderSkillsPane } = await import('./tab-dev-skills.js');
+  const { renderCasesPane } = await import('./tab-dev-cases.js');
+  const pid = S.devProject;
+  const reload = () => loadDevelopment();
+
   await renderUnifiedLayout(el, 'development', {
-    title: 'Development',
-    subtitle: 'Обучение и навыки',
+    title: 'Развитие',
+    subtitle: 'Проекты и навыки',
     icon: '🚀',
+    renderSkills: pid ? (paneEl) => renderSkillsPane(paneEl, pid, reload) : null,
+    renderCases: pid ? (paneEl) => renderCasesPane(paneEl, pid, reload) : null,
     renderTable: async (paneEl) => {
       try {
         const items = await invoke('get_learning_items', { typeFilter: S.devFilter === 'all' ? null : S.devFilter }).catch(() => []);
@@ -1048,6 +1059,49 @@ async function loadDevelopment() {
         paneEl.innerHTML = '<div class="uni-empty">Не удалось загрузить</div>';
       }
     },
+  });
+
+  // Inject project selector before uni-tabs
+  const tabsEl = el.querySelector('.uni-tabs');
+  if (tabsEl && projects.length) {
+    const sel = document.createElement('div');
+    sel.className = 'dev-project-selector';
+    sel.innerHTML = projects.map(p =>
+      `<button class="pill${p.id === pid ? ' active' : ''}" data-pid="${p.id}">${p.icon} ${escapeHtml(p.name)}</button>`
+    ).join('') + '<button class="pill dev-add-project">+</button>';
+    tabsEl.parentNode.insertBefore(sel, tabsEl);
+
+    sel.querySelectorAll('.pill[data-pid]').forEach(btn => {
+      btn.addEventListener('click', () => { S.devProject = parseInt(btn.dataset.pid); reload(); });
+    });
+    sel.querySelector('.dev-add-project')?.addEventListener('click', () => showAddProjectModal(reload));
+  }
+}
+
+function showAddProjectModal(reloadFn) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-title">Новый проект</div>
+    <div class="form-group"><label class="form-label">Название</label>
+      <input class="form-input" id="dev-proj-name" placeholder="English"></div>
+    <div class="form-group"><label class="form-label">Иконка</label>
+      <input class="form-input" id="dev-proj-icon" value="📁" style="width:60px;"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-primary" id="dev-proj-save">Создать</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('dev-proj-save')?.addEventListener('click', async () => {
+    const name = document.getElementById('dev-proj-name')?.value?.trim();
+    if (!name) return;
+    const icon = document.getElementById('dev-proj-icon')?.value || '📁';
+    const id = await invoke('create_dev_project', { name, icon });
+    S.devProject = id;
+    overlay.remove();
+    reloadFn();
   });
 }
 
@@ -1782,7 +1836,10 @@ async function loadSchedule(subTab) {
           if (typeof val === 'string') { try { const dt = new Date(val); timeStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; } catch {} }
           return `<td style="text-align:center;"><span style="color:var(--color-green);font-size:11px;font-weight:500;">${timeStr || '✓'}</span></td>`;
         }).join('');
-        const streak = days.reduce((acc, d) => compMap[s.id]?.[d] ? acc + 1 : 0, 0);
+        let streak = 0;
+        for (let i = days.length - 1; i >= 0; i--) {
+          if (compMap[s.id]?.[days[i]]) { streak++; } else if (i < days.length - 1) break; // skip today if not yet done
+        }
         return `<tr class="data-table-row" data-id="${s.id}"><td class="col-check"><input type="checkbox"></td><td style="font-size:13px;white-space:nowrap;">${escapeHtml(s.title)}</td>${cells}<td style="text-align:center;font-size:12px;color:var(--text-muted);">${streak > 0 ? streak + '🔥' : ''}</td></tr>`;
       }).join('');
 

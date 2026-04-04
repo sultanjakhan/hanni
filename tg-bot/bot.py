@@ -16,7 +16,7 @@ ALLOWED_USER = int(os.environ.get("ALLOWED_USER", "0"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("hanni-bot")
 
-bot = Bot(token=TOKEN)
+bot = None
 dp = Dispatcher()
 
 STAGES = {
@@ -147,6 +147,11 @@ async def handle_stage(cb: CallbackQuery):
 
 
 async def main():
+    global bot
+    if not TOKEN:
+        log.error("BOT_TOKEN not set!")
+        return
+    bot = Bot(token=TOKEN)
     await db.init_db()
     log.info("Bot starting...")
     await dp.start_polling(bot)

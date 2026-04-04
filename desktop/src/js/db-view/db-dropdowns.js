@@ -62,7 +62,7 @@ function closeDropdown(dd, closeRef) {
 
 // ── Unified Select Dropdown (Notion-style) ──
 
-export function showSelectDropdown(cell, options, rawVal, save, propId, labelMap, onOptionsChange) {
+export function showSelectDropdown(cell, options, rawVal, save, propId, labelMap, onOptionsChange, singleSelect) {
   closeAllDropdowns();
   let allOptions = normalizeOptions(options);
   let selected = [];
@@ -77,7 +77,7 @@ export function showSelectDropdown(cell, options, rawVal, save, propId, labelMap
   const canEdit = !!persist;
   const dopersist = () => { if (persist) persist([...allOptions]); };
   const closeRef = { fn: null };
-  const doSave = () => { save(selected.length > 0 ? JSON.stringify(selected) : ''); };
+  const doSave = () => { save(singleSelect ? (selected[0] || '') : (selected.length > 0 ? JSON.stringify(selected) : '')); };
 
   const rect = cell.getBoundingClientRect();
   const dd = document.createElement('div');
@@ -158,14 +158,17 @@ export function showSelectDropdown(cell, options, rawVal, save, propId, labelMap
         const v = opt.dataset.val;
         if (opt.classList.contains('inline-dd-create')) {
           allOptions.push({ value: v, color: BADGE_COLORS[allOptions.length % BADGE_COLORS.length] });
-          selected.push(v);
+          if (singleSelect) { selected = [v]; } else { selected.push(v); }
           dopersist();
+        } else if (singleSelect) {
+          selected = selected[0] === v ? [] : [v];
         } else if (selected.includes(v)) {
           selected = selected.filter(x => x !== v);
         } else {
           selected.push(v);
         }
         doSave(); renderSelected();
+        if (singleSelect && selected.length > 0) { closeDropdown(dd, closeRef); return; }
         renderOptions(dd.querySelector('.inline-dd-search')?.value.trim() || '');
       });
     });

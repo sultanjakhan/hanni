@@ -98,7 +98,7 @@ export function startFixedCellEdit(cell, reloadFn) {
     const labelMap = {};
     options.forEach(o => { if (typeof o === 'object' && o.label) labelMap[o.value] = o.label; });
     const onOptsChange = (vals) => { try { localStorage.setItem(storageKey, JSON.stringify(vals)); } catch {} };
-    showSelectDropdown(cell, baseOpts, rawVal, saveCellVal, null, labelMap, onOptsChange);
+    showSelectDropdown(cell, baseOpts, rawVal, saveCellVal, null, labelMap, onOptsChange, editType === 'select');
     return;
   }
   if (editType === 'recurrence') {

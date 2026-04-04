@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════
 
 // ── Foundation ──
-import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY, TAB_DESCRIPTIONS, setTheme, getTabIcon, IS_MOBILE } from './js/state.js';
+import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY, TAB_DESCRIPTIONS, setTheme, getTabIcon, saveTabCustom, IS_MOBILE } from './js/state.js';
 import { renderPageHeader, setupPageHeaderControls, loadTabBlockEditor, escapeHtml } from './js/utils.js';
 
 // ── Core modules ──
@@ -263,6 +263,21 @@ document.addEventListener('keydown', (e) => {
   // Re-filter openTabs now that custom pages are registered
   S.openTabs = S.openTabs.filter(id => TAB_REGISTRY[id]);
   if (!S.openTabs.includes('chat')) S.openTabs.unshift('chat');
+
+  // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis
+  for (const tabId of S.openTabs) {
+    try {
+      const raw = await invoke('get_ui_state', { key: `tab_meta_${tabId}` });
+      if (raw) {
+        const meta = JSON.parse(raw);
+        if (meta.icon) {
+          if (!S.tabCustomizations[tabId]) S.tabCustomizations[tabId] = {};
+          S.tabCustomizations[tabId].icon = meta.icon;
+        }
+      }
+    } catch (_) {}
+  }
+  saveTabCustom();
 
   // Render tab bar
   renderTabBar();

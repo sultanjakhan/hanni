@@ -2251,3 +2251,53 @@ th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
 .jm-store-row { display: flex; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-md); }
 .jm-store-key { font-size: 13px; font-weight: 500; color: var(--text-primary); min-width: 120px; }
 .jm-store-val { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+
+/* ══════════════════════════════════════════════
+   Development: Projects / Skills / Cases
+   ══════════════════════════════════════════════ */
+
+.dev-project-selector {
+  display: flex; gap: var(--space-1); padding: 0 0 var(--space-2); flex-wrap: wrap;
+}
+
+/* Skills grid */
+.dev-skills-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3); margin-bottom: var(--space-3);
+}
+.dev-skill-card {
+  background: var(--bg-card); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); padding: var(--space-3);
+  transition: border-color 0.15s;
+}
+.dev-skill-card:hover { border-color: var(--border-hover); }
+.dev-skill-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-1); }
+.dev-skill-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.dev-skill-level { font-size: 11px; font-weight: 500; }
+.dev-skill-stars { margin-bottom: var(--space-1); }
+.dev-star { font-size: 16px; color: var(--border-default); cursor: pointer; transition: color 0.1s; }
+.dev-star:hover, .dev-star.filled { color: var(--yellow); }
+.dev-skill-meta { font-size: 11px; color: var(--text-faint); }
+.dev-skill-desc { font-size: 12px; color: var(--text-muted); margin-top: var(--space-1); }
+.dev-add-skill { margin-top: var(--space-2); }
+
+/* Cases list */
+.dev-cases-list { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
+.dev-case-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); background: var(--bg-card);
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  position: relative;
+}
+.dev-case-row:hover { border-color: var(--border-hover); }
+.dev-case-main { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
+.dev-case-title { font-size: 13px; color: var(--text-primary); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
+.dev-case-notes { font-size: 11px; color: var(--text-faint); flex-shrink: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-case-del {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-faint); cursor: pointer;
+  font-size: 16px; opacity: 0; transition: opacity 0.15s;
+}
+.dev-case-row:hover .dev-case-del { opacity: 1; }
+.dev-case-del:hover { color: var(--red); }

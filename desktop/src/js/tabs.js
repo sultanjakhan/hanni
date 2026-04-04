@@ -43,10 +43,9 @@ function renderTabBar() {
     item.className = 'tab-item' + (tabId === S.activeTab ? ' active' : '');
     item.dataset.tabId = tabId;
     item.title = reg.label;
-    const customIcon = S.tabCustomizations[tabId]?.icon;
-    item.innerHTML = customIcon
-      ? `<span class="tab-item-icon tab-item-icon-emoji">${customIcon}</span>`
-      : `<span class="tab-item-icon">${reg.icon || ''}</span>`;
+    const icon = S.tabCustomizations[tabId]?.icon || reg.icon || '';
+    const isEmoji = icon && !icon.startsWith('<');
+    item.innerHTML = `<span class="tab-item-icon${isEmoji ? ' tab-item-icon-emoji' : ''}">${icon}</span>`;
     if (tabId === 'focus' && S.focusWidgetActivity) {
       const dot = document.createElement('span');
       dot.className = 'tab-focus-dot';
@@ -177,11 +176,11 @@ function showMobileTabPicker() {
   for (const tabId of S.openTabs) {
     const reg = TAB_REGISTRY[tabId];
     if (!reg) continue;
-    const customIcon = S.tabCustomizations[tabId]?.icon;
-    const icon = customIcon || reg.icon || '';
+    const icon = S.tabCustomizations[tabId]?.icon || reg.icon || '';
+    const isEmoji = icon && !icon.startsWith('<');
     const item = document.createElement('div');
     item.className = 'tab-dropdown-item' + (tabId === S.activeTab ? ' active' : '');
-    item.innerHTML = `<span class="tab-item-icon">${icon}</span> ${reg.label}`;
+    item.innerHTML = `<span class="tab-item-icon${isEmoji ? ' tab-item-icon-emoji' : ''}">${icon}</span> ${reg.label}`;
     item.addEventListener('click', () => {
       dropdown.classList.add('hidden');
       switchTab(tabId);
