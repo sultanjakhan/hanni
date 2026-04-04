@@ -27,6 +27,7 @@ const TAB_LABELS = {
   calendar: { name: 'Календарь', icon: '📅', desc: 'События и расписание' },
   focus: { name: 'Фокус', icon: '🎯', desc: 'Глубокая работа' },
   projects: { name: 'Проекты', icon: '📁', desc: 'Проекты и их задачи' },
+  timeline: { name: 'Таймлайн', icon: '⏱️', desc: '24-часовой обзор активности' },
 };
 
 // ── Tab metadata persistence ──
@@ -58,7 +59,8 @@ export async function renderUnifiedLayout(el, tabId, config) {
 
   const panes = [...SUB_PANES];
   if (config.renderBody) panes.splice(1, 0, { id: 'body', icon: '🦴', label: 'Тело' });
-  if (config.renderTracking) panes.splice(config.renderBody ? 3 : 2, 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
+  if (config.renderSleep) panes.splice(config.renderBody ? 2 : 1, 0, { id: 'sleep', icon: '🌙', label: 'Сон' });
+  if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
 
   // Tab title header — merge defaults with user overrides
   const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };
@@ -117,6 +119,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
     case 'table':
       if (config.renderTable) await config.renderTable(paneEl);
       else paneEl.innerHTML = renderEmptyState('Таблица', 'Пока нет записей');
+      break;
+    case 'sleep':
+      if (config.renderSleep) await config.renderSleep(paneEl);
       break;
     case 'tracking':
       if (config.renderTracking) await config.renderTracking(paneEl);

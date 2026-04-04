@@ -1,6 +1,6 @@
 [package]
 name = "hanni"
-version = "0.31.1"
+version = "0.32.0"
 description = "Hanni — personal AI assistant"
 authors = ["sultanjakhan"]
 edition = "2021"
@@ -27,7 +27,7 @@ futures-util = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 dirs = "6"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "load_extension"] }
 regex = "1"
 axum = "0.8"
 tower = "0.5"

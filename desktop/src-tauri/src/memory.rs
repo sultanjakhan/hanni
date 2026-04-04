@@ -750,6 +750,7 @@ pub async fn process_conversation_end(
         tools: None,
     };
 
+    tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
     let response = client
         .post(MLX_URL)
         .json(&request)
@@ -1014,6 +1015,7 @@ pub async fn process_conversation_end(
             };
 
             // Async LLM call — no DB lock held (30s timeout)
+            tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
             if let Ok(resp) = client.post(MLX_URL).json(&dedup_request).timeout(std::time::Duration::from_secs(30)).send().await {
                 if !resp.status().is_success() { eprintln!("[dedup] MLX error {}", resp.status()); }
                 else if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
@@ -1164,6 +1166,7 @@ pub async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
         tools: None,
     };
 
+    tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
     let response = client.post(MLX_URL).json(&request).timeout(std::time::Duration::from_secs(30)).send().await
         .map_err(|e| format!("Profile synthesis error: {}", e))?;
     if !response.status().is_success() {

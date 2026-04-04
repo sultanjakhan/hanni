@@ -12,6 +12,7 @@ const SETTINGS_SECTIONS = {
     { id: 'styles', label: 'Стили' },
     { id: 'tools', label: 'Инструменты' },
     { id: 'data', label: 'Данные' },
+    { id: 'sync', label: 'Синхронизация' },
     { id: 'appearance', label: 'Оформление' },
     { id: 'about', label: 'О Hanni' },
   ],
@@ -631,6 +632,7 @@ function loadSubTabContent(tabId, subTab) {
     case 'people': tabLoaders.loadPeople?.(subTab); break;
     case 'schedule': tabLoaders.loadSchedule?.(subTab); break;
     case 'dankoe': tabLoaders.loadDanKoe?.(subTab); break;
+    case 'timeline': tabLoaders.loadTimeline?.(subTab); break;
     default:
       if (tabId.startsWith('page_')) tabLoaders.loadCustomPage?.(tabId, subTab);
       break;
@@ -802,6 +804,7 @@ async function renderSettingsPage(tabId, sectionId) {
 
   // Wire up controls
   wireSettingsControls(el, tabId);
+  wireSyncControls(el);
   wireManageControls(el, tabId);
 }
 
@@ -851,6 +854,8 @@ async function renderSettingsSectionContent(tabId, sectionId) {
       <div class="settings-row"><span class="settings-hint">Подключение внешних инструментов через MCP</span></div>
       <div class="settings-empty-hint">Нет подключённых MCP серверов</div>
       <button class="btn-smallall" style="margin-top:12px;">+ Подключить MCP</button></div>`;
+  } else if (sectionId === 'sync') {
+    return renderSyncSection();
   } else if (sectionId === 'manage') {
     return renderManageSection(tabId);
   }
@@ -872,6 +877,61 @@ function wireSettingsControls(el, tabId) {
         saveTabSetting(group.dataset.tabId, group.dataset.settingKey, pill.dataset.value);
       });
     });
+  });
+}
+
+// ── Sync Settings Section ──
+
+async function renderSyncSection() {
+  let status = { enabled: false, last_sync: null, pending_changes: 0, site_id: '', device_name: '' };
+  try { status = await invoke('get_sync_status'); } catch(_) {}
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">Синхронизация</div>
+      <div class="settings-row"><span class="settings-label">Включить синхронизацию</span>
+        <span class="settings-value"><label class="toggle"><input type="checkbox" id="sync-enabled" ${status.enabled ? 'checked' : ''}><span class="toggle-track"></span></label></span></div>
+      <div class="settings-row"><span class="settings-label">Relay URL</span>
+        <span class="settings-value"><input class="form-input" id="sync-relay-url" type="text" placeholder="https://hanni-sync.workers.dev" style="width:260px;"></span></div>
+      <div class="settings-row"><span class="settings-label">Device Token</span>
+        <span class="settings-value"><input class="form-input" id="sync-device-token" type="password" placeholder="secret" style="width:200px;"></span></div>
+      <div class="settings-row"><span class="settings-label">Имя устройства</span>
+        <span class="settings-value"><input class="form-input" id="sync-device-name" type="text" value="${escapeHtml(status.device_name)}" placeholder="MacBook" style="width:200px;"></span></div>
+      <div class="settings-row"><span class="settings-label">Device ID</span>
+        <span class="settings-value"><span class="settings-hint">${status.site_id || '—'}</span></span></div>
+      <div class="settings-row"><span class="settings-label">Последняя синхронизация</span>
+        <span class="settings-value"><span class="settings-hint">${status.last_sync || 'никогда'}</span></span></div>
+      <div class="settings-row"><span class="settings-label">Ожидающие изменения</span>
+        <span class="settings-value"><span class="settings-hint">${status.pending_changes}</span></span></div>
+      <div class="settings-row" style="gap:var(--space-2);justify-content:flex-end;">
+        <button class="btn-smallall" id="sync-save-btn">Сохранить</button>
+        <button class="btn-primary" id="sync-now-btn">Синхронизировать</button>
+      </div>
+    </div>`;
+}
+
+function wireSyncControls(el) {
+  el.querySelector('#sync-save-btn')?.addEventListener('click', async () => {
+    const enabled = el.querySelector('#sync-enabled')?.checked || false;
+    const relayUrl = el.querySelector('#sync-relay-url')?.value || '';
+    const deviceToken = el.querySelector('#sync-device-token')?.value || '';
+    const deviceName = el.querySelector('#sync-device-name')?.value || '';
+    try {
+      await invoke('set_sync_config', { enabled, relayUrl, deviceToken, deviceName });
+    } catch(e) { console.error('sync config save:', e); }
+  });
+  el.querySelector('#sync-now-btn')?.addEventListener('click', async () => {
+    const btn = el.querySelector('#sync-now-btn');
+    btn.textContent = 'Синхронизация…';
+    btn.disabled = true;
+    try {
+      const result = await invoke('sync_now');
+      btn.textContent = 'Готово!';
+      setTimeout(() => { btn.textContent = 'Синхронизировать'; btn.disabled = false; }, 2000);
+    } catch(e) {
+      btn.textContent = 'Ошибка';
+      console.error('sync:', e);
+      setTimeout(() => { btn.textContent = 'Синхронизировать'; btn.disabled = false; }, 3000);
+    }
   });
 }
 

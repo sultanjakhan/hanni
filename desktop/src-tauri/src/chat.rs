@@ -33,6 +33,11 @@ pub async fn chat(app: AppHandle, messages: Vec<serde_json::Value>, call_mode: O
         ).ok().map(|v| v == "true").unwrap_or(false)
     };
 
+    // Ensure MLX server is running on-demand (saves CPU when idle)
+    if !use_openclaw || is_call {
+        tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
+    }
+
     // Call mode always uses direct MLX (fast ~3s vs 30s+ through OpenClaw)
     let result = if use_openclaw && !is_call {
         let conv_id_str = conversation_id.as_ref().map(|v| match v {

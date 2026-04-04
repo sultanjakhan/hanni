@@ -181,6 +181,7 @@ export const TAB_REGISTRY = {
   people:      { label: 'People',      icon: TAB_ICONS.people, closable: true,  subTabs: [] },
   schedule:    { label: 'Schedule',    icon: '📅', closable: true,  subTabs: [] },
   dankoe:      { label: 'Dan Koe',     icon: '🧠', closable: true,  subTabs: [] },
+  timeline:    { label: 'Timeline',    icon: '⏱️', closable: true,  subTabs: [] },
 };
 
 export const TAB_DESCRIPTIONS = {
@@ -200,6 +201,7 @@ export const TAB_DESCRIPTIONS = {
   people: 'Contacts and relationship management',
   schedule: 'Recurring events and routines with completion tracking',
   dankoe: 'Dan Koe Protocol — daily contemplation, pattern interrupt, vision, integration',
+  timeline: '24-hour activity timeline — sleep, focus, AFK, meals, sport',
 };
 
 // Page customization (Notion-like editable icon/description)

@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════
 
 // ── Foundation ──
-import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY, TAB_DESCRIPTIONS, setTheme, getTabIcon } from './js/state.js';
+import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY, TAB_DESCRIPTIONS, setTheme, getTabIcon, IS_MOBILE } from './js/state.js';
 import { renderPageHeader, setupPageHeaderControls, loadTabBlockEditor, escapeHtml } from './js/utils.js';
 
 // ── Core modules ──
@@ -32,6 +32,7 @@ import {
   loadHobbies, loadSports, loadHealth, loadCustomPage,
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
+import './js/tab-timeline.js';
 
 // ── One-time migration: work → jobs tab rename ──
 (() => {
@@ -291,4 +292,23 @@ document.addEventListener('keydown', (e) => {
   } catch (_) {}
   if (chat.children.length === 0) renderChatWelcomeCard();
   loadConversationsList();
+
+  // Android back button: close overlays, then go to previous tab
+  if (IS_MOBILE) {
+    history.pushState(null, '', '');
+    window.addEventListener('popstate', () => {
+      history.pushState(null, '', '');
+      // Close tab dropdown
+      const dd = document.getElementById('tab-dropdown');
+      if (dd && !dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }
+      // Close sub-sidebar drawer
+      const sb = document.getElementById('sub-sidebar');
+      if (sb?.classList.contains('mobile-open')) { sb.classList.remove('mobile-open'); document.querySelector('.sub-sidebar-backdrop')?.remove(); return; }
+      // Close any modal
+      const modal = document.querySelector('.modal-overlay');
+      if (modal) { modal.remove(); return; }
+      // Switch to chat (home)
+      if (S.activeTab !== 'chat') { switchTab('chat'); return; }
+    });
+  }
 })();

@@ -47,6 +47,7 @@ pub async fn run_agent_task(
             tools: if tools.is_empty() { None } else { Some(tools.clone()) },
         };
 
+        tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
         let resp = client.post(MLX_URL)
             .json(&request)
             .timeout(std::time::Duration::from_secs(180))

@@ -835,6 +835,9 @@ pub async fn proactive_llm_call(
         tools: None,
     };
 
+    // Ensure MLX is running on-demand
+    tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
+
     let response = client
         .post(MLX_URL)
         .json(&request)

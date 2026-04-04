@@ -22,6 +22,11 @@ mod vacancy;
 mod dashboard;
 mod commands_timeline;
 mod timeline_stats;
+mod timeline_afk;
+mod mlx_manager;
+mod sync;
+mod sync_commands;
+mod health_connect;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -42,7 +47,7 @@ use macos::run_osascript;
 use commands_meta::spawn_api_server;
 #[cfg(not(target_os = "android"))]
 use commands_meta::{
-    start_mlx_server, updater_with_headers,
+    updater_with_headers,
     ensure_voice_server_launchagent, ensure_openclaw_gateway,
 };
 
@@ -54,6 +59,38 @@ use tauri::{Emitter, Manager};
 #[cfg(not(target_os = "android"))]
 use chrono::{Timelike, Datelike};
 
+/// Load cr-sqlite extension for CRDT-based sync
+fn load_crsqlite(conn: &rusqlite::Connection) {
+    unsafe { conn.load_extension_enable().ok(); }
+    let lib_path = crsqlite_lib_path();
+    match unsafe { conn.load_extension(&lib_path, Some("sqlite3_crsqlite_init")) } {
+        Ok(_) => eprintln!("cr-sqlite loaded from {:?}", lib_path),
+        Err(e) => eprintln!("Warning: cr-sqlite not loaded: {e}. Sync disabled."),
+    }
+    unsafe { conn.load_extension_disable().ok(); }
+}
+
+fn crsqlite_lib_path() -> std::path::PathBuf {
+    #[cfg(target_os = "macos")]
+    let name = "crsqlite.dylib";
+    #[cfg(target_os = "android")]
+    let name = "crsqlite.so";
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    let name = "crsqlite.so";
+
+    // In dev mode, load from libs/ relative to src-tauri
+    let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("libs")
+        .join(if cfg!(target_os = "macos") { "darwin-aarch64" } else { "android-aarch64" })
+        .join(name);
+    if dev_path.exists() { return dev_path; }
+
+    // In production, load from Tauri resource dir
+    let data_dir = types::hanni_data_dir();
+    data_dir.parent().unwrap_or(&data_dir).join(name)
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let proactive_settings = load_proactive_settings();
     let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
@@ -78,6 +115,10 @@ pub fn run() {
     backup_db(); // Auto-backup before opening DB
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
+
+    // Load cr-sqlite extension for CRDT sync
+    load_crsqlite(&conn);
+
     init_db(&conn).expect("Cannot initialize database");
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
@@ -94,6 +135,8 @@ pub fn run() {
     migrate_job_search(&conn);
     migrate_dashboard_widgets(&conn);
     migrate_timeline(&conn);
+    db::migrate_sleep(&conn);
+    db::enable_crr_tables(&conn);
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -116,13 +159,11 @@ pub fn run() {
     }
     let hanni_db = HanniDb(std::sync::Mutex::new(conn));
 
-    // Desktop-only: MLX server, OpenClaw gateway, voice server
+    // Desktop-only: MLX server (on-demand — starts when needed, stops after 5min idle)
     #[cfg(not(target_os = "android"))]
-    let mlx_child = start_mlx_server();
+    mlx_manager::init();
     #[cfg(not(target_os = "android"))]
-    let mlx_process = Arc::new(MlxProcess(std::sync::Mutex::new(mlx_child)));
-    #[cfg(not(target_os = "android"))]
-    let mlx_cleanup = mlx_process.clone();
+    mlx_manager::spawn_idle_watchdog();
 
     #[cfg(not(target_os = "android"))]
     let openclaw_child = ensure_openclaw_gateway();
@@ -325,6 +366,7 @@ pub fn run() {
             commands_data::add_job_vacancy,
             commands_data::update_job_vacancy,
             commands_data::delete_job_vacancy,
+            commands_data::restore_job_vacancy,
             commands_data::get_job_stats,
             commands_data::add_job_search_log,
             commands_data::get_job_search_log,
@@ -559,7 +601,16 @@ pub fn run() {
             timeline_stats::delete_timeline_goal,
             timeline_stats::get_timeline_day_stats,
             timeline_stats::get_timeline_range_stats,
-            timeline_stats::sync_afk_blocks,
+            timeline_afk::sync_afk_blocks,
+            // Sync
+            sync_commands::sync_now,
+            sync_commands::get_sync_status,
+            sync_commands::set_sync_config,
+            // Health Connect / Sleep
+            health_connect::get_sleep_sessions,
+            health_connect::add_sleep_session,
+            health_connect::get_sleep_stats,
+            health_connect::import_health_connect_sleep,
         ])
         .setup(move |app| {
             // Auto-updater (desktop only)
@@ -939,6 +990,9 @@ pub fn run() {
 
                     if snapshots_text.is_empty() { continue; }
 
+                    // Ensure MLX is running before calling it
+                    tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
+
                     let prompt = format!(
                         "Проанализируй активность пользователя за последние 3 часа и найди паттерны.\n\n\
                         Снимки активности (от новых к старым):\n{}\n\n\
@@ -1134,12 +1188,7 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             if let tauri::RunEvent::Exit = event {
                 // Kill MLX server process on app exit
-                {
-                    let mut child = mlx_cleanup.0.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(ref mut proc) = *child {
-                        let _ = proc.kill();
-                    }
-                }
+                mlx_manager::stop();
                 // Kill OpenClaw gateway if we started it as subprocess
                 {
                     let mut child = openclaw_cleanup.0.lock().unwrap_or_else(|e| e.into_inner());

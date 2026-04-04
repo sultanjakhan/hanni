@@ -555,11 +555,12 @@ async function renderDayCalendar(el, events) {
   const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
   const challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
 
-  const hours = Array.from({length: 24}, (_, i) => i); // 0:00 - 23:00
+  const hours = Array.from({length: 24}, (_, i) => i);
+  const isViewingToday = S.calDayDate === `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const curHour = today.getHours(), curMin = today.getMinutes();
   let timelineHtml = hours.map(h => {
     const timeStr = `${String(h).padStart(2,'0')}:`;
     const hourEvents = dayEvents.filter(e => e.time && e.time.startsWith(timeStr.slice(0,2)));
-    // Schedules with matching time
     const hourScheds = dayScheds.filter(s => s.time_of_day && s.time_of_day.startsWith(timeStr.slice(0,2)));
     const evtHtml = hourEvents.map(e => {
       const srcBadge = e.source && e.source !== 'manual' ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
@@ -579,9 +580,10 @@ async function renderDayCalendar(el, events) {
         <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
       </div>`;
     }).join('');
+    const nowLine = (isViewingToday && h === curHour) ? `<div class="wk-now-line" style="top:${(curMin/60)*100}%"><div class="wk-now-dot"></div></div>` : '';
     return `<div class="day-hour-row">
       <div class="day-hour-label">${String(h).padStart(2,'0')}:00</div>
-      <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}">${evtHtml}${schHtml}</div>
+      <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}">${nowLine}${evtHtml}${schHtml}</div>
     </div>`;
   }).join('');
 
@@ -615,6 +617,12 @@ async function renderDayCalendar(el, events) {
     </div>
     ${allDayHtml}
     <div class="day-timeline">${timelineHtml}</div>`;
+
+  // Auto-scroll to current time
+  if (isViewingToday) {
+    const nowEl = el.querySelector('.wk-now-line');
+    if (nowEl) nowEl.scrollIntoView({ block: 'center', behavior: 'instant' });
+  }
 
   document.getElementById('day-prev')?.addEventListener('click', () => {
     const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() - 1);

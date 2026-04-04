@@ -960,6 +960,7 @@ pub fn migrate_job_search(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE job_vacancies ADD COLUMN contact TEXT NOT NULL DEFAULT ''", []).ok();
     conn.execute("ALTER TABLE job_vacancies ADD COLUMN applied_at TEXT", []).ok();
     conn.execute("ALTER TABLE job_vacancies ADD COLUMN source TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE job_vacancies ADD COLUMN deleted_at TEXT", []).ok();
 }
 
 pub fn migrate_dashboard_widgets(conn: &rusqlite::Connection) {
@@ -1027,4 +1028,126 @@ pub fn migrate_timeline(conn: &rusqlite::Connection) {
             rusqlite::params![name, color, icon, order],
         ).ok();
     }
+}
+
+pub fn migrate_sleep(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sleep_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            duration_minutes INTEGER NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            quality_score INTEGER,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(date, start_time, source)
+        );
+        CREATE TABLE IF NOT EXISTS sleep_stages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES sleep_sessions(id) ON DELETE CASCADE,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            stage TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sleep_date ON sleep_sessions(date);
+        CREATE INDEX IF NOT EXISTS idx_sleep_stages_session ON sleep_stages(session_id);
+
+        -- v0.32.0: Development Projects, Skills, Cases
+        CREATE TABLE IF NOT EXISTS dev_projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            icon TEXT NOT NULL DEFAULT '📁',
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS dev_skills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES dev_projects(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            score INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS dev_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            skill_id INTEGER NOT NULL REFERENCES dev_skills(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            score INTEGER DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            solved_at TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_skills_project ON dev_skills(project_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_cases_skill ON dev_cases(skill_id);"
+    ).ok();
+
+    // Seed PM project with skills if not exists
+    seed_pm_project(conn);
+}
+
+fn seed_pm_project(conn: &rusqlite::Connection) {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM dev_projects", [], |r| r.get(0)).unwrap_or(0);
+    if count > 0 { return; }
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute("INSERT INTO dev_projects (name, icon, sort_order, created_at) VALUES ('PM', '📦', 0, ?1)", rusqlite::params![now]).ok();
+    let pid: i64 = conn.last_insert_rowid();
+    let skills = [
+        "Discovery & User Research", "Prioritization", "Metrics & Analytics",
+        "Roadmapping", "Stakeholder Management", "User Stories & Requirements",
+        "A/B Testing & Experimentation", "Go-to-Market", "Technical Understanding",
+        "Communication & Presentation", "Competitive Analysis", "Strategy & Vision",
+    ];
+    for (i, name) in skills.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO dev_skills (project_id, name, score, sort_order, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?4, ?4)",
+            rusqlite::params![pid, name, i as i32, now],
+        ).ok();
+    }
+}
+
+/// Convert regular tables to CRRs (conflict-free replicated relations) for sync.
+/// Skips FTS5, vec0, and device-specific tables. Safe to call repeatedly.
+pub fn enable_crr_tables(conn: &rusqlite::Connection) {
+    // Check if cr-sqlite is loaded
+    let loaded: bool = conn.query_row(
+        "SELECT count(*) > 0 FROM pragma_function_list WHERE name='crsql_as_crr'",
+        [], |r| r.get(0),
+    ).unwrap_or(false);
+    if !loaded {
+        eprintln!("cr-sqlite not loaded, skipping CRR setup");
+        return;
+    }
+
+    let tables = [
+        "facts", "conversations", "activities", "notes", "events",
+        "projects", "tasks", "learning_items", "hobbies", "hobby_entries",
+        "workouts", "exercises", "health_log", "habits", "habit_checks",
+        "media_items", "user_lists", "list_items", "food_log", "recipes",
+        "products", "transactions", "budgets", "savings_goals",
+        "subscriptions", "debts", "journal_entries", "mood_log",
+        "principles", "blocklist", "tab_goals", "home_items",
+        "contacts", "contact_blocks", "page_meta", "property_definitions",
+        "property_values", "view_configs", "ui_state", "activity_snapshots",
+        "proactive_history", "message_feedback", "conversation_insights",
+        "reminders", "flywheel_cycles", "custom_pages", "tab_page_blocks",
+        "note_tags", "schedules", "schedule_completions", "dan_koe_entries",
+        "proactive_messages", "project_records", "body_records",
+        "job_sources", "job_roles", "job_vacancies", "job_search_log",
+        "dashboard_widgets", "timeline_activity_types", "timeline_blocks",
+        "timeline_goals", "sleep_sessions", "sleep_stages",
+    ];
+
+    for table in &tables {
+        let sql = format!("SELECT crsql_as_crr('{}')", table);
+        if let Err(e) = conn.execute_batch(&sql) {
+            eprintln!("CRR skip {}: {}", table, e);
+        }
+    }
+    eprintln!("CRR enabled for {} tables", tables.len());
 }

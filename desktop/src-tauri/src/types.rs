@@ -158,6 +158,14 @@ impl HanniDb {
     }
 }
 
+impl Drop for HanniDb {
+    fn drop(&mut self) {
+        if let Ok(conn) = self.0.lock() {
+            let _ = conn.execute_batch("SELECT crsql_finalize();");
+        }
+    }
+}
+
 /// ~/Library/Application Support/Hanni/
 pub fn hanni_data_dir() -> PathBuf {
     dirs::data_dir()
@@ -305,7 +313,6 @@ pub struct TokenPayload {
 pub struct HttpClient(pub reqwest::Client);
 pub struct LlmBusy(pub tokio::sync::Semaphore);
 
-pub struct MlxProcess(pub std::sync::Mutex<Option<Child>>);
 pub struct OpenClawProcess(pub std::sync::Mutex<Option<Child>>);
 
 // ── Whisper / Voice state ──
