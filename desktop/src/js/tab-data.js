@@ -1045,10 +1045,15 @@ async function loadDevelopment() {
   const pid = S.devProject;
   const reload = () => loadDevelopment();
 
+  const projHtml = projects.length ? `<div class="dev-project-selector">${projects.map(p =>
+    `<button class="pill${p.id === pid ? ' active' : ''}" data-pid="${p.id}">${p.icon} ${escapeHtml(p.name)}</button>`
+  ).join('')}<button class="pill dev-add-project">+</button></div>` : '';
+
   await renderUnifiedLayout(el, 'development', {
     title: 'Развитие',
     subtitle: 'Проекты и навыки',
     icon: '🚀',
+    headerExtra: projHtml,
     renderSkills: pid ? (paneEl) => renderSkillsPane(paneEl, pid, reload) : null,
     renderCases: pid ? (paneEl) => renderCasesPane(paneEl, pid, reload) : null,
     renderTable: async (paneEl) => {
@@ -1061,21 +1066,11 @@ async function loadDevelopment() {
     },
   });
 
-  // Inject project selector before uni-tabs
-  const tabsEl = el.querySelector('.uni-tabs');
-  if (tabsEl && projects.length) {
-    const sel = document.createElement('div');
-    sel.className = 'dev-project-selector';
-    sel.innerHTML = projects.map(p =>
-      `<button class="pill${p.id === pid ? ' active' : ''}" data-pid="${p.id}">${p.icon} ${escapeHtml(p.name)}</button>`
-    ).join('') + '<button class="pill dev-add-project">+</button>';
-    tabsEl.parentNode.insertBefore(sel, tabsEl);
-
-    sel.querySelectorAll('.pill[data-pid]').forEach(btn => {
-      btn.addEventListener('click', () => { S.devProject = parseInt(btn.dataset.pid); reload(); });
-    });
-    sel.querySelector('.dev-add-project')?.addEventListener('click', () => showAddProjectModal(reload));
-  }
+  // Wire project selector events
+  el.querySelectorAll('.dev-project-selector .pill[data-pid]').forEach(btn => {
+    btn.addEventListener('click', () => { S.devProject = parseInt(btn.dataset.pid); reload(); });
+  });
+  el.querySelector('.dev-add-project')?.addEventListener('click', () => showAddProjectModal(reload));
 }
 
 function showAddProjectModal(reloadFn) {
@@ -1966,8 +1961,11 @@ async function loadSchedule(subTab) {
       paneEl.addEventListener('click', async (e) => {
         const chk = e.target.closest('[data-schid]');
         if (chk) {
-          await invoke('toggle_schedule_completion', { scheduleId: parseInt(chk.dataset.schid), date: today });
-          reloadTable();
+          const id = parseInt(chk.dataset.schid);
+          await invoke('toggle_schedule_completion', { scheduleId: id, date: today });
+          const wasChecked = chk.classList.contains('checked');
+          chk.classList.toggle('checked', !wasChecked);
+          chk.innerHTML = wasChecked ? '' : '&#10003;';
           return;
         }
         const tog = e.target.closest('[data-toggle-id]');

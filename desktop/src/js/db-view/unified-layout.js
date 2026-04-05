@@ -85,6 +85,7 @@ export async function renderUnifiedLayout(el, tabId, config) {
       <span class="uni-header-name" title="Изменить название">${escapeHtml(name)}</span>
       <div class="uni-header-desc" title="Изменить описание">${desc ? escapeHtml(desc) : '<span style="opacity:0.4">Добавить описание…</span>'}</div>
     </div>
+    ${config.headerExtra || ''}
     <div class="uni-tabs">${tabsHtml}</div>
     <div class="uni-content">
       <div class="uni-pane" id="uni-pane-${tabId}"></div>
