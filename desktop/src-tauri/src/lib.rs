@@ -614,6 +614,7 @@ pub fn run() {
             timeline_stats::get_timeline_day_stats,
             timeline_stats::get_timeline_range_stats,
             timeline_afk::sync_afk_blocks,
+            timeline_afk::sync_timeline_auto,
             // Sync
             sync_commands::sync_now,
             sync_commands::get_sync_status,

@@ -6,6 +6,10 @@ async function loadTimeline(subTab) {
   const el = document.getElementById('timeline-content');
   if (!el) return;
 
+  // Auto-sync AFK + Focus blocks from activity_snapshots
+  const today = localDate();
+  await invoke('sync_timeline_auto', { date: today }).catch(() => {});
+
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'timeline', {
     title: 'Timeline',
@@ -29,7 +33,7 @@ async function loadTimeline(subTab) {
 }
 
 async function renderBlocksTable(paneEl) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   const blocks = await invoke('get_timeline_blocks', { date: today }).catch(() => []);
 
   const fmtDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('ru', { day: 'numeric', month: 'short' });
@@ -71,6 +75,11 @@ async function renderBlocksTable(paneEl) {
       await renderBlocksTable(paneEl);
     });
   });
+}
+
+function localDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 // Register tab loader
