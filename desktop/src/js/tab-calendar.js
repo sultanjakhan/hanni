@@ -20,6 +20,7 @@ function scheduleMatchesDate(sch, dateStr) {
 }
 
 const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
+let calDayScrolled = false;
 
 // ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
@@ -70,6 +71,7 @@ async function loadCalendar(subTab) {
       paneEl.querySelectorAll('[data-calview]').forEach(btn => {
         btn.addEventListener('click', () => {
           S._calendarInner = btn.dataset.calview;
+          calDayScrolled = false;
           // Update active tab pill without re-rendering layout
           paneEl.querySelectorAll('[data-calview]').forEach(b => b.classList.toggle('active', b.dataset.calview === btn.dataset.calview));
           refreshCalendarInner();
@@ -607,6 +609,10 @@ async function renderDayCalendar(el, events) {
     <div class="day-hour-content">${allDayEvts}${noTimeSchHtml}</div>
   </div>` : '';
 
+  // Save scroll position before re-render
+  const scrollParent = el.closest('.tab-content') || el.parentElement;
+  const savedScroll = scrollParent?.scrollTop || 0;
+
   el.innerHTML = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="day-prev">&lt;</button>
@@ -618,27 +624,29 @@ async function renderDayCalendar(el, events) {
     ${allDayHtml}
     <div class="day-timeline">${timelineHtml}</div>`;
 
-  // Auto-scroll to current time
-  if (isViewingToday) {
+  // Auto-scroll to current time on first render, restore position on re-renders
+  if (!calDayScrolled && isViewingToday) {
     const nowEl = el.querySelector('.wk-now-line');
-    if (nowEl) nowEl.scrollIntoView({ block: 'center', behavior: 'instant' });
+    if (nowEl) { nowEl.scrollIntoView({ block: 'center', behavior: 'instant' }); calDayScrolled = true; }
+  } else if (scrollParent && savedScroll > 0) {
+    scrollParent.scrollTop = savedScroll;
   }
 
   document.getElementById('day-prev')?.addEventListener('click', () => {
     const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() - 1);
     S.calDayDate = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
     S.calendarMonth = dd.getMonth(); S.calendarYear = dd.getFullYear();
-    refreshCalendarInner();
+    calDayScrolled = false; refreshCalendarInner();
   });
   document.getElementById('day-next')?.addEventListener('click', () => {
     const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() + 1);
     S.calDayDate = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
     S.calendarMonth = dd.getMonth(); S.calendarYear = dd.getFullYear();
-    refreshCalendarInner();
+    calDayScrolled = false; refreshCalendarInner();
   });
   document.getElementById('day-today')?.addEventListener('click', () => {
     S.calDayDate = null; S.calendarMonth = today.getMonth(); S.calendarYear = today.getFullYear();
-    refreshCalendarInner();
+    calDayScrolled = false; refreshCalendarInner();
   });
   document.getElementById('day-add-event')?.addEventListener('click', () => {
     S.selectedCalendarDate = S.calDayDate;

@@ -29,10 +29,12 @@ export async function renderTimelineGrid(paneEl) {
 
   // Sub-tab clicks
   paneEl.querySelectorAll('[data-tlview]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       gridMode = btn.dataset.tlview;
       S._tlView = gridMode;
       gridOffset = 0;
+      const { resetScroll } = await import('./timeline-dayweek.js');
+      resetScroll();
       renderTimelineGrid(paneEl);
     });
   });

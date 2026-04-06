@@ -1,6 +1,10 @@
 // timeline-dayweek.js — Day/Week grid renderer for Timeline
 import { invoke } from './state.js';
 
+let hasScrolled = false;
+
+export function resetScroll() { hasScrolled = false; }
+
 export async function renderDayWeekGrid(paneEl, dates, mode) {
   const allBlocks = {};
   for (const d of dates) {
@@ -51,14 +55,22 @@ export async function renderDayWeekGrid(paneEl, dates, mode) {
     ? `<div class="tl-now-line" style="top:${nowTop}px;left:calc(50px + ${todayIdx} * (100% - 50px) / ${dates.length});width:calc((100% - 50px) / ${dates.length});"></div>`
     : '';
 
+  // Save scroll position before re-render
+  const scrollParent = paneEl.closest('.tab-content') || paneEl.parentElement;
+  const savedScroll = scrollParent?.scrollTop || 0;
+
   paneEl.innerHTML = `<div class="tl-grid-wrap">
     <table class="tl-grid"><thead><tr><th class="tl-time-label"></th>${dayHeaders}</tr></thead><tbody>${rows}</tbody></table>
     ${nowLine}
   </div>`;
 
-  // Auto-scroll to current time
-  const nowLineEl = paneEl.querySelector('.tl-now-line');
-  if (nowLineEl) nowLineEl.scrollIntoView({ block: 'center', behavior: 'instant' });
+  // Auto-scroll to current time on first render, restore position on re-renders
+  if (!hasScrolled) {
+    const nowLineEl = paneEl.querySelector('.tl-now-line');
+    if (nowLineEl) { nowLineEl.scrollIntoView({ block: 'center', behavior: 'instant' }); hasScrolled = true; }
+  } else if (scrollParent && savedScroll > 0) {
+    scrollParent.scrollTop = savedScroll;
+  }
 
   // Click handlers
   paneEl.querySelectorAll('.tl-empty-cell').forEach(cell => {
