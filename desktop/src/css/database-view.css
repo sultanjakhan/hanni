@@ -2260,26 +2260,64 @@ th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
   display: flex; gap: var(--space-1); padding: 0 0 var(--space-2); flex-wrap: wrap;
 }
 
-/* Skills grid */
-.dev-skills-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--space-3); margin-bottom: var(--space-3);
+/* Skills list */
+.dev-skills-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); }
+.dev-skill-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
+  cursor: pointer; transition: background 0.1s;
 }
-.dev-skill-card {
-  background: var(--bg-card); border: 1px solid var(--border-default);
-  border-radius: var(--radius-md); padding: var(--space-3);
-  transition: border-color 0.15s;
-}
-.dev-skill-card:hover { border-color: var(--border-hover); }
-.dev-skill-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--space-1); }
-.dev-skill-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.dev-skill-level { font-size: 11px; font-weight: 500; }
-.dev-skill-stars { margin-bottom: var(--space-1); }
-.dev-star { font-size: 16px; color: var(--border-default); cursor: pointer; transition: color 0.1s; }
-.dev-star:hover, .dev-star.filled { color: var(--yellow); }
-.dev-skill-meta { font-size: 11px; color: var(--text-faint); }
-.dev-skill-desc { font-size: 12px; color: var(--text-muted); margin-top: var(--space-1); }
+.dev-skill-row:hover { background: var(--bg-hover); }
+.dev-skill-score-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dev-skill-name { font-size: 14px; font-weight: 500; color: var(--text-primary); flex: 1; }
+.dev-skill-level { font-size: 11px; font-weight: 500; flex-shrink: 0; }
+.dev-skill-cases-count { font-size: 11px; color: var(--text-faint); flex-shrink: 0; min-width: 30px; text-align: right; }
+.dev-skill-arrow { font-size: 12px; color: var(--text-faint); }
 .dev-add-skill { margin-top: var(--space-2); }
+
+/* Skill page */
+.dev-back-btn {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 13px; padding: var(--space-1) 0; margin-bottom: var(--space-2);
+}
+.dev-back-btn:hover { color: var(--accent); }
+.dev-page-header { margin-bottom: var(--space-3); }
+.dev-page-title { font-size: 22px; font-weight: 700; color: var(--text-primary); margin: 0 0 4px; }
+.dev-page-subtitle { font-size: 13px; color: var(--text-muted); }
+.dev-page-score {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3);
+  background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-md);
+}
+.dev-page-score-label { font-size: 13px; color: var(--text-muted); }
+.dev-skill-stars { display: inline-flex; gap: 2px; }
+.dev-star { font-size: 18px; color: var(--border-default); transition: color 0.1s; }
+.dev-star.interactive { cursor: pointer; }
+.dev-star.interactive:hover, .dev-star.filled { color: var(--yellow); }
+
+/* Skill page sections */
+.dev-page-sections { display: flex; flex-direction: column; gap: var(--space-2); }
+.dev-section { border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; }
+.dev-section-title {
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+  padding: var(--space-2) var(--space-3); cursor: pointer;
+  background: var(--bg-card); list-style: none;
+}
+.dev-section-title::-webkit-details-marker { display: none; }
+.dev-section-title::before {
+  content: '▸'; display: inline-block; margin-right: var(--space-2);
+  transition: transform 0.15s; font-size: 12px;
+}
+.dev-section[open] > .dev-section-title::before { transform: rotate(90deg); }
+.dev-section-body { padding: var(--space-3); }
+.dev-theory-content { font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+.dev-theory-content h2 { font-size: 15px; font-weight: 600; margin: var(--space-3) 0 var(--space-1); color: var(--text-primary); }
+.dev-theory-content h2:first-child { margin-top: 0; }
+.dev-theory-content ul, .dev-theory-content ol { padding-left: 20px; margin: var(--space-1) 0; }
+.dev-theory-content li { margin-bottom: 4px; }
+.dev-theory-content strong { color: var(--text-primary); }
+.dev-theory-content code { background: var(--bg-hover); padding: 1px 5px; border-radius: var(--radius-sm); font-size: 12px; }
+.dev-add-case-btn { margin-top: var(--space-2); }
 
 /* Cases list */
 .dev-cases-list { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }

@@ -578,16 +578,16 @@ pub fn delete_dev_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), 
 pub fn get_dev_skills(project_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.name, s.description, s.score, s.sort_order,
+        "SELECT s.id, s.name, s.description, s.theory, s.score, s.sort_order,
                 (SELECT COUNT(*) FROM dev_cases WHERE skill_id=s.id) as case_count,
                 (SELECT COUNT(*) FROM dev_cases WHERE skill_id=s.id AND solved_at IS NOT NULL) as solved_count
          FROM dev_skills s WHERE s.project_id=?1 ORDER BY s.sort_order"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![project_id], |row| Ok(serde_json::json!({
         "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
-        "description": row.get::<_, String>(2)?, "score": row.get::<_, i32>(3)?,
-        "sort_order": row.get::<_, i32>(4)?,
-        "case_count": row.get::<_, i32>(5)?, "solved_count": row.get::<_, i32>(6)?,
+        "description": row.get::<_, String>(2)?, "theory": row.get::<_, String>(3)?,
+        "score": row.get::<_, i32>(4)?, "sort_order": row.get::<_, i32>(5)?,
+        "case_count": row.get::<_, i32>(6)?, "solved_count": row.get::<_, i32>(7)?,
     }))).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
@@ -602,7 +602,7 @@ pub fn create_dev_skill(project_id: i64, name: String, description: String, db: 
 }
 
 #[tauri::command]
-pub fn update_dev_skill(id: i64, name: Option<String>, description: Option<String>, score: Option<i32>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_dev_skill(id: i64, name: Option<String>, description: Option<String>, theory: Option<String>, score: Option<i32>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let mut updates = vec!["updated_at=?1".to_string()];
@@ -610,6 +610,7 @@ pub fn update_dev_skill(id: i64, name: Option<String>, description: Option<Strin
     let mut idx = 2;
     if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = description { updates.push(format!("description=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = theory { updates.push(format!("theory=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = score { updates.push(format!("score=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     params.push(Box::new(id));
     let sql = format!("UPDATE dev_skills SET {} WHERE id=?{}", updates.join(","), idx);

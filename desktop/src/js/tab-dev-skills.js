@@ -1,13 +1,14 @@
-// ── tab-dev-skills.js — Skills pane for Development tab ──
+// ── tab-dev-skills.js — Skills list pane for Development tab ──
 
 import { S, invoke } from './state.js';
-import { escapeHtml, confirmModal } from './utils.js';
+import { escapeHtml } from './utils.js';
+import { renderSkillPage } from './tab-dev-skill-page.js';
 
 function scoreColor(score) {
   if (score >= 4) return 'var(--green)';
   if (score === 3) return 'var(--yellow)';
   if (score >= 1) return 'var(--red)';
-  return 'var(--border)';
+  return 'var(--text-faint)';
 }
 
 function scoreLabel(score) {
@@ -15,50 +16,37 @@ function scoreLabel(score) {
   return labels[score] || labels[0];
 }
 
-function renderStars(score) {
-  return Array.from({ length: 5 }, (_, i) =>
-    `<span class="dev-star ${i < score ? 'filled' : ''}" data-val="${i + 1}">★</span>`
-  ).join('');
-}
-
 export async function renderSkillsPane(el, projectId, reloadFn) {
+  if (S._devOpenSkill) {
+    await renderSkillPage(el, S._devOpenSkill, projectId, reloadFn);
+    return;
+  }
+
   const skills = await invoke('get_dev_skills', { projectId }).catch(() => []);
   if (!skills.length) {
     el.innerHTML = '<div class="uni-empty">Нет навыков</div>';
     return;
   }
 
-  el.innerHTML = `<div class="dev-skills-grid">${skills.map(s => `
-    <div class="dev-skill-card" data-id="${s.id}">
-      <div class="dev-skill-header">
-        <span class="dev-skill-name">${escapeHtml(s.name)}</span>
-        <span class="dev-skill-level" style="color:${scoreColor(s.score)}">${scoreLabel(s.score)}</span>
-      </div>
-      <div class="dev-skill-stars" data-id="${s.id}">${renderStars(s.score)}</div>
-      <div class="dev-skill-meta">
-        <span class="dev-skill-cases">${s.solved_count}/${s.case_count} кейсов</span>
-      </div>
-      ${s.description ? `<div class="dev-skill-desc">${escapeHtml(s.description)}</div>` : ''}
+  el.innerHTML = `<div class="dev-skills-list">${skills.map(s => `
+    <div class="dev-skill-row" data-id="${s.id}">
+      <div class="dev-skill-score-dot" style="background:${scoreColor(s.score)}"></div>
+      <span class="dev-skill-name">${escapeHtml(s.name)}</span>
+      <span class="dev-skill-level" style="color:${scoreColor(s.score)}">${scoreLabel(s.score)}</span>
+      <span class="dev-skill-cases-count">${s.solved_count}/${s.case_count}</span>
+      <span class="dev-skill-arrow">\u2192</span>
     </div>
   `).join('')}</div>
   <button class="btn-secondary dev-add-skill">+ Навык</button>`;
 
-  // Star click → update score
-  el.querySelectorAll('.dev-skill-stars').forEach(container => {
-    container.querySelectorAll('.dev-star').forEach(star => {
-      star.addEventListener('click', async () => {
-        const id = parseInt(container.dataset.id);
-        const val = parseInt(star.dataset.val);
-        await invoke('update_dev_skill', { id, name: null, description: null, score: val });
-        reloadFn();
-      });
+  el.querySelectorAll('.dev-skill-row').forEach(row => {
+    row.addEventListener('click', () => {
+      S._devOpenSkill = parseInt(row.dataset.id);
+      reloadFn();
     });
   });
 
-  // Add skill button
-  el.querySelector('.dev-add-skill')?.addEventListener('click', () => {
-    showAddSkillModal(projectId, reloadFn);
-  });
+  el.querySelector('.dev-add-skill')?.addEventListener('click', () => showAddSkillModal(projectId, reloadFn));
 }
 
 function showAddSkillModal(projectId, reloadFn) {
