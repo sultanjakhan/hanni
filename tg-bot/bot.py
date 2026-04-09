@@ -3,6 +3,10 @@ import os
 import re
 import asyncio
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
@@ -11,7 +15,9 @@ import db
 import parsers
 
 TOKEN = os.environ.get("BOT_TOKEN", "")
-ALLOWED_USER = int(os.environ.get("ALLOWED_USER", "0"))
+_users_raw = os.environ.get("ALLOWED_USERS", "")
+ALLOWED_USERS = [u.strip().lower() for u in _users_raw.split(",") if u.strip()]
+HANNI_DB = os.path.expanduser("~/Library/Application Support/Hanni/hanni.db")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("hanni-bot")
@@ -28,6 +34,25 @@ STAGES = {
     "ignored": "Пропущена",
 }
 URL_RE = re.compile(r"https?://[^\s]+")
+
+
+async def sync_to_hanni(data: dict):
+    """Save vacancy to Hanni's main SQLite DB."""
+    if not os.path.exists(HANNI_DB):
+        return
+    try:
+        import aiosqlite
+        async with aiosqlite.connect(HANNI_DB) as conn:
+            await conn.execute(
+                """INSERT OR IGNORE INTO job_vacancies (company, position, url, stage, contact, source, salary, notes, found_at, updated_at)
+                   VALUES (?, ?, ?, 'found', ?, ?, ?, ?, datetime('now'), datetime('now'))""",
+                (data.get('company', ''), data.get('position', ''), data.get('url', ''),
+                 data.get('contact', ''), data.get('source', 'tg-bot'),
+                 data.get('salary', ''), data.get('notes', '')),
+            )
+            await conn.commit()
+    except Exception as e:
+        log.error(f"Hanni sync failed: {e}")
 
 
 def card_text(v: dict) -> str:
@@ -58,7 +83,10 @@ def stage_keyboard(vacancy_id: int) -> InlineKeyboardMarkup:
 
 
 def is_allowed(msg: Message) -> bool:
-    return ALLOWED_USER == 0 or msg.from_user.id == ALLOWED_USER
+    if not ALLOWED_USERS:
+        return True
+    username = (msg.from_user.username or "").lower()
+    return username in ALLOWED_USERS
 
 
 @dp.message(Command("start"))
@@ -71,6 +99,23 @@ async def cmd_start(msg: Message):
         "/list — все вакансии\n"
         "/pipeline — по этапам\n"
         "/help — помощь"
+    )
+
+
+@dp.message(Command("help"))
+async def cmd_help(msg: Message):
+    if not is_allowed(msg):
+        return
+    await msg.answer(
+        "📖 <b>Команды:</b>\n\n"
+        "/list — все вакансии (последние 20)\n"
+        "/pipeline — вакансии по этапам\n"
+        "/help — эта справка\n\n"
+        "<b>Как добавить вакансию:</b>\n"
+        "Просто кинь ссылку на вакансию (hh.kz, djinni, linkedin и др.) — "
+        "я распарсю и добавлю в таблицу.\n\n"
+        "<b>Этапы:</b> Найдена → Откликнулся → Интервью → Оффер/Отказ",
+        parse_mode="HTML",
     )
 
 
@@ -115,13 +160,24 @@ async def cmd_pipeline(msg: Message):
     await msg.answer("📊 Pipeline:\n" + "\n".join(lines), parse_mode="HTML")
 
 
-@dp.message(F.text)
+@dp.message()
 async def handle_url(msg: Message):
     if not is_allowed(msg):
         return
-    urls = URL_RE.findall(msg.text)
+    # Extract URLs from text, caption, and entities
+    text = msg.text or msg.caption or ''
+    urls = URL_RE.findall(text)
+    # Also extract from entities (url type and text_link type)
+    for entities in [msg.entities or [], msg.caption_entities or []]:
+        for ent in entities:
+            if ent.type == 'url':
+                urls.append(ent.extract_from(text))
+            elif ent.type == 'text_link' and ent.url:
+                urls.append(ent.url)
+    urls = list(dict.fromkeys(urls))  # deduplicate, preserve order
     if not urls:
-        await msg.answer("Не нашёл ссылку. Кинь URL вакансии.")
+        if text and not text.startswith('/'):
+            await msg.answer("Не нашёл ссылку. Кинь URL вакансии.")
         return
 
     for url in urls[:3]:
@@ -132,6 +188,7 @@ async def handle_url(msg: Message):
             await msg.answer(f"⚠️ Уже добавлена: {data.get('position', url)}")
             continue
         v = await db.get_vacancy(vid)
+        await sync_to_hanni(data)
         await msg.answer(card_text(v), parse_mode="HTML", reply_markup=stage_keyboard(vid))
 
 
@@ -142,6 +199,15 @@ async def handle_stage(cb: CallbackQuery):
     await db.update_stage(vid, stage)
     v = await db.get_vacancy(vid)
     if v:
+        # Sync stage to Hanni
+        try:
+            import aiosqlite
+            if os.path.exists(HANNI_DB):
+                async with aiosqlite.connect(HANNI_DB) as conn:
+                    await conn.execute("UPDATE job_vacancies SET stage=?, updated_at=datetime('now') WHERE url=?", (stage, v['url']))
+                    await conn.commit()
+        except Exception as e:
+            log.error(f"Hanni stage sync: {e}")
         await cb.message.edit_text(card_text(v), parse_mode="HTML", reply_markup=stage_keyboard(vid))
     await cb.answer(f"✅ {STAGES.get(stage, stage)}")
 

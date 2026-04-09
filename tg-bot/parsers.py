@@ -101,7 +101,11 @@ async def _parse_generic(url: str, base: dict) -> dict:
             html = await resp.text()
 
     soup = BeautifulSoup(html, "html.parser")
-    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    # Prefer og:title (cleaner, no site suffix)
+    og = soup.find("meta", property="og:title")
+    title = og["content"].strip() if og and og.get("content") else ""
+    if not title:
+        title = soup.title.string.strip() if soup.title and soup.title.string else ""
 
     # Try to extract company and position from title
     if " at " in title:
