@@ -1,62 +1,153 @@
-/* ── Mobile Layout — bottom tab bar, touch targets, core responsive ── */
+/* ── Mobile Layout — ChatGPT/Claude-style drawer sidebar ── */
 
 /* Hide drag region on mobile */
 .mobile #drag-region { display: none; }
 
-/* App body: vertical flow on mobile */
+/* App body: full width column on mobile */
 .mobile #app-body {
   flex-direction: column;
 }
 
-/* Tab bar: bottom navigation */
-.mobile #tab-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  width: 100%;
-  min-width: unset;
-  height: 56px;
-  flex-direction: row;
-  border-right: none;
-  border-top: 1px solid var(--border-subtle);
-  padding: 0 var(--space-2);
-  z-index: 100;
+/* ── Top header bar with hamburger ── */
+.mobile #mobile-header {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 var(--space-3);
   background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  z-index: 50;
+  gap: var(--space-2);
 }
 
-.mobile #tab-list {
-  flex-direction: row;
-  overflow-x: auto;
-  overflow-y: hidden;
-  gap: 0;
-  padding: 0;
-  flex: 1;
-  justify-content: space-around;
-}
-
-.mobile .tab-item {
-  width: 44px;
-  height: 44px;
+.mobile #mobile-hamburger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
   flex-shrink: 0;
 }
-
-/* Active indicator: bottom dot instead of left bar */
-.mobile .tab-item.active::after {
-  left: 12px;
-  right: 12px;
-  top: unset;
-  bottom: 0;
-  width: unset;
-  height: 3px;
-  border-radius: 2px 2px 0 0;
+.mobile #mobile-hamburger:active {
+  background: var(--bg-hover);
 }
 
-/* Hide tab add button and bottom section on mobile */
-.mobile #tab-add { display: none; }
-.mobile #tab-bar-bottom { display: none; }
+.mobile #mobile-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
 
-/* Sub-sidebar: hidden by default on mobile, shown as overlay */
+/* ── Tab bar → drawer sidebar (hidden by default) ── */
+.mobile #tab-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  min-width: 280px;
+  z-index: 300;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  flex-direction: column;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-sidebar);
+  padding: var(--space-3) 0;
+}
+.mobile #tab-bar.drawer-open {
+  transform: translateX(0);
+}
+
+/* Backdrop when drawer is open */
+.mobile .drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 299;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.mobile .drawer-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Tab list inside drawer: vertical, full width, with labels */
+.mobile #tab-list {
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  flex: 1;
+}
+
+/* Tab items: horizontal row with icon + label */
+.mobile .tab-item {
+  width: 100%;
+  height: 40px;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  flex-direction: row;
+}
+
+/* Show label next to icon in drawer */
+.mobile .tab-item-label {
+  display: inline;
+  font-size: 14px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile .tab-item.active .tab-item-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Active indicator: left bar like desktop */
+.mobile .tab-item.active::after {
+  left: 0;
+  right: unset;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  height: unset;
+  border-radius: 0 2px 2px 0;
+}
+
+/* Show tab add button in drawer */
+.mobile #tab-add {
+  margin: var(--space-2) var(--space-2) 0;
+  width: calc(100% - var(--space-4));
+}
+
+/* Bottom section in drawer */
+.mobile #tab-bar-bottom {
+  padding: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+}
+.mobile #tab-bar-bottom .tab-item {
+  width: 100%;
+  justify-content: flex-start;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+/* ── Sub-sidebar: overlay drawer ── */
 .mobile #sub-sidebar {
   display: none;
 }
@@ -65,24 +156,22 @@
   position: fixed;
   top: 0;
   left: 0;
-  bottom: 56px;
+  bottom: 0;
   width: 280px;
-  z-index: 200;
+  z-index: 300;
   box-shadow: var(--shadow-lg);
 }
 
-/* Sub-sidebar drawer backdrop */
 .mobile .sub-sidebar-backdrop {
   position: fixed;
   inset: 0;
-  bottom: 56px;
   background: rgba(0, 0, 0, 0.3);
-  z-index: 199;
+  z-index: 299;
 }
 
-/* Content area: full width, account for bottom bar */
+/* ── Content area: full width ── */
 .mobile #content-area {
-  padding-bottom: 56px;
+  padding-bottom: 0;
 }
 
 /* Touch-friendly targets */
@@ -135,7 +224,7 @@
   top: 0;
   left: 0;
   right: 0;
-  bottom: 56px;
+  bottom: 0;
   max-width: 100%;
   max-height: unset;
   border-radius: 0;
@@ -148,19 +237,14 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* Keyboard avoidance: use visual viewport to resize */
+/* Keyboard avoidance */
 .mobile #app-body {
   height: 100dvh;
-}
-
-/* Safe area insets for notch/gesture bar */
-.mobile #tab-bar {
-  padding-bottom: env(safe-area-inset-bottom, 0);
-}
-.mobile #content-area {
-  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0));
 }
 
 /* Hide desktop-only elements */
 .mobile .desktop-only { display: none !important; }
 .desktop .mobile-only { display: none !important; }
+
+/* Hide mobile header on desktop */
+#mobile-header { display: none; }

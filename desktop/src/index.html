@@ -20,7 +20,15 @@
 </div>
 
 <div id="app-body">
-  <!-- Left vertical tab bar -->
+  <!-- Mobile top header with hamburger -->
+  <div id="mobile-header">
+    <button id="mobile-hamburger" aria-label="Menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <span id="mobile-title">Hanni</span>
+  </div>
+
+  <!-- Left vertical tab bar (drawer on mobile) -->
   <div id="tab-bar">
     <div id="tab-list"></div>
     <button id="tab-add" title="Открыть вкладку">+</button>

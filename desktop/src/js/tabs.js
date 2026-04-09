@@ -3,6 +3,43 @@
 import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders, loadTabSetting, saveTabSetting, IS_MOBILE } from './state.js';
 import { escapeHtml, confirmModal, renderTabSettingsPage, setupPageHeaderControls, renderPageHeader } from './utils.js';
 
+// ── Mobile drawer (ChatGPT/Claude-style sidebar) ──
+let drawerBackdrop = null;
+
+function openDrawer() {
+  const tabBar = document.getElementById('tab-bar');
+  if (!tabBar) return;
+  tabBar.classList.add('drawer-open');
+  if (!drawerBackdrop) {
+    drawerBackdrop = document.createElement('div');
+    drawerBackdrop.className = 'drawer-backdrop';
+    drawerBackdrop.addEventListener('click', closeDrawer);
+    document.body.appendChild(drawerBackdrop);
+  }
+  requestAnimationFrame(() => drawerBackdrop.classList.add('visible'));
+}
+
+function closeDrawer() {
+  const tabBar = document.getElementById('tab-bar');
+  if (tabBar) tabBar.classList.remove('drawer-open');
+  if (drawerBackdrop) {
+    drawerBackdrop.classList.remove('visible');
+  }
+}
+
+function updateMobileTitle() {
+  const titleEl = document.getElementById('mobile-title');
+  if (!titleEl) return;
+  const reg = TAB_REGISTRY[S.activeTab];
+  titleEl.textContent = reg?.label || 'Hanni';
+}
+
+// Init hamburger button
+if (IS_MOBILE) {
+  const hamburger = document.getElementById('mobile-hamburger');
+  if (hamburger) hamburger.addEventListener('click', openDrawer);
+}
+
 // ── Settings sections per tab ──
 const SETTINGS_SECTIONS = {
   chat: [
@@ -33,8 +70,9 @@ function renderTabBar() {
   const tabList = document.getElementById('tab-list');
   tabList.innerHTML = '';
 
-  const MOBILE_MAX_TABS = 5;
-  const visibleTabs = IS_MOBILE ? S.openTabs.slice(0, MOBILE_MAX_TABS) : S.openTabs;
+  // Mobile: show ALL tabs with labels (drawer sidebar)
+  // Desktop: show open tabs as icons only
+  const visibleTabs = IS_MOBILE ? S.openTabs : S.openTabs;
 
   for (const tabId of visibleTabs) {
     const reg = TAB_REGISTRY[tabId];
@@ -45,7 +83,12 @@ function renderTabBar() {
     item.title = reg.label;
     const icon = S.tabCustomizations[tabId]?.icon || reg.icon || '';
     const isEmoji = icon && !icon.startsWith('<');
-    item.innerHTML = `<span class="tab-item-icon${isEmoji ? ' tab-item-icon-emoji' : ''}">${icon}</span>`;
+    let html = `<span class="tab-item-icon${isEmoji ? ' tab-item-icon-emoji' : ''}">${icon}</span>`;
+    // Mobile: add label next to icon
+    if (IS_MOBILE) {
+      html += `<span class="tab-item-label">${escapeHtml(reg.label)}</span>`;
+    }
+    item.innerHTML = html;
     if (tabId === 'focus' && S.focusWidgetActivity) {
       const dot = document.createElement('span');
       dot.className = 'tab-focus-dot';
@@ -54,6 +97,8 @@ function renderTabBar() {
     item.addEventListener('click', (e) => {
       if (item.dataset.wasDragged) { delete item.dataset.wasDragged; return; }
       switchTab(tabId);
+      // Mobile: close drawer after selecting tab
+      if (IS_MOBILE) closeDrawer();
     });
 
     if (!IS_MOBILE) {
@@ -119,17 +164,6 @@ function renderTabBar() {
     }
 
     tabList.appendChild(item);
-  }
-
-  // Mobile: "More" button to show all tabs
-  if (IS_MOBILE) {
-    const more = document.createElement('div');
-    const isMoreActive = S.openTabs.indexOf(S.activeTab) >= MOBILE_MAX_TABS;
-    more.className = 'tab-item' + (isMoreActive ? ' active' : '');
-    more.title = 'Ещё';
-    more.innerHTML = `<span class="tab-item-icon">${TAB_ICONS.more || '⋯'}</span>`;
-    more.addEventListener('click', () => showMobileTabPicker());
-    tabList.appendChild(more);
   }
 
   // Bottom area: settings gear (desktop only, hidden on mobile via CSS)
@@ -560,6 +594,7 @@ function switchTab(tabId) {
   saveTabs();
   renderTabBar();
   activateView();
+  if (IS_MOBILE) updateMobileTitle();
   tabLoaders.updateFocusWidgetVisibility?.();
   tabLoaders.updateChatOverlayVisibility?.();
 }
@@ -981,4 +1016,6 @@ export {
   hideChatSettingsMode,
   renderSubTabBar,
   loadGoalsWidget,
+  closeDrawer,
+  updateMobileTitle,
 };
