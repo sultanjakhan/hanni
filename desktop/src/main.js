@@ -8,7 +8,7 @@ import { S, invoke, listen, chat, input, sendBtn, tabLoaders, TAB_REGISTRY, TAB_
 import { renderPageHeader, setupPageHeaderControls, loadTabBlockEditor, escapeHtml } from './js/utils.js';
 
 // ── Core modules ──
-import { renderTabBar, renderSubSidebar, openTab, closeTab, switchTab, activateView, ensureViewDiv, loadSubTabContent, showChatSettingsMode, hideChatSettingsMode } from './js/tabs.js';
+import { renderTabBar, renderSubSidebar, openTab, closeTab, switchTab, activateView, ensureViewDiv, loadSubTabContent, showChatSettingsMode, hideChatSettingsMode, closeDrawer, updateMobileTitle } from './js/tabs.js';
 import { loadConversationsList, loadConversation, autoSaveConversation } from './js/conversations.js';
 import {
   addMsg, scrollDown, send, newChat,
@@ -25,6 +25,7 @@ import { loadCalendar } from './js/tab-calendar.js';
 import { loadFocus, createFocusWidget, updateFocusWidget, updateFocusWidgetVisibility, toggleFocusWidgetPopover, startPomodoro, bindFocusWidgetEvents } from './js/tab-focus.js';
 import { initNotificationWidget } from './js/notification-widget.js';
 import { initMusicWidget } from './js/music-widget.js';
+import { initQuotesWidget } from './js/quotes-widget.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
@@ -72,6 +73,8 @@ tabLoaders.openTab = openTab;
 tabLoaders.closeTab = closeTab;
 tabLoaders.activateView = activateView;
 tabLoaders.ensureViewDiv = ensureViewDiv;
+tabLoaders.closeDrawer = closeDrawer;
+tabLoaders.updateMobileTitle = updateMobileTitle;
 tabLoaders.loadSubTabContent = loadSubTabContent;
 
 // Chat
@@ -264,6 +267,14 @@ document.addEventListener('keydown', (e) => {
   S.openTabs = S.openTabs.filter(id => TAB_REGISTRY[id]);
   if (!S.openTabs.includes('chat')) S.openTabs.unshift('chat');
 
+  // Mobile: ensure default tabs are present on fresh install
+  if (IS_MOBILE && S.openTabs.length <= 1) {
+    const defaultMobileTabs = ['chat', 'notes', 'calendar', 'focus', 'health', 'timeline'];
+    for (const t of defaultMobileTabs) {
+      if (TAB_REGISTRY[t] && !S.openTabs.includes(t)) S.openTabs.push(t);
+    }
+  }
+
   // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis
   for (const tabId of S.openTabs) {
     try {
@@ -282,6 +293,10 @@ document.addEventListener('keydown', (e) => {
   // Render tab bar
   renderTabBar();
   activateView();
+  if (IS_MOBILE) updateMobileTitle();
+
+  // Quotes widget (above music)
+  initQuotesWidget();
 
   // Music widget (above notifications)
   initMusicWidget();
@@ -313,6 +328,9 @@ document.addEventListener('keydown', (e) => {
     history.pushState(null, '', '');
     window.addEventListener('popstate', () => {
       history.pushState(null, '', '');
+      // Close drawer sidebar
+      const tabBar = document.getElementById('tab-bar');
+      if (tabBar?.classList.contains('drawer-open')) { tabLoaders.closeDrawer?.(); return; }
       // Close tab dropdown
       const dd = document.getElementById('tab-dropdown');
       if (dd && !dd.classList.contains('hidden')) { dd.classList.add('hidden'); return; }

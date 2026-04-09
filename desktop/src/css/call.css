@@ -535,6 +535,115 @@
   color: #fff;
 }
 
+/* ── Quotes Widget ── */
+
+.quotes-widget {
+  position: absolute;
+  bottom: 228px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.qw-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  position: relative;
+  box-shadow: var(--shadow-card);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.qw-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+  transform: scale(1.05);
+}
+
+/* ── Quotes Panel Popup ── */
+
+.qp-panel {
+  width: 280px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-card);
+  animation: nw-slideIn 0.15s ease;
+  transform-origin: bottom right;
+  margin-bottom: 8px;
+}
+.qp-panel.hidden { display: none; }
+
+.qp-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.qp-body {
+  padding: 16px 14px;
+  min-height: 80px;
+}
+
+.qp-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-style: italic;
+}
+
+.qp-author {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 10px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.qp-source {
+  font-size: 11px;
+  color: var(--text-muted, var(--text-secondary));
+  margin-top: 2px;
+}
+
+.qp-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-default);
+}
+
+.qp-nav-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  align-items: center;
+  transition: background 0.1s;
+}
+.qp-nav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* ── Notification Widget ── */
 
 .notification-widget {
