@@ -90,13 +90,11 @@ fn crsqlite_lib_path() -> std::path::PathBuf {
     data_dir.parent().unwrap_or(&data_dir).join(name)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    let proactive_settings = load_proactive_settings();
-    let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
-
-    // Migrate data from ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
-    // Must run BEFORE init_db to avoid creating an empty DB over old data
+/// Initialize SQLite database: register extensions, open connection, run migrations.
+/// Requires set_data_dir() to have been called on Android.
+fn init_database() -> HanniDb {
+    // Migrate data from ~/Documents/Hanni/ (macOS only)
+    #[cfg(not(target_os = "android"))]
     migrate_old_data_dir();
 
     // Register sqlite-vec extension BEFORE opening any connection
@@ -107,16 +105,14 @@ pub fn run() {
         )));
     }
 
-    // Initialize SQLite database
     let db_path = hanni_db_path();
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    backup_db(); // Auto-backup before opening DB
+    backup_db();
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
 
-    // Load cr-sqlite extension for CRDT sync
     load_crsqlite(&conn);
 
     init_db(&conn).expect("Cannot initialize database");
@@ -137,6 +133,7 @@ pub fn run() {
     migrate_timeline(&conn);
     db::migrate_sleep(&conn);
     db::enable_crr_tables(&conn);
+
     // Load calendar toggle from DB into static flag
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='apple_calendar_enabled'",
@@ -144,7 +141,6 @@ pub fn run() {
     ) {
         APPLE_CALENDAR_DISABLED.store(val == "false", Ordering::Relaxed);
     }
-    // Restore persisted calendar access result — never re-prompt after first check
     if let Ok(val) = conn.query_row(
         "SELECT value FROM app_settings WHERE key='calendar_access_ok'",
         [], |row| row.get::<_, String>(0),
@@ -157,7 +153,21 @@ pub fn run() {
     ) {
         if val == "true" { CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed); }
     }
-    let hanni_db = HanniDb(std::sync::Mutex::new(conn));
+
+    HanniDb(std::sync::Mutex::new(conn))
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // Desktop: init DB before builder (dirs crate works on macOS)
+    #[cfg(not(target_os = "android"))]
+    let proactive_settings = load_proactive_settings();
+    #[cfg(target_os = "android")]
+    let proactive_settings = ProactiveSettings::default();
+    let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
+
+    #[cfg(not(target_os = "android"))]
+    let hanni_db = init_database();
 
     // Desktop-only: MLX server (on-demand — starts when needed, stops after 5min idle)
     #[cfg(not(target_os = "android"))]
@@ -225,7 +235,6 @@ pub fn run() {
         .manage(HttpClient(reqwest::Client::new()))
         .manage(LlmBusy(tokio::sync::Semaphore::new(1)))
         .manage(proactive_state.clone())
-        .manage(hanni_db)
         .manage(audio_state)
         .manage(focus_manager)
         .manage(call_mode)
@@ -236,6 +245,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
+
+    // Desktop: manage DB state on builder (initialized before builder)
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.manage(hanni_db);
 
     #[cfg(not(target_os = "android"))]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
@@ -626,6 +639,16 @@ pub fn run() {
             health_connect::import_health_connect_sleep,
         ])
         .setup(move |app| {
+            // Android: resolve data dir from Tauri, then init DB
+            #[cfg(target_os = "android")]
+            {
+                let data_dir = app.path().app_data_dir()
+                    .expect("Cannot resolve app_data_dir on Android");
+                types::set_data_dir(data_dir);
+                let hanni_db = init_database();
+                app.manage(hanni_db);
+            }
+
             // Auto-updater (desktop only)
             #[cfg(not(target_os = "android"))]
             {
@@ -661,10 +684,7 @@ pub fn run() {
             // MCP client manager — connect to configured MCP servers in background
             let mcp_arc = app.state::<mcp::McpState>().0.clone();
             tauri::async_runtime::spawn(async move {
-                let config_path = dirs::home_dir()
-                    .unwrap_or_default()
-                    .join(".hanni")
-                    .join("mcp.json");
+                let config_path = hanni_data_dir().join("mcp.json");
                 eprintln!("[mcp] Loading config from: {:?}", config_path);
                 let mgr = mcp::McpManager::from_config(
                     config_path.to_str().unwrap_or("")

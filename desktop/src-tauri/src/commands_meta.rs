@@ -37,9 +37,7 @@ pub fn start_focus(
     }
 
     // Load default config if not provided
-    let blocker_config_path = dirs::home_dir()
-        .unwrap_or_default()
-        .join("hanni/blocker_config.json");
+    let blocker_config_path = hanni_data_dir().join("blocker_config.json");
 
     let default_apps = vec!["Telegram".to_string(), "Discord".to_string(), "Slack".to_string()];
     let default_sites = vec![
@@ -163,9 +161,7 @@ pub fn get_focus_status(focus: tauri::State<'_, FocusManager>) -> Result<FocusSt
 
 #[tauri::command]
 pub fn update_blocklist(apps: Option<Vec<String>>, sites: Option<Vec<String>>) -> Result<String, String> {
-    let config_path = dirs::home_dir()
-        .unwrap_or_default()
-        .join("hanni/blocker_config.json");
+    let config_path = hanni_data_dir().join("blocker_config.json");
 
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Dir error: {}", e))?;
@@ -962,9 +958,7 @@ pub async fn get_integrations() -> Result<IntegrationsInfo, String> {
     };
 
     // ── Blocker config ──
-    let blocker_config_path = dirs::home_dir()
-        .unwrap_or_default()
-        .join("hanni/blocker_config.json");
+    let blocker_config_path = hanni_data_dir().join("blocker_config.json");
 
     let default_apps = vec!["Telegram", "Discord", "Slack", "Safari"];
     let default_sites = vec![

@@ -5,6 +5,7 @@ use crate::types::hanni_data_dir;
 use chrono;
 
 /// Migrate data from old ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
+#[cfg(not(target_os = "android"))]
 pub fn migrate_old_data_dir() {
     let new_dir = hanni_data_dir();
     let marker = new_dir.join(".migrated");
@@ -41,6 +42,7 @@ pub fn migrate_old_data_dir() {
     eprintln!("Migrated data from {:?} to {:?}", old_dir, new_dir);
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {

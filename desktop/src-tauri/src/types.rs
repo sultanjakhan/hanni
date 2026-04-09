@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 // ── Constants ──
 
@@ -167,14 +167,33 @@ impl Drop for HanniDb {
 }
 
 /// ~/Library/Application Support/Hanni/
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set the app data directory. Must be called once before any DB access.
+/// On Android, call with `app.path().app_data_dir()` from .setup().
+pub fn set_data_dir(path: PathBuf) {
+    let _ = DATA_DIR.set(path);
+}
+
 pub fn hanni_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join("Library/Application Support")
-        })
-        .join("Hanni")
+    if let Some(dir) = DATA_DIR.get() {
+        return dir.clone();
+    }
+    // Fallback for macOS/desktop — dirs crate works there
+    #[cfg(not(target_os = "android"))]
+    {
+        dirs::data_dir()
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join("Library/Application Support")
+            })
+            .join("Hanni")
+    }
+    #[cfg(target_os = "android")]
+    {
+        panic!("set_data_dir() must be called before hanni_data_dir() on Android");
+    }
 }
 
 pub fn hanni_db_path() -> PathBuf {
