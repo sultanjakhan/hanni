@@ -16,7 +16,12 @@ export const SOUNDS = [
 ];
 
 const STORAGE_KEY = 'hanni_ambient_state';
-const ctx = new AudioContext();
+const ctx = new AudioContext({ latencyHint: 'playback' });
+ctx.addEventListener('statechange', () => {
+  if (ctx.state === 'interrupted' || ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+});
 const bufferCache = new Map();
 const nodes = new Map();   // id → { source, gain, playing }
 const volumes = {};
@@ -25,7 +30,7 @@ let onChange = null;
 
 async function loadBuffer(id) {
   if (bufferCache.has(id)) return bufferCache.get(id);
-  const resp = await fetch(`sounds/${id}.mp3`);
+  const resp = await fetch(`sounds/${id}.m4a`);
   const arr = await resp.arrayBuffer();
   const buf = await ctx.decodeAudioData(arr);
   bufferCache.set(id, buf);
