@@ -1,0 +1,11 @@
+name = "hanni-sync"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hanni-sync"
+database_id = "" # fill after `wrangler d1 create hanni-sync`
+
+[vars]
+DEVICE_TOKEN = "" # set via `wrangler secret put DEVICE_TOKEN`
