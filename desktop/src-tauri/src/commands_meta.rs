@@ -1154,6 +1154,12 @@ pub fn get_or_create_api_token() -> String {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::write(&path, &token);
+    // Restrict token file to owner-only (0600)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
     token
 }
 
