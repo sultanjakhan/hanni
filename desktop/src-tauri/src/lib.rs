@@ -817,9 +817,11 @@ pub fn run() {
 
                     // Kill blocked apps if they relaunch
                     for app_name in &apps {
+                        let safe = app_name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ' || *c == '.').collect::<String>();
+                        if safe.is_empty() { continue; }
                         let _ = run_osascript(&format!(
                             "tell application \"System Events\"\nif (name of processes) contains \"{}\" then\ntell application \"{}\" to quit\nend if\nend tell",
-                            app_name, app_name
+                            safe, safe
                         ));
                     }
                 }
@@ -1126,7 +1128,7 @@ pub fn run() {
                         let _ = reminder_handle.emit("reminder-fired", &title);
                         let _ = run_osascript(&format!(
                             "display notification \"{}\" with title \"Напоминание\"",
-                            title.replace("\\", "\\\\").replace("\"", "\\\"")
+                            macos::osa_escape(&title)
                         ));
                     }
                     // Check note reminders
@@ -1149,7 +1151,7 @@ pub fn run() {
                         let _ = reminder_handle.emit("note-reminder-fired", &payload);
                         let _ = run_osascript(&format!(
                             "display notification \"{}\" with title \"Заметка\"",
-                            title.replace("\\", "\\\\").replace("\"", "\\\"")
+                            macos::osa_escape(&title)
                         ));
                     }
                 }

@@ -94,6 +94,15 @@ pub fn check_calendar_access() -> bool {
     }
 }
 
+/// Escape a string for safe interpolation into AppleScript double-quoted strings.
+/// Handles backslashes, double quotes, and newlines (which can break out of strings).
+pub fn osa_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', " ")
+        .replace('\r', " ")
+}
+
 pub fn run_osascript(script: &str) -> Result<String, String> {
     let mut child = std::process::Command::new("osascript")
         .args(["-e", script])
@@ -224,11 +233,10 @@ pub async fn open_url(url: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn send_notification(title: String, body: String) -> Result<String, String> {
-    let sanitize = |s: &str| s.replace("\\", "\\\\").replace("\"", "\\\"");
     let script = format!(
         "display notification \"{}\" with title \"{}\"",
-        sanitize(&body),
-        sanitize(&title)
+        osa_escape(&body),
+        osa_escape(&title)
     );
     run_osascript(&script)?;
     Ok("Notification sent".into())
