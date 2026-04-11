@@ -13,9 +13,13 @@ export async function showRecipeDetail(id, reloadFn) {
   const instructions = (recipe.instructions || '').split('\n').filter(Boolean);
   const diffLabel = recipe.difficulty === 'medium' ? 'Средний' : 'Лёгкий';
 
+  function fmtIngr(i) {
+    const amt = i.amount ? `${i.amount}${escapeHtml(i.unit)}` : '';
+    return `<span class="ingr-tag" data-ingr="${escapeHtml(i.name)}">${escapeHtml(i.name)}${amt ? ' ' + amt : ''}</span>`;
+  }
   const ingrHtml = items.length > 0
-    ? items.map(i => `<li>${escapeHtml(i.name)} — ${i.amount}${escapeHtml(i.unit)}</li>`).join('')
-    : (recipe.ingredients || '').split(',').map(s => s.trim()).filter(Boolean).map(i => `<li>${escapeHtml(i)}</li>`).join('');
+    ? items.map(fmtIngr).join('')
+    : (recipe.ingredients || '').split(',').map(s => s.trim()).filter(Boolean).map(n => `<span class="ingr-tag">${escapeHtml(n)}</span>`).join('');
 
   overlay.innerHTML = `<div class="modal recipe-detail-modal">
     <div class="modal-title">${escapeHtml(recipe.name)}</div>
@@ -28,7 +32,7 @@ export async function showRecipeDetail(id, reloadFn) {
     </div>
     <div class="recipe-detail-section">
       <h4>\u0418\u043d\u0433\u0440\u0435\u0434\u0438\u0435\u043d\u0442\u044b</h4>
-      <ul class="recipe-ingredients">${ingrHtml}</ul>
+      <div class="recipe-ingr-tags">${ingrHtml}</div>
     </div>
     <div class="recipe-detail-section">
       <h4>\u041f\u0440\u0438\u0433\u043e\u0442\u043e\u0432\u043b\u0435\u043d\u0438\u0435</h4>

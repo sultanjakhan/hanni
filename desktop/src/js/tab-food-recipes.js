@@ -36,7 +36,20 @@ function matchesMealFilter(recipe, filter) {
   return (recipe.tags || '').split(',').map(t => t.trim()).includes(filter);
 }
 
-function renderCard(r) {
+function matchesSearch(recipe, query) {
+  if (!query) return true;
+  const text = `${recipe.name} ${recipe.ingredients || ''}`.toLowerCase();
+  return text.includes(query);
+}
+
+function getIngrNames(recipe) {
+  return (recipe.ingredients || '').split(',').map(s => {
+    const colonIdx = s.indexOf(':');
+    return (colonIdx > -1 ? s.slice(0, colonIdx) : s).trim();
+  }).filter(Boolean);
+}
+
+function renderCard(r, onIngrClick) {
   const tags = (r.tags || '').split(',').map(t => t.trim()).filter(Boolean);
   const badgesHtml = tags.map(t => {
     const c = MEAL_COLORS[t] || 'gray';
@@ -45,7 +58,15 @@ function renderCard(r) {
   }).join('');
   const totalTime = (r.prep_time || 0) + (r.cook_time || 0);
   const diffLabel = r.difficulty === 'medium' ? 'Средний' : 'Лёгкий';
-  return `<div class="recipe-card" data-id="${r.id}">
+  const ingrNames = getIngrNames(r);
+  const ingrHtml = ingrNames.slice(0, 5).map(n =>
+    `<span class="ingr-tag" data-ingr="${escapeHtml(n)}">${escapeHtml(n)}</span>`
+  ).join('') + (ingrNames.length > 5 ? `<span class="ingr-tag ingr-more">+${ingrNames.length - 5}</span>` : '');
+
+  const div = document.createElement('div');
+  div.className = 'recipe-card';
+  div.dataset.id = r.id;
+  div.innerHTML = `
     <div class="recipe-card-header">
       <span class="recipe-card-name">${escapeHtml(r.name)}</span>
       <span class="recipe-card-cal">${r.calories || '—'} kcal</span>
@@ -56,7 +77,15 @@ function renderCard(r) {
       <span class="recipe-diff recipe-diff-${r.difficulty || 'easy'}">${diffLabel}</span>
     </div>
     <div class="recipe-card-tags">${badgesHtml}</div>
-  </div>`;
+    <div class="recipe-card-ingr">${ingrHtml}</div>`;
+
+  div.querySelectorAll('.ingr-tag[data-ingr]').forEach(tag => {
+    tag.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onIngrClick(tag.dataset.ingr);
+    });
+  });
+  return div;
 }
 
 export async function renderRecipesPane(el) {
@@ -72,7 +101,7 @@ export async function renderRecipesPane(el) {
     const filtered = recipes
       .filter(r => !matchesBlacklist(r, blacklist))
       .filter(r => matchesMealFilter(r, activeFilter))
-      .filter(r => !searchQuery || r.name.toLowerCase().includes(searchQuery));
+      .filter(r => matchesSearch(r, searchQuery));
 
     el.innerHTML = `
       <div class="recipe-pane">
@@ -80,13 +109,30 @@ export async function renderRecipesPane(el) {
           <div class="recipe-filters">${MEAL_FILTERS.map(f =>
             `<button class="recipe-filter-btn${activeFilter === f.id ? ' active' : ''}" data-filter="${f.id}">${f.label}</button>`
           ).join('')}</div>
-          <input class="recipe-search" type="text" placeholder="Поиск рецептов..." value="${escapeHtml(searchQuery)}">
+          <input class="recipe-search" type="text" placeholder="Поиск по названию или продукту..." value="${escapeHtml(searchQuery)}">
           <button class="btn-primary recipe-add-btn">+ Рецепт</button>
         </div>
-        <div class="recipe-grid">
-          ${filtered.length ? filtered.map(renderCard).join('') : '<div class="uni-empty">Нет рецептов</div>'}
-        </div>
+        <div class="recipe-grid"></div>
       </div>`;
+
+    const grid = el.querySelector('.recipe-grid');
+    if (!filtered.length) {
+      grid.innerHTML = '<div class="uni-empty">Нет рецептов</div>';
+    } else {
+      for (const r of filtered) {
+        const card = renderCard(r, (ingr) => {
+          searchQuery = ingr.toLowerCase();
+          const input = el.querySelector('.recipe-search');
+          if (input) input.value = searchQuery;
+          render();
+        });
+        card.addEventListener('click', async () => {
+          const { showRecipeDetail } = await import('./food-recipe-modals.js');
+          showRecipeDetail(parseInt(card.dataset.id), render);
+        });
+        grid.appendChild(card);
+      }
+    }
 
     el.querySelectorAll('.recipe-filter-btn').forEach(btn => {
       btn.onclick = () => { activeFilter = btn.dataset.filter; render(); };
@@ -98,12 +144,6 @@ export async function renderRecipesPane(el) {
     el.querySelector('.recipe-add-btn')?.addEventListener('click', async () => {
       const { showAddRecipeModal } = await import('./food-recipe-modals.js');
       showAddRecipeModal(render);
-    });
-    el.querySelectorAll('.recipe-card').forEach(card => {
-      card.onclick = async () => {
-        const { showRecipeDetail } = await import('./food-recipe-modals.js');
-        showRecipeDetail(parseInt(card.dataset.id), render);
-      };
     });
   }
 
