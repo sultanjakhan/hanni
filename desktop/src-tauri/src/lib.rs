@@ -774,6 +774,16 @@ pub fn run() {
                 });
             }
 
+            // Startup cleanup: remove stale focus blocker entries from /etc/hosts
+            // (in case app crashed or was force-killed during focus mode)
+            #[cfg(not(target_os = "android"))]
+            if std::fs::read_to_string("/etc/hosts")
+                .map(|c| c.contains("# === HANNI FOCUS BLOCKER ==="))
+                .unwrap_or(false)
+            {
+                let _ = run_osascript("do shell script \"sed -i '' '/# === HANNI FOCUS BLOCKER ===/,/# === END HANNI FOCUS BLOCKER ===/d' /etc/hosts && dscacheutil -flushcache && killall -HUP mDNSResponder\" with administrator privileges");
+            }
+
             // Focus mode monitor loop (desktop only — uses osascript)
             #[cfg(not(target_os = "android"))]
             {
