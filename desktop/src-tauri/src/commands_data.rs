@@ -1841,13 +1841,13 @@ pub fn get_recipes(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Res
     if let Some(q) = search {
         let like = format!("%{}%", q);
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![like], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags FROM recipes ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients FROM recipes ORDER BY updated_at DESC LIMIT 50"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map([], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
@@ -1860,7 +1860,25 @@ pub fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlit
         "description": row.get::<_, String>(2)?, "prep_time": row.get::<_, i64>(3)?,
         "cook_time": row.get::<_, i64>(4)?, "servings": row.get::<_, i64>(5)?,
         "calories": row.get::<_, i64>(6)?, "tags": row.get::<_, String>(7)?,
+        "ingredients": row.get::<_, String>(8)?,
     }))
+}
+
+#[tauri::command]
+pub fn get_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let row = conn.query_row(
+        "SELECT id, name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags FROM recipes WHERE id=?1",
+        rusqlite::params![id],
+        |row| Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+            "description": row.get::<_, String>(2)?, "ingredients": row.get::<_, String>(3)?,
+            "instructions": row.get::<_, String>(4)?, "prep_time": row.get::<_, i64>(5)?,
+            "cook_time": row.get::<_, i64>(6)?, "servings": row.get::<_, i64>(7)?,
+            "calories": row.get::<_, i64>(8)?, "tags": row.get::<_, String>(9)?,
+        })),
+    ).map_err(|e| format!("Recipe not found: {}", e))?;
+    Ok(row)
 }
 
 #[tauri::command]
@@ -1973,6 +1991,44 @@ pub fn get_expiring_products(days: Option<i64>, db: tauri::State<'_, HanniDb>) -
     let rows = stmt.query_map(rusqlite::params![deadline], |row| product_from_row(row))
         .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
+}
+
+// ── Meal Plan commands ──
+
+#[tauri::command]
+pub fn plan_meal(date: String, meal_type: String, recipe_id: i64, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO meal_plan (date, meal_type, recipe_id, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![date, meal_type, recipe_id, notes.unwrap_or_default(), now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+pub fn get_meal_plan(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT mp.id, mp.date, mp.meal_type, mp.recipe_id, mp.notes, r.name, r.calories
+         FROM meal_plan mp JOIN recipes r ON mp.recipe_id = r.id WHERE mp.date = ?1 ORDER BY CASE mp.meal_type WHEN 'breakfast' THEN 1 WHEN 'lunch' THEN 2 WHEN 'dinner' THEN 3 ELSE 4 END"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![date], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
+            "meal_type": row.get::<_, String>(2)?, "recipe_id": row.get::<_, i64>(3)?,
+            "notes": row.get::<_, String>(4)?, "recipe_name": row.get::<_, String>(5)?,
+            "calories": row.get::<_, i64>(6)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn delete_meal_plan(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM meal_plan WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
 }
 
 // ── v0.8.0: Money commands ──

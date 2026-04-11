@@ -566,6 +566,41 @@
 }
 .sleep-bar-seg { min-width: 2px; }
 
+/* ── Health bar charts ── */
+.health-bar-chart {
+  display: flex; gap: var(--space-2); align-items: flex-end;
+  height: 100px; padding: var(--space-2) 0;
+}
+.health-bar-col {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  height: 100%; position: relative;
+}
+.health-bar-fill {
+  width: 100%; max-width: 28px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  min-height: 2px; margin-top: auto; transition: height 0.3s ease;
+}
+.health-bar-label {
+  font-size: 10px; color: var(--text-faint); margin-top: var(--space-1);
+  white-space: nowrap;
+}
+
+/* ── Health recommendations ── */
+.health-recs {
+  margin-top: var(--space-4); padding: var(--space-3);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+.health-recs-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+.health-rec-item {
+  font-size: 12px; color: var(--text-secondary);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.health-rec-item:last-child { border-bottom: none; }
+
 .habits-section { margin-top: var(--space-5); }
 
 .habit-item {
@@ -986,3 +1021,56 @@
 .wf-entity-card:hover { background: var(--bg-hover); }
 .wf-entity-name { font-size: 14px; color: var(--text-primary); font-weight: 500; }
 .wf-entity-desc { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+
+/* ── Recipe Book ── */
+.recipe-pane { max-width: 900px; margin: 0 auto; }
+.recipe-filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.recipe-filters { display: flex; gap: 4px; }
+.recipe-filter-btn {
+  padding: 4px 12px; border-radius: var(--radius-pill); border: 1px solid var(--border-default);
+  background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all var(--transition-fast);
+}
+.recipe-filter-btn:hover { background: var(--bg-hover); }
+.recipe-filter-btn.active { background: var(--accent-fill); color: #fff; border-color: var(--accent-fill); }
+.recipe-search {
+  flex: 1; min-width: 120px; padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default);
+  background: var(--bg-page); color: var(--text-primary); font-size: 13px; outline: none;
+}
+.recipe-search:focus { border-color: var(--border-focus); }
+.recipe-add-btn { white-space: nowrap; }
+.recipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.recipe-card {
+  padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-default);
+  background: var(--bg-card); cursor: pointer; transition: all var(--transition-fast);
+}
+.recipe-card:hover { border-color: var(--border-hover); box-shadow: 0 2px 8px rgba(0,0,0,0.06); transform: translateY(-1px); }
+.recipe-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.recipe-card-name { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.3; }
+.recipe-card-cal { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.recipe-card-meta { display: flex; gap: 12px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.recipe-card-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* Recipe detail modal */
+.recipe-detail-modal { max-width: 520px; }
+.recipe-detail-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.recipe-detail-section { margin-bottom: 14px; }
+.recipe-detail-section h4 { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 0 0 8px; }
+.recipe-ingredients { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
+.recipe-ingredients li { margin-bottom: 3px; }
+.recipe-instructions { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
+.recipe-instructions li { margin-bottom: 6px; line-height: 1.4; }
+
+/* ── Meal Plan (calendar day view) ── */
+.meal-plan-block { margin-bottom: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 10px 14px; background: var(--bg-card); }
+.meal-plan-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+.meal-plan-total { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.meal-plan-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+.meal-plan-type { font-weight: 500; min-width: 60px; font-size: 12px; }
+.meal-plan-name { flex: 1; color: var(--text-primary); }
+.meal-plan-cal { font-size: 12px; color: var(--text-muted); }
+.meal-plan-del { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 16px; padding: 0 4px; }
+.meal-plan-del:hover { color: var(--color-red, #e03e3e); }
+.mp-recipe-list { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.mp-recipe-option { display: flex; justify-content: space-between; padding: 8px 10px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border-subtle); }
+.mp-recipe-option:last-child { border-bottom: none; }
+.mp-recipe-option:hover { background: var(--bg-hover); }

@@ -239,6 +239,10 @@ async function loadFood(subTab) {
     renderTable: async (paneEl) => {
       await loadFoodLog(paneEl);
     },
+    renderRecipes: async (paneEl) => {
+      const { renderRecipesPane } = await import('./tab-food-recipes.js');
+      await renderRecipesPane(paneEl);
+    },
   });
 }
 
@@ -1568,6 +1572,10 @@ async function loadHealth() {
     title: 'Health',
     subtitle: 'Здоровье и привычки',
     icon: '❤️',
+    renderDash: async (paneEl) => {
+      const { renderHealthDash } = await import('./health-dash.js');
+      await renderHealthDash(paneEl);
+    },
     renderBody: async (paneEl) => {
       const { loadBodyInline } = await import('./tab-body.js');
       await loadBodyInline(paneEl);

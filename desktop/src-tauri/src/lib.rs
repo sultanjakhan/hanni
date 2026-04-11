@@ -27,6 +27,10 @@ mod mlx_manager;
 mod sync;
 mod sync_commands;
 mod health_connect;
+mod health_connect_plugin;
+mod health_import;
+mod sleep_analysis;
+mod timeline_health;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -116,6 +120,7 @@ fn init_database() -> HanniDb {
     load_crsqlite(&conn);
 
     init_db(&conn).expect("Cannot initialize database");
+    seed_default_recipes(&conn);
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
     migrate_facts_decay(&conn);
@@ -242,9 +247,8 @@ pub fn run() {
         .manage(commands_meta::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
+        .plugin(health_connect_plugin::init());
 
     // Desktop: manage DB state on builder (initialized before builder)
     #[cfg(not(target_os = "android"))]
@@ -252,9 +256,6 @@ pub fn run() {
 
     #[cfg(not(target_os = "android"))]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
-
-    #[cfg(all(debug_assertions, not(target_os = "android")))]
-    let builder = builder.plugin(tauri_plugin_webdriver_automation::init());
 
     builder
         .invoke_handler(tauri::generate_handler![
@@ -477,6 +478,10 @@ pub fn run() {
             commands_data::update_product,
             commands_data::delete_product,
             commands_data::get_expiring_products,
+            commands_data::get_recipe,
+            commands_data::plan_meal,
+            commands_data::get_meal_plan,
+            commands_data::delete_meal_plan,
             // Money
             commands_data::add_transaction,
             commands_data::get_transactions,
@@ -628,6 +633,7 @@ pub fn run() {
             timeline_stats::get_timeline_range_stats,
             timeline_afk::sync_afk_blocks,
             timeline_afk::sync_timeline_auto,
+            timeline_health::sync_health_to_timeline,
             // Sync
             sync_commands::sync_now,
             sync_commands::get_sync_status,
@@ -637,6 +643,11 @@ pub fn run() {
             health_connect::add_sleep_session,
             health_connect::get_sleep_stats,
             health_connect::import_health_connect_sleep,
+            // Health import & analytics
+            health_import::import_health_connect_all,
+            health_import::get_heart_rate_samples,
+            health_import::get_health_summary,
+            sleep_analysis::get_sleep_analysis,
         ])
         .setup(move |app| {
             // Android: resolve data dir from Tauri, then init DB

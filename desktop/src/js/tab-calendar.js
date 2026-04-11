@@ -613,14 +613,20 @@ async function renderDayCalendar(el, events) {
   const scrollParent = el.closest('.tab-content') || el.parentElement;
   const savedScroll = scrollParent?.scrollTop || 0;
 
+  // Meal plan for this day
+  const { renderMealPlanBlock } = await import('./food-meal-plan.js');
+  const mealPlanHtml = await renderMealPlanBlock(S.calDayDate);
+
   el.innerHTML = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="day-prev">&lt;</button>
       <div class="calendar-month-label">${d.getDate()} ${monthNames[d.getMonth()]} · ${dayNames[d.getDay()]}</div>
       <button class="calendar-nav-btn" id="day-next">&gt;</button>
       <button class="btn-secondary" id="day-today" style="margin-left:8px;">Сегодня</button>
-      <button class="btn-primary" id="day-add-event" style="margin-left:8px;">+ Событие</button>
+      <button class="btn-secondary" id="day-add-meal" style="margin-left:4px;">+ Еда</button>
+      <button class="btn-primary" id="day-add-event" style="margin-left:4px;">+ Событие</button>
     </div>
+    ${mealPlanHtml}
     ${allDayHtml}
     <div class="day-timeline">${timelineHtml}</div>`;
 
@@ -647,6 +653,17 @@ async function renderDayCalendar(el, events) {
   document.getElementById('day-today')?.addEventListener('click', () => {
     S.calDayDate = null; S.calendarMonth = today.getMonth(); S.calendarYear = today.getFullYear();
     calDayScrolled = false; refreshCalendarInner();
+  });
+  document.getElementById('day-add-meal')?.addEventListener('click', async () => {
+    const { showMealPlanModal } = await import('./food-meal-plan.js');
+    showMealPlanModal(S.calDayDate, () => refreshCalendarInner());
+  });
+  el.querySelectorAll('.meal-plan-del').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await invoke('delete_meal_plan', { id: parseInt(btn.dataset.delId) }).catch(() => {});
+      refreshCalendarInner();
+    });
   });
   document.getElementById('day-add-event')?.addEventListener('click', () => {
     S.selectedCalendarDate = S.calDayDate;

@@ -64,6 +64,7 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
   if (config.renderSkills) panes.splice(1, 0, { id: 'skills', icon: '💡', label: 'Навыки' });
   if (config.renderCases) panes.splice(panes.findIndex(p => p.id === 'goals'), 0, { id: 'cases', icon: '📝', label: 'Кейсы' });
+  if (config.renderRecipes) panes.splice(1, 0, { id: 'recipes', icon: '📖', label: 'Рецепты' });
 
   // Tab title header — merge defaults with user overrides
   const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };
@@ -136,6 +137,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
       break;
     case 'cases':
       if (config.renderCases) await config.renderCases(paneEl);
+      break;
+    case 'recipes':
+      if (config.renderRecipes) await config.renderRecipes(paneEl);
       break;
     case 'goals':
       await renderGoalsPane(paneEl, tabId, config);
@@ -408,7 +412,7 @@ function showEditNoteModal(parentEl, tabId, config, note) {
 const STORE_HINTS = {
   jobs: { examples: ['Резюме', 'Портфолио', 'Навыки', 'Сопроводительное письмо'], placeholder: 'резюме, навыки...' },
   health: { examples: ['Лекарства', 'Анализы', 'Диагнозы', 'Врачи'], placeholder: 'лекарства, анализы...' },
-  food: { examples: ['Что есть дома', 'Аллергии', 'Любимые продукты'], placeholder: 'продукты, аллергии...' },
+  food: { examples: ['Блэклист', 'Любимые продукты', 'Что есть дома'], placeholder: 'продукты, исключения...' },
   sports: { examples: ['Личные рекорды', 'Программа тренировок', 'Замеры'], placeholder: 'рекорды, замеры...' },
   money: { examples: ['Реквизиты', 'Карты', 'Инвестиции'], placeholder: 'реквизиты, карты...' },
   development: { examples: ['Стек технологий', 'Сертификаты', 'GitHub проекты'], placeholder: 'стек, сертификаты...' },
