@@ -8,7 +8,10 @@ async function loadTimeline(subTab) {
 
   // Auto-sync AFK + Focus blocks from activity_snapshots
   const today = localDate();
-  await invoke('sync_timeline_auto', { date: today }).catch(() => {});
+  await Promise.all([
+    invoke('sync_timeline_auto', { date: today }).catch(() => {}),
+    invoke('sync_health_to_timeline', { date: today }).catch(() => {}),
+  ]);
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'timeline', {

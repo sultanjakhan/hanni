@@ -323,6 +323,11 @@ document.addEventListener('keydown', (e) => {
   if (chat.children.length === 0) renderChatWelcomeCard();
   loadConversationsList();
 
+  // Auto-sync health data from Health Connect (Android only)
+  if (IS_MOBILE) {
+    invoke('import_health_connect_all').catch(() => {});
+  }
+
   // Android back button: close overlays, then go to previous tab
   if (IS_MOBILE) {
     history.pushState(null, '', '');

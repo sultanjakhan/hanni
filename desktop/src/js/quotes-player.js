@@ -1,5 +1,5 @@
 // ── quotes-player.js — Motivational quotes popup widget ──
-import { randomQuote, getQuote } from './quotes-data.js';
+import { nextQuote, prevQuote, getQuote, canGoBack } from './quotes-data.js';
 
 let panel = null;
 
@@ -9,12 +9,14 @@ function renderQuote() {
   panel.querySelector('.qp-text').textContent = `"${q.text}"`;
   panel.querySelector('.qp-author').textContent = `— ${q.author}`;
   panel.querySelector('.qp-source').textContent = q.source;
+  const prevBtn = panel.querySelector('#qp-prev');
+  if (prevBtn) prevBtn.style.opacity = canGoBack() ? '1' : '0.3';
 }
 
 function togglePanel() {
   if (!panel) return;
   const wasHidden = panel.classList.contains('hidden');
-  if (wasHidden) randomQuote();
+  if (wasHidden) nextQuote();
   panel.classList.toggle('hidden');
   if (wasHidden) renderQuote();
 }
@@ -65,11 +67,11 @@ export function initQuotesPlayer() {
 
   document.getElementById('qw-btn').addEventListener('click', togglePanel);
   document.getElementById('qp-prev').addEventListener('click', () => {
-    randomQuote();
+    prevQuote();
     renderQuote();
   });
   document.getElementById('qp-next').addEventListener('click', () => {
-    randomQuote();
+    nextQuote();
     renderQuote();
   });
 

@@ -1,23 +1,35 @@
-// ── quotes-data.js — Random quote logic (no persistence) ──
+// ── quotes-data.js — Quote navigation with history ──
 import { QUOTES } from './quotes-collection.js';
 
-let currentIndex = -1;
+const history = [];
+let historyPos = -1;
 
 function pickRandom() {
-  if (QUOTES.length <= 1) { currentIndex = 0; return; }
+  if (QUOTES.length <= 1) return 0;
+  const cur = history.length ? history[historyPos] : -1;
   let next;
-  do { next = Math.floor(Math.random() * QUOTES.length); } while (next === currentIndex);
-  currentIndex = next;
+  do { next = Math.floor(Math.random() * QUOTES.length); } while (next === cur);
+  return next;
 }
 
-export function randomQuote() {
-  pickRandom();
-  return QUOTES[currentIndex];
+export function nextQuote() {
+  if (historyPos < history.length - 1) {
+    historyPos++;
+  } else {
+    history.push(pickRandom());
+    historyPos = history.length - 1;
+  }
+  return QUOTES[history[historyPos]];
+}
+
+export function prevQuote() {
+  if (historyPos > 0) historyPos--;
+  return QUOTES[history[historyPos]];
 }
 
 export function getQuote() {
-  if (currentIndex < 0) pickRandom();
-  return QUOTES[currentIndex];
+  if (!history.length) return nextQuote();
+  return QUOTES[history[historyPos]];
 }
 
-export function getTotal() { return QUOTES.length; }
+export function canGoBack() { return historyPos > 0; }

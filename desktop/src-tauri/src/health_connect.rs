@@ -123,20 +123,12 @@ pub fn get_sleep_stats(db: State<'_, HanniDb>, days: i64) -> SleepStats {
 }
 
 /// Import sleep sessions from Health Connect (Android only).
-/// On desktop, returns error. On Android, this will call Kotlin plugin.
+/// Delegates to import_health_connect_all for full import.
 #[tauri::command]
-pub async fn import_health_connect_sleep(
+pub async fn import_health_connect_sleep<R: tauri::Runtime>(
     db: State<'_, HanniDb>,
+    app: tauri::AppHandle<R>,
 ) -> Result<String, String> {
-    #[cfg(target_os = "android")]
-    {
-        // TODO: Call Kotlin plugin via Tauri mobile plugin bridge
-        // let sessions = app.run_mobile_plugin::<Vec<SleepSession>>("readSleep", ()).await?;
-        // for s in sessions { add_sleep_session_internal(&db, s)?; }
-        Err("Health Connect import not yet implemented for Android".into())
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        Err("Health Connect is only available on Android".into())
-    }
+    crate::health_import::import_health_connect_all(db, app).await
+        .map(|v| format!("Imported: {}", v))
 }
