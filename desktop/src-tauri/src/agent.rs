@@ -100,9 +100,15 @@ pub async fn run_agent_task(
             let preview: String = result.chars().take(150).collect();
             eprintln!("[agent] tool {} → {}", tc.function.name, preview);
 
+            // Truncate large tool outputs to prevent unbounded history growth
+            let truncated = if result.len() > 4000 {
+                format!("{}…\n[truncated {} chars]", &result[..4000], result.len() - 4000)
+            } else {
+                result
+            };
             messages.push(ChatMessage {
                 role: "tool".into(),
-                content: Some(result),
+                content: Some(truncated),
                 tool_call_id: Some(tc.id.clone()),
                 name: Some(tc.function.name.clone()),
                 tool_calls: None,
