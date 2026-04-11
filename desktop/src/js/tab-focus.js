@@ -155,10 +155,10 @@ async function renderFocusCurrent(el) {
       <div class="focus-log-header">Сегодня</div>
       <div class="focus-log">
         ${log.map(item => `<div class="focus-log-item">
-          <span class="focus-log-time">${item.time || ''}</span>
+          <span class="focus-log-time">${escapeHtml(item.time || '')}</span>
           <span class="focus-log-title">${escapeHtml(item.title)}</span>
-          <span class="focus-log-category">${item.category || ''}</span>
-          <span class="focus-log-duration">${item.duration || ''}</span>
+          <span class="focus-log-category">${escapeHtml(item.category || '')}</span>
+          <span class="focus-log-duration">${escapeHtml(item.duration || '')}</span>
         </div>`).join('')}
       </div>` : '';
 

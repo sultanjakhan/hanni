@@ -24,7 +24,7 @@ markedInstance.use({
       return `<div class="code-block"><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent)">Копировать</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
     },
     link({ href, text }) {
-      return `<a href="#" onclick="event.preventDefault();window.__TAURI__.core.invoke('open_url',{url:'${href.replace(/'/g, "\\'")}'});return false;">${text}</a>`;
+      return `<a href="#" class="md-link" data-href="${escapeHtml(href)}">${text}</a>`;
     },
   },
 });
@@ -311,3 +311,13 @@ export function migrateTextToBlocks(text) {
     }))
   };
 }
+
+// Delegated click handler for markdown links (safe — no inline onclick)
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('.md-link');
+  if (link) {
+    e.preventDefault();
+    const url = link.dataset.href;
+    if (url) invoke('open_url', { url });
+  }
+});
