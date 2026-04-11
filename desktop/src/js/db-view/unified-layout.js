@@ -412,7 +412,7 @@ function showEditNoteModal(parentEl, tabId, config, note) {
 const STORE_HINTS = {
   jobs: { examples: ['Резюме', 'Портфолио', 'Навыки', 'Сопроводительное письмо'], placeholder: 'резюме, навыки...' },
   health: { examples: ['Лекарства', 'Анализы', 'Диагнозы', 'Врачи'], placeholder: 'лекарства, анализы...' },
-  food: { examples: ['Блэклист', 'Любимые продукты', 'Что есть дома'], placeholder: 'продукты, исключения...' },
+  food: { examples: ['Блэклист', 'Аллергия', 'Любимые продукты'], placeholder: 'продукты, ограничения...' },
   sports: { examples: ['Личные рекорды', 'Программа тренировок', 'Замеры'], placeholder: 'рекорды, замеры...' },
   money: { examples: ['Реквизиты', 'Карты', 'Инвестиции'], placeholder: 'реквизиты, карты...' },
   development: { examples: ['Стек технологий', 'Сертификаты', 'GitHub проекты'], placeholder: 'стек, сертификаты...' },

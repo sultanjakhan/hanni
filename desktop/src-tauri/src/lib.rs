@@ -127,6 +127,7 @@ fn init_database() -> HanniDb {
     migrate_conversations_category(&conn);
     migrate_proactive_history_v2(&conn);
     migrate_proactive_messages_rating(&conn);
+    migrate_recipe_difficulty(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);

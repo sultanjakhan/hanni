@@ -1049,6 +1049,11 @@
 .recipe-card-cal { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .recipe-card-meta { display: flex; gap: 12px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .recipe-card-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.recipe-diff { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-sm); }
+.recipe-diff-easy { background: var(--bg-success); color: var(--text-success); }
+.recipe-diff-medium { background: var(--bg-warning); color: var(--text-warning); }
+.badge-purple { background: #f0e6ff; color: #7c3aed; }
+[data-theme="dark"] .badge-purple { background: #2d1b59; color: #a78bfa; }
 
 /* Recipe detail modal */
 .recipe-detail-modal { max-width: 520px; }

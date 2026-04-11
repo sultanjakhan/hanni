@@ -14,9 +14,14 @@ const MEAL_COLORS = { breakfast: 'yellow', lunch: 'green', dinner: 'purple', uni
 async function getBlacklist() {
   try {
     const entries = await invoke('memory_list', { category: 'food', limit: 100 });
-    const bl = entries.find(e => e.key.toLowerCase().includes('блэклист') || e.key.toLowerCase().includes('blacklist'));
-    if (!bl) return [];
-    return bl.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const items = [];
+    for (const e of entries) {
+      const k = e.key.toLowerCase();
+      if (k.includes('блэклист') || k.includes('blacklist') || k.includes('аллергия') || k.includes('allergy')) {
+        items.push(...e.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+      }
+    }
+    return items;
   } catch { return []; }
 }
 
@@ -39,6 +44,7 @@ function renderCard(r) {
     return `<span class="badge badge-${c}">${label}</span>`;
   }).join('');
   const totalTime = (r.prep_time || 0) + (r.cook_time || 0);
+  const diffLabel = r.difficulty === 'medium' ? 'Средний' : 'Лёгкий';
   return `<div class="recipe-card" data-id="${r.id}">
     <div class="recipe-card-header">
       <span class="recipe-card-name">${escapeHtml(r.name)}</span>
@@ -47,6 +53,7 @@ function renderCard(r) {
     <div class="recipe-card-meta">
       ${totalTime ? `<span>⏱ ${totalTime} мин</span>` : ''}
       <span>👥 ${r.servings || 1}</span>
+      <span class="recipe-diff recipe-diff-${r.difficulty || 'easy'}">${diffLabel}</span>
     </div>
     <div class="recipe-card-tags">${badgesHtml}</div>
   </div>`;
