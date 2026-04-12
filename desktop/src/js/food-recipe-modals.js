@@ -15,7 +15,7 @@ export async function showRecipeDetail(id, reloadFn) {
 
   function fmtIngr(i) {
     const amt = i.amount ? `${i.amount}${escapeHtml(i.unit)}` : '';
-    return `<span class="ingr-tag" data-ingr="${escapeHtml(i.name)}">${escapeHtml(i.name)}${amt ? ' ' + amt : ''}</span>`;
+    return `<span class="ingr-item"><span class="ingr-tag" data-ingr="${escapeHtml(i.name)}">${escapeHtml(i.name)}</span>${amt ? `<span class="ingr-amt">${amt}</span>` : ''}</span>`;
   }
   const ingrHtml = items.length > 0
     ? items.map(fmtIngr).join('')

@@ -1065,7 +1065,9 @@
 .ingr-tag:hover { background: var(--accent); color: #fff; }
 .ingr-more { cursor: default; opacity: 0.6; }
 .ingr-more:hover { background: var(--bg-tertiary); color: var(--text-secondary); }
-.recipe-ingr-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.ingr-item { display: inline-flex; align-items: center; gap: 4px; }
+.ingr-amt { font-size: 11px; color: var(--text-muted); }
+.recipe-ingr-tags { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* Recipe detail modal */
 .recipe-detail-modal { max-width: 520px; }
