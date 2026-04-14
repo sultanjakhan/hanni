@@ -1822,17 +1822,22 @@ pub fn create_recipe(
     name: String, description: Option<String>, ingredients: String, instructions: String,
     prep_time: Option<i64>, cook_time: Option<i64>, servings: Option<i64>,
     calories: Option<i64>, tags: Option<String>, difficulty: Option<String>,
+    cuisine: Option<String>, health_score: Option<i64>, price_score: Option<i64>,
+    protein: Option<i64>, fat: Option<i64>, carbs: Option<i64>,
     ingredient_items: Option<Vec<serde_json::Value>>, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO recipes (name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, difficulty, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+        "INSERT INTO recipes (name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, difficulty, cuisine, health_score, price_score, protein, fat, carbs, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)",
         rusqlite::params![name, description.unwrap_or_default(), ingredients, instructions,
             prep_time.unwrap_or(0), cook_time.unwrap_or(0), servings.unwrap_or(1),
             calories.unwrap_or(0), tags.unwrap_or_default(),
-            difficulty.unwrap_or_else(|| "easy".into()), now],
+            difficulty.unwrap_or_else(|| "easy".into()),
+            cuisine.unwrap_or_else(|| "kz".into()),
+            health_score.unwrap_or(5), price_score.unwrap_or(5),
+            protein.unwrap_or(0), fat.unwrap_or(0), carbs.unwrap_or(0), now],
     ).map_err(|e| format!("DB error: {}", e))?;
     let recipe_id = conn.last_insert_rowid();
     if let Some(items) = ingredient_items {
@@ -1857,13 +1862,13 @@ pub fn get_recipes(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Res
     if let Some(q) = search {
         let like = format!("%{}%", q);
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![like], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty FROM recipes ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked FROM recipes ORDER BY updated_at DESC LIMIT 50"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map([], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
@@ -1878,6 +1883,14 @@ pub fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlit
         "calories": row.get::<_, i64>(6)?, "tags": row.get::<_, String>(7)?,
         "ingredients": row.get::<_, String>(8)?,
         "difficulty": row.get::<_, String>(9).unwrap_or_else(|_| "easy".into()),
+        "cuisine": row.get::<_, String>(10).unwrap_or_else(|_| "kz".into()),
+        "health_score": row.get::<_, i64>(11).unwrap_or(5),
+        "price_score": row.get::<_, i64>(12).unwrap_or(5),
+        "protein": row.get::<_, i64>(13).unwrap_or(0),
+        "fat": row.get::<_, i64>(14).unwrap_or(0),
+        "carbs": row.get::<_, i64>(15).unwrap_or(0),
+        "favorite": row.get::<_, i64>(16).unwrap_or(0),
+        "last_cooked": row.get::<_, Option<String>>(17).unwrap_or(None),
     }))
 }
 
@@ -1885,7 +1898,7 @@ pub fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlit
 pub fn get_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
     let mut recipe = conn.query_row(
-        "SELECT id, name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, difficulty FROM recipes WHERE id=?1",
+        "SELECT id, name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked FROM recipes WHERE id=?1",
         rusqlite::params![id],
         |row| Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
@@ -1894,6 +1907,14 @@ pub fn get_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::
             "cook_time": row.get::<_, i64>(6)?, "servings": row.get::<_, i64>(7)?,
             "calories": row.get::<_, i64>(8)?, "tags": row.get::<_, String>(9)?,
             "difficulty": row.get::<_, String>(10).unwrap_or_else(|_| "easy".into()),
+            "cuisine": row.get::<_, String>(11).unwrap_or_else(|_| "kz".into()),
+            "health_score": row.get::<_, i64>(12).unwrap_or(5),
+            "price_score": row.get::<_, i64>(13).unwrap_or(5),
+            "protein": row.get::<_, i64>(14).unwrap_or(0),
+            "fat": row.get::<_, i64>(15).unwrap_or(0),
+            "carbs": row.get::<_, i64>(16).unwrap_or(0),
+            "favorite": row.get::<_, i64>(17).unwrap_or(0),
+            "last_cooked": row.get::<_, Option<String>>(18).unwrap_or(None),
         })),
     ).map_err(|e| format!("Recipe not found: {}", e))?;
     // Attach structured ingredients
@@ -1929,6 +1950,23 @@ pub fn update_recipe(id: i64, name: Option<String>, prep_time: Option<i64>, cook
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_favorite_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let cur: i64 = conn.query_row("SELECT favorite FROM recipes WHERE id=?1", rusqlite::params![id], |r| r.get(0)).unwrap_or(0);
+    let next = if cur == 0 { 1 } else { 0 };
+    conn.execute("UPDATE recipes SET favorite=?1 WHERE id=?2", rusqlite::params![next, id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(next)
+}
+
+#[tauri::command]
+pub fn mark_recipe_cooked(id: i64, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().format("%Y-%m-%d").to_string();
+    conn.execute("UPDATE recipes SET last_cooked=?1 WHERE id=?2", rusqlite::params![now, id]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(now)
 }
 
 #[tauri::command]

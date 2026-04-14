@@ -1,151 +1,116 @@
 // ── tab-food-recipes.js — Recipe book pane for Food tab ──
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
+import { renderCard } from './food-recipe-card.js';
+import {
+  MEALS, CUISINES, DIFFS, SORTS, CAT_LABELS, CAT_ORDER,
+  getBlacklist, matchBL, matchMeal, matchCuisine, matchDiff,
+  matchSearch, matchIngr, sortRecipes, collectIngredients,
+} from './food-recipe-filters.js';
 
-const MEAL_FILTERS = [
-  { id: 'all', label: 'Все' },
-  { id: 'breakfast', label: 'Завтрак' },
-  { id: 'lunch', label: 'Обед' },
-  { id: 'dinner', label: 'Ужин' },
-];
-
-const MEAL_COLORS = { breakfast: 'yellow', lunch: 'green', dinner: 'purple', universal: 'blue' };
-
-async function getBlacklist() {
-  try {
-    const entries = await invoke('memory_list', { category: 'food', limit: 100 });
-    const items = [];
-    for (const e of entries) {
-      const k = e.key.toLowerCase();
-      if (k.includes('блэклист') || k.includes('blacklist') || k.includes('аллергия') || k.includes('allergy')) {
-        items.push(...e.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
-      }
-    }
-    return items;
-  } catch { return []; }
-}
-
-function matchesBlacklist(recipe, blacklist) {
-  if (!blacklist.length) return false;
-  const text = `${recipe.name} ${recipe.ingredients || ''} ${recipe.description || ''}`.toLowerCase();
-  return blacklist.some(item => text.includes(item));
-}
-
-function matchesMealFilter(recipe, filter) {
-  if (filter === 'all') return true;
-  return (recipe.tags || '').split(',').map(t => t.trim()).includes(filter);
-}
-
-function matchesSearch(recipe, query) {
-  if (!query) return true;
-  const text = `${recipe.name} ${recipe.ingredients || ''}`.toLowerCase();
-  return text.includes(query);
-}
-
-function getIngrNames(recipe) {
-  return (recipe.ingredients || '').split(',').map(s => {
-    const colonIdx = s.indexOf(':');
-    return (colonIdx > -1 ? s.slice(0, colonIdx) : s).trim();
-  }).filter(Boolean);
-}
-
-function renderCard(r, onIngrClick) {
-  const tags = (r.tags || '').split(',').map(t => t.trim()).filter(Boolean);
-  const badgesHtml = tags.map(t => {
-    const c = MEAL_COLORS[t] || 'gray';
-    const label = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', universal: 'Универсал' }[t] || t;
-    return `<span class="badge badge-${c}">${label}</span>`;
-  }).join('');
-  const totalTime = (r.prep_time || 0) + (r.cook_time || 0);
-  const diffLabel = r.difficulty === 'medium' ? 'Средний' : 'Лёгкий';
-  const ingrNames = getIngrNames(r);
-  const ingrHtml = ingrNames.slice(0, 5).map(n =>
-    `<span class="ingr-tag" data-ingr="${escapeHtml(n)}">${escapeHtml(n)}</span>`
-  ).join('') + (ingrNames.length > 5 ? `<span class="ingr-tag ingr-more">+${ingrNames.length - 5}</span>` : '');
-
-  const div = document.createElement('div');
-  div.className = 'recipe-card';
-  div.dataset.id = r.id;
-  div.innerHTML = `
-    <div class="recipe-card-header">
-      <span class="recipe-card-name">${escapeHtml(r.name)}</span>
-      <span class="recipe-card-cal">${r.calories || '—'} kcal</span>
-    </div>
-    <div class="recipe-card-meta">
-      ${totalTime ? `<span>⏱ ${totalTime} мин</span>` : ''}
-      <span>👥 ${r.servings || 1}</span>
-      <span class="recipe-diff recipe-diff-${r.difficulty || 'easy'}">${diffLabel}</span>
-    </div>
-    <div class="recipe-card-tags">${badgesHtml}</div>
-    <div class="recipe-card-ingr">${ingrHtml}</div>`;
-
-  div.querySelectorAll('.ingr-tag[data-ingr]').forEach(tag => {
-    tag.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onIngrClick(tag.dataset.ingr);
-    });
-  });
-  return div;
+function chips(items, cur, group) {
+  return items.map(o =>
+    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
+  ).join('');
 }
 
 export async function renderRecipesPane(el) {
-  let activeFilter = 'all';
-  let searchQuery = '';
+  const F = { meal: 'all', cuisine: 'all', diff: 'all', sort: 'name', fav: false, q: '' };
+  const selIngr = new Set();
+  let allRecipes = [], blacklist = [], panelOpen = false, built = false;
 
-  async function render() {
-    const [recipes, blacklist] = await Promise.all([
-      invoke('get_recipes', { search: null }).catch(() => []),
-      getBlacklist(),
+  async function loadData() {
+    [allRecipes, blacklist] = await Promise.all([
+      invoke('get_recipes', { search: null }).catch(() => []), getBlacklist(),
     ]);
-
-    const filtered = recipes
-      .filter(r => !matchesBlacklist(r, blacklist))
-      .filter(r => matchesMealFilter(r, activeFilter))
-      .filter(r => matchesSearch(r, searchQuery));
-
-    el.innerHTML = `
-      <div class="recipe-pane">
-        <div class="recipe-filter-bar">
-          <div class="recipe-filters">${MEAL_FILTERS.map(f =>
-            `<button class="recipe-filter-btn${activeFilter === f.id ? ' active' : ''}" data-filter="${f.id}">${f.label}</button>`
-          ).join('')}</div>
-          <input class="recipe-search" type="text" placeholder="Поиск по названию или продукту..." value="${escapeHtml(searchQuery)}">
-          <button class="btn-primary recipe-add-btn">+ Рецепт</button>
-        </div>
-        <div class="recipe-grid"></div>
-      </div>`;
-
-    const grid = el.querySelector('.recipe-grid');
-    if (!filtered.length) {
-      grid.innerHTML = '<div class="uni-empty">Нет рецептов</div>';
-    } else {
-      for (const r of filtered) {
-        const card = renderCard(r, (ingr) => {
-          searchQuery = ingr.toLowerCase();
-          const input = el.querySelector('.recipe-search');
-          if (input) input.value = searchQuery;
-          render();
-        });
-        card.addEventListener('click', async () => {
-          const { showRecipeDetail } = await import('./food-recipe-modals.js');
-          showRecipeDetail(parseInt(card.dataset.id), render);
-        });
-        grid.appendChild(card);
-      }
-    }
-
-    el.querySelectorAll('.recipe-filter-btn').forEach(btn => {
-      btn.onclick = () => { activeFilter = btn.dataset.filter; render(); };
-    });
-    const searchInput = el.querySelector('.recipe-search');
-    if (searchInput) {
-      searchInput.oninput = () => { searchQuery = searchInput.value.trim().toLowerCase(); render(); };
-    }
-    el.querySelector('.recipe-add-btn')?.addEventListener('click', async () => {
-      const { showAddRecipeModal } = await import('./food-recipe-modals.js');
-      showAddRecipeModal(render);
-    });
   }
 
-  await render();
+  function getFiltered() {
+    let list = allRecipes.filter(r => !matchBL(r, blacklist) && matchMeal(r, F.meal)
+      && matchCuisine(r, F.cuisine) && matchDiff(r, F.diff)
+      && matchSearch(r, F.q) && (!F.fav || r.favorite === 1)
+      && matchIngr(r, selIngr));
+    return sortRecipes(list, F.sort);
+  }
+
+  function buildShell() {
+    el.innerHTML = `<div class="recipe-pane">
+      <div class="recipe-filter-bar">
+        <button class="rf-toggle" title="Фильтр">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M1.5 2h13L9.5 8.5V13l-3 1.5V8.5z"/></svg>
+          <span class="rf-badge" style="display:none"></span></button>
+        <input class="recipe-search" type="text" placeholder="Поиск...">
+        <button class="btn-primary recipe-add-btn">+ Рецепт</button>
+      </div>
+      <div class="rf-panel" style="display:none"></div>
+      <div class="recipe-grid"></div></div>`;
+    el.querySelector('.rf-toggle').onclick = () => {
+      panelOpen = !panelOpen;
+      el.querySelector('.rf-panel').style.display = panelOpen ? '' : 'none';
+    };
+    el.querySelector('.recipe-search').oninput = (e) => {
+      F.q = e.target.value.trim().toLowerCase(); updateGrid();
+    };
+    el.querySelector('.recipe-add-btn').onclick = async () => {
+      const { showAddRecipeModal } = await import('./food-recipe-modals.js');
+      showAddRecipeModal(fullReload);
+    };
+  }
+
+  function updatePanel() {
+    const panel = el.querySelector('.rf-panel');
+    const grouped = collectIngredients(allRecipes.filter(r => !matchBL(r, blacklist)));
+    const ingrSections = CAT_ORDER.filter(c => grouped[c]?.length).map(cat =>
+      `<div class="rf-section"><span class="rf-title rf-title-${cat}">${CAT_LABELS[cat]}</span>${grouped[cat].map(i =>
+        `<button class="rf-chip rf-ingr-chip ingr-cat-${cat}${selIngr.has(i.name.toLowerCase()) ? ' active' : ''}" data-group="ingr" data-val="${escapeHtml(i.name.toLowerCase())}">${escapeHtml(i.name)}</button>`
+      ).join('')}</div>`
+    ).join('');
+    panel.innerHTML = `
+      <div class="rf-section"><span class="rf-title">Приём</span>${chips(MEALS, F.meal, 'meal')}</div>
+      <div class="rf-section"><span class="rf-title">Кухня</span>${chips(CUISINES, F.cuisine, 'cuisine')}</div>
+      <div class="rf-section"><span class="rf-title">Слож.</span>${chips(DIFFS, F.diff, 'diff')}</div>
+      <div class="rf-section"><span class="rf-title">Сорт.</span>${chips(SORTS, F.sort, 'sort')}</div>
+      <div class="rf-section"><span class="rf-title">★</span>
+        <button class="rf-chip${F.fav ? ' active' : ''}" data-group="fav" data-val="toggle">Избранное</button></div>
+      ${ingrSections}`;
+    panel.querySelectorAll('.rf-chip').forEach(btn => btn.onclick = () => {
+      const g = btn.dataset.group, v = btn.dataset.val;
+      if (g === 'fav') F.fav = !F.fav;
+      else if (g === 'ingr') { selIngr.has(v) ? selIngr.delete(v) : selIngr.add(v); }
+      else F[g] = v;
+      updatePanel(); updateGrid(); updateBadge();
+    });
+    updateBadge();
+  }
+
+  function updateBadge() {
+    const ac = [F.meal !== 'all', F.cuisine !== 'all', F.diff !== 'all', F.fav, selIngr.size > 0].filter(Boolean).length;
+    const badge = el.querySelector('.rf-badge'), toggle = el.querySelector('.rf-toggle');
+    badge.textContent = ac; badge.style.display = ac ? '' : 'none';
+    toggle.classList.toggle('rf-active', ac > 0);
+  }
+
+  function updateGrid() {
+    const list = getFiltered(), grid = el.querySelector('.recipe-grid');
+    grid.innerHTML = '';
+    if (!list.length) { grid.innerHTML = '<div class="uni-empty">Нет рецептов</div>'; return; }
+    for (const r of list) {
+      const card = renderCard(r, (ingr) => {
+        F.q = ingr.toLowerCase(); el.querySelector('.recipe-search').value = F.q; updateGrid();
+      });
+      card.onclick = async () => {
+        const { showRecipeDetail } = await import('./food-recipe-modals.js');
+        showRecipeDetail(parseInt(card.dataset.id), fullReload);
+      };
+      grid.appendChild(card);
+    }
+  }
+
+  async function fullReload() {
+    await loadData();
+    if (!built) { buildShell(); built = true; }
+    updatePanel(); updateGrid();
+  }
+  await fullReload();
 }

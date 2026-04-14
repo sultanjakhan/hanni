@@ -1386,7 +1386,8 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         .route("/auto/eval", post(auto_eval))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8235").await;
+    let port = if cfg!(debug_assertions) { 8236 } else { 8235 };
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await;
     match listener {
         Ok(listener) => {
             let _ = axum::serve(listener, app).await;

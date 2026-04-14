@@ -128,6 +128,8 @@ fn init_database() -> HanniDb {
     migrate_proactive_history_v2(&conn);
     migrate_proactive_messages_rating(&conn);
     migrate_recipe_difficulty(&conn);
+    migrate_recipe_extra(&conn);
+    migrate_recipe_extra2(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
@@ -474,6 +476,8 @@ pub fn run() {
             commands_data::get_recipes,
             commands_data::update_recipe,
             commands_data::delete_recipe,
+            commands_data::toggle_favorite_recipe,
+            commands_data::mark_recipe_cooked,
             commands_data::add_product,
             commands_data::get_products,
             commands_data::update_product,

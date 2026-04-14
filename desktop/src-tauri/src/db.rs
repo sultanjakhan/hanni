@@ -927,6 +927,73 @@ pub fn migrate_recipe_difficulty(conn: &rusqlite::Connection) {
     }
 }
 
+pub fn migrate_recipe_extra(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT cuisine FROM recipes LIMIT 1").is_err() {
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN cuisine TEXT NOT NULL DEFAULT 'kz'", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN health_score INTEGER NOT NULL DEFAULT 5", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN price_score INTEGER NOT NULL DEFAULT 5", []);
+        seed_recipe_extra_values(conn);
+    }
+}
+
+pub fn migrate_recipe_extra2(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT protein FROM recipes LIMIT 1").is_err() {
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN protein INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN fat INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN carbs INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN last_cooked TEXT", []);
+        seed_recipe_macros(conn);
+    }
+}
+
+fn seed_recipe_extra_values(conn: &rusqlite::Connection) {
+    let updates: Vec<(&str, &str, i64, i64)> = vec![
+        ("Овсянка%", "other", 8, 2), ("Яичница%", "other", 6, 2),
+        ("Омлет%", "other", 7, 2), ("Бутерброды с авокадо", "other", 7, 4),
+        ("Каша рисовая%", "other", 6, 2), ("Гречка с курицей", "ru", 8, 3),
+        ("Рис с овощами", "other", 7, 3), ("Картофельное пюре%", "ru", 5, 3),
+        ("Макароны с фаршем", "it", 5, 4), ("Куриный суп%", "ru", 7, 3),
+        ("Борщ", "ru", 7, 4), ("Салат овощной", "other", 9, 3),
+        ("Салат Цезарь%", "other", 6, 5), ("Жареная картошка", "ru", 4, 2),
+        ("Куриные отбивные%", "ru", 6, 4), ("Блины", "ru", 5, 3),
+        ("Творог с ягодами%", "other", 9, 4), ("Куриное филе на сковороде", "other", 8, 4),
+        ("Плов", "kz", 6, 4), ("Бешбармак%", "kz", 5, 6),
+        ("Овощное рагу", "other", 8, 3), ("Тосты%", "other", 5, 3),
+        ("Гуляш%", "ru", 5, 5), ("Греческий салат", "other", 8, 4),
+    ];
+    for (name, cuisine, health, price) in updates {
+        let _ = conn.execute(
+            "UPDATE recipes SET cuisine=?1, health_score=?2, price_score=?3 WHERE name LIKE ?4",
+            rusqlite::params![cuisine, health, price, name],
+        );
+    }
+}
+
+fn seed_recipe_macros(conn: &rusqlite::Connection) {
+    // (name_pattern, protein, fat, carbs) per serving
+    let macros: Vec<(&str, i64, i64, i64)> = vec![
+        ("Овсянка%", 12, 8, 55), ("Яичница%", 18, 16, 4),
+        ("Омлет%", 17, 12, 3), ("Бутерброды с авокадо", 10, 18, 28),
+        ("Каша рисовая%", 8, 6, 50), ("Гречка с курицей", 35, 10, 45),
+        ("Рис с овощами", 8, 7, 60), ("Картофельное пюре%", 25, 20, 50),
+        ("Макароны с фаршем", 28, 18, 55), ("Куриный суп%", 20, 8, 25),
+        ("Борщ", 15, 10, 30), ("Салат овощной", 3, 8, 12),
+        ("Салат Цезарь%", 22, 15, 10), ("Жареная картошка", 5, 12, 45),
+        ("Куриные отбивные%", 30, 12, 15), ("Блины", 8, 10, 40),
+        ("Творог с ягодами%", 18, 5, 20), ("Куриное филе на сковороде", 32, 8, 5),
+        ("Плов", 20, 15, 50), ("Бешбармак%", 25, 20, 40),
+        ("Овощное рагу", 5, 6, 25), ("Тосты%", 12, 10, 30),
+        ("Гуляш%", 22, 14, 15), ("Греческий салат", 6, 14, 8),
+    ];
+    for (name, p, f, c) in macros {
+        let _ = conn.execute(
+            "UPDATE recipes SET protein=?1, fat=?2, carbs=?3 WHERE name LIKE ?4",
+            rusqlite::params![p, f, c, name],
+        );
+    }
+}
+
 pub fn migrate_facts_decay(conn: &rusqlite::Connection) {
     // ME1: Add access tracking columns for memory decay
     let has_access_count = conn.prepare("SELECT access_count FROM facts LIMIT 1").is_ok();
