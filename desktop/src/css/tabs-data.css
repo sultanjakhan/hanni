@@ -1170,7 +1170,7 @@
 .ingr-autocomplete-item { padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--text-primary); }
 .ingr-autocomplete-item:hover { background: var(--bg-hover); }
 .ingr-autocomplete-create { color: var(--accent-fill); font-weight: 500; }
-.ingr-ac-cat { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); padding: 6px 10px 2px; border-top: 1px solid var(--border-default); }
+.ingr-ac-cat { font-weight: 600; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); padding: 6px 10px 2px; border-top: 1px solid var(--border-default); }
 .ingr-ac-cat:first-child { border-top: none; }
 .add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .rf-chip-add { border-style: dashed; opacity: 0.7; }
@@ -1206,3 +1206,48 @@
 .mp-recipe-option { display: flex; justify-content: space-between; padding: 8px 10px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border-subtle); }
 .mp-recipe-option:last-child { border-bottom: none; }
 .mp-recipe-option:hover { background: var(--bg-hover); }
+
+/* ── Sport catalog & template cards ── */
+.sport-card {
+  padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-default);
+  background: var(--bg-card); cursor: pointer; transition: all var(--transition-fast);
+}
+.sport-card:hover { border-color: var(--border-hover); box-shadow: 0 2px 8px rgba(0,0,0,0.06); transform: translateY(-1px); }
+.sport-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.sport-card-name { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.3; }
+.sport-card-count { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.sport-card-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.sport-card-equip { font-size: 12px; color: var(--text-secondary); }
+.sport-card-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.sport-card-muscles { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.sport-card.recipe-fav .sport-card-name { color: var(--color-yellow, #e8a100); }
+
+/* Exercise rows in template add modal */
+.exercise-row { margin-bottom: 8px; }
+.exercise-row-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.exercise-ac-wrap { position: relative; flex: 2; min-width: 140px; }
+.exercise-ac-list {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 100;
+  background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-height: 180px; overflow-y: auto;
+}
+.exercise-ac-item { padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--text-primary); }
+.exercise-ac-item:hover { background: var(--bg-hover); }
+.exercise-remove { background: none; border: none; cursor: pointer; color: var(--text-faint); font-size: 14px; padding: 4px; }
+.exercise-remove:hover { color: var(--color-red, #e03e3e); }
+.exercise-add-row { font-size: 13px; }
+
+/* Template detail modal */
+.tmpl-exercises-list { margin-bottom: 12px; }
+.tmpl-exercise-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+.tmpl-exercise-row:last-child { border-bottom: none; }
+.tmpl-exercise-num { font-size: 11px; color: var(--text-faint); min-width: 20px; }
+.tmpl-exercise-name { flex: 1; font-weight: 500; color: var(--text-primary); }
+.tmpl-exercise-detail { color: var(--text-secondary); white-space: nowrap; }
+.tmpl-exercise-rest { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+/* Chip row for modals */
+.rf-chip-row { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px; }
+
+/* Template picker in workout modal */
+.tmpl-pick-row:hover { background: var(--bg-hover); }

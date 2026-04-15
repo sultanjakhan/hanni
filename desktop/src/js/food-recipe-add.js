@@ -20,8 +20,6 @@ export async function showAddRecipeModal(reloadFn) {
   const diffsHtml = ['easy:Лёгкий', 'medium:Средний', 'hard:Сложный']
     .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.diff === id); }).join('');
   const defCuisine = cuisines.find(c => c.id === state.cuisine);
-  const cuisineLabel = defCuisine ? `${defCuisine.emoji} ${defCuisine.name}` : 'Выбрать';
-  const cuisineOpts = cuisines.map(c => `<div class="ingr-unit-opt${c.id === state.cuisine ? ' active' : ''}" data-val="${c.id}">${c.emoji} ${c.name}</div>`).join('');
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -42,8 +40,8 @@ export async function showAddRecipeModal(reloadFn) {
     ${acc('Тип блюда', 'tags', `<div class="add-chips" data-field="tags">${mealsHtml}</div>`, false)}
     ${acc('Сложность', 'diff', `<div class="add-chips" data-field="diff">${diffsHtml}</div>`, false)}
     <div class="form-group"><label class="form-label">Кухня</label>
-      <div class="ingr-unit-acc" id="r-cuisine-acc" style="width:100%;"><button type="button" class="ingr-unit-btn" style="width:100%;text-align:left;" id="r-cuisine-btn">${cuisineLabel} ▾</button>
-        <div class="ingr-unit-dropdown" id="r-cuisine-dd" style="display:none;width:100%;">${cuisineOpts}<div class="ingr-unit-opt" data-val="__new__" style="color:var(--accent-fill);font-weight:500;">+ Новая кухня</div></div>
+      <div style="position:relative;"><input class="form-input" id="r-cuisine-input" placeholder="Поиск кухни..." value="${defCuisine ? `${defCuisine.emoji} ${defCuisine.name}` : ''}" autocomplete="off">
+        <div class="ingr-autocomplete" id="r-cuisine-dd" style="display:none;width:100%;"></div>
       </div><div id="new-cuisine-form" style="display:none;margin-top:6px;"></div></div>
     ${acc('БЖУ и оценки', 'extra', `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
       <div class="form-group"><label class="form-label">Полезность (1-10)</label><input class="form-input" id="r-health" type="number" min="1" max="10" value="5"></div>
@@ -69,7 +67,7 @@ export async function showAddRecipeModal(reloadFn) {
   });
   bindMultiChips(overlay, 'tags', state);
   bindChips(overlay, 'diff', state);
-  bindCuisineAcc(overlay, state);
+  bindCuisineInput(overlay, state, cuisines);
 
   overlay.querySelector('#r-save').addEventListener('click', async () => {
     const nameEl = overlay.querySelector('#r-name');
@@ -117,32 +115,36 @@ function bindMultiChips(overlay, field, state) {
     };
   });
 }
-function bindCuisineAcc(overlay, state) {
-  const btn = overlay.querySelector('#r-cuisine-btn');
+function bindCuisineInput(overlay, state, cuisines) {
+  const inp = overlay.querySelector('#r-cuisine-input');
   const dd = overlay.querySelector('#r-cuisine-dd');
   const form = overlay.querySelector('#new-cuisine-form');
-  btn.onclick = (e) => { e.preventDefault(); dd.style.display = dd.style.display === 'none' ? '' : 'none'; };
-  dd.querySelectorAll('.ingr-unit-opt').forEach(opt => {
-    opt.onclick = () => {
-      dd.style.display = 'none';
-      if (opt.dataset.val === '__new__') {
-        form.style.display = '';
-        form.innerHTML = `<div style="display:flex;gap:6px;align-items:center;"><input class="form-input" id="nc-name" placeholder="Название" style="flex:1;"><input class="form-input" id="nc-emoji" placeholder="🌍" style="width:48px;text-align:center;"><button class="btn-primary" id="nc-save" style="padding:4px 10px;font-size:12px;">OK</button><button class="btn-secondary" id="nc-cancel" style="padding:4px 8px;font-size:12px;">✕</button></div>`;
-        form.querySelector('#nc-cancel').onclick = () => { form.style.display = 'none'; };
-        form.querySelector('#nc-save').onclick = async () => {
-          const n = form.querySelector('#nc-name')?.value?.trim();
-          if (!n) return;
-          const em = form.querySelector('#nc-emoji')?.value?.trim() || '🌍';
-          const code = n.toLowerCase().replace(/\s+/g, '_').slice(0, 20);
-          try { await invoke('add_cuisine', { code, name: n, emoji: em }); invalidateCuisineCache();
-            state.cuisine = code; form.style.display = 'none'; btn.textContent = `${em} ${n} ▾`;
-          } catch (e) { alert('Ошибка: ' + e); }
-        };
-        return;
-      }
-      state.cuisine = opt.dataset.val;
-      btn.textContent = `${opt.textContent.trim()} ▾`;
-      dd.querySelectorAll('.ingr-unit-opt').forEach(o => o.classList.toggle('active', o.dataset.val === state.cuisine));
+  function showDD(q) {
+    const lc = q.toLowerCase();
+    const matches = lc ? cuisines.filter(c => c.name.toLowerCase().includes(lc)) : cuisines;
+    dd.innerHTML = matches.map(c => `<div class="ingr-autocomplete-item" data-id="${c.id}">${c.emoji} ${c.name}</div>`).join('')
+      + `<div class="ingr-autocomplete-item ingr-autocomplete-create" data-id="__new__">+ Новая кухня</div>`;
+    dd.style.display = '';
+    dd.querySelectorAll('.ingr-autocomplete-item').forEach(opt => { opt.onmousedown = (e) => {
+      e.preventDefault(); dd.style.display = 'none';
+      if (opt.dataset.id === '__new__') return showNewCuisineForm();
+      const c = cuisines.find(x => x.id === opt.dataset.id);
+      if (c) { state.cuisine = c.id; inp.value = `${c.emoji} ${c.name}`; }
+    }; });
+  }
+  const show = () => showDD(inp.value.trim());
+  inp.addEventListener('focus', show); inp.addEventListener('input', show);
+  inp.addEventListener('blur', () => setTimeout(() => { dd.style.display = 'none'; }, 150));
+  function showNewCuisineForm() {
+    form.style.display = '';
+    form.innerHTML = `<div style="display:flex;gap:6px;align-items:center;"><input class="form-input" id="nc-name" placeholder="Название" style="flex:1;"><input class="form-input" id="nc-emoji" placeholder="🌍" style="width:48px;text-align:center;"><button class="btn-primary" id="nc-save" style="padding:4px 10px;font-size:12px;">OK</button><button class="btn-secondary" id="nc-cancel" style="padding:4px 8px;font-size:12px;">✕</button></div>`;
+    form.querySelector('#nc-cancel').onclick = () => { form.style.display = 'none'; };
+    form.querySelector('#nc-save').onclick = async () => {
+      const n = form.querySelector('#nc-name')?.value?.trim(); if (!n) return;
+      const em = form.querySelector('#nc-emoji')?.value?.trim() || '🌍', code = n.toLowerCase().replace(/\s+/g, '_').slice(0, 20);
+      try { await invoke('add_cuisine', { code, name: n, emoji: em }); invalidateCuisineCache();
+        cuisines.push({ id: code, name: n, emoji: em }); state.cuisine = code; form.style.display = 'none'; inp.value = `${em} ${n}`;
+      } catch (e) { alert('Ошибка: ' + e); }
     };
-  });
+  }
 }
