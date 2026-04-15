@@ -14,13 +14,14 @@ export async function showAddRecipeModal(reloadFn) {
   const [catalog, cuisines] = await Promise.all([
     invoke('get_ingredient_catalog').catch(() => []), loadCuisines(),
   ]);
-  const state = { tags: 'universal', diff: 'easy', cuisine: 'kz' };
+  const state = { tags: new Set(['universal']), diff: 'easy', cuisine: 'kz' };
   const mealsHtml = ['breakfast:Завтрак', 'lunch:Обед', 'dinner:Ужин', 'universal:Универсал']
-    .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.tags === id); }).join('');
+    .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.tags.has(id)); }).join('');
   const diffsHtml = ['easy:Лёгкий', 'medium:Средний', 'hard:Сложный']
     .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.diff === id); }).join('');
-  const cuisineHtml = cuisines.map(c => chip(c.id, `${c.emoji} ${c.name}`, state.cuisine === c.id)).join('')
-    + '<button type="button" class="rf-chip rf-chip-add" data-val="__new__">+ Новая</button>';
+  const defCuisine = cuisines.find(c => c.id === state.cuisine);
+  const cuisineLabel = defCuisine ? `${defCuisine.emoji} ${defCuisine.name}` : 'Выбрать';
+  const cuisineOpts = cuisines.map(c => `<div class="ingr-unit-opt${c.id === state.cuisine ? ' active' : ''}" data-val="${c.id}">${c.emoji} ${c.name}</div>`).join('');
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -33,28 +34,24 @@ export async function showAddRecipeModal(reloadFn) {
     <div class="form-group"><label class="form-label">Приготовление <span class="req">*</span></label>
       <div id="r-steps"></div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-      <div class="form-group"><label class="form-label">Подготовка (мин)</label>
-        <input class="form-input" id="r-prep" type="number" value="10"></div>
-      <div class="form-group"><label class="form-label">Готовка (мин)</label>
-        <input class="form-input" id="r-cook" type="number" value="20"></div>
-      <div class="form-group"><label class="form-label">Порции</label>
-        <input class="form-input" id="r-serv" type="number" value="2"></div>
-      <div class="form-group"><label class="form-label">Калории</label>
-        <input class="form-input" id="r-cal" type="number"></div>
+      <div class="form-group"><label class="form-label">Подготовка (мин)</label><input class="form-input" id="r-prep" type="number" value="10"></div>
+      <div class="form-group"><label class="form-label">Готовка (мин)</label><input class="form-input" id="r-cook" type="number" value="20"></div>
+      <div class="form-group"><label class="form-label">Порции</label><input class="form-input" id="r-serv" type="number" value="2"></div>
+      <div class="form-group"><label class="form-label">Калории</label><input class="form-input" id="r-cal" type="number"></div>
     </div>
     ${acc('Тип блюда', 'tags', `<div class="add-chips" data-field="tags">${mealsHtml}</div>`, false)}
     ${acc('Сложность', 'diff', `<div class="add-chips" data-field="diff">${diffsHtml}</div>`, false)}
-    ${acc('Кухня', 'cuisine', `<div class="add-chips" data-field="cuisine">${cuisineHtml}</div><div id="new-cuisine-form" style="display:none;margin-top:6px;"></div>`, false)}
-    ${acc('БЖУ и оценки', 'extra', `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div class="form-group"><label class="form-label">Полезность (1-10)</label><input class="form-input" id="r-health" type="number" min="1" max="10" value="5"></div>
-        <div class="form-group"><label class="form-label">Цена (1-10)</label><input class="form-input" id="r-price" type="number" min="1" max="10" value="5"></div>
-      </div>
+    <div class="form-group"><label class="form-label">Кухня</label>
+      <div class="ingr-unit-acc" id="r-cuisine-acc" style="width:100%;"><button type="button" class="ingr-unit-btn" style="width:100%;text-align:left;" id="r-cuisine-btn">${cuisineLabel} ▾</button>
+        <div class="ingr-unit-dropdown" id="r-cuisine-dd" style="display:none;width:100%;">${cuisineOpts}<div class="ingr-unit-opt" data-val="__new__" style="color:var(--accent-fill);font-weight:500;">+ Новая кухня</div></div>
+      </div><div id="new-cuisine-form" style="display:none;margin-top:6px;"></div></div>
+    ${acc('БЖУ и оценки', 'extra', `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <div class="form-group"><label class="form-label">Полезность (1-10)</label><input class="form-input" id="r-health" type="number" min="1" max="10" value="5"></div>
+      <div class="form-group"><label class="form-label">Цена (1-10)</label><input class="form-input" id="r-price" type="number" min="1" max="10" value="5"></div></div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-        <div class="form-group"><label class="form-label">Белки (г)</label><input class="form-input" id="r-protein" type="number" value="0"></div>
-        <div class="form-group"><label class="form-label">Жиры (г)</label><input class="form-input" id="r-fat" type="number" value="0"></div>
-        <div class="form-group"><label class="form-label">Углеводы (г)</label><input class="form-input" id="r-carbs" type="number" value="0"></div>
-      </div>`, false)}
+      <div class="form-group"><label class="form-label">Белки (г)</label><input class="form-input" id="r-protein" type="number" value="0"></div>
+      <div class="form-group"><label class="form-label">Жиры (г)</label><input class="form-input" id="r-fat" type="number" value="0"></div>
+      <div class="form-group"><label class="form-label">Углеводы (г)</label><input class="form-input" id="r-carbs" type="number" value="0"></div></div>`, false)}
     <div class="modal-actions">
       <button class="btn-secondary" id="r-cancel">Отмена</button>
       <button class="btn-primary" id="r-save">Сохранить</button>
@@ -63,22 +60,16 @@ export async function showAddRecipeModal(reloadFn) {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#r-cancel').onclick = () => overlay.remove();
-
   renderIngredientRows(overlay.querySelector('#r-ingr-rows'), catalog);
-  const getIngrNames = () => collectIngredientItems(overlay.querySelector('#r-ingr-rows')).map(i => i.name);
-  renderStepsRows(overlay.querySelector('#r-steps'), getIngrNames);
-
-  // Accordion toggles
+  renderStepsRows(overlay.querySelector('#r-steps'), () => collectIngredientItems(overlay.querySelector('#r-ingr-rows')).map(i => i.name));
   overlay.querySelectorAll('.rf-acc-header').forEach(hdr => hdr.onclick = () => {
-    const body = hdr.nextElementSibling;
-    const open = body.style.display !== 'none';
+    const body = hdr.nextElementSibling, open = body.style.display !== 'none';
     body.style.display = open ? 'none' : '';
     hdr.querySelector('.rf-acc-arrow').textContent = open ? '▸' : '▾';
   });
-  // Chip groups
-  bindChips(overlay, 'tags', state);
+  bindMultiChips(overlay, 'tags', state);
   bindChips(overlay, 'diff', state);
-  bindCuisineChips(overlay, state, cuisines);
+  bindCuisineAcc(overlay, state);
 
   overlay.querySelector('#r-save').addEventListener('click', async () => {
     const nameEl = overlay.querySelector('#r-name');
@@ -86,25 +77,17 @@ export async function showAddRecipeModal(reloadFn) {
     if (!name) { nameEl.classList.add('input-error'); nameEl.focus(); return; }
     const ingredientItems = collectIngredientItems(overlay.querySelector('#r-ingr-rows'));
     const ingrFlat = ingredientItems.map(i => `${i.name}: ${i.amount}${i.unit}`).join(', ');
-    const instructions = collectSteps(overlay.querySelector('#r-steps'));
+    const v = id => parseInt(overlay.querySelector(`#${id}`)?.value) || 0;
     try {
       await invoke('create_recipe', {
-        name, description: '',
-        ingredients: ingrFlat, instructions,
-        prepTime: parseInt(overlay.querySelector('#r-prep')?.value) || 0,
-        cookTime: parseInt(overlay.querySelector('#r-cook')?.value) || 0,
-        servings: parseInt(overlay.querySelector('#r-serv')?.value) || 1,
-        calories: parseInt(overlay.querySelector('#r-cal')?.value) || 0,
-        tags: state.tags, difficulty: state.diff, cuisine: state.cuisine,
-        healthScore: parseInt(overlay.querySelector('#r-health')?.value) || 5,
-        priceScore: parseInt(overlay.querySelector('#r-price')?.value) || 5,
-        protein: parseInt(overlay.querySelector('#r-protein')?.value) || 0,
-        fat: parseInt(overlay.querySelector('#r-fat')?.value) || 0,
-        carbs: parseInt(overlay.querySelector('#r-carbs')?.value) || 0,
-        ingredientItems,
+        name, description: '', ingredients: ingrFlat,
+        instructions: collectSteps(overlay.querySelector('#r-steps')),
+        prepTime: v('r-prep'), cookTime: v('r-cook'), servings: v('r-serv') || 1, calories: v('r-cal'),
+        tags: [...state.tags].join(','), difficulty: state.diff, cuisine: state.cuisine,
+        healthScore: v('r-health') || 5, priceScore: v('r-price') || 5,
+        protein: v('r-protein'), fat: v('r-fat'), carbs: v('r-carbs'), ingredientItems,
       });
-      overlay.remove();
-      if (reloadFn) await reloadFn();
+      overlay.remove(); if (reloadFn) await reloadFn();
     } catch (e) { alert('Ошибка: ' + e); }
   });
 }
@@ -116,32 +99,50 @@ function bindChips(overlay, field, state) {
   overlay.querySelector(`[data-field="${field}"]`)?.querySelectorAll('.rf-chip').forEach(btn => {
     btn.onclick = (e) => {
       e.preventDefault();
-      if (btn.dataset.val === '__new__') return showNewCuisine(overlay, state);
       state[field] = btn.dataset.val;
       btn.closest('.add-chips').querySelectorAll('.rf-chip').forEach(b =>
         b.classList.toggle('active', b.dataset.val === state[field]));
     };
   });
 }
-
-function showNewCuisine(overlay, state) {
+function bindMultiChips(overlay, field, state) {
+  overlay.querySelector(`[data-field="${field}"]`)?.querySelectorAll('.rf-chip').forEach(btn => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      const v = btn.dataset.val;
+      if (state[field].has(v)) { if (state[field].size > 1) state[field].delete(v); }
+      else state[field].add(v);
+      btn.closest('.add-chips').querySelectorAll('.rf-chip').forEach(b =>
+        b.classList.toggle('active', state[field].has(b.dataset.val)));
+    };
+  });
+}
+function bindCuisineAcc(overlay, state) {
+  const btn = overlay.querySelector('#r-cuisine-btn');
+  const dd = overlay.querySelector('#r-cuisine-dd');
   const form = overlay.querySelector('#new-cuisine-form');
-  form.style.display = '';
-  form.innerHTML = `<div style="display:flex;gap:6px;align-items:center;">
-    <input class="form-input" id="nc-name" placeholder="Название" style="flex:1;">
-    <input class="form-input" id="nc-emoji" placeholder="🌍" style="width:48px;text-align:center;">
-    <button class="btn-primary" id="nc-save" style="padding:4px 10px;font-size:12px;">OK</button>
-    <button class="btn-secondary" id="nc-cancel" style="padding:4px 8px;font-size:12px;">✕</button></div>`;
-  form.querySelector('#nc-cancel').onclick = () => { form.style.display = 'none'; };
-  form.querySelector('#nc-save').onclick = async () => {
-    const name = form.querySelector('#nc-name')?.value?.trim();
-    if (!name) return;
-    const emoji = form.querySelector('#nc-emoji')?.value?.trim() || '🌍';
-    const code = name.toLowerCase().replace(/\s+/g, '_').slice(0, 20);
-    try {
-      await invoke('add_cuisine', { code, name, emoji });
-      invalidateCuisineCache();
-      state.cuisine = code; form.style.display = 'none';
-    } catch (e) { alert('Ошибка: ' + e); }
-  };
+  btn.onclick = (e) => { e.preventDefault(); dd.style.display = dd.style.display === 'none' ? '' : 'none'; };
+  dd.querySelectorAll('.ingr-unit-opt').forEach(opt => {
+    opt.onclick = () => {
+      dd.style.display = 'none';
+      if (opt.dataset.val === '__new__') {
+        form.style.display = '';
+        form.innerHTML = `<div style="display:flex;gap:6px;align-items:center;"><input class="form-input" id="nc-name" placeholder="Название" style="flex:1;"><input class="form-input" id="nc-emoji" placeholder="🌍" style="width:48px;text-align:center;"><button class="btn-primary" id="nc-save" style="padding:4px 10px;font-size:12px;">OK</button><button class="btn-secondary" id="nc-cancel" style="padding:4px 8px;font-size:12px;">✕</button></div>`;
+        form.querySelector('#nc-cancel').onclick = () => { form.style.display = 'none'; };
+        form.querySelector('#nc-save').onclick = async () => {
+          const n = form.querySelector('#nc-name')?.value?.trim();
+          if (!n) return;
+          const em = form.querySelector('#nc-emoji')?.value?.trim() || '🌍';
+          const code = n.toLowerCase().replace(/\s+/g, '_').slice(0, 20);
+          try { await invoke('add_cuisine', { code, name: n, emoji: em }); invalidateCuisineCache();
+            state.cuisine = code; form.style.display = 'none'; btn.textContent = `${em} ${n} ▾`;
+          } catch (e) { alert('Ошибка: ' + e); }
+        };
+        return;
+      }
+      state.cuisine = opt.dataset.val;
+      btn.textContent = `${opt.textContent.trim()} ▾`;
+      dd.querySelectorAll('.ingr-unit-opt').forEach(o => o.classList.toggle('active', o.dataset.val === state.cuisine));
+    };
+  });
 }
