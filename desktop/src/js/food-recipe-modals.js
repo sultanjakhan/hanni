@@ -1,7 +1,7 @@
 // ── food-recipe-modals.js — Recipe detail modal ──
 import { invoke } from './state.js';
-import { escapeHtml, ingrCat, confirmModal } from './utils.js';
-import { loadCuisines } from './food-recipe-filters.js';
+import { escapeHtml, confirmModal } from './utils.js';
+import { loadCuisines, catalogCat } from './food-recipe-filters.js';
 
 export async function showRecipeDetail(id, reloadFn) {
   let recipe;
@@ -21,14 +21,14 @@ export async function showRecipeDetail(id, reloadFn) {
   const bjuHtml = (p || f || c) ? `<span class="badge badge-gray">Б${p} Ж${f} У${c}</span>` : '';
 
   function fmtIngr(i) {
-    const cat = ingrCat(i.name);
+    const cat = catalogCat(i.name);
     const catCls = cat ? ` ingr-cat-${cat}` : '';
     const amt = i.amount ? `${i.amount}${escapeHtml(i.unit)}` : '';
     return `<span class="ingr-item"><span class="ingr-tag${catCls}" data-ingr="${escapeHtml(i.name)}">${escapeHtml(i.name)}</span>${amt ? `<span class="ingr-amt" data-base="${i.amount}" data-unit="${escapeHtml(i.unit)}">${amt}</span>` : ''}</span>`;
   }
   const ingrHtml = items.length > 0
     ? items.map(fmtIngr).join('')
-    : (recipe.ingredients || '').split(',').map(s => s.trim()).filter(Boolean).map(n => { const cat = ingrCat(n); const cls = cat ? ` ingr-cat-${cat}` : ''; return `<span class="ingr-tag${cls}">${escapeHtml(n)}</span>`; }).join('');
+    : (recipe.ingredients || '').split(',').map(s => s.trim()).filter(Boolean).map(n => { const cat = catalogCat(n); const cls = cat ? ` ingr-cat-${cat}` : ''; return `<span class="ingr-tag${cls}">${escapeHtml(n)}</span>`; }).join('');
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';

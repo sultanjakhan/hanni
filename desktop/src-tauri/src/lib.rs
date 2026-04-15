@@ -132,6 +132,7 @@ fn init_database() -> HanniDb {
     migrate_recipe_extra(&conn);
     migrate_recipe_extra2(&conn);
     migrate_clear_seed_recipes(&conn);
+    migrate_reseed_ingredient_catalog(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);

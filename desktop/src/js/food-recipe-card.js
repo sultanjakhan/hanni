@@ -1,5 +1,6 @@
 // ── food-recipe-card.js — Recipe card rendering ──
-import { escapeHtml, ingrCat } from './utils.js';
+import { escapeHtml } from './utils.js';
+import { catalogCat } from './food-recipe-filters.js';
 
 const MEAL_COLORS = { breakfast: 'green', lunch: 'yellow', dinner: 'red', universal: 'blue' };
 
@@ -18,7 +19,7 @@ export function renderCard(r, onIngrClick) {
   const diffLabel = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' }[r.difficulty] || 'Лёгкий';
   const ingrNames = getIngrNames(r);
   const ingrHtml = ingrNames.slice(0, 5).map(n => {
-    const cat = ingrCat(n); const cls = cat ? ` ingr-cat-${cat}` : '';
+    const cat = catalogCat(n); const cls = cat ? ` ingr-cat-${cat}` : '';
     return `<span class="ingr-tag${cls}" data-ingr="${escapeHtml(n)}">${escapeHtml(n)}</span>`;
   }).join('') + (ingrNames.length > 5 ? `<span class="ingr-tag ingr-more">+${ingrNames.length - 5}</span>` : '');
 

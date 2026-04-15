@@ -1069,6 +1069,11 @@
 .rf-ingr-chip.ingr-cat-fruit.active { background: var(--color-orange-bg); color: var(--color-orange); }
 .rf-ingr-chip.ingr-cat-spice.active { background: var(--color-yellow-bg); color: var(--color-yellow); }
 .rf-ingr-chip.ingr-cat-oil.active { background: var(--bg-hover); color: var(--text-muted); }
+.rf-ingr-chip.ingr-cat-fish.active { background: var(--color-blue-bg); color: var(--color-blue); }
+.rf-ingr-chip.ingr-cat-legumes.active { background: var(--color-green-bg); color: var(--color-green); }
+.rf-ingr-chip.ingr-cat-nuts.active { background: var(--color-orange-bg); color: var(--color-orange); }
+.rf-ingr-chip.ingr-cat-bakery.active { background: var(--color-purple-bg); color: var(--color-purple); }
+.rf-ingr-chip.ingr-cat-drinks.active { background: var(--color-blue-bg); color: var(--color-blue); }
 .recipe-search {
   flex: 1; min-width: 120px; padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default);
   background: var(--bg-page); color: var(--text-primary); font-size: 13px; outline: none;
@@ -1108,6 +1113,11 @@
 .ingr-cat-dairy { background: var(--color-purple-bg); color: var(--color-purple); }
 .ingr-cat-spice { background: var(--color-yellow-bg); color: var(--color-yellow); }
 .ingr-cat-oil { background: var(--bg-hover); color: var(--text-muted); }
+.ingr-cat-fish { background: var(--color-blue-bg); color: var(--color-blue); }
+.ingr-cat-legumes { background: var(--color-green-bg); color: var(--color-green); }
+.ingr-cat-nuts { background: var(--color-orange-bg); color: var(--color-orange); }
+.ingr-cat-bakery { background: var(--color-purple-bg); color: var(--color-purple); }
+.ingr-cat-drinks { background: var(--color-blue-bg); color: var(--color-blue); }
 .ingr-more { cursor: default; opacity: 0.6; background: var(--bg-hover); color: var(--text-muted); }
 .ingr-more:hover { opacity: 0.6; }
 .ingr-item { display: flex; align-items: center; gap: 6px; }
@@ -1160,6 +1170,8 @@
 .ingr-autocomplete-item { padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--text-primary); }
 .ingr-autocomplete-item:hover { background: var(--bg-hover); }
 .ingr-autocomplete-create { color: var(--accent-fill); font-weight: 500; }
+.ingr-ac-cat { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-muted); padding: 6px 10px 2px; border-top: 1px solid var(--border-default); }
+.ingr-ac-cat:first-child { border-top: none; }
 .add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .rf-chip-add { border-style: dashed; opacity: 0.7; }
 .rf-chip-add:hover { opacity: 1; }

@@ -3,7 +3,7 @@ import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { renderCard } from './food-recipe-card.js';
 import {
-  MEALS, DIFFS, CAT_LABELS, CAT_ORDER, getCuisineChips,
+  MEALS, DIFFS, CAT_LABELS, CAT_ORDER, getCuisineChips, loadCatalog,
   getBlacklist, matchBL, matchMeal, matchCuisine, matchDiff,
   matchSearch, matchIngr, sortRecipes, collectIngredients,
 } from './food-recipe-filters.js';
@@ -28,7 +28,7 @@ export async function renderRecipesPane(el) {
 
   async function loadData() {
     [allRecipes, blacklist] = await Promise.all([
-      invoke('get_recipes', { search: null }).catch(() => []), getBlacklist(),
+      invoke('get_recipes', { search: null }).catch(() => []), getBlacklist(), loadCatalog(),
     ]);
   }
 

@@ -1,6 +1,5 @@
 // ── food-recipe-filters.js — Filter logic and data for recipes ──
 import { invoke } from './state.js';
-import { ingrCat } from './utils.js';
 import { getIngrNames } from './food-recipe-card.js';
 
 export const MEALS = [
@@ -26,8 +25,24 @@ export const DIFFS = [
   { id: 'all', label: 'Любая' }, { id: 'easy', label: 'Лёгкий' },
   { id: 'medium', label: 'Средний' }, { id: 'hard', label: 'Сложный' },
 ];
-export const CAT_LABELS = { meat: 'Мясо', grain: 'Крупы', veg: 'Овощи', dairy: 'Молочные', fruit: 'Фрукты', spice: 'Специи', oil: 'Масла' };
-export const CAT_ORDER = ['meat', 'grain', 'veg', 'dairy', 'fruit', 'spice', 'oil'];
+export const CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', fruit: 'Фрукты', grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи', spice: 'Специи', oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', other: 'Другое' };
+export const CAT_ORDER = ['meat', 'fish', 'veg', 'fruit', 'grain', 'dairy', 'legumes', 'nuts', 'spice', 'oil', 'bakery', 'drinks', 'other'];
+
+// Ingredient catalog cache — lookup category by name from DB
+let _catalogCache = null;
+export async function loadCatalog() {
+  if (_catalogCache) return _catalogCache;
+  try { _catalogCache = await invoke('get_ingredient_catalog'); } catch { _catalogCache = []; }
+  return _catalogCache;
+}
+export function getCatalogCache() { return _catalogCache || []; }
+export function invalidateCatalogCache() { _catalogCache = null; }
+export function catalogCat(name) {
+  if (!_catalogCache) return '';
+  const lc = name.toLowerCase();
+  const item = _catalogCache.find(c => c.name.toLowerCase() === lc);
+  return item ? item.category : '';
+}
 
 export async function getBlacklist() {
   try {
@@ -65,7 +80,7 @@ export function collectIngredients(recipes) {
   const map = {};
   for (const r of recipes) {
     for (const n of getIngrNames(r)) {
-      const lc = n.toLowerCase(), cat = ingrCat(n) || 'other';
+      const lc = n.toLowerCase(), cat = catalogCat(n) || 'other';
       if (!map[lc]) map[lc] = { name: n, cat, count: 0 };
       map[lc].count++;
     }

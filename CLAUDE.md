@@ -68,6 +68,7 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 - **CSS: always use variables from `base.css`** — never hardcode colors, spacing, radii, shadows
 - **JS state: only persistent data in `S` object** — no temp vars
 - **Settings UI: `settings-row` / `settings-label` / toggle layout** — never raw dropdowns
+- **No hardcoded data lists** — product categories, ingredient lists, cuisines etc. must come from DB, never from JS/Rust constants
 
 ### Pre-commit Checklist
 - [ ] `UPDATER_GITHUB_TOKEN=dummy cargo check` passes

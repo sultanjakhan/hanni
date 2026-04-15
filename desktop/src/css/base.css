@@ -5,6 +5,12 @@
    fast transitions, shadows on floating elements
    ══════════════════════════════════════════════ */
 
+/* ── Fonts ── */
+@font-face { font-family: 'Oswald'; font-weight: 700; font-style: normal; font-display: swap;
+  src: url('../fonts/Oswald-Bold-Cyrillic.woff2') format('woff2'); unicode-range: U+0400-04FF; }
+@font-face { font-family: 'Oswald'; font-weight: 700; font-style: normal; font-display: swap;
+  src: url('../fonts/Oswald-Bold-Latin.woff2') format('woff2'); unicode-range: U+0000-024F; }
+
 /* ── Shared tokens (theme-independent) ── */
 :root {
   /* Radius */
