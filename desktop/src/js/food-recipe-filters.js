@@ -7,17 +7,24 @@ export const MEALS = [
   { id: 'all', label: 'Все' }, { id: 'breakfast', label: 'Завтрак' },
   { id: 'lunch', label: 'Обед' }, { id: 'dinner', label: 'Ужин' },
 ];
-export const CUISINES = [
-  { id: 'all', label: 'Все' }, { id: 'kz', label: '🇰🇿' },
-  { id: 'ru', label: '🇷🇺' }, { id: 'it', label: '🇮🇹' },
-  { id: 'ge', label: '🇬🇪' }, { id: 'other', label: '🌍' },
-];
+// Cuisines loaded dynamically from DB
+let _cuisineCache = null;
+export async function loadCuisines() {
+  if (_cuisineCache) return _cuisineCache;
+  try {
+    const rows = await invoke('get_cuisines');
+    _cuisineCache = rows.map(r => ({ id: r.code, label: `${r.emoji} ${r.name}`, emoji: r.emoji, name: r.name }));
+  } catch { _cuisineCache = [{ id: 'other', label: '🌍 Другая', emoji: '🌍', name: 'Другая' }]; }
+  return _cuisineCache;
+}
+export function invalidateCuisineCache() { _cuisineCache = null; }
+export async function getCuisineChips() {
+  const list = await loadCuisines();
+  return [{ id: 'all', label: 'Все' }, ...list.map(c => ({ id: c.id, label: c.emoji }))];
+}
 export const DIFFS = [
-  { id: 'all', label: 'Любая' }, { id: 'easy', label: 'Лёгкий' }, { id: 'medium', label: 'Средний' },
-];
-export const SORTS = [
-  { id: 'name', label: 'А-Я' }, { id: 'calories', label: 'Ккал ↑' },
-  { id: 'health', label: '❤ ↓' }, { id: 'price', label: '💰 ↑' },
+  { id: 'all', label: 'Любая' }, { id: 'easy', label: 'Лёгкий' },
+  { id: 'medium', label: 'Средний' }, { id: 'hard', label: 'Сложный' },
 ];
 export const CAT_LABELS = { meat: 'Мясо', grain: 'Крупы', veg: 'Овощи', dairy: 'Молочные', fruit: 'Фрукты', spice: 'Специи', oil: 'Масла' };
 export const CAT_ORDER = ['meat', 'grain', 'veg', 'dairy', 'fruit', 'spice', 'oil'];

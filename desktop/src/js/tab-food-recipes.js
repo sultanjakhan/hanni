@@ -3,7 +3,7 @@ import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { renderCard } from './food-recipe-card.js';
 import {
-  MEALS, CUISINES, DIFFS, SORTS, CAT_LABELS, CAT_ORDER,
+  MEALS, DIFFS, CAT_LABELS, CAT_ORDER, getCuisineChips,
   getBlacklist, matchBL, matchMeal, matchCuisine, matchDiff,
   matchSearch, matchIngr, sortRecipes, collectIngredients,
 } from './food-recipe-filters.js';
@@ -14,8 +14,15 @@ function chips(items, cur, group) {
   ).join('');
 }
 
+function accordionRow(title, group, content, activeCount) {
+  const badge = activeCount ? `<span class="rf-acc-badge">${activeCount}</span>` : '';
+  return `<div class="rf-acc" data-acc="${group}">
+    <div class="rf-acc-header">${title}${badge}<span class="rf-acc-arrow">▸</span></div>
+    <div class="rf-acc-body" style="display:none">${content}</div></div>`;
+}
+
 export async function renderRecipesPane(el) {
-  const F = { meal: 'all', cuisine: 'all', diff: 'all', sort: 'name', fav: false, q: '' };
+  const F = { meal: 'all', cuisine: 'all', diff: 'all', fav: false, q: '' };
   const selIngr = new Set();
   let allRecipes = [], blacklist = [], panelOpen = false, built = false;
 
@@ -30,7 +37,7 @@ export async function renderRecipesPane(el) {
       && matchCuisine(r, F.cuisine) && matchDiff(r, F.diff)
       && matchSearch(r, F.q) && (!F.fav || r.favorite === 1)
       && matchIngr(r, selIngr));
-    return sortRecipes(list, F.sort);
+    return sortRecipes(list, 'name');
   }
 
   function buildShell() {
@@ -58,28 +65,41 @@ export async function renderRecipesPane(el) {
     };
   }
 
-  function updatePanel() {
+  async function updatePanel() {
     const panel = el.querySelector('.rf-panel');
+    const cuisineChips = await getCuisineChips();
     const grouped = collectIngredients(allRecipes.filter(r => !matchBL(r, blacklist)));
-    const ingrSections = CAT_ORDER.filter(c => grouped[c]?.length).map(cat =>
+    const ingrContent = CAT_ORDER.filter(c => grouped[c]?.length).map(cat =>
       `<div class="rf-section"><span class="rf-title rf-title-${cat}">${CAT_LABELS[cat]}</span>${grouped[cat].map(i =>
         `<button class="rf-chip rf-ingr-chip ingr-cat-${cat}${selIngr.has(i.name.toLowerCase()) ? ' active' : ''}" data-group="ingr" data-val="${escapeHtml(i.name.toLowerCase())}">${escapeHtml(i.name)}</button>`
-      ).join('')}</div>`
-    ).join('');
+      ).join('')}</div>`).join('');
+    const mealActive = F.meal !== 'all' ? 1 : 0;
+    const cuisineActive = F.cuisine !== 'all' ? 1 : 0;
+    const diffActive = F.diff !== 'all' ? 1 : 0;
+    const ingrActive = selIngr.size || 0;
     panel.innerHTML = `
-      <div class="rf-section"><span class="rf-title">Приём</span>${chips(MEALS, F.meal, 'meal')}</div>
-      <div class="rf-section"><span class="rf-title">Кухня</span>${chips(CUISINES, F.cuisine, 'cuisine')}</div>
-      <div class="rf-section"><span class="rf-title">Слож.</span>${chips(DIFFS, F.diff, 'diff')}</div>
-      <div class="rf-section"><span class="rf-title">Сорт.</span>${chips(SORTS, F.sort, 'sort')}</div>
-      <div class="rf-section"><span class="rf-title">★</span>
-        <button class="rf-chip${F.fav ? ' active' : ''}" data-group="fav" data-val="toggle">Избранное</button></div>
-      ${ingrSections}`;
-    panel.querySelectorAll('.rf-chip').forEach(btn => btn.onclick = () => {
+      ${accordionRow('Приём пищи', 'meal', chips(MEALS, F.meal, 'meal'), mealActive)}
+      ${accordionRow('Кухня', 'cuisine', chips(cuisineChips, F.cuisine, 'cuisine'), cuisineActive)}
+      ${accordionRow('Сложность', 'diff', chips(DIFFS, F.diff, 'diff'), diffActive)}
+      ${accordionRow('Ингредиенты', 'ingr', ingrContent, ingrActive)}
+      <div class="rf-acc-fav">
+        <button class="rf-chip${F.fav ? ' active' : ''}" data-group="fav" data-val="toggle">★ Избранное</button>
+      </div>`;
+    // Accordion toggle
+    panel.querySelectorAll('.rf-acc-header').forEach(hdr => hdr.onclick = () => {
+      const acc = hdr.parentElement;
+      const body = acc.querySelector('.rf-acc-body');
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : '';
+      acc.querySelector('.rf-acc-arrow').textContent = open ? '▸' : '▾';
+    });
+    // Chip clicks
+    panel.querySelectorAll('.rf-chip').forEach(btn => btn.onclick = async () => {
       const g = btn.dataset.group, v = btn.dataset.val;
       if (g === 'fav') F.fav = !F.fav;
       else if (g === 'ingr') { selIngr.has(v) ? selIngr.delete(v) : selIngr.add(v); }
       else F[g] = v;
-      updatePanel(); updateGrid(); updateBadge();
+      await updatePanel(); updateGrid(); updateBadge();
     });
     updateBadge();
   }
@@ -110,7 +130,7 @@ export async function renderRecipesPane(el) {
   async function fullReload() {
     await loadData();
     if (!built) { buildShell(); built = true; }
-    updatePanel(); updateGrid();
+    await updatePanel(); updateGrid();
   }
   await fullReload();
 }

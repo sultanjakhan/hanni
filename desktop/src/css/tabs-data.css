@@ -1043,6 +1043,15 @@
   padding: 12px 14px; margin-bottom: 12px; border-radius: var(--radius-lg);
   border: 1px solid var(--border-default); background: var(--bg-card);
 }
+/* Accordion filter rows */
+.rf-acc { border-bottom: 1px solid var(--border-subtle); }
+.rf-acc:last-of-type { border-bottom: none; }
+.rf-acc-header { display: flex; align-items: center; gap: 6px; padding: 8px 0; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-primary); user-select: none; }
+.rf-acc-header:hover { color: var(--accent-fill); }
+.rf-acc-arrow { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.rf-acc-badge { font-size: 10px; background: var(--accent-fill); color: #fff; border-radius: var(--radius-pill); padding: 0 5px; min-width: 16px; text-align: center; line-height: 16px; }
+.rf-acc-body { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.rf-acc-fav { padding: 8px 0; }
 .rf-section { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rf-title { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 55px; text-transform: uppercase; letter-spacing: 0.5px; }
 .rf-chip {
@@ -1081,6 +1090,7 @@
 .recipe-diff { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-sm); }
 .recipe-diff-easy { background: var(--bg-success); color: var(--text-success); }
 .recipe-diff-medium { background: var(--bg-warning); color: var(--text-warning); }
+.recipe-diff-hard { background: var(--bg-danger); color: var(--text-danger); }
 .badge-purple { background: #f0e6ff; color: #7c3aed; }
 [data-theme="dark"] .badge-purple { background: #2d1b59; color: #a78bfa; }
 
@@ -1131,6 +1141,44 @@
 }
 .recipe-cooked-label { font-size: 13px; color: var(--text-secondary); }
 .recipe-fav .recipe-card-name { color: var(--color-yellow, #e8a100); }
+
+/* ── Ingredient rows (add recipe modal) ── */
+.ingr-row { margin-bottom: 8px; position: relative; }
+.ingr-row-main { display: flex; align-items: center; gap: 8px; }
+.ingr-name-input { flex: 2; min-width: 120px; }
+.ingr-amount-input { width: 70px; flex-shrink: 0; }
+.ingr-unit-acc { position: relative; flex-shrink: 0; }
+.ingr-unit-btn { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); white-space: nowrap; font-family: inherit; }
+.ingr-unit-btn:hover { border-color: var(--border-focus); }
+.ingr-unit-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); min-width: 80px; }
+.ingr-unit-opt { padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); }
+.ingr-unit-opt:hover { background: var(--bg-hover); }
+.ingr-unit-opt.active { background: var(--accent-fill); color: #fff; }
+.ingr-del-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted); padding: 0 4px; line-height: 1; flex-shrink: 0; }
+.ingr-del-btn:hover { color: var(--color-red, #e03e3e); }
+.ingr-autocomplete { position: absolute; left: 0; top: 100%; z-index: 1000; width: 220px; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); max-height: 160px; overflow-y: auto; box-shadow: var(--shadow-md); }
+.ingr-autocomplete-item { padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--text-primary); }
+.ingr-autocomplete-item:hover { background: var(--bg-hover); }
+.ingr-autocomplete-create { color: var(--accent-fill); font-weight: 500; }
+.add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.rf-chip-add { border-style: dashed; opacity: 0.7; }
+.rf-chip-add:hover { opacity: 1; }
+.req { color: var(--color-red, #e03e3e); }
+.input-error { border-color: var(--color-red, #e03e3e) !important; }
+/* ── Step rows (structured instructions) ── */
+.step-row { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 8px; }
+.step-num { font-size: 13px; font-weight: 600; color: var(--text-muted); min-width: 20px; padding-top: 6px; }
+.step-fields { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.step-line { display: flex; gap: 6px; align-items: center; }
+.step-acc-wrap { position: relative; }
+.step-acc-btn { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-secondary); white-space: nowrap; font-family: inherit; }
+.step-acc-btn:hover { border-color: var(--border-focus); color: var(--text-primary); }
+.step-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); min-width: 140px; max-height: 180px; overflow-y: auto; }
+.step-dd-opt { padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); }
+.step-dd-opt:hover { background: var(--bg-hover); }
+.step-time-input { width: 60px; }
+.step-note-input { font-size: 14px; color: var(--text-secondary); }
+.step-del { padding-top: 4px; }
 
 /* ── Meal Plan (calendar day view) ── */
 .meal-plan-block { margin-bottom: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 10px 14px; background: var(--bg-card); }

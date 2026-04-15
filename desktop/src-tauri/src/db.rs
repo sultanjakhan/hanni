@@ -416,6 +416,20 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS ingredient_catalog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            category TEXT NOT NULL DEFAULT 'other'
+        );
+
+        CREATE TABLE IF NOT EXISTS custom_cuisines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            emoji TEXT NOT NULL DEFAULT '🌍',
+            is_default INTEGER NOT NULL DEFAULT 0
+        );
+
         -- v0.8.0: Money
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -727,108 +741,63 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
     ).map_err(|e| format!("DB init error: {}", e))
 }
 
-pub fn seed_default_recipes(conn: &rusqlite::Connection) {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM recipes", [], |r| r.get(0)).unwrap_or(0);
-    if count > 0 {
-        seed_recipe_ingredients(conn);
-        return;
-    }
-    let now = chrono::Local::now().to_rfc3339();
-    // (name, desc, instructions, prep, cook, servings, cal, tags, difficulty, ingredients: &[(name, amount, unit)])
-    let recipes: Vec<(&str, &str, &str, i64, i64, i64, i64, &str, &str, Vec<(&str, f64, &str)>)> = vec![
-        ("Овсянка с бананом", "Быстрый и сытный завтрак", "1. Сварить овсянку на молоке 5 мин\n2. Нарезать банан\n3. Добавить мёд", 5, 5, 1, 350, "breakfast", "easy",
-         vec![("овсяные хлопья", 80.0, "г"), ("банан", 1.0, "шт"), ("мёд", 15.0, "г"), ("молоко", 200.0, "мл")]),
-        ("Яичница с помидорами", "Классический завтрак", "1. Разогреть масло\n2. Нарезать помидор, обжарить 2 мин\n3. Залить яйцами, жарить до готовности", 3, 5, 1, 280, "breakfast", "easy",
-         vec![("яйца", 3.0, "шт"), ("помидор", 1.0, "шт"), ("масло растительное", 10.0, "мл"), ("соль", 2.0, "г")]),
-        ("Омлет с зеленью", "Пышный омлет на сковороде", "1. Взбить яйца с молоком и солью\n2. Вылить на разогретую сковороду\n3. Готовить под крышкой 5 мин\n4. Посыпать зеленью", 3, 5, 1, 250, "breakfast", "easy",
-         vec![("яйца", 3.0, "шт"), ("молоко", 50.0, "мл"), ("укроп", 10.0, "г"), ("соль", 2.0, "г")]),
-        ("Бутерброды с авокадо", "Тосты с авокадо и яйцом", "1. Поджарить хлеб\n2. Размять авокадо вилкой\n3. Намазать на тост\n4. Сверху варёное яйцо", 5, 3, 1, 320, "breakfast", "easy",
-         vec![("хлеб", 2.0, "шт"), ("авокадо", 1.0, "шт"), ("яйцо", 1.0, "шт"), ("соль", 1.0, "г")]),
-        ("Каша рисовая на молоке", "Нежная молочная каша", "1. Промыть рис\n2. Залить молоком, довести до кипения\n3. Варить на слабом огне 20 мин\n4. Добавить масло и сахар", 5, 20, 2, 300, "breakfast", "easy",
-         vec![("рис", 100.0, "г"), ("молоко", 300.0, "мл"), ("сахар", 15.0, "г"), ("масло сливочное", 15.0, "г")]),
-        ("Гречка с курицей", "Сытный обед", "1. Отварить гречку\n2. Нарезать филе кубиками, обжарить\n3. Добавить лук и морковь\n4. Смешать с гречкой", 10, 25, 2, 450, "lunch,dinner", "easy",
-         vec![("гречка", 150.0, "г"), ("куриное филе", 200.0, "г"), ("лук", 1.0, "шт"), ("морковь", 1.0, "шт"), ("масло растительное", 15.0, "мл"), ("соль", 3.0, "г")]),
-        ("Рис с овощами", "Лёгкий и полезный гарнир", "1. Отварить рис\n2. Нарезать овощи, обжарить 5 мин\n3. Добавить рис и соевый соус\n4. Перемешать, прогреть 3 мин", 10, 20, 2, 380, "lunch,dinner", "easy",
-         vec![("рис", 150.0, "г"), ("перец болгарский", 1.0, "шт"), ("морковь", 1.0, "шт"), ("лук", 1.0, "шт"), ("масло растительное", 15.0, "мл"), ("соевый соус", 20.0, "мл")]),
-        ("Картофельное пюре с котлетой", "Домашняя классика", "1. Сварить картофель, сделать пюре с молоком и маслом\n2. Смешать фарш с луком и яйцом\n3. Сформировать котлеты, обжарить по 5 мин с каждой стороны", 15, 30, 2, 550, "lunch,dinner", "medium",
-         vec![("картофель", 400.0, "г"), ("фарш говяжий", 300.0, "г"), ("лук", 1.0, "шт"), ("яйцо", 1.0, "шт"), ("молоко", 50.0, "мл"), ("масло сливочное", 20.0, "г")]),
-        ("Макароны с фаршем", "Быстрый сытный обед", "1. Отварить макароны\n2. Обжарить фарш с луком\n3. Добавить томатную пасту\n4. Смешать с макаронами", 5, 20, 2, 500, "lunch,dinner", "easy",
-         vec![("макароны", 200.0, "г"), ("фарш говяжий", 250.0, "г"), ("лук", 1.0, "шт"), ("томатная паста", 30.0, "г"), ("соль", 3.0, "г")]),
-        ("Куриный суп с лапшой", "Лёгкий суп на каждый день", "1. Сварить бульон из филе 20 мин\n2. Добавить нарезанный картофель и морковь\n3. За 5 мин до готовности добавить лапшу\n4. Посыпать зеленью", 10, 30, 3, 300, "lunch", "easy",
-         vec![("куриное филе", 200.0, "г"), ("лапша", 80.0, "г"), ("картофель", 2.0, "шт"), ("морковь", 1.0, "шт"), ("лук", 1.0, "шт"), ("зелень", 10.0, "г")]),
-        ("Борщ", "Классический борщ", "1. Сварить бульон из мяса 1 час\n2. Добавить нарезанную свёклу и картофель\n3. Обжарить лук, морковь с томатной пастой\n4. Добавить капусту и зажарку\n5. Варить 15 мин", 20, 70, 4, 350, "lunch", "medium",
-         vec![("говядина", 300.0, "г"), ("свёкла", 1.0, "шт"), ("капуста", 200.0, "г"), ("картофель", 2.0, "шт"), ("морковь", 1.0, "шт"), ("лук", 1.0, "шт"), ("томатная паста", 30.0, "г"), ("чеснок", 2.0, "шт")]),
-        ("Плов", "Узбекский плов", "1. Обжарить мясо кубиками в масле\n2. Добавить лук и морковь соломкой\n3. Залить водой, добавить специи\n4. Сверху выложить рис\n5. Готовить под крышкой 40 мин", 20, 50, 4, 550, "lunch,dinner", "medium",
-         vec![("рис", 300.0, "г"), ("говядина", 400.0, "г"), ("морковь", 3.0, "шт"), ("лук", 2.0, "шт"), ("масло растительное", 50.0, "мл"), ("зира", 5.0, "г"), ("соль", 5.0, "г")]),
-        ("Салат овощной", "Лёгкий летний салат", "1. Нарезать все овощи\n2. Заправить маслом и солью\n3. Перемешать", 10, 0, 2, 120, "lunch,dinner,universal", "easy",
-         vec![("огурец", 2.0, "шт"), ("помидор", 2.0, "шт"), ("перец болгарский", 1.0, "шт"), ("лук красный", 0.5, "шт"), ("масло оливковое", 15.0, "мл"), ("соль", 2.0, "г")]),
-        ("Салат Цезарь с курицей", "Популярный салат", "1. Обжарить филе, нарезать\n2. Сделать сухарики из хлеба\n3. Смешать салат, курицу, сухарики\n4. Заправить соусом, посыпать пармезаном", 10, 10, 2, 400, "lunch", "medium",
-         vec![("куриное филе", 200.0, "г"), ("салат ромэн", 100.0, "г"), ("хлеб белый", 50.0, "г"), ("пармезан", 30.0, "г"), ("соус цезарь", 40.0, "мл")]),
-        ("Жареная картошка", "Хрустящая картошка на сковороде", "1. Нарезать картофель соломкой\n2. Обжарить на сильном огне 15 мин\n3. Добавить лук, жарить ещё 5 мин\n4. Посолить, посыпать укропом", 10, 20, 2, 400, "dinner", "easy",
-         vec![("картофель", 500.0, "г"), ("масло растительное", 30.0, "мл"), ("лук", 1.0, "шт"), ("соль", 3.0, "г"), ("укроп", 10.0, "г")]),
-        ("Тушёная капуста", "Простое и сытное блюдо", "1. Нашинковать капусту\n2. Обжарить лук и морковь\n3. Добавить капусту, тушить 20 мин\n4. Добавить томатную пасту, готовить ещё 10 мин", 10, 30, 3, 200, "dinner,universal", "easy",
-         vec![("капуста", 500.0, "г"), ("морковь", 1.0, "шт"), ("лук", 1.0, "шт"), ("томатная паста", 30.0, "г"), ("масло растительное", 15.0, "мл"), ("соль", 3.0, "г")]),
-        ("Куриные крылышки в духовке", "Хрустящие крылышки", "1. Смешать соевый соус, мёд и чеснок\n2. Замариновать крылышки на 30 мин\n3. Запекать при 200°C 35 мин", 35, 35, 2, 480, "dinner", "easy",
-         vec![("крылышки куриные", 500.0, "г"), ("соевый соус", 30.0, "мл"), ("мёд", 20.0, "г"), ("чеснок", 3.0, "шт"), ("масло растительное", 10.0, "мл")]),
-        ("Гречка с тушёнкой", "Походная классика", "1. Сварить гречку\n2. Обжарить лук\n3. Добавить тушёнку и гречку\n4. Перемешать, прогреть 5 мин", 5, 15, 2, 450, "lunch,dinner", "easy",
-         vec![("гречка", 150.0, "г"), ("тушёнка", 1.0, "шт"), ("лук", 1.0, "шт"), ("соль", 2.0, "г")]),
-        ("Блины", "Тонкие блины на молоке", "1. Смешать муку, яйца, сахар и соль\n2. Постепенно влить молоко, размешать\n3. Жарить на смазанной сковороде\n4. Подавать с начинкой по вкусу", 10, 20, 4, 300, "breakfast,universal", "easy",
-         vec![("мука", 200.0, "г"), ("молоко", 500.0, "мл"), ("яйца", 2.0, "шт"), ("сахар", 20.0, "г"), ("масло растительное", 15.0, "мл"), ("соль", 2.0, "г")]),
-        ("Сосиски с пюре", "Быстрый ужин", "1. Сварить картофель, сделать пюре\n2. Сварить сосиски 5 мин\n3. Подать вместе", 5, 20, 2, 400, "dinner", "easy",
-         vec![("сосиски", 4.0, "шт"), ("картофель", 400.0, "г"), ("молоко", 50.0, "мл"), ("масло сливочное", 15.0, "г")]),
-        ("Творог с мёдом и орехами", "Полезный завтрак", "1. Выложить творог в миску\n2. Добавить мёд и нарезанный банан\n3. Посыпать орехами", 5, 0, 1, 350, "breakfast", "easy",
-         vec![("творог", 200.0, "г"), ("мёд", 20.0, "г"), ("грецкие орехи", 30.0, "г"), ("банан", 1.0, "шт")]),
-        ("Куриное филе на гриле", "Лёгкий белковый ужин", "1. Замариновать филе в лимоне, чесноке и масле\n2. Обжарить на гриль-сковороде по 5 мин с каждой стороны\n3. Дать отдохнуть 3 мин", 15, 10, 2, 350, "lunch,dinner", "easy",
-         vec![("куриное филе", 300.0, "г"), ("лимон", 0.5, "шт"), ("чеснок", 2.0, "шт"), ("масло оливковое", 15.0, "мл"), ("соль", 3.0, "г"), ("перец", 2.0, "г")]),
-        ("Окрошка", "Холодный летний суп", "1. Отварить картофель и яйца, нарезать кубиками\n2. Нарезать колбасу, огурцы и редис\n3. Смешать всё, залить квасом\n4. Посыпать зеленью", 20, 20, 3, 280, "lunch", "easy",
-         vec![("колбаса варёная", 200.0, "г"), ("картофель", 2.0, "шт"), ("огурцы", 2.0, "шт"), ("яйца", 3.0, "шт"), ("редис", 5.0, "шт"), ("квас", 500.0, "мл"), ("зелень", 15.0, "г")]),
-        ("Пельмени", "Магазинные или домашние", "1. Вскипятить воду с солью\n2. Забросить пельмени\n3. Варить 7-10 мин после всплытия\n4. Подать со сметаной", 2, 12, 2, 450, "lunch,dinner", "easy",
-         vec![("пельмени", 400.0, "г"), ("сметана", 40.0, "г"), ("соль", 5.0, "г")]),
-        ("Бутерброд с тунцом", "Быстрый перекус или завтрак", "1. Размять тунец вилкой\n2. Смешать с нарезанным огурцом и майонезом\n3. Выложить на хлеб с листьями салата", 5, 0, 1, 300, "breakfast,universal", "easy",
-         vec![("хлеб", 2.0, "шт"), ("тунец консервированный", 1.0, "шт"), ("огурец", 0.5, "шт"), ("салат листовой", 2.0, "шт"), ("майонез", 15.0, "г")]),
+/// Seed ingredient catalog with common ingredients
+pub fn seed_ingredient_catalog(conn: &rusqlite::Connection) {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM ingredient_catalog", [], |r| r.get(0)).unwrap_or(0);
+    if count > 0 { return; }
+    let items: Vec<(&str, &str)> = vec![
+        // meat
+        ("курица", "meat"), ("куриное филе", "meat"), ("говядина", "meat"),
+        ("фарш говяжий", "meat"), ("индейка", "meat"), ("свинина", "meat"),
+        ("крылышки куриные", "meat"), ("тушёнка", "meat"), ("колбаса варёная", "meat"),
+        ("сосиски", "meat"), ("бекон", "meat"),
+        // grain
+        ("рис", "grain"), ("гречка", "grain"), ("макароны", "grain"),
+        ("овсяные хлопья", "grain"), ("мука", "grain"), ("хлеб", "grain"),
+        ("лапша", "grain"), ("булгур", "grain"), ("спагетти", "grain"), ("пельмени", "grain"),
+        // veg
+        ("лук", "veg"), ("морковь", "veg"), ("картофель", "veg"),
+        ("помидор", "veg"), ("огурец", "veg"), ("перец болгарский", "veg"),
+        ("капуста", "veg"), ("чеснок", "veg"), ("кабачок", "veg"),
+        ("свёкла", "veg"), ("редис", "veg"), ("шпинат", "veg"), ("брокколи", "veg"),
+        // dairy
+        ("молоко", "dairy"), ("сметана", "dairy"), ("масло сливочное", "dairy"),
+        ("творог", "dairy"), ("яйца", "dairy"), ("сливки", "dairy"), ("пармезан", "dairy"),
+        // fruit
+        ("банан", "fruit"), ("яблоко", "fruit"), ("лимон", "fruit"), ("авокадо", "fruit"),
+        // spice
+        ("соль", "spice"), ("перец", "spice"), ("сахар", "spice"), ("мёд", "spice"),
+        ("соевый соус", "spice"), ("томатная паста", "spice"), ("зира", "spice"),
+        ("паприка", "spice"), ("куркума", "spice"), ("укроп", "spice"),
+        ("петрушка", "spice"), ("зелень", "spice"), ("майонез", "spice"),
+        // oil
+        ("масло растительное", "oil"), ("масло оливковое", "oil"),
     ];
-    for (name, desc, instr, prep, cook, serv, cal, tags, diff, items) in &recipes {
-        let ingr_text: String = items.iter().map(|(n, a, u)| format!("{}: {}{}", n, a, u)).collect::<Vec<_>>().join(", ");
+    for (name, cat) in items {
         let _ = conn.execute(
-            "INSERT INTO recipes (name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, difficulty, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11)",
-            rusqlite::params![name, desc, ingr_text, instr, prep, cook, serv, cal, tags, diff, now],
+            "INSERT OR IGNORE INTO ingredient_catalog (name, category) VALUES (?1, ?2)",
+            rusqlite::params![name, cat],
         );
-        let recipe_id = conn.last_insert_rowid();
-        for (iname, amount, unit) in items {
-            let _ = conn.execute(
-                "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit) VALUES (?1,?2,?3,?4)",
-                rusqlite::params![recipe_id, iname, amount, unit],
-            );
-        }
     }
 }
 
-/// For existing users: populate recipe_ingredients from text ingredients field
-fn seed_recipe_ingredients(conn: &rusqlite::Connection) {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM recipe_ingredients", [], |r| r.get(0)).unwrap_or(0);
+/// Seed default cuisines
+pub fn seed_default_cuisines(conn: &rusqlite::Connection) {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM custom_cuisines", [], |r| r.get(0)).unwrap_or(0);
     if count > 0 { return; }
-    // Parse existing text ingredients and create structured entries
-    let mut stmt = conn.prepare("SELECT id, ingredients FROM recipes").unwrap();
-    let rows: Vec<(i64, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(|r| r.ok()).collect();
-    for (recipe_id, ingr_text) in &rows {
-        for part in ingr_text.split(',') {
-            let part = part.trim();
-            if part.is_empty() { continue; }
-            // Try parsing "name: amount unit" or "name amount unit" or just "name"
-            if let Some((name, rest)) = part.split_once(':') {
-                let rest = rest.trim();
-                let (amount, unit) = parse_amount_unit(rest);
-                let _ = conn.execute(
-                    "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit) VALUES (?1,?2,?3,?4)",
-                    rusqlite::params![recipe_id, name.trim(), amount, unit],
-                );
-            } else {
-                let _ = conn.execute(
-                    "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit) VALUES (?1,?2,?3,?4)",
-                    rusqlite::params![recipe_id, part, 0.0, ""],
-                );
-            }
-        }
+    let cuisines: Vec<(&str, &str, &str)> = vec![
+        ("kz", "Казахская", "🇰🇿"), ("ru", "Русская", "🇷🇺"),
+        ("it", "Итальянская", "🇮🇹"), ("jp", "Японская", "🇯🇵"),
+        ("ge", "Грузинская", "🇬🇪"), ("tr", "Турецкая", "🇹🇷"),
+        ("uz", "Узбекская", "🇺🇿"), ("kr", "Корейская", "🇰🇷"),
+        ("us", "Американская", "🇺🇸"), ("mx", "Мексиканская", "🇲🇽"),
+        ("other", "Другая", "🌍"),
+    ];
+    for (code, name, emoji) in cuisines {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO custom_cuisines (code, name, emoji, is_default) VALUES (?1, ?2, ?3, 1)",
+            rusqlite::params![code, name, emoji],
+        );
     }
 }
 
@@ -932,7 +901,6 @@ pub fn migrate_recipe_extra(conn: &rusqlite::Connection) {
         let _ = conn.execute("ALTER TABLE recipes ADD COLUMN cuisine TEXT NOT NULL DEFAULT 'kz'", []);
         let _ = conn.execute("ALTER TABLE recipes ADD COLUMN health_score INTEGER NOT NULL DEFAULT 5", []);
         let _ = conn.execute("ALTER TABLE recipes ADD COLUMN price_score INTEGER NOT NULL DEFAULT 5", []);
-        seed_recipe_extra_values(conn);
     }
 }
 
@@ -943,55 +911,18 @@ pub fn migrate_recipe_extra2(conn: &rusqlite::Connection) {
         let _ = conn.execute("ALTER TABLE recipes ADD COLUMN carbs INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE recipes ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0", []);
         let _ = conn.execute("ALTER TABLE recipes ADD COLUMN last_cooked TEXT", []);
-        seed_recipe_macros(conn);
     }
 }
 
-fn seed_recipe_extra_values(conn: &rusqlite::Connection) {
-    let updates: Vec<(&str, &str, i64, i64)> = vec![
-        ("Овсянка%", "other", 8, 2), ("Яичница%", "other", 6, 2),
-        ("Омлет%", "other", 7, 2), ("Бутерброды с авокадо", "other", 7, 4),
-        ("Каша рисовая%", "other", 6, 2), ("Гречка с курицей", "ru", 8, 3),
-        ("Рис с овощами", "other", 7, 3), ("Картофельное пюре%", "ru", 5, 3),
-        ("Макароны с фаршем", "it", 5, 4), ("Куриный суп%", "ru", 7, 3),
-        ("Борщ", "ru", 7, 4), ("Салат овощной", "other", 9, 3),
-        ("Салат Цезарь%", "other", 6, 5), ("Жареная картошка", "ru", 4, 2),
-        ("Куриные отбивные%", "ru", 6, 4), ("Блины", "ru", 5, 3),
-        ("Творог с ягодами%", "other", 9, 4), ("Куриное филе на сковороде", "other", 8, 4),
-        ("Плов", "kz", 6, 4), ("Бешбармак%", "kz", 5, 6),
-        ("Овощное рагу", "other", 8, 3), ("Тосты%", "other", 5, 3),
-        ("Гуляш%", "ru", 5, 5), ("Греческий салат", "other", 8, 4),
-    ];
-    for (name, cuisine, health, price) in updates {
-        let _ = conn.execute(
-            "UPDATE recipes SET cuisine=?1, health_score=?2, price_score=?3 WHERE name LIKE ?4",
-            rusqlite::params![cuisine, health, price, name],
-        );
-    }
-}
-
-fn seed_recipe_macros(conn: &rusqlite::Connection) {
-    // (name_pattern, protein, fat, carbs) per serving
-    let macros: Vec<(&str, i64, i64, i64)> = vec![
-        ("Овсянка%", 12, 8, 55), ("Яичница%", 18, 16, 4),
-        ("Омлет%", 17, 12, 3), ("Бутерброды с авокадо", 10, 18, 28),
-        ("Каша рисовая%", 8, 6, 50), ("Гречка с курицей", 35, 10, 45),
-        ("Рис с овощами", 8, 7, 60), ("Картофельное пюре%", 25, 20, 50),
-        ("Макароны с фаршем", 28, 18, 55), ("Куриный суп%", 20, 8, 25),
-        ("Борщ", 15, 10, 30), ("Салат овощной", 3, 8, 12),
-        ("Салат Цезарь%", 22, 15, 10), ("Жареная картошка", 5, 12, 45),
-        ("Куриные отбивные%", 30, 12, 15), ("Блины", 8, 10, 40),
-        ("Творог с ягодами%", 18, 5, 20), ("Куриное филе на сковороде", 32, 8, 5),
-        ("Плов", 20, 15, 50), ("Бешбармак%", 25, 20, 40),
-        ("Овощное рагу", 5, 6, 25), ("Тосты%", 12, 10, 30),
-        ("Гуляш%", 22, 14, 15), ("Греческий салат", 6, 14, 8),
-    ];
-    for (name, p, f, c) in macros {
-        let _ = conn.execute(
-            "UPDATE recipes SET protein=?1, fat=?2, carbs=?3 WHERE name LIKE ?4",
-            rusqlite::params![p, f, c, name],
-        );
-    }
+/// One-time migration: clear seed recipes (v0.36)
+pub fn migrate_clear_seed_recipes(conn: &rusqlite::Connection) {
+    let has_flag = conn.prepare("SELECT 1 FROM _migrations WHERE name='clear_seed_recipes'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if has_flag { return; }
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let _ = conn.execute("DELETE FROM recipe_ingredients", []);
+    let _ = conn.execute("DELETE FROM recipes", []);
+    let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('clear_seed_recipes')", []);
 }
 
 pub fn migrate_facts_decay(conn: &rusqlite::Connection) {

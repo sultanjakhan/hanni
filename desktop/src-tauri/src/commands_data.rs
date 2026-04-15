@@ -1977,6 +1977,50 @@ pub fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub fn get_ingredient_catalog(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare("SELECT id, name, category FROM ingredient_catalog ORDER BY name")
+        .map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "category": row.get::<_, String>(2)? }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn add_ingredient_to_catalog(name: String, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let cat = category.unwrap_or_else(|| "other".into());
+    conn.execute("INSERT OR IGNORE INTO ingredient_catalog (name, category) VALUES (?1, ?2)",
+        rusqlite::params![name, cat]).map_err(|e| format!("DB error: {}", e))?;
+    let id: i64 = conn.query_row("SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE",
+        rusqlite::params![name], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn get_cuisines(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare("SELECT id, code, name, emoji, is_default FROM custom_cuisines ORDER BY is_default DESC, name")
+        .map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "code": row.get::<_, String>(1)?,
+            "name": row.get::<_, String>(2)?, "emoji": row.get::<_, String>(3)?,
+            "is_default": row.get::<_, i64>(4)? }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn add_cuisine(code: String, name: String, emoji: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let em = emoji.unwrap_or_else(|| "🌍".into());
+    conn.execute("INSERT INTO custom_cuisines (code, name, emoji, is_default) VALUES (?1, ?2, ?3, 0)",
+        rusqlite::params![code, name, em]).map_err(|e| format!("DB error: {}", e))?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
 pub fn add_product(
     name: String, category: Option<String>, quantity: Option<f64>, unit: Option<String>,
     expiry_date: Option<String>, location: Option<String>, notes: Option<String>,

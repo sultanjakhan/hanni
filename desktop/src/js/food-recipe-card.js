@@ -15,7 +15,7 @@ export function renderCard(r, onIngrClick) {
     return `<span class="badge badge-${c}">${label}</span>`;
   }).join('');
   const totalTime = (r.prep_time || 0) + (r.cook_time || 0);
-  const diffLabel = r.difficulty === 'medium' ? 'Средний' : 'Лёгкий';
+  const diffLabel = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' }[r.difficulty] || 'Лёгкий';
   const ingrNames = getIngrNames(r);
   const ingrHtml = ingrNames.slice(0, 5).map(n => {
     const cat = ingrCat(n); const cls = cat ? ` ingr-cat-${cat}` : '';

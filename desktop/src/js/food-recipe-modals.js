@@ -1,8 +1,7 @@
 // ── food-recipe-modals.js — Recipe detail modal ──
 import { invoke } from './state.js';
 import { escapeHtml, ingrCat, confirmModal } from './utils.js';
-
-const CUISINES = { kz: '🇰🇿 Казахская', ru: '🇷🇺 Русская', it: '🇮🇹 Итальянская', jp: '🇯🇵 Японская', ge: '🇬🇪 Грузинская', tr: '🇹🇷 Турецкая', other: '🌍 Другая' };
+import { loadCuisines } from './food-recipe-filters.js';
 
 export async function showRecipeDetail(id, reloadFn) {
   let recipe;
@@ -14,8 +13,9 @@ export async function showRecipeDetail(id, reloadFn) {
   const baseCal = recipe.calories || 0;
   const totalTime = (recipe.prep_time || 0) + (recipe.cook_time || 0);
   const instructions = (recipe.instructions || '').split('\n').filter(Boolean);
-  const diffLabel = recipe.difficulty === 'medium' ? 'Средний' : 'Лёгкий';
-  const cuisineLabel = CUISINES[recipe.cuisine] || CUISINES.other;
+  const diffLabel = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' }[recipe.difficulty] || 'Лёгкий';
+  const cuisines = await loadCuisines();
+  const cuisineLabel = cuisines.find(c => c.id === recipe.cuisine)?.label || '🌍 Другая';
   let isFav = recipe.favorite === 1;
   const p = recipe.protein || 0, f = recipe.fat || 0, c = recipe.carbs || 0;
   const bjuHtml = (p || f || c) ? `<span class="badge badge-gray">Б${p} Ж${f} У${c}</span>` : '';

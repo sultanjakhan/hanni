@@ -120,7 +120,8 @@ fn init_database() -> HanniDb {
     load_crsqlite(&conn);
 
     init_db(&conn).expect("Cannot initialize database");
-    seed_default_recipes(&conn);
+    seed_ingredient_catalog(&conn);
+    seed_default_cuisines(&conn);
     migrate_memory_json(&conn);
     migrate_events_source(&conn);
     migrate_facts_decay(&conn);
@@ -130,6 +131,7 @@ fn init_database() -> HanniDb {
     migrate_recipe_difficulty(&conn);
     migrate_recipe_extra(&conn);
     migrate_recipe_extra2(&conn);
+    migrate_clear_seed_recipes(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
@@ -476,6 +478,10 @@ pub fn run() {
             commands_data::get_recipes,
             commands_data::update_recipe,
             commands_data::delete_recipe,
+            commands_data::get_ingredient_catalog,
+            commands_data::add_ingredient_to_catalog,
+            commands_data::get_cuisines,
+            commands_data::add_cuisine,
             commands_data::toggle_favorite_recipe,
             commands_data::mark_recipe_cooked,
             commands_data::add_product,
