@@ -65,6 +65,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderSkills) panes.splice(1, 0, { id: 'skills', icon: '💡', label: 'Навыки' });
   if (config.renderCases) panes.splice(panes.findIndex(p => p.id === 'goals'), 0, { id: 'cases', icon: '📝', label: 'Кейсы' });
   if (config.renderRecipes) panes.splice(1, 0, { id: 'recipes', icon: '📖', label: 'Рецепты' });
+  if (config.renderProducts) panes.splice(panes.findIndex(p => p.id === 'recipes') + 1 || 2, 0, { id: 'products', icon: '🥕', label: 'Продукты' });
+  if (config.renderCatalog) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'catalog', icon: '📚', label: 'Каталог' });
+  if (config.renderTemplates) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'templates', icon: '📋', label: 'Шаблоны' });
 
   // Tab title header — merge defaults with user overrides
   const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };
@@ -140,6 +143,15 @@ export async function renderUnifiedLayout(el, tabId, config) {
       break;
     case 'recipes':
       if (config.renderRecipes) await config.renderRecipes(paneEl);
+      break;
+    case 'products':
+      if (config.renderProducts) await config.renderProducts(paneEl);
+      break;
+    case 'catalog':
+      if (config.renderCatalog) await config.renderCatalog(paneEl);
+      break;
+    case 'templates':
+      if (config.renderTemplates) await config.renderTemplates(paneEl);
       break;
     case 'goals':
       await renderGoalsPane(paneEl, tabId, config);

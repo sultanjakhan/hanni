@@ -419,7 +419,8 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS ingredient_catalog (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            category TEXT NOT NULL DEFAULT 'other'
+            category TEXT NOT NULL DEFAULT 'other',
+            tags TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS custom_cuisines (
@@ -745,101 +746,159 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
 pub fn seed_ingredient_catalog(conn: &rusqlite::Connection) {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM ingredient_catalog", [], |r| r.get(0)).unwrap_or(0);
     if count > 0 { return; }
-    let items: Vec<(&str, &str)> = vec![
-        // meat
-        ("курица", "meat"), ("куриное филе", "meat"), ("куриные бёдра", "meat"),
-        ("куриные крылышки", "meat"), ("говядина", "meat"), ("телятина", "meat"),
-        ("свинина", "meat"), ("баранина", "meat"), ("конина", "meat"),
-        ("фарш говяжий", "meat"), ("фарш куриный", "meat"), ("фарш свиной", "meat"),
-        ("индейка", "meat"), ("утка", "meat"), ("кролик", "meat"),
-        ("бекон", "meat"), ("ветчина", "meat"), ("колбаса варёная", "meat"),
-        ("колбаса копчёная", "meat"), ("сосиски", "meat"), ("тушёнка", "meat"),
-        ("печень куриная", "meat"), ("печень говяжья", "meat"), ("язык говяжий", "meat"),
-        // fish
-        ("лосось", "fish"), ("сёмга", "fish"), ("форель", "fish"),
-        ("треска", "fish"), ("минтай", "fish"), ("скумбрия", "fish"),
-        ("тунец", "fish"), ("сельдь", "fish"), ("карп", "fish"),
-        ("креветки", "fish"), ("кальмар", "fish"), ("мидии", "fish"),
-        ("крабовые палочки", "fish"), ("икра красная", "fish"), ("шпроты", "fish"),
-        // veg
-        ("лук", "veg"), ("лук красный", "veg"), ("лук-порей", "veg"),
-        ("морковь", "veg"), ("картофель", "veg"), ("помидор", "veg"),
-        ("огурец", "veg"), ("перец болгарский", "veg"), ("перец чили", "veg"),
-        ("капуста белокочанная", "veg"), ("капуста пекинская", "veg"), ("капуста цветная", "veg"),
-        ("брокколи", "veg"), ("чеснок", "veg"), ("кабачок", "veg"),
-        ("баклажан", "veg"), ("тыква", "veg"), ("свёкла", "veg"),
-        ("редис", "veg"), ("редька", "veg"), ("шпинат", "veg"),
-        ("салат айсберг", "veg"), ("руккола", "veg"), ("сельдерей", "veg"),
-        ("кукуруза", "veg"), ("горошек зелёный", "veg"), ("стручковая фасоль", "veg"),
-        ("имбирь", "veg"), ("грибы шампиньоны", "veg"), ("грибы вёшенки", "veg"),
-        // fruit
-        ("банан", "fruit"), ("яблоко", "fruit"), ("груша", "fruit"),
-        ("апельсин", "fruit"), ("лимон", "fruit"), ("лайм", "fruit"),
-        ("мандарин", "fruit"), ("грейпфрут", "fruit"), ("авокадо", "fruit"),
-        ("манго", "fruit"), ("ананас", "fruit"), ("киви", "fruit"),
-        ("виноград", "fruit"), ("клубника", "fruit"), ("малина", "fruit"),
-        ("черника", "fruit"), ("вишня", "fruit"), ("арбуз", "fruit"),
-        ("дыня", "fruit"), ("хурма", "fruit"), ("гранат", "fruit"),
-        ("персик", "fruit"), ("слива", "fruit"), ("изюм", "fruit"),
-        ("курага", "fruit"), ("чернослив", "fruit"), ("финики", "fruit"),
-        // grain
-        ("рис", "grain"), ("рис басмати", "grain"), ("гречка", "grain"),
-        ("овсяные хлопья", "grain"), ("пшено", "grain"), ("булгур", "grain"),
-        ("кус-кус", "grain"), ("перловка", "grain"), ("манка", "grain"),
-        ("кукурузная крупа", "grain"), ("киноа", "grain"),
-        ("макароны", "grain"), ("спагетти", "grain"), ("лапша", "grain"),
-        ("лапша рисовая", "grain"), ("фунчоза", "grain"),
-        ("мука пшеничная", "grain"), ("мука кукурузная", "grain"),
-        ("хлеб белый", "grain"), ("хлеб чёрный", "grain"), ("лаваш", "grain"),
-        ("батон", "grain"), ("панировочные сухари", "grain"),
-        // dairy
-        ("молоко", "dairy"), ("кефир", "dairy"), ("ряженка", "dairy"),
-        ("йогурт", "dairy"), ("сметана", "dairy"), ("сливки", "dairy"),
-        ("масло сливочное", "dairy"), ("творог", "dairy"), ("творожный сыр", "dairy"),
-        ("сыр твёрдый", "dairy"), ("пармезан", "dairy"), ("моцарелла", "dairy"),
-        ("фета", "dairy"), ("брынза", "dairy"), ("плавленый сыр", "dairy"),
-        ("яйца куриные", "dairy"), ("яйца перепелиные", "dairy"),
-        ("сгущённое молоко", "dairy"), ("кокосовое молоко", "dairy"),
+    // (name, category, tags)
+    let items: Vec<(&str, &str, &str)> = vec![
+        // meat — птица
+        ("курица", "meat", "птица"), ("куриное филе", "meat", "птица"),
+        ("куриные бёдра", "meat", "птица"), ("куриные крылышки", "meat", "птица"),
+        ("индейка", "meat", "птица"), ("утка", "meat", "птица"),
+        ("фарш куриный", "meat", "птица"), ("печень куриная", "meat", "птица,субпродукты"),
+        // meat — говядина
+        ("говядина", "meat", "говядина"), ("телятина", "meat", "говядина"),
+        ("фарш говяжий", "meat", "говядина"), ("печень говяжья", "meat", "говядина,субпродукты"),
+        ("язык говяжий", "meat", "говядина,субпродукты"),
+        // meat — баранина, конина, прочее
+        ("баранина", "meat", "баранина"), ("конина", "meat", "конина"),
+        ("кролик", "meat", ""), ("колбаса варёная", "meat", "полуфабрикаты"),
+        ("колбаса копчёная", "meat", "полуфабрикаты"), ("сосиски", "meat", "полуфабрикаты"),
+        ("тушёнка", "meat", "полуфабрикаты"),
+        // fish — красная рыба
+        ("лосось", "fish", "красная рыба"), ("сёмга", "fish", "красная рыба"),
+        ("форель", "fish", "красная рыба"), ("икра красная", "fish", "красная рыба"),
+        // fish — белая рыба
+        ("треска", "fish", "белая рыба"), ("минтай", "fish", "белая рыба"),
+        ("скумбрия", "fish", "белая рыба"), ("сельдь", "fish", "белая рыба"),
+        ("карп", "fish", "белая рыба"), ("тунец", "fish", "белая рыба"),
+        ("шпроты", "fish", "белая рыба"),
+        // fish — морепродукты
+        ("креветки", "fish", "морепродукты"), ("кальмар", "fish", "морепродукты"),
+        ("мидии", "fish", "морепродукты"), ("крабовые палочки", "fish", "морепродукты"),
+        // veg — корнеплоды
+        ("морковь", "veg", "корнеплоды"), ("картофель", "veg", "корнеплоды"),
+        ("свёкла", "veg", "корнеплоды"), ("редис", "veg", "корнеплоды"),
+        ("редька", "veg", "корнеплоды"), ("имбирь", "veg", "корнеплоды"),
+        // veg — паслёновые
+        ("помидор", "veg", "паслёновые"), ("перец болгарский", "veg", "паслёновые"),
+        ("перец чили", "veg", "паслёновые"), ("баклажан", "veg", "паслёновые"),
+        // veg — капустные
+        ("капуста белокочанная", "veg", "капустные"), ("капуста пекинская", "veg", "капустные"),
+        ("капуста цветная", "veg", "капустные"), ("брокколи", "veg", "капустные"),
+        // veg — зелень
+        ("шпинат", "veg", "зелень"), ("салат айсберг", "veg", "зелень"),
+        ("руккола", "veg", "зелень"), ("сельдерей", "veg", "зелень"),
+        // veg — прочие
+        ("лук", "veg", ""), ("лук красный", "veg", ""), ("лук-порей", "veg", ""),
+        ("чеснок", "veg", ""), ("огурец", "veg", ""), ("кабачок", "veg", ""),
+        ("тыква", "veg", ""), ("кукуруза", "veg", ""),
+        ("горошек зелёный", "veg", ""), ("стручковая фасоль", "veg", ""),
+        ("грибы шампиньоны", "veg", ""), ("грибы вёшенки", "veg", ""),
+        // fruit — цитрусовые
+        ("апельсин", "fruit", "цитрусовые"), ("лимон", "fruit", "цитрусовые"),
+        ("лайм", "fruit", "цитрусовые"), ("мандарин", "fruit", "цитрусовые"),
+        ("грейпфрут", "fruit", "цитрусовые"),
+        // fruit — ягоды
+        ("клубника", "fruit", "ягоды"), ("малина", "fruit", "ягоды"),
+        ("черника", "fruit", "ягоды"), ("вишня", "fruit", "ягоды"),
+        ("виноград", "fruit", "ягоды"),
+        // fruit — тропические
+        ("манго", "fruit", "тропические"), ("ананас", "fruit", "тропические"),
+        ("киви", "fruit", "тропические"), ("авокадо", "fruit", "тропические"),
+        ("банан", "fruit", "тропические"),
+        // fruit — косточковые
+        ("персик", "fruit", "косточковые"), ("слива", "fruit", "косточковые"),
+        ("хурма", "fruit", "косточковые"),
+        // fruit — прочие
+        ("яблоко", "fruit", ""), ("груша", "fruit", ""),
+        ("арбуз", "fruit", ""), ("дыня", "fruit", ""), ("гранат", "fruit", ""),
+        // fruit — сухофрукты
+        ("изюм", "fruit", "сухофрукты"), ("курага", "fruit", "сухофрукты"),
+        ("чернослив", "fruit", "сухофрукты"), ("финики", "fruit", "сухофрукты"),
+        // grain — каша
+        ("рис", "grain", "каша"), ("рис басмати", "grain", "каша"),
+        ("гречка", "grain", "каша"), ("овсяные хлопья", "grain", "каша"),
+        ("пшено", "grain", "каша"), ("булгур", "grain", "каша"),
+        ("кус-кус", "grain", "каша"), ("перловка", "grain", "каша"),
+        ("манка", "grain", "каша"), ("кукурузная крупа", "grain", "каша"),
+        ("киноа", "grain", "каша"),
+        // grain — макароны
+        ("макароны", "grain", "макароны"), ("спагетти", "grain", "макароны"),
+        ("лапша", "grain", "макароны"), ("лапша рисовая", "grain", "макароны"),
+        ("фунчоза", "grain", "макароны"),
+        // grain — мука
+        ("мука пшеничная", "grain", "мука"), ("мука кукурузная", "grain", "мука"),
+        ("панировочные сухари", "grain", "мука"),
+        // grain — хлеб
+        ("хлеб белый", "grain", "хлеб"), ("хлеб чёрный", "grain", "хлеб"),
+        ("лаваш", "grain", "хлеб"), ("батон", "grain", "хлеб"),
+        // dairy — кисломолочные
+        ("кефир", "dairy", "кисломолочные"), ("ряженка", "dairy", "кисломолочные"),
+        ("йогурт", "dairy", "кисломолочные"), ("сметана", "dairy", "кисломолочные"),
+        ("творог", "dairy", "кисломолочные"), ("творожный сыр", "dairy", "кисломолочные"),
+        // dairy — сыр
+        ("сыр твёрдый", "dairy", "сыр"), ("пармезан", "dairy", "сыр"),
+        ("моцарелла", "dairy", "сыр"), ("фета", "dairy", "сыр"),
+        ("брынза", "dairy", "сыр"), ("плавленый сыр", "dairy", "сыр"),
+        // dairy — прочие
+        ("молоко", "dairy", ""), ("сливки", "dairy", ""),
+        ("масло сливочное", "dairy", ""), ("яйца куриные", "dairy", ""),
+        ("яйца перепелиные", "dairy", ""), ("сгущённое молоко", "dairy", ""),
+        ("кокосовое молоко", "dairy", ""),
         // legumes
-        ("фасоль", "legumes"), ("фасоль красная", "legumes"), ("фасоль белая", "legumes"),
-        ("чечевица", "legumes"), ("чечевица красная", "legumes"),
-        ("горох", "legumes"), ("нут", "legumes"), ("маш", "legumes"),
-        ("соя", "legumes"), ("тофу", "legumes"),
-        // nuts
-        ("грецкий орех", "nuts"), ("миндаль", "nuts"), ("фундук", "nuts"),
-        ("кешью", "nuts"), ("арахис", "nuts"), ("фисташки", "nuts"),
-        ("кедровые орехи", "nuts"), ("семена подсолнечника", "nuts"),
-        ("семена тыквы", "nuts"), ("семена кунжута", "nuts"),
-        ("семена льна", "nuts"), ("семена чиа", "nuts"), ("кокосовая стружка", "nuts"),
-        // spice
-        ("соль", "spice"), ("перец чёрный", "spice"), ("перец красный", "spice"),
-        ("паприка", "spice"), ("куркума", "spice"), ("зира", "spice"),
-        ("кориандр", "spice"), ("корица", "spice"), ("мускатный орех", "spice"),
-        ("гвоздика", "spice"), ("лавровый лист", "spice"), ("орегано", "spice"),
-        ("базилик", "spice"), ("тимьян", "spice"), ("розмарин", "spice"),
-        ("укроп", "spice"), ("петрушка", "spice"), ("кинза", "spice"),
-        ("мята", "spice"), ("зелёный лук", "spice"),
-        ("сахар", "spice"), ("мёд", "spice"), ("ваниль", "spice"),
-        ("уксус", "spice"), ("соевый соус", "spice"), ("томатная паста", "spice"),
-        ("горчица", "spice"), ("майонез", "spice"), ("кетчуп", "spice"),
-        ("сметанный соус", "spice"), ("аджика", "spice"),
-        // oil
-        ("масло растительное", "oil"), ("масло оливковое", "oil"),
-        ("масло подсолнечное", "oil"), ("масло кунжутное", "oil"),
-        ("масло кокосовое", "oil"), ("масло льняное", "oil"),
-        // bakery
-        ("дрожжи", "bakery"), ("разрыхлитель", "bakery"), ("какао", "bakery"),
-        ("шоколад тёмный", "bakery"), ("шоколад молочный", "bakery"),
-        ("крахмал", "bakery"), ("желатин", "bakery"), ("сахарная пудра", "bakery"),
+        ("фасоль", "legumes", ""), ("фасоль красная", "legumes", ""),
+        ("фасоль белая", "legumes", ""), ("чечевица", "legumes", ""),
+        ("чечевица красная", "legumes", ""), ("горох", "legumes", ""),
+        ("нут", "legumes", ""), ("маш", "legumes", ""),
+        ("соя", "legumes", ""), ("тофу", "legumes", ""),
+        // nuts — орехи
+        ("грецкий орех", "nuts", ""), ("миндаль", "nuts", ""),
+        ("фундук", "nuts", ""), ("кешью", "nuts", ""),
+        ("арахис", "nuts", ""), ("фисташки", "nuts", ""),
+        ("кедровые орехи", "nuts", ""), ("кокосовая стружка", "nuts", ""),
+        // nuts — семена
+        ("семена подсолнечника", "nuts", "семена"), ("семена тыквы", "nuts", "семена"),
+        ("семена кунжута", "nuts", "семена"), ("семена льна", "nuts", "семена"),
+        ("семена чиа", "nuts", "семена"),
+        // spice — приправы
+        ("соль", "spice", "приправы"), ("перец чёрный", "spice", "приправы"),
+        ("перец красный", "spice", "приправы"), ("паприка", "spice", "приправы"),
+        ("куркума", "spice", "приправы"), ("зира", "spice", "приправы"),
+        ("кориандр", "spice", "приправы"), ("корица", "spice", "приправы"),
+        ("мускатный орех", "spice", "приправы"), ("гвоздика", "spice", "приправы"),
+        ("лавровый лист", "spice", "приправы"), ("орегано", "spice", "приправы"),
+        ("базилик", "spice", "приправы"), ("тимьян", "spice", "приправы"),
+        ("розмарин", "spice", "приправы"), ("ваниль", "spice", "приправы"),
+        // spice — зелень
+        ("укроп", "spice", "зелень"), ("петрушка", "spice", "зелень"),
+        ("кинза", "spice", "зелень"), ("мята", "spice", "зелень"),
+        ("зелёный лук", "spice", "зелень"),
+        // spice — соусы
+        ("соевый соус", "spice", "соусы"), ("томатная паста", "spice", "соусы"),
+        ("горчица", "spice", "соусы"), ("майонез", "spice", "соусы"),
+        ("кетчуп", "spice", "соусы"), ("сметанный соус", "spice", "соусы"),
+        ("аджика", "spice", "соусы"), ("уксус", "spice", "соусы"),
+        // spice — прочие
+        ("сахар", "spice", ""), ("мёд", "spice", ""),
+        // oil — растительные
+        ("масло растительное", "oil", "растительные"), ("масло оливковое", "oil", "растительные"),
+        ("масло подсолнечное", "oil", "растительные"), ("масло кунжутное", "oil", "растительные"),
+        ("масло кокосовое", "oil", "растительные"), ("масло льняное", "oil", "растительные"),
+        // bakery — тесто
+        ("дрожжи", "bakery", "тесто"), ("разрыхлитель", "bakery", "тесто"),
+        ("крахмал", "bakery", "тесто"), ("желатин", "bakery", "тесто"),
+        ("сахарная пудра", "bakery", "тесто"),
+        // bakery — шоколад
+        ("какао", "bakery", ""), ("шоколад тёмный", "bakery", ""),
+        ("шоколад молочный", "bakery", ""),
         // drinks
-        ("чай чёрный", "drinks"), ("чай зелёный", "drinks"), ("кофе", "drinks"),
-        ("какао-порошок", "drinks"), ("сок апельсиновый", "drinks"),
-        ("вода минеральная", "drinks"), ("компот", "drinks"),
+        ("чай чёрный", "drinks", "чай"), ("чай зелёный", "drinks", "чай"),
+        ("кофе", "drinks", "кофе"), ("какао-порошок", "drinks", ""),
+        ("сок апельсиновый", "drinks", "сок"),
+        ("вода минеральная", "drinks", ""), ("компот", "drinks", ""),
     ];
-    for (name, cat) in items {
+    for (name, cat, tags) in items {
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO ingredient_catalog (name, category) VALUES (?1, ?2)",
-            rusqlite::params![name, cat],
+            "INSERT OR IGNORE INTO ingredient_catalog (name, category, tags) VALUES (?1, ?2, ?3)",
+            rusqlite::params![name, cat, tags],
         );
     }
 }
@@ -997,6 +1056,22 @@ pub fn migrate_reseed_ingredient_catalog(conn: &rusqlite::Connection) {
     let _ = conn.execute("DELETE FROM ingredient_catalog", []);
     seed_ingredient_catalog(conn);
     let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('reseed_catalog_v2')", []);
+}
+
+pub fn migrate_catalog_tags_v3(conn: &rusqlite::Connection) {
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='catalog_tags_v3'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    // Add tags column if missing
+    let has_tags = conn.prepare("SELECT tags FROM ingredient_catalog LIMIT 1").is_ok();
+    if !has_tags {
+        let _ = conn.execute("ALTER TABLE ingredient_catalog ADD COLUMN tags TEXT NOT NULL DEFAULT ''", []);
+    }
+    // Re-seed: clear and re-populate with tags + no pork
+    let _ = conn.execute("DELETE FROM ingredient_catalog", []);
+    seed_ingredient_catalog(conn);
+    let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('catalog_tags_v3')", []);
 }
 
 pub fn migrate_facts_decay(conn: &rusqlite::Connection) {
@@ -1456,4 +1531,44 @@ pub fn enable_crr_tables(conn: &rusqlite::Connection) {
         }
     }
     eprintln!("CRR enabled for {} tables", tables.len());
+}
+
+pub fn migrate_sports_catalog(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS exercise_catalog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            muscle_group TEXT NOT NULL DEFAULT 'full_body',
+            equipment TEXT NOT NULL DEFAULT '',
+            type TEXT NOT NULL DEFAULT 'strength',
+            description TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS workout_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'gym',
+            difficulty TEXT NOT NULL DEFAULT 'easy',
+            target_muscle_groups TEXT NOT NULL DEFAULT '',
+            favorite INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS template_exercises (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER NOT NULL,
+            exercise_catalog_id INTEGER,
+            name TEXT NOT NULL,
+            sets INTEGER DEFAULT 3,
+            reps INTEGER DEFAULT 10,
+            weight_kg REAL DEFAULT 0,
+            duration_seconds INTEGER DEFAULT 0,
+            rest_seconds INTEGER DEFAULT 60,
+            order_index INTEGER DEFAULT 0,
+            FOREIGN KEY (template_id) REFERENCES workout_templates(id) ON DELETE CASCADE,
+            FOREIGN KEY (exercise_catalog_id) REFERENCES exercise_catalog(id)
+        );"
+    ).ok();
+    // Add template_id FK to existing workouts table
+    conn.execute("ALTER TABLE workouts ADD COLUMN template_id INTEGER", []).ok();
 }

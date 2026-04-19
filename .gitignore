@@ -25,6 +25,9 @@ __pycache__/
 # Serena
 .serena/
 
+# Claude Code runtime
+.claude/scheduled_tasks.lock
+
 # Playwright
 .playwright-mcp/
 

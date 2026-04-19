@@ -243,6 +243,10 @@ async function loadFood(subTab) {
       const { renderRecipesPane } = await import('./tab-food-recipes.js');
       await renderRecipesPane(paneEl);
     },
+    renderProducts: async (paneEl) => {
+      const { renderProductCatalogPane } = await import('./food-product-catalog.js');
+      await renderProductCatalogPane(paneEl);
+    },
   });
 }
 
@@ -1467,6 +1471,14 @@ async function loadSports(subTab) {
       const { loadBodyInline } = await import('./tab-body.js');
       await loadBodyInline(paneEl);
     },
+    renderCatalog: async (paneEl) => {
+      const { renderCatalogPane } = await import('./sport-catalog.js');
+      await renderCatalogPane(paneEl);
+    },
+    renderTemplates: async (paneEl) => {
+      const { renderTemplatesPane } = await import('./sport-templates.js');
+      await renderTemplatesPane(paneEl);
+    },
     renderTable: async (paneEl) => {
       const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
       const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));
@@ -1541,11 +1553,34 @@ function showAddWorkoutModal() {
     <textarea class="form-textarea" id="workout-notes" placeholder="Заметки (необязательно)" rows="2"></textarea>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" id="workout-from-tmpl">Из шаблона</button>
       <button class="btn-primary" id="workout-save">Сохранить</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('workout-from-tmpl')?.addEventListener('click', async () => {
+    overlay.remove();
+    const templates = await invoke('get_workout_templates', { search: null }).catch(() => []);
+    if (!templates.length) { alert('Нет шаблонов. Создайте шаблон в разделе "Шаблоны".'); return; }
+    const picker = document.createElement('div');
+    picker.className = 'modal-overlay';
+    picker.innerHTML = `<div class="modal modal-compact"><div class="modal-title">Выберите шаблон</div>
+      <div style="max-height:300px;overflow-y:auto">${templates.map(t =>
+        `<div class="settings-row tmpl-pick-row" data-id="${t.id}" style="cursor:pointer;padding:8px;border-radius:6px">
+          <span>${escapeHtml(t.name)}</span><span class="badge badge-blue" style="margin-left:8px">${t.exercise_count || 0} упр.</span>
+        </div>`).join('')}</div>
+      <div class="modal-actions"><button class="btn-secondary" id="tmpl-pick-cancel">Отмена</button></div></div>`;
+    document.body.appendChild(picker);
+    picker.addEventListener('click', (e) => { if (e.target === picker) picker.remove(); });
+    picker.querySelector('#tmpl-pick-cancel').onclick = () => picker.remove();
+    picker.querySelectorAll('.tmpl-pick-row').forEach(row => row.addEventListener('click', async () => {
+      try {
+        await invoke('create_workout_from_template', { templateId: parseInt(row.dataset.id) });
+        picker.remove(); loadSports();
+      } catch (err) { alert('Ошибка: ' + err); }
+    }));
+  });
   document.getElementById('workout-save')?.addEventListener('click', async () => {
     const title = document.getElementById('workout-title')?.value?.trim();
     try {

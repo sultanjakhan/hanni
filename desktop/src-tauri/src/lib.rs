@@ -133,6 +133,7 @@ fn init_database() -> HanniDb {
     migrate_recipe_extra2(&conn);
     migrate_clear_seed_recipes(&conn);
     migrate_reseed_ingredient_catalog(&conn);
+    migrate_catalog_tags_v3(&conn);
     migrate_notes_v2(&conn);
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
@@ -143,6 +144,7 @@ fn init_database() -> HanniDb {
     migrate_dashboard_widgets(&conn);
     migrate_timeline(&conn);
     db::migrate_sleep(&conn);
+    db::migrate_sports_catalog(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -419,6 +421,18 @@ pub fn run() {
             commands_data::get_workout_stats,
             commands_data::delete_workout,
             commands_data::update_workout,
+            // Exercise Catalog
+            commands_data::get_exercise_catalog,
+            commands_data::add_exercise_to_catalog,
+            commands_data::update_exercise_catalog,
+            commands_data::delete_exercise_catalog,
+            // Workout Templates
+            commands_data::create_workout_template,
+            commands_data::get_workout_templates,
+            commands_data::get_workout_template,
+            commands_data::delete_workout_template,
+            commands_data::toggle_favorite_template,
+            commands_data::create_workout_from_template,
             // Schedules
             commands_data::create_schedule,
             commands_data::get_schedules,
@@ -481,6 +495,9 @@ pub fn run() {
             commands_data::delete_recipe,
             commands_data::get_ingredient_catalog,
             commands_data::add_ingredient_to_catalog,
+            commands_data::update_ingredient_in_catalog,
+            commands_data::delete_ingredient_from_catalog,
+            commands_data::check_ingredient_usage,
             commands_data::get_cuisines,
             commands_data::add_cuisine,
             commands_data::toggle_favorite_recipe,

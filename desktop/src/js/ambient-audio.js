@@ -16,7 +16,6 @@ export const SOUNDS = [
 ];
 
 const STORAGE_KEY = 'hanni_ambient_state';
-const FADE_SAMPLES = 200; // ~4.5ms at 44.1kHz — inaudible but eliminates loop clicks
 const ctx = new AudioContext({ latencyHint: 'playback' });
 ctx.addEventListener('statechange', () => {
   if (ctx.state === 'interrupted' || ctx.state === 'suspended') {
@@ -35,27 +34,11 @@ setInterval(() => {
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
 }, 25_000);
 
-function applyCrossfade(buf) {
-  const len = FADE_SAMPLES;
-  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
-    const d = buf.getChannelData(ch);
-    const total = d.length;
-    if (total < len * 2) continue;
-    for (let i = 0; i < len; i++) {
-      const t = i / len; // 0→1
-      d[i] *= t;                   // fade-in
-      d[total - 1 - i] *= t;      // fade-out
-    }
-  }
-  return buf;
-}
-
 async function loadBuffer(id) {
   if (bufferCache.has(id)) return bufferCache.get(id);
-  const resp = await fetch(`sounds/${id}.m4a`);
+  const resp = await fetch(`sounds/${id}.ogg`);
   const arr = await resp.arrayBuffer();
   const buf = await ctx.decodeAudioData(arr);
-  applyCrossfade(buf);
   bufferCache.set(id, buf);
   return buf;
 }

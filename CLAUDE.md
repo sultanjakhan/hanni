@@ -85,8 +85,8 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 Use Read/Edit/Grep/Glob/Bash for all code tasks. They are faster and more reliable.
 
 ### MCP usage
-- **screenshot.sh** — `desktop/tools/screenshot.sh` for Hanni screenshots (NOT MCP screenshot)
-- **HTTP API** — `127.0.0.1:8235/auto/eval` for DOM operations, clicks, data reading
+- **screenshot.sh** — `desktop/tools/screenshot.sh` for Hanni screenshots (NOT MCP screenshot). Pass port as 2nd arg for dev: `screenshot.sh /tmp/out.png 8236`
+- **HTTP API** — `127.0.0.1:8235/auto/eval` (prod) or `127.0.0.1:8236/auto/eval` (dev). Use the port of the instance you're testing against; по умолчанию — порт dev-сборки, если она запущена и правки касаются dev.
 - **playwright** — only for external web pages, never for Hanni itself
 - **context7 / Nia** — library/API documentation lookup before coding
 - **css/a11y** — only when explicitly requested for audit
@@ -112,12 +112,12 @@ When a task is non-trivial, consider which skill fits during the clarification s
 For architectural decisions or large features, use `architect` or the Plan agent first.
 
 ### Hanni app interaction
-- **Screenshots**: `desktop/tools/screenshot.sh /tmp/out.png` → Read tool to view. Silent (`-x`), works minimized (html2canvas fallback)
-- **DOM operations**: HTTP API at `127.0.0.1:8235`, endpoint `POST /auto/eval` with `{"script": "..."}`. Use python3 urllib for complex scripts with quotes
+- **Screenshots**: `desktop/tools/screenshot.sh /tmp/out.png [port]` → Read tool. Silent (`-x`), works minimized (html2canvas). Port 8235 prod / 8236 dev
+- **DOM operations**: HTTP API at `127.0.0.1:8235` (prod) or `127.0.0.1:8236` (dev), endpoint `POST /auto/eval` with `{"script": "..."}`. Use python3 urllib for complex scripts with quotes
 - **Click/type/navigate**: `element.click()`, `dispatchEvent(new MouseEvent('dblclick'))`, `KeyboardEvent` — all via `/auto/eval`
 - **Token**: `cat ~/Library/Application\ Support/Hanni/api_token.txt`
 - **NEVER** use MCP screenshot (hangs on macOS) or tauri-automation (broken on macOS)
-- **NEVER** run 2 Hanni instances (dev + production). Ask the user to stop one before starting the other
+- **OK**: 1 prod (port 8235) + 1 dev (port 8236) одновременно. Больше инстансов — запрещено (конфликт портов, overheat)
 - **NEVER** activate/focus Hanni window (`osascript activate`, `open -a Hanni`, etc.) — it interrupts the user's workflow
 - **NEVER** touch production Hanni — only use `cargo tauri dev` for testing
 - If a screenshot requires window focus — **ask the user** to take it manually, do NOT activate
@@ -130,11 +130,11 @@ For architectural decisions or large features, use `architect` or the Plan agent
 - **Rust pattern**: `types.rs` shared via `use types::*`, commands `pub` for `generate_handler![]`
 - **LLM**: local MLX server at `127.0.0.1:8234` (Qwen3.5-35B-A3B)
 - **Streaming**: SSE events — `chat-token`, `chat-done`, `chat-reasoning`, `chat-reasoning-done`
-- **HTTP API**: `127.0.0.1:8235` — automation endpoint for DOM eval, used by screenshot.sh and Claude
+- **HTTP API**: `127.0.0.1:8235` (prod), `127.0.0.1:8236` (dev, `cfg!(debug_assertions)`). Automation endpoint for DOM eval, used by screenshot.sh and Claude
 - **MCP hanni**: Python MCP server (`hanni-mcp/server.py`) — CRUD for SQLite (facts, events, SQL)
 - **Voice**: `voice_server.py` — background LaunchAgent for speech
 - **Build**: `UPDATER_GITHUB_TOKEN=dummy cargo check` for dev
-- **Graceful restart**: `osascript -e 'tell application "Hanni" to quit'` + `open -a Hanni`. Never kill/pkill/killall
+- **Graceful quit**: `osascript -e 'tell application "Hanni" to quit'`. Re-open — попросить пользователя (никогда не `open -a Hanni` / activate, см. `feedback_no_activate`). Never kill/pkill/killall
 
 ## Safety & Rollback
 
