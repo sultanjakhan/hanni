@@ -8,11 +8,11 @@ export const SOUNDS = [
   { id: 'wind',        emoji: '\u{1F4A8}',  name: '\u{0412}\u{0435}\u{0442}\u{0435}\u{0440}' },
   { id: 'birds',       emoji: '\u{1F426}',  name: '\u{041F}\u{0442}\u{0438}\u{0446}\u{044B}' },
   { id: 'thunder',     emoji: '\u{26C8}\u{FE0F}', name: '\u{0413}\u{0440}\u{043E}\u{0437}\u{0430}' },
-  { id: 'white-noise', emoji: '\u{1F4FB}',  name: '\u{0411}\u{0435}\u{043B}\u{044B}\u{0439} \u{0448}\u{0443}\u{043C}' },
-  { id: 'cafe',        emoji: '\u{2615}',   name: '\u{041A}\u{0430}\u{0444}\u{0435}' },
   { id: 'stream',      emoji: '\u{1F3DE}\u{FE0F}', name: '\u{0420}\u{0443}\u{0447}\u{0435}\u{0439}' },
-  { id: 'piano',       emoji: '\u{1F3B9}',  name: '\u{041F}\u{0438}\u{0430}\u{043D}\u{043E}' },
-  { id: 'guitar',      emoji: '\u{1F3B8}',  name: '\u{0413}\u{0438}\u{0442}\u{0430}\u{0440}\u{0430}' },
+  { id: 'jupiter',     emoji: '\u{1FA90}',  name: '\u{042E}\u{043F}\u{0438}\u{0442}\u{0435}\u{0440}' },
+  { id: 'saturn',      emoji: '\u{1F30C}',  name: '\u{0421}\u{0430}\u{0442}\u{0443}\u{0440}\u{043D}' },
+  { id: 'blackhole',   emoji: '\u{1F573}\u{FE0F}',  name: '\u{0427}\u{0451}\u{0440}\u{043D}\u{0430}\u{044F} \u{0434}\u{044B}\u{0440}\u{0430}' },
+  { id: 'space',       emoji: '\u{1F680}',  name: '\u{041A}\u{043E}\u{0441}\u{043C}\u{043E}\u{0441}' },
 ];
 
 const STORAGE_KEY = 'hanni_ambient_state';
@@ -36,7 +36,7 @@ setInterval(() => {
 
 async function loadBuffer(id) {
   if (bufferCache.has(id)) return bufferCache.get(id);
-  const resp = await fetch(`sounds/${id}.ogg`);
+  const resp = await fetch(`sounds/${id}.m4a`);
   const arr = await resp.arrayBuffer();
   const buf = await ctx.decodeAudioData(arr);
   bufferCache.set(id, buf);
@@ -44,40 +44,41 @@ async function loadBuffer(id) {
 }
 
 function getNode(id) {
-  if (!nodes.has(id)) nodes.set(id, { source: null, gain: null, playing: false });
+  if (!nodes.has(id)) nodes.set(id, { source: null, gain: null, playing: false, starting: false });
   return nodes.get(id);
 }
 
 async function startSound(id) {
   if (ctx.state === 'suspended') await ctx.resume();
   const node = getNode(id);
-  if (node.playing) return;
-  const buf = await loadBuffer(id);
-  const gain = ctx.createGain();
-  gain.gain.value = (volumes[id] ?? 0.7) * masterVol;
-  gain.connect(ctx.destination);
-  const source = ctx.createBufferSource();
-  source.buffer = buf;
-  source.loop = true;
-  source.connect(gain);
-  source.start();
-  source.onended = () => {
-    if (node.playing) {
-      node.playing = false;
-      node.source = null;
-      node.gain = null;
-      startSound(id).catch(() => {});
-    }
-  };
-  node.source = source;
-  node.gain = gain;
-  node.playing = true;
+  if (node.playing || node.starting) return;
+  node.starting = true;
+  try {
+    const buf = await loadBuffer(id);
+    if (!node.starting) return; // cancelled by stop during loadBuffer
+    const gain = ctx.createGain();
+    gain.gain.value = (volumes[id] ?? 0.7) * masterVol;
+    gain.connect(ctx.destination);
+    const source = ctx.createBufferSource();
+    source.buffer = buf;
+    source.loop = true;
+    source.connect(gain);
+    source.start();
+    node.source = source;
+    node.gain = gain;
+    node.playing = true;
+  } finally {
+    node.starting = false;
+  }
 }
 
 function stopSound(id) {
   const node = nodes.get(id);
-  if (!node || !node.playing) return;
+  if (!node) return;
+  node.starting = false; // cancel any in-flight startSound
+  if (!node.playing) return;
   try { node.source.stop(); } catch (_) {}
+  try { node.source.disconnect(); } catch (_) {}
   try { node.gain.disconnect(); } catch (_) {}
   node.source = null;
   node.gain = null;

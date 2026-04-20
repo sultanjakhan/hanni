@@ -70,6 +70,8 @@ export class DatabaseView {
       onAddView: (vt) => this._addView(vt),
       hiddenColumns: hiddenCols,
       onShowColumn: (col) => this._showColumn(col),
+      onFrozenView: s.onFrozenView,
+      frozenCount: s.frozenCount,
     });
   }
 
@@ -83,7 +85,7 @@ export class DatabaseView {
       onRowClick: s.onRowClick, onAdd: s.onAdd, onQuickAdd: s.onQuickAdd,
       addButton: s.addButton, kanban: s.kanban, gallery: s.gallery,
       onSort: () => this._handleSort(),
-      onDrop: s.onDrop, onCellEdit: s.onCellEdit, onDelete: s.onDelete, onDuplicate: s.onDuplicate,
+      onDrop: s.onDrop, onCellEdit: s.onCellEdit, onDelete: s.onDelete, onDuplicate: s.onDuplicate, onFreeze: s.onFreeze,
     };
     const views = { kanban: renderKanbanView, list: renderListView, gallery: renderGalleryView, timeline: renderTimelineView, calendar: renderCalendarView };
     const fn = views[this._currentView];

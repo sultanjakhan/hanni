@@ -6,6 +6,8 @@ import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, lo
 // Helper: check if a schedule should appear on a given date
 function scheduleMatchesDate(sch, dateStr) {
   if (!sch.is_active) return false;
+  // Honor until_date: skip dates after the end date
+  if (sch.until_date && dateStr > sch.until_date) return false;
   if (sch.frequency === 'daily') return true;
   const d = new Date(dateStr + 'T12:00:00');
   const dow = d.getDay() || 7; // 1=Mon..7=Sun

@@ -18,11 +18,12 @@ export function bindRowContextMenu(container, ctx) {
 
 function showRowMenu(e, rid, record, ctx) {
   document.querySelectorAll('.row-context-menu').forEach(m => m.remove());
-  const { onDelete, onDuplicate, reloadFn } = ctx;
+  const { onDelete, onDuplicate, onFreeze, reloadFn } = ctx;
 
   const items = [];
   items.push({ id: 'copy', label: 'Копировать ID', icon: '⎘' });
   if (onDuplicate) items.push({ id: 'duplicate', label: 'Дубликат', icon: '⧉' });
+  if (onFreeze) items.push({ id: 'freeze', label: 'Заморозить', icon: '❄' });
   if (onDelete) items.push({ id: 'delete', label: 'Удалить', icon: '✕', danger: true });
 
   const menu = document.createElement('div');
@@ -42,6 +43,8 @@ function showRowMenu(e, rid, record, ctx) {
         try { await navigator.clipboard.writeText(String(rid)); } catch {}
       } else if (action === 'duplicate') {
         if (onDuplicate) { await onDuplicate(record); if (reloadFn) reloadFn(); }
+      } else if (action === 'freeze') {
+        if (onFreeze) { await onFreeze(rid, record); if (reloadFn) reloadFn(); }
       } else if (action === 'delete') {
         if (onDelete && await confirmModal('Удалить запись?')) {
           await onDelete(rid);

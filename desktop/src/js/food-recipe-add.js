@@ -1,6 +1,6 @@
 // ── food-recipe-add.js — Add recipe modal ──
 import { invoke } from './state.js';
-import { loadCuisines, invalidateCuisineCache } from './food-recipe-filters.js';
+import { loadCuisines, invalidateCuisineCache, getBlacklist } from './food-recipe-filters.js';
 import { renderIngredientRows, collectIngredientItems } from './food-recipe-ingredients.js';
 import { renderStepsRows, collectSteps } from './food-recipe-steps.js';
 
@@ -11,8 +11,8 @@ function acc(title, field, content, open) {
 }
 
 export async function showAddRecipeModal(reloadFn) {
-  const [catalog, cuisines] = await Promise.all([
-    invoke('get_ingredient_catalog').catch(() => []), loadCuisines(),
+  const [catalog, cuisines, blacklist] = await Promise.all([
+    invoke('get_ingredient_catalog').catch(() => []), loadCuisines(), getBlacklist(),
   ]);
   const state = { tags: new Set(['universal']), diff: 'easy', cuisine: 'kz' };
   const mealsHtml = ['breakfast:Завтрак', 'lunch:Обед', 'dinner:Ужин', 'universal:Универсал']
@@ -58,7 +58,7 @@ export async function showAddRecipeModal(reloadFn) {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#r-cancel').onclick = () => overlay.remove();
-  renderIngredientRows(overlay.querySelector('#r-ingr-rows'), catalog);
+  renderIngredientRows(overlay.querySelector('#r-ingr-rows'), catalog, blacklist);
   renderStepsRows(overlay.querySelector('#r-steps'), () => collectIngredientItems(overlay.querySelector('#r-ingr-rows')).map(i => i.name));
   overlay.querySelectorAll('.rf-acc-header').forEach(hdr => hdr.onclick = () => {
     const body = hdr.nextElementSibling, open = body.style.display !== 'none';

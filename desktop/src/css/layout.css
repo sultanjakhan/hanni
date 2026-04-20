@@ -163,10 +163,30 @@
   z-index: 500;
   min-width: 200px;
   max-width: 320px;
-  max-height: 400px;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-md);
   animation: scaleIn 0.1s ease-out;
+}
+
+#tab-dropdown-search {
+  flex-shrink: 0;
+  margin-bottom: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+#tab-dropdown-search:focus { border-color: var(--accent-blue); }
+
+#tab-dropdown-list {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .tab-dropdown-item {

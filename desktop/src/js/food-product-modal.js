@@ -2,9 +2,9 @@
 import { invoke } from './state.js';
 import { CAT_LABELS, CAT_ORDER, invalidateCatalogCache } from './food-recipe-filters.js';
 
-export function showProductModal(reloadFn, product) {
+export function showProductModal(reloadFn, product, defaults = {}) {
   const isEdit = !!product;
-  const state = { cat: product?.category || 'other' };
+  const state = { cat: product?.category || defaults.category || 'other' };
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal modal-compact">
@@ -15,6 +15,9 @@ export function showProductModal(reloadFn, product) {
       <div class="add-chips pm-cats">${CAT_ORDER.map(c =>
         `<button type="button" class="rf-chip${c === state.cat ? ' active' : ''}" data-val="${c}">${CAT_LABELS[c]}</button>`
       ).join('')}</div></div>
+    <div class="form-group"><label class="form-label">Подгруппа</label>
+      <input class="form-input" id="pm-subgroup" value="${esc(product?.subgroup || defaults.subgroup || '')}" placeholder="например: говядина, курица, кисломолочные" list="pm-subgroup-list">
+      <datalist id="pm-subgroup-list"></datalist></div>
     <div class="form-group"><label class="form-label">Теги</label>
       <input class="form-input" id="pm-tags" value="${esc(product?.tags || '')}" placeholder="птица, субпродукты"></div>
     <div class="modal-actions">
@@ -26,10 +29,20 @@ export function showProductModal(reloadFn, product) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#pm-cancel').onclick = () => overlay.remove();
 
+  const dl = overlay.querySelector('#pm-subgroup-list');
+  async function refreshSubgroups() {
+    try {
+      const rows = await invoke('list_catalog_subgroups', { category: state.cat });
+      dl.innerHTML = rows.filter(r => r.name).map(r => `<option value="${esc(r.name)}">`).join('');
+    } catch {}
+  }
+  refreshSubgroups();
+
   overlay.querySelectorAll('.pm-cats .rf-chip').forEach(btn => {
     btn.onclick = () => {
       state.cat = btn.dataset.val;
       overlay.querySelectorAll('.pm-cats .rf-chip').forEach(b => b.classList.toggle('active', b.dataset.val === state.cat));
+      refreshSubgroups();
     };
   });
 
@@ -37,17 +50,19 @@ export function showProductModal(reloadFn, product) {
     const name = overlay.querySelector('#pm-name').value.trim();
     if (!name) { overlay.querySelector('#pm-name').classList.add('input-error'); return; }
     const tags = overlay.querySelector('#pm-tags').value.trim();
+    const subgroup = overlay.querySelector('#pm-subgroup').value.trim();
     try {
       if (isEdit) {
         const changes = {};
         if (name !== product.name) changes.name = name;
         if (state.cat !== product.category) changes.category = state.cat;
         if (tags !== (product.tags || '')) changes.tags = tags;
+        if (subgroup !== (product.subgroup || '')) changes.subgroup = subgroup;
         if (Object.keys(changes).length) {
           await invoke('update_ingredient_in_catalog', { id: product.id, ...changes });
         }
       } else {
-        await invoke('add_ingredient_to_catalog', { name, category: state.cat, tags });
+        await invoke('add_ingredient_to_catalog', { name, category: state.cat, tags, subgroup });
       }
       invalidateCatalogCache();
       overlay.remove();

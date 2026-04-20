@@ -1827,6 +1827,35 @@ const SCH_CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practi
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
+function getScheduleUntil(s) {
+  if (!s.until_date) return null;
+  const d = new Date(s.until_date + 'T00:00:00');
+  return isNaN(d) ? null : d;
+}
+
+function isScheduleExpired(s) {
+  const u = getScheduleUntil(s);
+  if (!u) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  u.setHours(0, 0, 0, 0);
+  return u < today;
+}
+
+function pluralDays(n) {
+  const m = n % 10, h = n % 100;
+  if (m === 1 && h !== 11) return 'день';
+  if (m >= 2 && m <= 4 && (h < 10 || h > 20)) return 'дня';
+  return 'дней';
+}
+
+function daysSinceScheduleExpired(s) {
+  const u = getScheduleUntil(s);
+  if (!u) return 0;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  u.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.floor((today - u) / 86400000));
+}
+
 function buildRecurrenceJson(r) {
   if (!r.frequency) return '';
   const obj = { every: 1, unit: 'day' };
@@ -1834,7 +1863,84 @@ function buildRecurrenceJson(r) {
   else if (r.frequency === 'weekly') { obj.unit = 'week'; }
   else if (r.frequency === 'custom' && r.frequency_days) { obj.unit = 'week'; obj.days = r.frequency_days.split(',').map(Number); }
   if (r.time_of_day) obj.time = r.time_of_day;
+  if (r.until_date) obj.until = r.until_date;
   return JSON.stringify(obj);
+}
+
+function showFrozenPopover(anchor, frozen, onUnfreeze) {
+  document.querySelectorAll('.frozen-popover').forEach(m => m.remove());
+  const rect = anchor.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'frozen-popover';
+  const maxW = Math.min(720, window.innerWidth - 24);
+  menu.style.cssText = `position:fixed;z-index:1100;top:${rect.bottom + 4}px;right:12px;width:${maxW}px;max-height:60vh;overflow:auto;background:var(--bg-elevated);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);`;
+  if (frozen.length === 0) {
+    menu.innerHTML = `<div style="padding:16px;color:var(--text-faint);font-size:12px;text-align:center;">Нет замороженных</div>`;
+  } else {
+    const rows = frozen.map(s => {
+      const title = escapeHtml(s.title || '(без названия)');
+      let cats = [];
+      if (s.category) {
+        try { const p = JSON.parse(s.category); cats = Array.isArray(p) ? p : [s.category]; }
+        catch { cats = [s.category]; }
+      }
+      const catHtml = cats.map(c =>
+        `<span class="badge badge-${SCH_CAT_COLORS[c] || 'gray'}" style="font-size:11px;">${SCHEDULE_CATEGORIES[c] || c}</span>`
+      ).join(' ');
+      const recJson = s.recurrence || buildRecurrenceJson(s);
+      const recStr = recJson ? escapeHtml(formatRecurrence(recJson)) : '<span style="color:var(--text-faint);">—</span>';
+      const det = s.details ? escapeHtml(s.details) : '<span style="color:var(--text-faint);">—</span>';
+      const cellStyle = 'padding:6px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-top:1px solid var(--border-subtle);';
+      return `<tr class="frozen-item" data-id="${s.id}" style="cursor:pointer;">
+        <td style="${cellStyle}">${title}</td>
+        <td style="${cellStyle}">${catHtml}</td>
+        <td style="${cellStyle}font-size:12px;color:var(--text-muted);">${recStr}</td>
+        <td style="${cellStyle}font-size:12px;color:var(--text-secondary);">${det}</td>
+      </tr>`;
+    }).join('');
+    menu.innerHTML =
+      `<div style="padding:8px 12px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border-subtle);">Заморожено · клик или ПКМ → Разморозить</div>
+       <table style="font-size:13px;width:100%;border-collapse:collapse;table-layout:fixed;">
+         <thead><tr style="background:var(--bg-secondary);">
+           <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:28%;">Название</th>
+           <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:20%;">Категория</th>
+           <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:22%;">Повторение</th>
+           <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:30%;">Детали</th>
+         </tr></thead>
+         <tbody>${rows}</tbody>
+       </table>`;
+  }
+  document.body.appendChild(menu);
+  const doUnfreeze = async (id) => { menu.remove(); await onUnfreeze(id); };
+  menu.querySelectorAll('.frozen-item').forEach(item => {
+    const id = parseInt(item.dataset.id);
+    item.addEventListener('click', () => doUnfreeze(id));
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      document.querySelectorAll('.row-context-menu').forEach(m => m.remove());
+      const ctxMenu = document.createElement('div');
+      ctxMenu.className = 'inline-dropdown row-context-menu';
+      ctxMenu.innerHTML = `<div class="inline-dd-option" data-action="unfreeze"><span style="margin-right:6px;">↺</span>Разморозить</div>`;
+      ctxMenu.style.left = e.clientX + 'px';
+      ctxMenu.style.top = e.clientY + 'px';
+      document.body.appendChild(ctxMenu);
+      ctxMenu.querySelector('[data-action="unfreeze"]').addEventListener('click', () => {
+        ctxMenu.remove();
+        doUnfreeze(id);
+      });
+      setTimeout(() => document.addEventListener('mousedown', (ev) => {
+        if (!ctxMenu.contains(ev.target)) ctxMenu.remove();
+      }, { once: true }), 10);
+    });
+  });
+  setTimeout(() => {
+    const close = (e) => {
+      if (menu.contains(e.target) || e.target === anchor) return;
+      if (e.target.closest('.row-context-menu')) return;
+      menu.remove(); document.removeEventListener('mousedown', close);
+    };
+    document.addEventListener('mousedown', close);
+  }, 10);
 }
 
 async function loadSchedule(subTab) {
@@ -1851,7 +1957,7 @@ async function loadSchedule(subTab) {
       const numDays = mode === 'month' ? 30 : 7;
 
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
-      const active = schedules.filter(s => s.is_active);
+      const active = schedules.filter(s => s.is_active && !isScheduleExpired(s));
       const days = [];
       for (let i = numDays - 1; i >= 0; i--) {
         const d = new Date(); d.setDate(d.getDate() - i);
@@ -1919,17 +2025,58 @@ async function loadSchedule(subTab) {
       const today = new Date().toISOString().slice(0, 10);
       const completions = await invoke('get_schedule_completions', { date: today }).catch(() => []);
       const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
+      const sortByExpired = (list) => {
+        const notEx = list.filter(s => !isScheduleExpired(s));
+        const ex = list.filter(s => isScheduleExpired(s));
+        return [...notEx, ...ex];
+      };
+      const injectExpiredSeparator = (list) => {
+        const tbody = paneEl.querySelector('.data-table tbody');
+        if (!tbody) return;
+        const firstExpired = list.find(s => isScheduleExpired(s));
+        if (!firstExpired) return;
+        const tr = tbody.querySelector(`tr.data-table-row[data-id="${firstExpired.id}"]`);
+        if (!tr) return;
+        const colCount = paneEl.querySelector('.data-table thead tr')?.children.length || 5;
+        tbody.querySelector('.dbv-expired-separator')?.remove();
+        const sep = document.createElement('tr');
+        sep.className = 'dbv-expired-separator';
+        sep.innerHTML = `<td colspan="${colCount}" style="padding:10px 10px 6px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;background:var(--bg-secondary);border-top:1px solid var(--border-subtle);">Истекшие</td>`;
+        tr.before(sep);
+        list.forEach(s => {
+          if (!isScheduleExpired(s)) return;
+          const row = tbody.querySelector(`tr.data-table-row[data-id="${s.id}"]`);
+          if (row) row.style.opacity = '0.55';
+        });
+      };
+
+      const activeInit = sortByExpired(schedules.filter(s => s.is_active));
+      const frozenInit = schedules.filter(s => !s.is_active);
 
       const reloadTable = async () => {
         const fresh = await invoke('get_schedules', { category: null }).catch(() => []);
         const comp = await invoke('get_schedule_completions', { date: today }).catch(() => []);
         const cIds = new Set(comp.filter(c => c.completed).map(c => c.schedule_id));
-        dbv.schema.records = fresh;
+        const active = sortByExpired(fresh.filter(s => s.is_active));
+        const frozen = fresh.filter(s => !s.is_active);
+        dbv.schema.records = active;
+        dbv.schema.frozenCount = frozen.length;
+        dbv.schema.onFrozenView = (btn) => showFrozenPopover(btn, frozen, async (id) => {
+          await invoke('update_schedule', { id, isActive: true });
+          reloadTable();
+        });
         dbv.schema.fixedColumns[0].render = r => `<div class="habit-check${cIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${cIds.has(r.id) ? '&#10003;' : ''}</div>`;
         await dbv.render();
+        injectExpiredSeparator(active);
       };
       const dbv = new DatabaseView(paneEl, {
-        tabId: 'schedule', recordTable: 'schedules', records: schedules,
+        tabId: 'schedule', recordTable: 'schedules', records: activeInit,
+        frozenCount: frozenInit.length,
+        onFrozenView: (btn) => showFrozenPopover(btn, frozenInit, async (id) => {
+          await invoke('update_schedule', { id, isActive: true });
+          reloadTable();
+        }),
+        onFreeze: async (id) => { await invoke('update_schedule', { id, isActive: false }); },
         availableViews: ['table', 'list'],
         fixedColumns: [
           { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
@@ -1940,10 +2087,14 @@ async function loadSchedule(subTab) {
             try { const p = JSON.parse(r.category); if (Array.isArray(p)) cats = p; } catch {}
             return cats.map(c => `<span class="badge badge-${SCH_CAT_COLORS[c] || 'gray'} cell-badge-removable">${SCHEDULE_CATEGORIES[c] || c}<span class="cell-badge-x" data-remove-cat="${c}">✕</span></span>`).join(' ');
           }},
-          { key: 'recurrence', label: 'Повторение', editable: true, editType: 'recurrence', render: r => {
+          { key: 'recurrence', label: 'Повторение', editable: true, editType: 'recurrence', rawValue: r => r.recurrence || buildRecurrenceJson(r), render: r => {
             const json = r.recurrence || buildRecurrenceJson(r);
-            if (!json) return '<span class="text-faint">—</span>';
-            return `<span class="cell-recurrence">${escapeHtml(formatRecurrence(json))}</span>`;
+            const base = json ? `<span class="cell-recurrence">${escapeHtml(formatRecurrence(json))}</span>` : '<span class="text-faint">—</span>';
+            if (isScheduleExpired(r)) {
+              const d = daysSinceScheduleExpired(r);
+              return `${base} <span style="font-size:11px;color:var(--color-red);white-space:nowrap;">· истёк ${d} ${pluralDays(d)} назад</span>`;
+            }
+            return base;
           }},
           { key: 'details', label: 'Детали', editable: true, editType: 'text', render: r => {
             if (!r.details) return '<span class="text-faint">—</span>';
@@ -1970,6 +2121,7 @@ async function loadSchedule(subTab) {
               else if (r.unit === 'month' && (r.every || 1) === 1) { params.frequency = 'monthly'; }
               else if (r.unit === 'month') { params.frequency = `every_${r.every}m`; }
               if (r.time) params.timeOfDay = r.time;
+              params.untilDate = r.until || '';
               await invoke('update_schedule', params);
             } catch {}
           } else {
@@ -1985,6 +2137,7 @@ async function loadSchedule(subTab) {
         onDelete: async (id) => { await invoke('delete_schedule', { id }); },
       });
       await dbv.render();
+      injectExpiredSeparator(activeInit);
       // Templates button next to add-row
       const addRow = paneEl.querySelector('.dbv-add-row');
       if (addRow) {

@@ -1147,6 +1147,8 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
             archived INTEGER DEFAULT 0
         );"
     ).ok();
+    // v0.40: schedule end date (after which it's considered expired)
+    conn.execute("ALTER TABLE schedules ADD COLUMN until_date TEXT", []).ok();
 }
 
 pub fn migrate_activity_tracking(conn: &rusqlite::Connection) {
@@ -1531,6 +1533,91 @@ pub fn enable_crr_tables(conn: &rusqlite::Connection) {
         }
     }
     eprintln!("CRR enabled for {} tables", tables.len());
+}
+
+pub fn migrate_food_blacklist(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS food_blacklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL CHECK(type IN ('tag','product','category','keyword')),
+            value TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(type, value)
+        );"
+    ).ok();
+
+    // One-shot: migrate legacy blacklist from facts (category='food', key contains 'лэклист')
+    let already: i64 = conn.query_row("SELECT COUNT(*) FROM food_blacklist", [], |r| r.get(0)).unwrap_or(0);
+    if already > 0 { return; }
+
+    let mut stmt = match conn.prepare(
+        "SELECT id, value FROM facts WHERE category='food' AND (key LIKE '%лэклист%' OR key LIKE '%blacklist%')"
+    ) { Ok(s) => s, Err(_) => return };
+
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+        .map(|m| m.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default();
+
+    for (fact_id, val) in &rows {
+        for raw in val.split(',') {
+            let item = raw.trim().to_lowercase();
+            if item.is_empty() { continue; }
+            let entry_type = classify_blacklist_item(conn, &item);
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO food_blacklist (type, value) VALUES (?1, ?2)",
+                rusqlite::params![entry_type, item],
+            );
+        }
+        let _ = conn.execute("DELETE FROM facts WHERE id=?1", rusqlite::params![fact_id]);
+    }
+}
+
+/// Classify a blacklist string: category code, tag in catalog, product name, else keyword.
+fn classify_blacklist_item(conn: &rusqlite::Connection, item: &str) -> &'static str {
+    const CATS: &[&str] = &["meat","fish","veg","fruit","grain","dairy","legumes","nuts","spice","oil","bakery","drinks","other"];
+    if CATS.contains(&item) { return "category"; }
+    let product_hit: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingredient_catalog WHERE name = ?1 COLLATE NOCASE",
+        rusqlite::params![item], |r| r.get(0),
+    ).unwrap_or(0);
+    if product_hit > 0 { return "product"; }
+    let tag_hit: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingredient_catalog WHERE (',' || tags || ',') LIKE ?1",
+        rusqlite::params![format!("%,{},%", item)], |r| r.get(0),
+    ).unwrap_or(0);
+    if tag_hit > 0 { return "tag"; }
+    "keyword"
+}
+
+pub fn migrate_catalog_subgroup(conn: &rusqlite::Connection) {
+    let has_col = conn.prepare("SELECT subgroup FROM ingredient_catalog LIMIT 1").is_ok();
+    if !has_col {
+        let _ = conn.execute("ALTER TABLE ingredient_catalog ADD COLUMN subgroup TEXT", []);
+    }
+
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='catalog_subgroup_autofill'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+
+    // Autogroup: first non-empty tag becomes subgroup for rows with NULL subgroup.
+    let mut stmt = match conn.prepare(
+        "SELECT id, tags FROM ingredient_catalog WHERE (subgroup IS NULL OR subgroup = '') AND tags != ''"
+    ) { Ok(s) => s, Err(_) => return };
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+        .map(|m| m.filter_map(|x| x.ok()).collect())
+        .unwrap_or_default();
+    for (id, tags) in &rows {
+        if let Some(first) = tags.split(',').map(|t| t.trim()).find(|t| !t.is_empty()) {
+            let _ = conn.execute(
+                "UPDATE ingredient_catalog SET subgroup=?1 WHERE id=?2",
+                rusqlite::params![first, id],
+            );
+        }
+    }
+    let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('catalog_subgroup_autofill')", []);
 }
 
 pub fn migrate_sports_catalog(conn: &rusqlite::Connection) {

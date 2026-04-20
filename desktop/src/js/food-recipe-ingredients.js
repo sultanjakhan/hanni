@@ -1,20 +1,25 @@
 // ── food-recipe-ingredients.js — Structured ingredient input: category → product → create ──
 import { invoke } from './state.js';
-import { CAT_LABELS, CAT_ORDER, invalidateCatalogCache } from './food-recipe-filters.js';
+import { CAT_LABELS, CAT_ORDER, invalidateCatalogCache,
+  isIngredientBlocked, isTagBlocked, isCategoryBlocked } from './food-recipe-filters.js';
 
 const UNITS = ['г', 'кг', 'мл', 'л', 'шт', 'ст.л.', 'ч.л.', 'стакан'];
+const productBlocked = (c, bl) => isIngredientBlocked(c.name, bl)
+  || (c.tags || '').split(',').some(t => isTagBlocked(t.trim(), bl));
+const keywordBlocked = (typed, bl) => (bl || []).some(e =>
+  e.type === 'keyword' && typed.toLowerCase().includes((e.value || '').toLowerCase()));
 
-export function renderIngredientRows(ct, catalog) {
+export function renderIngredientRows(ct, catalog, blacklist = []) {
   ct.innerHTML = '';
-  ct.insertBefore(createRow(catalog), null);
+  ct.insertBefore(createRow(catalog, blacklist), null);
   const ab = document.createElement('button');
   ab.className = 'btn-secondary'; ab.textContent = '+ Ингредиент';
   ab.style.cssText = 'margin-top:6px;font-size:12px;padding:4px 10px;';
-  ab.onclick = () => { ct.insertBefore(createRow(catalog), ab); };
+  ab.onclick = () => { ct.insertBefore(createRow(catalog, blacklist), ab); };
   ct.appendChild(ab);
 }
 
-function createRow(catalog) {
+function createRow(catalog, blacklist) {
   const row = document.createElement('div');
   row.className = 'ingr-row';
   const selUnit = UNITS[0];
@@ -30,7 +35,7 @@ function createRow(catalog) {
     if (row.parentElement.querySelectorAll('.ingr-row').length > 1) row.remove();
   };
   const nameInput = row.querySelector('.ingr-name-input');
-  nameInput.addEventListener('focus', () => openPicker(row, nameInput, catalog));
+  nameInput.addEventListener('focus', () => openPicker(row, nameInput, catalog, blacklist));
   nameInput.addEventListener('blur', () => setTimeout(() => closeAC(row), 180));
   return row;
 }
@@ -46,50 +51,45 @@ function setupUnitDD(row) {
   });
   row.addEventListener('focusout', () => setTimeout(() => { dd.style.display = 'none'; }, 150));
 }
-function openPicker(row, input, catalog) {
-  if (row.dataset.cat) showProductList(row, input, catalog, row.dataset.cat);
-  else showCategoryPicker(row, input, catalog);
+function openPicker(row, input, catalog, blacklist) {
+  if (row.dataset.cat) showProductList(row, input, catalog, row.dataset.cat, blacklist);
+  else showCategoryPicker(row, input, catalog, blacklist);
 }
-function showCategoryPicker(row, input, catalog) {
+function showCategoryPicker(row, input, catalog, blacklist) {
   closeAC(row);
   const dd = document.createElement('div');
   dd.className = 'ingr-autocomplete ingr-cat-picker';
   for (const cat of CAT_ORDER) {
-    const count = catalog.filter(c => c.category === cat).length;
+    if (isCategoryBlocked(cat, blacklist)) continue;
+    const count = catalog.filter(c => c.category === cat && !productBlocked(c, blacklist)).length;
+    if (!count) continue;
     const opt = document.createElement('div');
     opt.className = 'ingr-autocomplete-item ingr-cat-btn';
     opt.innerHTML = `${CAT_LABELS[cat] || cat} <span class="ingr-cat-count">(${count})</span>`;
     opt.onmousedown = (e) => {
-      e.preventDefault();
-      row.dataset.cat = cat;
-      input.readOnly = false;
-      input.placeholder = `Поиск в ${CAT_LABELS[cat]}...`;
-      input.value = '';
-      showProductList(row, input, catalog, cat);
-      input.focus();
+      e.preventDefault(); row.dataset.cat = cat; input.readOnly = false;
+      input.placeholder = `Поиск в ${CAT_LABELS[cat]}...`; input.value = '';
+      showProductList(row, input, catalog, cat, blacklist); input.focus();
     };
     dd.appendChild(opt);
   }
   row.querySelector('.ingr-row-main').appendChild(dd);
 }
 
-function showProductList(row, input, catalog, cat) {
+function showProductList(row, input, catalog, cat, blacklist) {
   closeAC(row);
   const q = input.value.trim().toLowerCase();
-  const items = catalog.filter(c => c.category === cat && (!q || c.name.toLowerCase().includes(q)));
+  const items = catalog.filter(c => c.category === cat && !productBlocked(c, blacklist)
+    && (!q || c.name.toLowerCase().includes(q)));
   const dd = document.createElement('div');
   dd.className = 'ingr-autocomplete';
-  // Back link
   const back = document.createElement('div');
   back.className = 'ingr-autocomplete-item ingr-back-link';
   back.textContent = `← ${CAT_LABELS[cat]}`;
   back.onmousedown = (e) => {
-    e.preventDefault();
-    delete row.dataset.cat;
-    input.readOnly = true;
-    input.placeholder = 'Категория...';
-    input.value = '';
-    showCategoryPicker(row, input, catalog);
+    e.preventDefault(); delete row.dataset.cat; input.readOnly = true;
+    input.placeholder = 'Категория...'; input.value = '';
+    showCategoryPicker(row, input, catalog, blacklist);
   };
   dd.appendChild(back);
   // Products
@@ -114,26 +114,26 @@ function showProductList(row, input, catalog, cat) {
   if (q && !items.some(i => i.name.toLowerCase() === q)) {
     const create = document.createElement('div');
     create.className = 'ingr-autocomplete-item ingr-autocomplete-create';
-    create.textContent = `+ Создать «${input.value.trim()}»`;
+    const typed = input.value.trim();
+    const blocked = isIngredientBlocked(typed, blacklist) || keywordBlocked(typed, blacklist);
+    create.textContent = blocked ? `🚫 «${typed}» в блэклисте` : `+ Создать «${typed}»`;
+    if (blocked) create.style.color = 'var(--color-red)';
     create.onmousedown = async (e) => {
       e.preventDefault();
-      const nm = input.value.trim();
-      try { await invoke('add_ingredient_to_catalog', { name: nm, category: cat }); catalog.push({ name: nm, category: cat }); invalidateCatalogCache(); } catch {}
-      selectItem(input, nm, row);
+      if (blocked) return;
+      try { await invoke('add_ingredient_to_catalog', { name: typed, category: cat }); catalog.push({ name: typed, category: cat, tags: '' }); invalidateCatalogCache(); } catch {}
+      selectItem(input, typed, row);
     };
     dd.appendChild(create);
   }
   row.querySelector('.ingr-row-main').appendChild(dd);
   // Live filter on input
-  input.oninput = () => showProductList(row, input, catalog, cat);
+  input.oninput = () => showProductList(row, input, catalog, cat, blacklist);
 }
 
 function selectItem(input, name, row) {
-  input.value = name;
-  input.readOnly = true;
-  input.oninput = null;
-  closeAC(row);
-  row.querySelector('.ingr-amount-input')?.focus();
+  input.value = name; input.readOnly = true; input.oninput = null;
+  closeAC(row); row.querySelector('.ingr-amount-input')?.focus();
 }
 function closeAC(row) { row.querySelector('.ingr-autocomplete')?.remove(); }
 

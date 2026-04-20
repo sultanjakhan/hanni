@@ -145,6 +145,8 @@ fn init_database() -> HanniDb {
     migrate_timeline(&conn);
     db::migrate_sleep(&conn);
     db::migrate_sports_catalog(&conn);
+    db::migrate_food_blacklist(&conn);
+    db::migrate_catalog_subgroup(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -496,8 +498,14 @@ pub fn run() {
             commands_data::get_ingredient_catalog,
             commands_data::add_ingredient_to_catalog,
             commands_data::update_ingredient_in_catalog,
+            commands_data::list_catalog_subgroups,
             commands_data::delete_ingredient_from_catalog,
             commands_data::check_ingredient_usage,
+            commands_data::list_food_blacklist,
+            commands_data::add_food_blacklist,
+            commands_data::remove_food_blacklist,
+            commands_data::find_recipes_matching_blacklist,
+            commands_data::delete_recipes_matching_blacklist,
             commands_data::get_cuisines,
             commands_data::add_cuisine,
             commands_data::toggle_favorite_recipe,

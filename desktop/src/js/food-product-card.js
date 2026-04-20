@@ -7,17 +7,24 @@ const CAT_COLORS = {
   oil: 'amber', bakery: 'warm', drinks: 'cyan', other: 'gray',
 };
 
-export function renderProductCard(product) {
+export function renderProductCard(product, opts = {}) {
+  const { productBlocked = false, blockedTags = new Set(), blockedCategory = false } = opts;
   const div = document.createElement('div');
-  div.className = 'product-card';
+  div.className = 'product-card' + (productBlocked ? ' product-card--blocked' : '');
   div.dataset.id = product.id;
   const color = CAT_COLORS[product.category] || 'gray';
   const label = CAT_LABELS[product.category] || product.category;
+  const catCls = blockedCategory ? ' product-card-tag--blocked' : '';
   const tagsHtml = (product.tags || '').split(',').filter(Boolean)
-    .map(t => `<span class="product-card-tag">${esc(t.trim())}</span>`).join('');
+    .map(t => {
+      const tag = t.trim();
+      const cls = blockedTags.has(tag.toLowerCase()) ? ' product-card-tag--blocked' : '';
+      return `<span class="product-card-tag${cls}">${esc(tag)}</span>`;
+    }).join('');
+  const blockIcon = productBlocked ? '<span class="product-card-blocked-icon" title="В блэклисте">🚫</span>' : '';
   div.innerHTML = `
-    <div class="product-card-name">${esc(product.name)}</div>
-    <div class="product-card-tags"><span class="product-card-cat product-cat-${color}">${label}</span>${tagsHtml}</div>`;
+    <div class="product-card-name">${blockIcon}${esc(product.name)}</div>
+    <div class="product-card-tags"><span class="product-card-cat product-cat-${color}${catCls}">${label}</span>${tagsHtml}</div>`;
   return div;
 }
 

@@ -1,5 +1,8 @@
 /* ── Calendar tab — Notion style ── */
 
+/* Delegate scroll to .tab-content so .calendar-nav sticky actually sticks */
+#calendar-content .uni-content { overflow: visible; }
+
 .calendar-nav {
   display: flex; align-items: center; gap: var(--space-2);
   position: sticky;
@@ -1216,6 +1219,26 @@
 .product-cat-warm { background: var(--color-orange-bg); color: var(--color-orange); }
 .product-cat-cyan { background: var(--color-blue-bg); color: var(--color-blue); }
 .product-cat-gray { background: var(--bg-hover); color: var(--text-muted); }
+.cat-grid, .sg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; padding: 8px 0; }
+.cat-tile, .sg-tile { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 16px 12px; text-align: center; cursor: pointer; transition: box-shadow 0.15s, transform 0.15s; }
+.cat-tile:hover, .sg-tile:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.cat-tile-emoji { font-size: 32px; margin-bottom: 6px; }
+.cat-tile-name, .sg-tile-name { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px; }
+.cat-tile-count, .sg-tile-count { font-size: 12px; color: var(--text-muted); }
+.cat-tile--blocked, .sg-tile--blocked { opacity: 0.55; border-color: var(--color-red, #e03e3e); }
+.pp-breadcrumb { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pp-crumb { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.pp-crumb:hover { background: var(--bg-hover); color: var(--text-primary); }
+.pp-crumb-active { color: var(--text-primary); font-weight: 500; cursor: default; }
+.pp-crumb-active:hover { background: transparent; }
+.pp-crumb-sep { color: var(--text-muted); }
+.product-card--blocked { opacity: 0.45; border-color: var(--color-red, #e03e3e); background: var(--color-red-bg, rgba(224,62,62,0.08)); }
+.product-card--blocked:hover { opacity: 0.7; }
+.product-card-blocked-icon { margin-right: 4px; font-size: 12px; }
+.product-card-tag--blocked { background: var(--color-red-bg, rgba(224,62,62,0.15)); color: var(--color-red, #e03e3e); text-decoration: line-through; }
+.rf-chip--blocked { opacity: 0.6; border-color: var(--color-red, #e03e3e); color: var(--color-red, #e03e3e); }
+.rf-chip--blocked.active { background: var(--color-red-bg, rgba(224,62,62,0.15)); }
+.pp-bl-tag-btn { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
 .add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .rf-chip-add { border-style: dashed; opacity: 0.7; }
 .rf-chip-add:hover { opacity: 1; }

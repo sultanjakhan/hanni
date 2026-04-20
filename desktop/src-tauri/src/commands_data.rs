@@ -1066,9 +1066,9 @@ pub fn create_schedule(title: String, category: String, frequency: String, frequ
 pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let sql = if category.is_some() {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day FROM schedules WHERE category=?1 ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date FROM schedules WHERE category=?1 ORDER BY title"
     } else {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day FROM schedules ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date FROM schedules ORDER BY title"
     };
     let mut stmt = conn.prepare(sql).map_err(|e| format!("DB error: {}", e))?;
     let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cat) = category {
@@ -1086,13 +1086,14 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
             "is_active": row.get::<_, i64>(7)? == 1,
             "created_at": row.get::<_, Option<String>>(8)?,
             "marks_previous_day": row.get::<_, i64>(9).unwrap_or(0) == 1,
+            "until_date": row.get::<_, Option<String>>(10).unwrap_or(None),
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(v) = title { conn.execute("UPDATE schedules SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = category { conn.execute("UPDATE schedules SET category=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
@@ -1102,6 +1103,10 @@ pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>,
     if let Some(v) = details { conn.execute("UPDATE schedules SET details=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = is_active { conn.execute("UPDATE schedules SET is_active=?1 WHERE id=?2", rusqlite::params![v as i64, id]).ok(); }
     if let Some(v) = marks_previous_day { conn.execute("UPDATE schedules SET marks_previous_day=?1 WHERE id=?2", rusqlite::params![v as i64, id]).ok(); }
+    if let Some(v) = until_date {
+        let val: Option<String> = if v.is_empty() { None } else { Some(v) };
+        conn.execute("UPDATE schedules SET until_date=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
+    }
     Ok(())
 }
 
@@ -2206,28 +2211,33 @@ pub fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), Strin
 #[tauri::command]
 pub fn get_ingredient_catalog(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
-    let mut stmt = conn.prepare("SELECT id, name, category, tags FROM ingredient_catalog ORDER BY name")
+    let mut stmt = conn.prepare("SELECT id, name, category, tags, COALESCE(subgroup,'') FROM ingredient_catalog ORDER BY name")
         .map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
-        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "category": row.get::<_, String>(2)?, "tags": row.get::<_, String>(3)? }))
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
+            "category": row.get::<_, String>(2)?, "tags": row.get::<_, String>(3)?,
+            "subgroup": row.get::<_, String>(4)?,
+        }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn add_ingredient_to_catalog(name: String, category: Option<String>, tags: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn add_ingredient_to_catalog(name: String, category: Option<String>, tags: Option<String>, subgroup: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
     let cat = category.unwrap_or_else(|| "other".into());
     let t = tags.unwrap_or_default();
-    conn.execute("INSERT OR IGNORE INTO ingredient_catalog (name, category, tags) VALUES (?1, ?2, ?3)",
-        rusqlite::params![name, cat, t]).map_err(|e| format!("DB error: {}", e))?;
+    let sg = subgroup.filter(|s| !s.is_empty());
+    conn.execute("INSERT OR IGNORE INTO ingredient_catalog (name, category, tags, subgroup) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![name, cat, t, sg]).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE",
         rusqlite::params![name], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
     Ok(id)
 }
 
 #[tauri::command]
-pub fn update_ingredient_in_catalog(id: i64, name: Option<String>, category: Option<String>, tags: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_ingredient_in_catalog(id: i64, name: Option<String>, category: Option<String>, tags: Option<String>, subgroup: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(ref new_name) = name {
         let old_name: String = conn.query_row("SELECT name FROM ingredient_catalog WHERE id=?1",
@@ -2245,7 +2255,24 @@ pub fn update_ingredient_in_catalog(id: i64, name: Option<String>, category: Opt
         conn.execute("UPDATE ingredient_catalog SET tags=?1 WHERE id=?2",
             rusqlite::params![t, id]).map_err(|e| format!("DB error: {}", e))?;
     }
+    if let Some(ref sg) = subgroup {
+        let val: Option<&str> = if sg.is_empty() { None } else { Some(sg.as_str()) };
+        conn.execute("UPDATE ingredient_catalog SET subgroup=?1 WHERE id=?2",
+            rusqlite::params![val, id]).map_err(|e| format!("DB error: {}", e))?;
+    }
     Ok(())
+}
+
+#[tauri::command]
+pub fn list_catalog_subgroups(category: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(subgroup,'') AS sg, COUNT(*) AS cnt FROM ingredient_catalog WHERE category=?1 GROUP BY sg ORDER BY sg"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![category], |row| {
+        Ok(serde_json::json!({ "name": row.get::<_, String>(0)?, "count": row.get::<_, i64>(1)? }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -2265,6 +2292,112 @@ pub fn check_ingredient_usage(ingredient_name: String, db: tauri::State<'_, Hann
     let names: Vec<String> = stmt.query_map(rusqlite::params![ingredient_name], |r| r.get(0))
         .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(serde_json::json!({ "count": names.len(), "recipe_names": names }))
+}
+
+// ── Food blacklist ──────────────────────────────────────────────────
+fn blacklist_keywords(conn: &rusqlite::Connection, entry_type: &str, value: &str) -> Vec<String> {
+    let v = value.trim().to_lowercase();
+    match entry_type {
+        "tag" => {
+            let mut kws = vec![v.clone()];
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT name FROM ingredient_catalog WHERE (',' || tags || ',') LIKE ?1"
+            ) {
+                let pat = format!("%,{},%", v);
+                let names: Vec<String> = stmt.query_map(rusqlite::params![pat], |r| r.get(0))
+                    .map(|m| m.filter_map(|x| x.ok()).collect()).unwrap_or_default();
+                kws.extend(names);
+            }
+            kws
+        }
+        "category" => {
+            let mut kws = vec![];
+            if let Ok(mut stmt) = conn.prepare("SELECT name FROM ingredient_catalog WHERE category = ?1") {
+                let names: Vec<String> = stmt.query_map(rusqlite::params![v], |r| r.get(0))
+                    .map(|m| m.filter_map(|x| x.ok()).collect()).unwrap_or_default();
+                kws.extend(names);
+            }
+            kws
+        }
+        _ => vec![v],
+    }
+}
+
+fn recipes_matching_keywords(conn: &rusqlite::Connection, kws: &[String]) -> Vec<(i64, String)> {
+    if kws.is_empty() { return vec![]; }
+    let mut ids: std::collections::BTreeMap<i64, String> = std::collections::BTreeMap::new();
+    for kw in kws {
+        let pat = format!("%{}%", kw);
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT DISTINCT r.id, r.name FROM recipes r \
+             LEFT JOIN recipe_ingredients ri ON ri.recipe_id = r.id \
+             WHERE LOWER(r.name) LIKE ?1 OR LOWER(IFNULL(r.ingredients,'')) LIKE ?1 \
+                OR LOWER(IFNULL(ri.name,'')) LIKE ?1"
+        ) {
+            let rows: Vec<(i64, String)> = stmt.query_map(rusqlite::params![pat], |r|
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                .map(|m| m.filter_map(|x| x.ok()).collect()).unwrap_or_default();
+            for (id, name) in rows { ids.insert(id, name); }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+#[tauri::command]
+pub fn list_food_blacklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare("SELECT id, type, value FROM food_blacklist ORDER BY type, value")
+        .map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "type": row.get::<_, String>(1)?,
+            "value": row.get::<_, String>(2)? }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn add_food_blacklist(entry_type: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    if !["tag","product","category","keyword"].contains(&entry_type.as_str()) {
+        return Err("invalid type".into());
+    }
+    let conn = db.conn();
+    let v = value.trim().to_lowercase();
+    if v.is_empty() { return Err("empty value".into()); }
+    conn.execute("INSERT OR IGNORE INTO food_blacklist (type, value) VALUES (?1, ?2)",
+        rusqlite::params![entry_type, v]).map_err(|e| format!("DB error: {}", e))?;
+    let id: i64 = conn.query_row("SELECT id FROM food_blacklist WHERE type=?1 AND value=?2",
+        rusqlite::params![entry_type, v], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn remove_food_blacklist(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM food_blacklist WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn find_recipes_matching_blacklist(entry_type: String, value: String, db: tauri::State<'_, HanniDb>)
+    -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let kws = blacklist_keywords(&conn, &entry_type, &value);
+    let hits = recipes_matching_keywords(&conn, &kws);
+    Ok(hits.into_iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect())
+}
+
+#[tauri::command]
+pub fn delete_recipes_matching_blacklist(entry_type: String, value: String, db: tauri::State<'_, HanniDb>)
+    -> Result<usize, String> {
+    let conn = db.conn();
+    let kws = blacklist_keywords(&conn, &entry_type, &value);
+    let hits = recipes_matching_keywords(&conn, &kws);
+    let count = hits.len();
+    for (id, _) in hits {
+        let _ = conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id]);
+    }
+    Ok(count)
 }
 
 #[tauri::command]

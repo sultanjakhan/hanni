@@ -26,6 +26,7 @@ export function renderBulkBar(container, tabId, ctx) {
   bar.className = 'dbv-bulk-bar';
   bar.innerHTML = `<span class="dbv-bulk-count">${sel.size} выбрано</span>
     <button class="dbv-action-btn dbv-bulk-deselect">Снять</button>
+    ${ctx.onFreeze ? '<button class="dbv-action-btn dbv-bulk-freeze">❄ Заморозить</button>' : ''}
     ${ctx.onDelete ? '<button class="dbv-action-btn dbv-bulk-delete">Удалить</button>' : ''}
     ${ctx.onDuplicate ? '<button class="dbv-action-btn dbv-bulk-dup">Дубликат</button>' : ''}`;
 
@@ -41,6 +42,17 @@ export function renderBulkBar(container, tabId, ctx) {
     clearSelection(tabId);
     for (const id of ids) surgicalRowRemove(container, id);
     bar.remove();
+  });
+
+  bar.querySelector('.dbv-bulk-freeze')?.addEventListener('click', async () => {
+    const records = ctx.records || [];
+    const ids = [...sel];
+    for (const id of ids) {
+      const rec = records.find(r => r[ctx.idField] === id);
+      if (rec) await ctx.onFreeze(id, rec);
+    }
+    clearSelection(tabId);
+    if (ctx.reloadFn) ctx.reloadFn();
   });
 
   bar.querySelector('.dbv-bulk-dup')?.addEventListener('click', async () => {

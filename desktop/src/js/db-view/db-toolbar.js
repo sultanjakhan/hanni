@@ -68,6 +68,16 @@ export function renderToolbar(container, availableViews, activeView, onViewChang
 
   if (actions.onFilter) addActionBtn(actionsBar, _s('<path d="M2 4h12M4 8h8M6 12h4"/>') + 'Фильтр', () => actions.onFilter(actionsBar.lastChild));
 
+  if (actions.onFrozenView) {
+    const cnt = actions.frozenCount ?? 0;
+    const btn = document.createElement('button');
+    btn.className = 'dbv-action-btn' + (cnt > 0 ? ' has-frozen' : '');
+    btn.innerHTML = `<span style="margin-right:4px;">❄</span>${cnt}`;
+    btn.title = 'Замороженные';
+    btn.addEventListener('click', () => actions.onFrozenView(btn));
+    actionsBar.appendChild(btn);
+  }
+
   if (actions.onQuickFilter) {
     const qf = actions.quickFilter || null;
     const grp = document.createElement('div');

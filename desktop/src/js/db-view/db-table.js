@@ -20,7 +20,7 @@ export async function renderTableView(el, ctx) {
   const {
     tabId, recordTable, records, fixedColumns = [], idField = 'id',
     customProps = [], valuesMap = {}, reloadFn, onRowClick, onAdd, onQuickAdd, addButton, onSort,
-    onDelete, onDuplicate, onCellEdit,
+    onDelete, onDuplicate, onFreeze, onCellEdit,
   } = ctx;
 
   await loadColState(tabId);
@@ -32,7 +32,7 @@ export async function renderTableView(el, ctx) {
   const hiddenFixed = getHiddenFixedCols(tabId);
   const deletedFixed = getDeletedFixedCols(tabId);
   const visFixedColumns = fixedColumns.filter(c => !hiddenFixed.includes(c.key) && !deletedFixed.includes(c.key));
-  const hasActions = !!(onDelete || onDuplicate);
+  const hasActions = !!(onDelete || onDuplicate || onFreeze);
   const reload = reloadFn || (() => {});
 
   // Build unified column order (fixed keys + "prop_ID")
@@ -74,7 +74,7 @@ export async function renderTableView(el, ctx) {
         const c = col.def;
         const val = c.render ? c.render(r) : escapeHtml(String(r[c.key] ?? ''));
         if (c.editable) {
-          const raw = escapeHtml(String(r[c.key] ?? ''));
+          const raw = c.rawValue ? escapeHtml(String(c.rawValue(r) ?? '')) : escapeHtml(String(r[c.key] ?? ''));
           const opts = c.editOptions ? escapeHtml(JSON.stringify(c.editOptions)) : '[]';
           return `<td class="cell-fixed-edit" data-record-id="${rid}" data-edit-key="${c.key}" data-edit-type="${c.editType || 'text'}" data-edit-options='${opts}' data-raw-value="${raw}" tabindex="0">${val}</td>`;
         }
@@ -116,7 +116,7 @@ export async function renderTableView(el, ctx) {
   if (hasActions) {
     bindCheckboxes(el, tabId, filtered, idField, { ...ctx, reloadFn: reload, records: filtered });
     renderBulkBar(el, tabId, { ...ctx, reloadFn: reload, records: filtered });
-    bindRowContextMenu(el, { records: filtered, idField, onDelete, onDuplicate, reloadFn: reload });
+    bindRowContextMenu(el, { records: filtered, idField, onDelete, onDuplicate, onFreeze, reloadFn: reload });
   }
   bindClipboard(el, { recordTable, reloadFn: reload });
   enableRowDrag(el, filtered, idField);

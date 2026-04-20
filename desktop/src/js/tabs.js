@@ -682,8 +682,10 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
   e.stopPropagation();
   const dropdown = document.getElementById('tab-dropdown');
   const list = document.getElementById('tab-dropdown-list');
+  const search = document.getElementById('tab-dropdown-search');
   const btn = document.getElementById('tab-add');
   list.innerHTML = '';
+  if (search) search.value = '';
 
   // "New Page" option — always first
   const newPageItem = document.createElement('div');
@@ -746,11 +748,42 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
     item.addEventListener('click', () => { dropdown.classList.add('hidden'); openTab(id); });
     list.appendChild(item);
   }
-  // Position dropdown near + button (vertical tab bar)
+  // Position dropdown near + button (vertical tab bar).
+  // Choose direction (down/up) by where there is more free space, so the
+  // popup never gets clipped by the viewport.
   const rect = btn.getBoundingClientRect();
+  const margin = 16;
+  const spaceBelow = window.innerHeight - rect.top - margin;
+  const spaceAbove = rect.bottom - margin;
   dropdown.style.left = (rect.right + 4) + 'px';
-  dropdown.style.top = Math.max(8, rect.top) + 'px';
+  if (spaceBelow >= spaceAbove) {
+    dropdown.style.top = Math.max(8, rect.top) + 'px';
+    dropdown.style.bottom = 'auto';
+    dropdown.style.maxHeight = Math.max(120, spaceBelow) + 'px';
+  } else {
+    dropdown.style.top = 'auto';
+    dropdown.style.bottom = Math.max(8, window.innerHeight - rect.bottom) + 'px';
+    dropdown.style.maxHeight = Math.max(120, spaceAbove) + 'px';
+  }
   dropdown.classList.toggle('hidden');
+  if (search && !dropdown.classList.contains('hidden')) {
+    search.focus();
+  }
+});
+
+document.getElementById('tab-dropdown-search')?.addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  const list = document.getElementById('tab-dropdown-list');
+  if (!list) return;
+  list.querySelectorAll('.tab-dropdown-item').forEach((item) => {
+    if (item.classList.contains('tab-dropdown-new-page')) return;
+    const match = !q || item.textContent.toLowerCase().includes(q);
+    item.style.display = match ? '' : 'none';
+  });
+});
+
+document.getElementById('tab-dropdown-search')?.addEventListener('click', (e) => {
+  e.stopPropagation();
 });
 
 document.addEventListener('click', () => {
