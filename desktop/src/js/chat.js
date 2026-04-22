@@ -6,12 +6,47 @@ import { autoSaveConversation, loadConversationsList } from './conversations.js'
 import { showChatSettingsMode, hideChatSettingsMode } from './tabs.js';
 
 // ── Auto-update notification ──
+function updaterBanner() {
+  let el = document.getElementById('updater-banner');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'updater-banner';
+  el.style.cssText = 'padding:8px 16px;background:var(--bg-card);color:var(--text-secondary);font-size:12px;text-align:center;border-bottom:1px solid var(--border-default);display:flex;justify-content:center;align-items:center;gap:12px;';
+  document.getElementById('content-area')?.prepend(el);
+  return el;
+}
+function setUpdaterBanner(html) { updaterBanner().innerHTML = html; }
+function mb(bytes) { return (bytes / 1048576).toFixed(0); }
+
+let updaterVersion = '';
 listen('update-available', (event) => {
-  const version = event.payload;
-  const banner = document.createElement('div');
-  banner.style.cssText = 'padding:8px 16px;background:var(--bg-card);color:var(--text-secondary);font-size:12px;text-align:center;border-bottom:1px solid var(--border-default);';
-  banner.textContent = `Обновление до v${version}...`;
-  document.getElementById('content-area')?.prepend(banner);
+  updaterVersion = event.payload;
+  setUpdaterBanner(`Качаю обновление до v${updaterVersion}…`);
+});
+listen('update-progress', (event) => {
+  const { downloaded = 0, total = 0, percent = 0 } = event.payload || {};
+  const size = total ? ` — ${mb(downloaded)} / ${mb(total)} МБ` : '';
+  setUpdaterBanner(`Обновление до v${updaterVersion} — ${percent}%${size}`);
+});
+listen('update-installing', () => {
+  setUpdaterBanner(`Устанавливаю v${updaterVersion}…`);
+});
+listen('update-ready', (event) => {
+  const v = event.payload || updaterVersion;
+  setUpdaterBanner(
+    `Готово: v${v} установлена · ` +
+    `<button id="updater-restart-btn" style="background:var(--bg-accent,#333);color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;">Перезапустить</button>`
+  );
+  document.getElementById('updater-restart-btn')?.addEventListener('click', () => {
+    invoke('restart_app');
+  });
+});
+listen('update-error', (event) => {
+  const msg = event.payload || 'Ошибка';
+  setUpdaterBanner(
+    `Обновление не установилось: ${escapeHtml(String(msg))} · ` +
+    `<a href="https://github.com/sultanjakhan/hanni/releases/latest" target="_blank" style="color:var(--text-accent,#06f);">Скачать DMG вручную</a>`
+  );
 });
 
 // ── Proactive message listener ──

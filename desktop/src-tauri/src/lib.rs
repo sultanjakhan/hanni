@@ -51,7 +51,6 @@ use macos::run_osascript;
 use commands_meta::spawn_api_server;
 #[cfg(not(target_os = "android"))]
 use commands_meta::{
-    updater_with_headers,
     ensure_voice_server_launchagent, ensure_openclaw_gateway,
 };
 
@@ -291,6 +290,7 @@ pub fn run() {
             macos::get_browser_tab,
             commands_meta::get_app_version,
             commands_meta::check_update,
+            commands_meta::restart_app,
             // Proactive
             proactive::get_proactive_settings,
             proactive::set_proactive_settings,
@@ -697,26 +697,13 @@ pub fn run() {
                 app.manage(hanni_db);
             }
 
-            // Auto-updater (desktop only)
+            // Auto-updater (desktop only) — downloads in background and emits
+            // `update-ready`; the UI shows a "Restart" button instead of
+            // auto-restarting (see commands_meta::auto_check_on_startup).
             #[cfg(not(target_os = "android"))]
             {
                 let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let updater = match updater_with_headers(&handle) {
-                        Ok(u) => u,
-                        Err(_) => return,
-                    };
-                    match updater.check().await {
-                        Ok(Some(update)) => {
-                            let version = update.version.clone();
-                            let _ = handle.emit("update-available", &version);
-                            if let Ok(()) = update.download_and_install(|_, _| {}, || {}).await {
-                                handle.restart();
-                            }
-                        }
-                        _ => {}
-                    }
-                });
+                tauri::async_runtime::spawn(commands_meta::auto_check_on_startup(handle));
             }
 
             // Save system prompt for nightly training script
