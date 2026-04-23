@@ -236,6 +236,14 @@ async function loadFood(subTab) {
     title: 'Food',
     subtitle: 'Питание и продукты',
     icon: '🍔',
+    toolbarActions: [{
+      icon: '🔗',
+      title: 'Общий доступ',
+      onClick: async () => {
+        const { openShareModal } = await import('./share-modal.js');
+        openShareModal('food');
+      },
+    }],
     renderTable: async (paneEl) => {
       await loadFoodLog(paneEl);
     },

@@ -83,11 +83,16 @@ export async function renderUnifiedLayout(el, tabId, config) {
     return `<div class="uni-tab${cls}" data-pane="${p.id}">${p.label}${countHtml}</div>`;
   }).join('');
 
+  const actionsHtml = (config.toolbarActions || []).map((a, i) =>
+    `<button class="uni-header-action" data-action-idx="${i}" title="${escapeHtml(a.title || '')}">${a.icon}</button>`
+  ).join('');
+
   el.innerHTML = `
     <div class="uni-header">
       <span class="uni-header-icon" title="Изменить иконку">${icon}</span>
       <span class="uni-header-name" title="Изменить название">${escapeHtml(name)}</span>
       <div class="uni-header-desc" title="Изменить описание">${desc ? escapeHtml(desc) : '<span style="opacity:0.4">Добавить описание…</span>'}</div>
+      ${actionsHtml ? `<div class="uni-header-actions">${actionsHtml}</div>` : ''}
     </div>
     ${config.headerExtra || ''}
     <div class="uni-tabs">${tabsHtml}</div>
@@ -97,6 +102,14 @@ export async function renderUnifiedLayout(el, tabId, config) {
 
   // Wire header editing
   wireHeaderEdit(el, tabId, config, meta, defaults);
+
+  // Wire toolbar actions (Share, etc.)
+  (config.toolbarActions || []).forEach((act, idx) => {
+    const btn = el.querySelector(`.uni-header-action[data-action-idx="${idx}"]`);
+    if (btn && typeof act.onClick === 'function') {
+      btn.addEventListener('click', (e) => { e.stopPropagation(); act.onClick(); });
+    }
+  });
 
   // Wire sub-tab clicks
   el.querySelectorAll('.uni-tab').forEach(tab => {

@@ -1659,3 +1659,48 @@ pub fn migrate_sports_catalog(conn: &rusqlite::Connection) {
     // Add template_id FK to existing workouts table
     conn.execute("ALTER TABLE workouts ADD COLUMN template_id INTEGER", []).ok();
 }
+
+pub fn migrate_share_links(conn: &rusqlite::Connection) {
+    // v0.41: public share links exposed via Cloudflare Tunnel
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS share_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT NOT NULL UNIQUE,
+            tab TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'all',
+            permissions TEXT NOT NULL DEFAULT '[\"view\"]',
+            label TEXT NOT NULL DEFAULT '',
+            lifetime TEXT NOT NULL DEFAULT 'permanent',
+            expires_at TEXT,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            revoked_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_token ON share_links(token);
+
+        CREATE TABLE IF NOT EXISTS share_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            link_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '',
+            guest_ip TEXT NOT NULL DEFAULT '',
+            user_agent TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (link_id) REFERENCES share_links(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_activity_link ON share_activity(link_id);
+
+        CREATE TABLE IF NOT EXISTS share_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            link_id INTEGER NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            author TEXT NOT NULL DEFAULT 'Guest',
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (link_id) REFERENCES share_links(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_share_comments_entity ON share_comments(entity_type, entity_id);"
+    ).ok();
+}

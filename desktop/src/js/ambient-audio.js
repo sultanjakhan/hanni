@@ -16,29 +16,37 @@ export const SOUNDS = [
 ];
 
 const STORAGE_KEY = 'hanni_ambient_state';
-const ctx = new AudioContext({ latencyHint: 'playback' });
-ctx.addEventListener('statechange', () => {
-  if (ctx.state === 'interrupted' || ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-  }
-});
+
+// Lazy AudioContext: WebKit on macOS spawns new AudioContext in 'suspended' state
+// until a user gesture. Creating it inside the first click handler sidesteps that.
+let ctx = null;
+function getCtx() {
+  if (ctx) return ctx;
+  ctx = new AudioContext({ latencyHint: 'playback' });
+  ctx.addEventListener('statechange', () => {
+    if (ctx.state === 'interrupted' || ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  });
+  // Keep-alive: prevent macOS from suspending AudioContext while playing.
+  setInterval(() => {
+    if (!isAnyPlaying()) return;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+  }, 25_000);
+  return ctx;
+}
+
 const bufferCache = new Map();
 const nodes = new Map();   // id → { source, gain, playing }
 const volumes = {};
 let masterVol = 0.8;
 let onChange = null;
 
-// Keep-alive: prevent macOS from suspending AudioContext
-setInterval(() => {
-  if (!isAnyPlaying()) return;
-  if (ctx.state !== 'running') ctx.resume().catch(() => {});
-}, 25_000);
-
 async function loadBuffer(id) {
   if (bufferCache.has(id)) return bufferCache.get(id);
   const resp = await fetch(`sounds/${id}.m4a`);
   const arr = await resp.arrayBuffer();
-  const buf = await ctx.decodeAudioData(arr);
+  const buf = await getCtx().decodeAudioData(arr);
   bufferCache.set(id, buf);
   return buf;
 }
@@ -49,17 +57,20 @@ function getNode(id) {
 }
 
 async function startSound(id) {
-  if (ctx.state === 'suspended') await ctx.resume();
+  // Create/resume ctx synchronously inside click handler — before any await —
+  // so WebKit accepts this as a valid user-gesture activation.
+  const c = getCtx();
+  if (c.state !== 'running') c.resume().catch(() => {});
   const node = getNode(id);
   if (node.playing || node.starting) return;
   node.starting = true;
   try {
     const buf = await loadBuffer(id);
     if (!node.starting) return; // cancelled by stop during loadBuffer
-    const gain = ctx.createGain();
+    const gain = c.createGain();
     gain.gain.value = (volumes[id] ?? 0.7) * masterVol;
-    gain.connect(ctx.destination);
-    const source = ctx.createBufferSource();
+    gain.connect(c.destination);
+    const source = c.createBufferSource();
     source.buffer = buf;
     source.loop = true;
     source.connect(gain);

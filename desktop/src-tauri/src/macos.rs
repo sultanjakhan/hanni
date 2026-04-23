@@ -234,7 +234,7 @@ pub async fn open_url(url: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn send_notification(title: String, body: String) -> Result<String, String> {
     let script = format!(
-        "display notification \"{}\" with title \"{}\"",
+        "display notification \"{}\" with title \"{}\" sound name \"Ping\"",
         osa_escape(&body),
         osa_escape(&title)
     );

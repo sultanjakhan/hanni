@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Hanni · {{LABEL}}</title>
+  <link rel="stylesheet" href="assets/guest.css">
+  <script>
+    window.__SHARE__ = {
+      token: "{{TOKEN}}",
+      tab: "{{TAB}}",
+      scope: "{{SCOPE}}",
+      permissions: {{PERMS}},
+      label: "{{LABEL}}",
+    };
+  </script>
+</head>
+<body>
+  <header class="hdr">
+    <div class="hdr-icon">🍔</div>
+    <div>
+      <div class="hdr-title">{{LABEL}}</div>
+      <div class="hdr-sub">Hanni · общий доступ к рецептам</div>
+    </div>
+  </header>
+  <main id="app"><div class="muted">Загрузка…</div></main>
+  <footer class="ftr">powered by Hanni</footer>
+  <script src="assets/guest.js"></script>
+</body>
+</html>

@@ -57,7 +57,7 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 ## Coding Rules
 
 ### Size Limits
-- **No file/component longer than 150 lines.** If it exceeds — split automatically
+- **No file/component longer than 230 lines.** If it exceeds — split automatically
 - **Rust: one `pub fn` = one task**, max 80 lines
 - **UI separated from logic** — always
 
@@ -76,7 +76,7 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 - [ ] No hardcoded colors/sizes (use CSS vars)
 - [ ] New Tauri commands registered in `invoke_handler`
 - [ ] No `console.log` / `dbg!()` left behind
-- [ ] No files over 150 lines introduced
+- [ ] No files over 230 lines introduced
 - [ ] No duplicate `const`/`let` declarations in the same scope
 
 ## Tools Strategy

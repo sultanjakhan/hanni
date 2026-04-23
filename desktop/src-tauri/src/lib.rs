@@ -31,6 +31,9 @@ mod health_connect_plugin;
 mod health_import;
 mod sleep_analysis;
 mod timeline_health;
+mod share_server;
+mod share_tunnel;
+mod commands_share;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -146,6 +149,7 @@ fn init_database() -> HanniDb {
     db::migrate_sports_catalog(&conn);
     db::migrate_food_blacklist(&conn);
     db::migrate_catalog_subgroup(&conn);
+    db::migrate_share_links(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -254,6 +258,7 @@ pub fn run() {
         .manage(call_mode)
         .manage(mcp::McpState::empty())
         .manage(commands_meta::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
+        .manage(share_tunnel::ShareTunnel::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -685,6 +690,12 @@ pub fn run() {
             health_import::get_heart_rate_samples,
             health_import::get_health_summary,
             sleep_analysis::get_sleep_analysis,
+            // Share links
+            commands_share::create_share_link,
+            commands_share::list_share_links,
+            commands_share::revoke_share_link,
+            commands_share::get_share_activity,
+            commands_share::tunnel_status,
         ])
         .setup(move |app| {
             // Android: resolve data dir from Tauri, then init DB
@@ -714,6 +725,12 @@ pub fn run() {
             let api_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 spawn_api_server(api_handle).await;
+            });
+
+            // Share-links public HTTP server (guest-facing, tunneled via cloudflared later)
+            let share_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                share_server::spawn_share_server(share_handle).await;
             });
 
             // MCP client manager — connect to configured MCP servers in background
@@ -1161,7 +1178,7 @@ pub fn run() {
                     for (_, title) in due {
                         let _ = reminder_handle.emit("reminder-fired", &title);
                         let _ = run_osascript(&format!(
-                            "display notification \"{}\" with title \"Напоминание\"",
+                            "display notification \"{}\" with title \"Напоминание\" sound name \"Ping\"",
                             macos::osa_escape(&title)
                         ));
                     }
@@ -1184,7 +1201,7 @@ pub fn run() {
                         let payload = serde_json::json!({"id": id, "title": title});
                         let _ = reminder_handle.emit("note-reminder-fired", &payload);
                         let _ = run_osascript(&format!(
-                            "display notification \"{}\" with title \"Заметка\"",
+                            "display notification \"{}\" with title \"Заметка\" sound name \"Ping\"",
                             macos::osa_escape(&title)
                         ));
                     }
