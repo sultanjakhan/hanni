@@ -32,6 +32,11 @@ mod health_import;
 mod sleep_analysis;
 mod timeline_health;
 mod share_server;
+mod share_auth;
+mod share_routes_recipes_read;
+mod share_routes_recipes_write;
+mod share_routes_comments;
+mod share_static;
 mod share_tunnel;
 mod commands_share;
 
@@ -53,9 +58,7 @@ use proactive::{
 use macos::run_osascript;
 use commands_meta::spawn_api_server;
 #[cfg(not(target_os = "android"))]
-use commands_meta::{
-    ensure_voice_server_launchagent, ensure_openclaw_gateway,
-};
+use commands_meta::ensure_voice_server_launchagent;
 
 // Imports needed by run()
 use std::sync::Arc;
@@ -187,18 +190,7 @@ pub fn run() {
     #[cfg(not(target_os = "android"))]
     let hanni_db = init_database();
 
-    // Desktop-only: MLX server (on-demand — starts when needed, stops after 5min idle)
-    #[cfg(not(target_os = "android"))]
-    mlx_manager::init();
-    #[cfg(not(target_os = "android"))]
-    mlx_manager::spawn_idle_watchdog();
-
-    #[cfg(not(target_os = "android"))]
-    let openclaw_child = ensure_openclaw_gateway();
-    #[cfg(not(target_os = "android"))]
-    let openclaw_process = Arc::new(OpenClawProcess(std::sync::Mutex::new(openclaw_child)));
-    #[cfg(not(target_os = "android"))]
-    let openclaw_cleanup = openclaw_process.clone();
+    // MLX + OpenClaw disabled — см. memory archive/project_llm_disabled.md
 
     #[cfg(not(target_os = "android"))]
     std::thread::spawn(|| {
@@ -1281,18 +1273,5 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Hanni")
-        .run(move |_app, event| {
-            #[cfg(not(target_os = "android"))]
-            if let tauri::RunEvent::Exit = event {
-                // Kill MLX server process on app exit
-                mlx_manager::stop();
-                // Kill OpenClaw gateway if we started it as subprocess
-                {
-                    let mut child = openclaw_cleanup.0.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(ref mut proc) = *child {
-                        let _ = proc.kill();
-                    }
-                }
-            }
-        });
+        .run(|_app, _event| {});
 }

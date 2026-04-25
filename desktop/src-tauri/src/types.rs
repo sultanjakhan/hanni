@@ -332,8 +332,6 @@ pub struct TokenPayload {
 pub struct HttpClient(pub reqwest::Client);
 pub struct LlmBusy(pub tokio::sync::Semaphore);
 
-pub struct OpenClawProcess(pub std::sync::Mutex<Option<Child>>);
-
 // ── Whisper / Voice state ──
 
 pub struct WhisperState {
