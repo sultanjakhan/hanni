@@ -18,6 +18,12 @@ async function loadTimeline(subTab) {
     title: 'Timeline',
     subtitle: '24-часовой обзор активности',
     icon: '⏱️',
+    defaultPane: 'today',
+
+    renderToday: async (paneEl) => {
+      const { renderTimelineToday } = await import('./timeline-today.js');
+      await renderTimelineToday(paneEl);
+    },
 
     renderDash: async (paneEl) => {
       const { renderTimelineDash } = await import('./timeline-dash.js');

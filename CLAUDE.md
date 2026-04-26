@@ -84,12 +84,11 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 ### Prefer native tools
 Use Read/Edit/Grep/Glob/Bash for all code tasks. They are faster and more reliable.
 
-### MCP usage
-- **screenshot.sh** — `desktop/tools/screenshot.sh` for Hanni screenshots (NOT MCP screenshot). Pass port as 2nd arg for dev: `screenshot.sh /tmp/out.png 8236`
-- **HTTP API** — `127.0.0.1:8235/auto/eval` (prod) or `127.0.0.1:8236/auto/eval` (dev). Use the port of the instance you're testing against; по умолчанию — порт dev-сборки, если она запущена и правки касаются dev.
+### MCP / tools
 - **playwright** — only for external web pages, never for Hanni itself
 - **context7 / Nia** — library/API documentation lookup before coding
 - **css/a11y** — only when explicitly requested for audit
+(Для скриншотов и DOM-ops смотри секцию «Hanni app interaction» ниже.)
 
 ### Skills strategy
 When a task is non-trivial, consider which skill fits during the clarification step:
@@ -97,9 +96,8 @@ When a task is non-trivial, consider which skill fits during the clarification s
 | Skill | When to use |
 |-------|-------------|
 | `architect` | Restructuring modules, splitting files, managing boundaries |
-| `decompose` | Understanding full project structure before big changes |
 | `design` | UI/UX improvements, visual consistency, animations |
-| `debug` / `debug-llm` | Systematic bug investigation |
+| `debug` | Systematic bug investigation |
 | `qa` | Testing edge cases, verifying error handling |
 | `add-tab` / `add-command` / `add-action` | Scaffolding new features |
 | `refactor` | Safe renaming, extraction, with dependency tracking |
@@ -108,6 +106,7 @@ When a task is non-trivial, consider which skill fits during the clarification s
 | `improve` | Code review from a specific perspective |
 | `security` | Hardening, vulnerability audit, input validation |
 | `deps` | Audit/update Cargo, pip, npm dependencies |
+| `db-migrate` / `docs` | Schema migrations, architecture docs |
 
 For architectural decisions or large features, use `architect` or the Plan agent first.
 
@@ -134,7 +133,7 @@ For architectural decisions or large features, use `architect` or the Plan agent
 - **MCP hanni**: Python MCP server (`hanni-mcp/server.py`) — CRUD for SQLite (facts, events, SQL)
 - **Voice**: `voice_server.py` — background LaunchAgent for speech
 - **Build**: `UPDATER_GITHUB_TOKEN=dummy cargo check` for dev
-- **Graceful quit**: `osascript -e 'tell application "Hanni" to quit'`. Re-open — попросить пользователя (никогда не `open -a Hanni` / activate, см. `feedback_no_activate`). Never kill/pkill/killall
+- **Graceful quit**: `osascript -e 'tell application "Hanni" to quit'`. Re-open — попросить пользователя (никогда не `open -a Hanni` / activate, см. `feedback_safety.md`). Never kill/pkill/killall
 
 ## Safety & Rollback
 

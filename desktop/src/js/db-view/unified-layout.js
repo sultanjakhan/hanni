@@ -55,10 +55,11 @@ function savePaneState(tabId, pane) {
 
 export async function renderUnifiedLayout(el, tabId, config) {
   if (!S._unifiedPane) S._unifiedPane = {};
-  if (!S._unifiedPane[tabId]) S._unifiedPane[tabId] = loadPaneState()[tabId] || 'dash';
+  if (!S._unifiedPane[tabId]) S._unifiedPane[tabId] = loadPaneState()[tabId] || config.defaultPane || 'dash';
   const activePane = S._unifiedPane[tabId];
 
   const panes = [...SUB_PANES];
+  if (config.renderToday) panes.splice(0, 0, { id: 'today', icon: '📋', label: 'Сегодня' });
   if (config.renderBody) panes.splice(1, 0, { id: 'body', icon: '🦴', label: 'Тело' });
   if (config.renderSleep) panes.splice(config.renderBody ? 2 : 1, 0, { id: 'sleep', icon: '🌙', label: 'Сон' });
   if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
@@ -133,6 +134,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
         const { renderDashboard } = await import('../dashboard-builder.js');
         await renderDashboard(paneEl, tabId);
       }
+      break;
+    case 'today':
+      if (config.renderToday) await config.renderToday(paneEl);
       break;
     case 'body':
       if (config.renderBody) await config.renderBody(paneEl);

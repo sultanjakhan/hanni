@@ -24,15 +24,16 @@ function getCtx() {
   if (ctx) return ctx;
   ctx = new AudioContext({ latencyHint: 'playback' });
   ctx.addEventListener('statechange', () => {
+    if (!isAnyPlaying()) return;
     if (ctx.state === 'interrupted' || ctx.state === 'suspended') {
       ctx.resume().catch(() => {});
     }
   });
-  // Keep-alive: prevent macOS from suspending AudioContext while playing.
-  setInterval(() => {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
     if (!isAnyPlaying()) return;
     if (ctx.state !== 'running') ctx.resume().catch(() => {});
-  }, 25_000);
+  });
   return ctx;
 }
 

@@ -1320,6 +1320,23 @@ pub fn migrate_timeline(conn: &rusqlite::Connection) {
     }
 }
 
+// Today timeline: link blocks to source (Calendar/Schedule/Notes), track active block
+pub fn migrate_timeline_today(conn: &rusqlite::Connection) {
+    conn.execute("ALTER TABLE timeline_blocks ADD COLUMN is_active INTEGER DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE timeline_blocks ADD COLUMN source_type TEXT", []).ok();
+    conn.execute("ALTER TABLE timeline_blocks ADD COLUMN source_id INTEGER", []).ok();
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tl_blocks_active ON timeline_blocks(date) WHERE is_active = 1", []).ok();
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tl_blocks_source ON timeline_blocks(source_type, source_id)", []).ok();
+    conn.execute("ALTER TABLE schedule_completions ADD COLUMN status TEXT DEFAULT 'done'", []).ok();
+    conn.execute(
+        "INSERT INTO timeline_activity_types (name, color, icon, is_system, sort_order)
+         SELECT ?1, ?2, ?3, 1, ?4 WHERE NOT EXISTS (
+             SELECT 1 FROM timeline_activity_types WHERE name=?1 AND is_system=1
+         )",
+        rusqlite::params!["Запланировано", "#3b82f6", "📋", 6i64],
+    ).ok();
+}
+
 pub fn migrate_sleep(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sleep_sessions (

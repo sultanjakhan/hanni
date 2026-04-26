@@ -21,6 +21,7 @@ mod agent;
 mod vacancy;
 mod dashboard;
 mod commands_timeline;
+mod commands_timeline_today;
 mod timeline_stats;
 mod timeline_afk;
 mod mlx_manager;
@@ -148,6 +149,8 @@ fn init_database() -> HanniDb {
     migrate_job_search(&conn);
     migrate_dashboard_widgets(&conn);
     migrate_timeline(&conn);
+    db::migrate_timeline_today(&conn);
+    commands_timeline_today::auto_close_orphan_blocks(&conn);
     db::migrate_sleep(&conn);
     db::migrate_sports_catalog(&conn);
     db::migrate_food_blacklist(&conn);
@@ -668,6 +671,10 @@ pub fn run() {
             timeline_afk::sync_afk_blocks,
             timeline_afk::sync_timeline_auto,
             timeline_health::sync_health_to_timeline,
+            commands_timeline_today::get_today_planned,
+            commands_timeline_today::start_task_block,
+            commands_timeline_today::complete_task_block,
+            commands_timeline_today::get_active_block,
             // Sync
             sync_commands::sync_now,
             sync_commands::get_sync_status,
