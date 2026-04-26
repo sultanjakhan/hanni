@@ -54,3 +54,56 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 4px
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
 .err { background: #fee; color: #b00; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin: 10px 0; }
 .ok { background: #e6f7e6; color: #060; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin: 10px 0; }
+
+/* Tab bar (scope=all) */
+.guest-tabs {
+  display: flex; gap: 6px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.guest-tab {
+  background: transparent; border: 0; padding: 10px 14px;
+  color: var(--muted); font-size: 14px; cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.guest-tab:hover { color: var(--fg); }
+.guest-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Product cards */
+.prod-card { border-left: 3px solid var(--border); }
+.prod-cat-meat { border-left-color: #c2410c; }
+.prod-cat-fish { border-left-color: #2563eb; }
+.prod-cat-dairy { border-left-color: #f0abfc; }
+.prod-cat-veg { border-left-color: #16a34a; }
+.prod-cat-fruit { border-left-color: #facc15; }
+.prod-cat-grain { border-left-color: #a16207; }
+.prod-cat-bakery { border-left-color: #d97706; }
+.prod-cat-drink { border-left-color: #0891b2; }
+.prod-cat-sweet { border-left-color: #ec4899; }
+.prod-cat-frozen { border-left-color: #38bdf8; }
+.prod-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.prod-name { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+.prod-actions { display: flex; gap: 4px; }
+.prod-notes { margin-top: 6px; font-size: 13px; color: var(--muted); font-style: italic; }
+.link-btn {
+  background: transparent; border: 0; cursor: pointer; padding: 4px 6px;
+  color: var(--muted); font-size: 16px; border-radius: 4px;
+}
+.link-btn:hover { background: var(--border); color: var(--fg); }
+.link-btn-danger:hover { background: #fee; color: #b00; }
+
+/* Expiry badges */
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 500;
+  background: var(--border); color: var(--muted);
+}
+.badge-warn { background: #fef3c7; color: #92400e; }
+.badge-danger { background: #fee2e2; color: #991b1b; }
+
+/* Meal plan */
+.meal-card { border-left: 3px solid var(--border); }
+.meal-breakfast { border-left-color: #facc15; }
+.meal-lunch { border-left-color: #16a34a; }
+.meal-dinner { border-left-color: #7c3aed; }
+.meal-snack { border-left-color: #94a3b8; }
+.meal-label { color: var(--muted); font-size: 13px; }

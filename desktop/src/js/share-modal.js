@@ -3,7 +3,7 @@
 import { invoke } from './state.js';
 import { escapeHtml, confirmModal } from './utils.js';
 
-const PERM_LABELS = { view: 'Просмотр', add: 'Добавление', edit: 'Редактирование', comment: 'Комментарии' };
+const PERM_LABELS = { view: 'Просмотр', add: 'Добавление', edit: 'Редактирование', delete: 'Удаление', comment: 'Комментарии' };
 const SCOPE_LABELS = {
   food: { all: 'Вся еда', recipes: 'Рецепты', products: 'Продукты', meal_plan: 'План меню' },
 };

@@ -51,7 +51,7 @@ pub async fn create_share_link(
     expires_at: Option<String>,
     db: State<'_, HanniDb>,
 ) -> Result<ShareLinkRow, String> {
-    let allowed_perms = ["view", "add", "edit", "comment"];
+    let allowed_perms = ["view", "add", "edit", "delete", "comment"];
     for p in &permissions {
         if !allowed_perms.contains(&p.as_str()) {
             return Err(format!("Unknown permission: {}", p));
