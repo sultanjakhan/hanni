@@ -696,6 +696,7 @@ pub fn run() {
             commands_share::create_share_link,
             commands_share::list_share_links,
             commands_share::revoke_share_link,
+            commands_share::delete_share_link,
             commands_share::get_share_activity,
             commands_share::tunnel_status,
         ])

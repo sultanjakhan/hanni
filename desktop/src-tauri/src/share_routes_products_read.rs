@@ -1,4 +1,4 @@
-// share_routes_products_read.rs — GET /products
+// share_routes_products_read.rs — GET /products (catalog from ingredient_catalog)
 
 use axum::{
     extract::{Path, State as AxumState, ConnectInfo},
@@ -29,26 +29,22 @@ pub async fn list_products(
         return Err((StatusCode::FORBIDDEN, "Scope does not include products".into()));
     }
     let mut stmt = conn.prepare(
-        "SELECT id, name, category, quantity, unit, expiry_date, location, notes
-         FROM products
-         ORDER BY (expiry_date IS NULL), expiry_date
-         LIMIT 200"
+        "SELECT id, name, category, tags, COALESCE(subgroup,'') as subgroup
+         FROM ingredient_catalog
+         ORDER BY category, subgroup, name"
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
         Ok(serde_json::json!({
             "id": r.get::<_, i64>(0)?,
             "name": r.get::<_, String>(1)?,
             "category": r.get::<_, String>(2)?,
-            "quantity": r.get::<_, f64>(3)?,
-            "unit": r.get::<_, String>(4)?,
-            "expiry_date": r.get::<_, Option<String>>(5)?,
-            "location": r.get::<_, String>(6)?,
-            "notes": r.get::<_, String>(7)?,
+            "tags": r.get::<_, String>(3)?,
+            "subgroup": r.get::<_, String>(4)?,
         }))
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
       .filter_map(|r| r.ok()).collect();
     drop(stmt);
-    log_activity(&conn, ctx.id, "view", "list_products", &ip, &ua);
+    log_activity(&conn, ctx.id, "view", "list_products_catalog", &ip, &ua);
 
     Ok(Json(serde_json::json!({
         "products": rows, "label": ctx.label, "permissions": ctx.permissions,

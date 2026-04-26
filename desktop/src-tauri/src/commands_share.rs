@@ -166,6 +166,18 @@ pub fn revoke_share_link(id: i64, db: State<'_, HanniDb>) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn delete_share_link(id: i64, db: State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM share_activity WHERE link_id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error (activity): {}", e))?;
+    conn.execute("DELETE FROM share_comments WHERE link_id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error (comments): {}", e))?;
+    conn.execute("DELETE FROM share_links WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| format!("DB error (link): {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_share_activity(
     link_id: i64,
     limit: Option<i64>,

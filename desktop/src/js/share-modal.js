@@ -66,6 +66,12 @@ async function refreshList(overlay, tabId) {
       await invoke('revoke_share_link', { id });
       refreshList(overlay, tabId);
     }));
+    body.querySelectorAll('[data-delete]').forEach(btn => btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.delete);
+      if (!(await confirmModal('Удалить ссылку и всю её историю навсегда?'))) return;
+      await invoke('delete_share_link', { id });
+      refreshList(overlay, tabId);
+    }));
     body.querySelectorAll('[data-qr]').forEach(btn => btn.addEventListener('click', () => {
       const row = btn.dataset.row;
       const qrBox = body.querySelector(`#share-qr-${row}`);
@@ -106,9 +112,10 @@ function renderList(links, tabId) {
         <button class="share-icon-btn" data-qr="${escapeHtml(url)}" data-row="${l.id}" title="QR-код">▦</button>
       </div>
       <div class="share-qr" id="share-qr-${l.id}" style="display:none"></div>` : ''}
-      ${isActive ? `<div class="share-row-actions">
-        <button class="btn-link-danger" data-revoke="${l.id}">Отозвать</button>
-      </div>` : ''}
+      <div class="share-row-actions">
+        ${isActive ? `<button class="btn-link-danger" data-revoke="${l.id}">Отозвать</button>` : ''}
+        <button class="btn-link-danger" data-delete="${l.id}">Удалить навсегда</button>
+      </div>
     </div>`;
   }).join('');
 }

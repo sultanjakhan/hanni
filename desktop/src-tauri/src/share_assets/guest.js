@@ -39,15 +39,7 @@
     ];
   }
 
-  function setHeaderIcon(viewId) {
-    const icon = document.querySelector('.hdr-icon');
-    if (!icon) return;
-    icon.textContent = viewId === 'products' ? '🛒'
-      : viewId === 'meal_plan' ? '🍽' : '🍔';
-  }
-
   function mountView(viewId, mountEl) {
-    setHeaderIcon(viewId);
     const mod = (window.HanniGuest || {})[viewId];
     if (!mod || typeof mod.mount !== 'function') {
       mountEl.innerHTML = `<div class="err">Внутренняя ошибка: модуль "${esc(viewId)}" не загружен.</div>`;

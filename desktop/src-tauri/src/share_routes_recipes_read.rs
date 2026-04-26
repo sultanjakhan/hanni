@@ -29,8 +29,8 @@ pub async fn list_recipes(
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
     }
     let mut stmt = conn.prepare(
-        "SELECT id, name, description, prep_time, cook_time, servings, calories, tags,
-                difficulty, cuisine, protein, fat, carbs
+        "SELECT id, name, description, ingredients, prep_time, cook_time, servings, calories, tags,
+                difficulty, cuisine, protein, fat, carbs, favorite, health_score, price_score
          FROM recipes ORDER BY updated_at DESC LIMIT 50"
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
@@ -38,24 +38,39 @@ pub async fn list_recipes(
             "id": r.get::<_, i64>(0)?,
             "name": r.get::<_, String>(1)?,
             "description": r.get::<_, String>(2)?,
-            "prep_time": r.get::<_, i64>(3)?,
-            "cook_time": r.get::<_, i64>(4)?,
-            "servings": r.get::<_, i64>(5)?,
-            "calories": r.get::<_, i64>(6)?,
-            "tags": r.get::<_, String>(7)?,
-            "difficulty": r.get::<_, String>(8).unwrap_or_else(|_| "easy".into()),
-            "cuisine": r.get::<_, String>(9).unwrap_or_else(|_| "kz".into()),
-            "protein": r.get::<_, i64>(10).unwrap_or(0),
-            "fat": r.get::<_, i64>(11).unwrap_or(0),
-            "carbs": r.get::<_, i64>(12).unwrap_or(0),
+            "ingredients": r.get::<_, String>(3)?,
+            "prep_time": r.get::<_, i64>(4)?,
+            "cook_time": r.get::<_, i64>(5)?,
+            "servings": r.get::<_, i64>(6)?,
+            "calories": r.get::<_, i64>(7)?,
+            "tags": r.get::<_, String>(8)?,
+            "difficulty": r.get::<_, String>(9).unwrap_or_else(|_| "easy".into()),
+            "cuisine": r.get::<_, String>(10).unwrap_or_else(|_| "kz".into()),
+            "protein": r.get::<_, i64>(11).unwrap_or(0),
+            "fat": r.get::<_, i64>(12).unwrap_or(0),
+            "carbs": r.get::<_, i64>(13).unwrap_or(0),
+            "favorite": r.get::<_, i64>(14).unwrap_or(0),
+            "health_score": r.get::<_, i64>(15).unwrap_or(5),
+            "price_score": r.get::<_, i64>(16).unwrap_or(5),
         }))
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
       .filter_map(|r| r.ok()).collect();
     drop(stmt);
+
+    // Ingredient catalog (name → category) — small enough to ship inline
+    let mut cat_stmt = conn.prepare("SELECT name, category FROM ingredient_catalog")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let catalog: Vec<serde_json::Value> = cat_stmt.query_map([], |r| {
+        Ok(serde_json::json!({ "name": r.get::<_, String>(0)?, "category": r.get::<_, String>(1)? }))
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+      .filter_map(|r| r.ok()).collect();
+    drop(cat_stmt);
+
     log_activity(&conn, ctx.id, "view", "list_recipes", &ip, &ua);
 
     Ok(Json(serde_json::json!({
-        "recipes": rows, "label": ctx.label, "permissions": ctx.permissions,
+        "recipes": rows, "catalog": catalog,
+        "label": ctx.label, "permissions": ctx.permissions,
     })))
 }
 
@@ -72,9 +87,10 @@ pub async fn get_recipe(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "view")?;
-    let recipe = conn.query_row(
+    let mut recipe = conn.query_row(
         "SELECT id, name, description, ingredients, instructions, prep_time, cook_time,
-                servings, calories, tags, difficulty, cuisine, protein, fat, carbs
+                servings, calories, tags, difficulty, cuisine, protein, fat, carbs,
+                favorite, health_score, price_score
          FROM recipes WHERE id=?1",
         rusqlite::params![id],
         |r| Ok(serde_json::json!({
@@ -93,8 +109,28 @@ pub async fn get_recipe(
             "protein": r.get::<_, i64>(12).unwrap_or(0),
             "fat": r.get::<_, i64>(13).unwrap_or(0),
             "carbs": r.get::<_, i64>(14).unwrap_or(0),
+            "favorite": r.get::<_, i64>(15).unwrap_or(0),
+            "health_score": r.get::<_, i64>(16).unwrap_or(5),
+            "price_score": r.get::<_, i64>(17).unwrap_or(5),
         }))
     ).map_err(|_| (StatusCode::NOT_FOUND, "Recipe not found".into()))?;
+
+    // Structured ingredient items (name, amount, unit) — for amount-with-unit display
+    let mut ing_stmt = conn.prepare(
+        "SELECT name, amount, unit FROM recipe_ingredients WHERE recipe_id=?1"
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let items: Vec<serde_json::Value> = ing_stmt.query_map(rusqlite::params![id], |r| {
+        Ok(serde_json::json!({
+            "name": r.get::<_, String>(0)?,
+            "amount": r.get::<_, f64>(1)?,
+            "unit": r.get::<_, String>(2)?,
+        }))
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+      .filter_map(|r| r.ok()).collect();
+    drop(ing_stmt);
+    if let Some(obj) = recipe.as_object_mut() {
+        obj.insert("ingredient_items".into(), serde_json::Value::Array(items));
+    }
 
     log_activity(&conn, ctx.id, "view", &format!("recipe:{}", id), &ip, &ua);
     Ok(Json(recipe))
