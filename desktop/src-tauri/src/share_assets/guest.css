@@ -73,6 +73,22 @@ h2 { color: var(--text-primary); font-size: 18px; font-weight: 600; margin-botto
 h3, h4 { color: var(--text-primary); font-size: 13px; font-weight: 600; margin: 16px 0 8px; }
 b { color: var(--text-primary); }
 
+/* ── Modal (mirror Hanni .modal-overlay) ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: var(--modal-overlay-bg);
+  backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center;
+  z-index: 9999; animation: fadeIn 0.12s ease-out;
+}
+.modal {
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: 8px; padding: 24px; width: 480px; max-width: 90vw; max-height: 85vh;
+  overflow-y: auto; box-shadow: var(--shadow-lg); animation: slideUp 0.15s ease-out;
+}
+.modal-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 16px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
 /* ── Tab bar (scope=all) ── */
 .guest-tabs { display: flex; gap: 2px; margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); }
 .guest-tab { background: transparent; border: 0; padding: 8px 14px; color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; font-family: inherit; transition: color var(--transition-fast); }
@@ -111,7 +127,11 @@ b { color: var(--text-primary); }
 
 /* ══ RECIPES (copy from tabs-data.css 1037-1170) ══ */
 .recipe-pane { max-width: 900px; margin: 0 auto; }
-.recipe-filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.recipe-filter-bar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 10; background: var(--bg-page);
+  padding: 10px 0; margin-top: -10px;
+}
 .recipe-search { flex: 1; min-width: 120px; padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-page); color: var(--text-primary); font-size: 13px; outline: none; font-family: inherit; }
 .recipe-search:focus { border-color: var(--border-focus); }
 .rf-toggle { display: flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); cursor: pointer; transition: all var(--transition-fast); position: relative; font-family: inherit; }

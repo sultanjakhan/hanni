@@ -75,6 +75,16 @@
     activate(views[0].id);
   }
 
+  // Global "/" → focus search (when not in input/textarea, no modal open).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = (document.activeElement?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+    if (document.querySelector('.modal-overlay')) return;
+    const search = document.querySelector('.recipe-search');
+    if (search) { e.preventDefault(); search.focus(); search.select(); }
+  });
+
   window.HanniGuest = window.HanniGuest || {};
   window.HanniGuest.utils = { ctx, base, api, esc, can, rememberAuthor, recallAuthor };
 
