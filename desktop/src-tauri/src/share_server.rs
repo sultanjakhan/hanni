@@ -23,7 +23,7 @@ use crate::share_routes_recipes_read::{get_recipe, list_recipes};
 use crate::share_routes_recipes_write::{create_recipe, update_recipe};
 use crate::share_static::{
     asset_css, asset_js, asset_js_meal_plan, asset_js_products,
-    asset_js_recipe_add, asset_js_recipe_ingredients, asset_js_recipe_steps, asset_js_recipes,
+    asset_js_recipe_add, asset_js_recipe_shared, asset_js_recipes,
 };
 use crate::types::HanniDb;
 
@@ -59,9 +59,8 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/assets/guest.css", get(asset_css))
         .route("/s/{token}/assets/guest.js", get(asset_js))
         .route("/s/{token}/assets/guest_recipes.js", get(asset_js_recipes))
+        .route("/s/{token}/assets/recipe-shared.js", get(asset_js_recipe_shared))
         .route("/s/{token}/assets/guest_recipe_add.js", get(asset_js_recipe_add))
-        .route("/s/{token}/assets/guest_recipe_ingredients.js", get(asset_js_recipe_ingredients))
-        .route("/s/{token}/assets/guest_recipe_steps.js", get(asset_js_recipe_steps))
         .route("/s/{token}/assets/guest_products.js", get(asset_js_products))
         .route("/s/{token}/assets/guest_meal_plan.js", get(asset_js_meal_plan))
         .with_state(state);

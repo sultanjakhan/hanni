@@ -28,10 +28,8 @@ pub async fn asset_js_recipe_add() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_recipe_add.js"))
 }
 
-pub async fn asset_js_recipe_ingredients() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_recipe_ingredients.js"))
-}
-
-pub async fn asset_js_recipe_steps() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_recipe_steps.js"))
+// Shared add-recipe modal — same source file as Hanni (desktop/src/js/recipe-shared.js).
+// Compile-time inlined; both frontends always serve identical bytes.
+pub async fn asset_js_recipe_shared() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("../../src/js/recipe-shared.js"))
 }
