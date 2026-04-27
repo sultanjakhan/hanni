@@ -24,6 +24,10 @@ pub async fn asset_js_meal_plan() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_meal_plan.js"))
 }
 
+pub async fn asset_js_memory() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_memory.js"))
+}
+
 pub async fn asset_js_recipe_add() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_recipe_add.js"))
 }

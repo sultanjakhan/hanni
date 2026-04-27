@@ -15,14 +15,14 @@ use tauri::{AppHandle, Manager};
 
 use crate::share_auth::{html_escape, load_link, rate_limit_check};
 use crate::share_routes_comments::{create_comment, list_comments};
-use crate::share_routes_food_meta::{create_catalog_item, create_cuisine, list_cuisines};
+use crate::share_routes_food_meta::{create_catalog_item, create_cuisine, list_blacklist, list_cuisines};
 use crate::share_routes_meal_plan::{create_meal_plan, delete_meal_plan, list_meal_plan};
 use crate::share_routes_products_read::list_products;
 use crate::share_routes_products_write::{create_product, delete_product, update_product};
 use crate::share_routes_recipes_read::{get_recipe, list_recipes};
 use crate::share_routes_recipes_write::{create_recipe, update_recipe};
 use crate::share_static::{
-    asset_css, asset_js, asset_js_meal_plan, asset_js_products,
+    asset_css, asset_js, asset_js_meal_plan, asset_js_memory, asset_js_products,
     asset_js_recipe_add, asset_js_recipe_shared, asset_js_recipes,
 };
 use crate::types::HanniDb;
@@ -56,6 +56,7 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/meal-plan/{id}", delete(delete_meal_plan))
         .route("/s/{token}/cuisines", get(list_cuisines).post(create_cuisine))
         .route("/s/{token}/catalog", axum::routing::post(create_catalog_item))
+        .route("/s/{token}/blacklist", get(list_blacklist))
         .route("/s/{token}/assets/guest.css", get(asset_css))
         .route("/s/{token}/assets/guest.js", get(asset_js))
         .route("/s/{token}/assets/guest_recipes.js", get(asset_js_recipes))
@@ -63,6 +64,7 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/assets/guest_recipe_add.js", get(asset_js_recipe_add))
         .route("/s/{token}/assets/guest_products.js", get(asset_js_products))
         .route("/s/{token}/assets/guest_meal_plan.js", get(asset_js_meal_plan))
+        .route("/s/{token}/assets/guest_memory.js", get(asset_js_memory))
         .with_state(state);
 
     let port = share_port();

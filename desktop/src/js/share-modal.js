@@ -5,7 +5,7 @@ import { escapeHtml, confirmModal } from './utils.js';
 
 const PERM_LABELS = { view: 'Просмотр', add: 'Добавление', edit: 'Редактирование', delete: 'Удаление', comment: 'Комментарии' };
 const SCOPE_LABELS = {
-  food: { all: 'Вся еда', recipes: 'Рецепты', products: 'Продукты', meal_plan: 'План меню' },
+  food: { all: 'Вся еда', recipes: 'Рецепты', products: 'Продукты', meal_plan: 'План меню', memory: 'Память (что не есть)' },
 };
 const LIFETIME_LABELS = { once: 'Одноразовая', permanent: 'Постоянная', expires: 'С экспирацией' };
 const EXPIRY_OPTIONS = [

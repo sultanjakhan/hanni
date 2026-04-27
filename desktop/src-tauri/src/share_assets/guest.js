@@ -32,10 +32,12 @@
     if (ctx.scope === 'recipes') return [{ id: 'recipes', label: '🍔 Рецепты' }];
     if (ctx.scope === 'products') return [{ id: 'products', label: '🛒 Продукты' }];
     if (ctx.scope === 'meal_plan') return [{ id: 'meal_plan', label: '🍽 План' }];
+    if (ctx.scope === 'memory') return [{ id: 'memory', label: '🧠 Память' }];
     return [
       { id: 'recipes', label: '🍔 Рецепты' },
       { id: 'products', label: '🛒 Продукты' },
       { id: 'meal_plan', label: '🍽 План' },
+      { id: 'memory', label: '🧠 Память' },
     ];
   }
 

@@ -22,6 +22,37 @@ fn check_food_recipes_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (Sta
     Ok(())
 }
 
+fn check_food_memory_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
+    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "memory") {
+        return Err((StatusCode::FORBIDDEN, "Scope does not include memory".into()));
+    }
+    Ok(())
+}
+
+pub async fn list_blacklist(
+    Path(token): Path<String>,
+    AxumState(state): AxumState<ShareServerState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    rate_limit_check(&state, &token)?;
+    let db = state.app.state::<HanniDb>();
+    let conn = db.conn();
+    let ctx = load_link(&conn, &token)?;
+    require_perm(&ctx, "view")?;
+    check_food_memory_scope(&ctx)?;
+    let mut stmt = conn.prepare(
+        "SELECT type, value, created_at FROM food_blacklist ORDER BY type, value"
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "type": r.get::<_, String>(0)?,
+            "value": r.get::<_, String>(1)?,
+            "created_at": r.get::<_, String>(2)?,
+        }))
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+      .filter_map(|r| r.ok()).collect();
+    Ok(Json(serde_json::json!({ "blacklist": rows, "label": ctx.label })))
+}
+
 pub async fn list_cuisines(
     Path(token): Path<String>,
     AxumState(state): AxumState<ShareServerState>,
