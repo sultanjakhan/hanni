@@ -15,12 +15,16 @@ use tauri::{AppHandle, Manager};
 
 use crate::share_auth::{html_escape, load_link, rate_limit_check};
 use crate::share_routes_comments::{create_comment, list_comments};
+use crate::share_routes_food_meta::{create_catalog_item, create_cuisine, list_cuisines};
 use crate::share_routes_meal_plan::{create_meal_plan, delete_meal_plan, list_meal_plan};
 use crate::share_routes_products_read::list_products;
 use crate::share_routes_products_write::{create_product, delete_product, update_product};
 use crate::share_routes_recipes_read::{get_recipe, list_recipes};
 use crate::share_routes_recipes_write::{create_recipe, update_recipe};
-use crate::share_static::{asset_css, asset_js, asset_js_meal_plan, asset_js_products, asset_js_recipes};
+use crate::share_static::{
+    asset_css, asset_js, asset_js_meal_plan, asset_js_products,
+    asset_js_recipe_add, asset_js_recipe_ingredients, asset_js_recipe_steps, asset_js_recipes,
+};
 use crate::types::HanniDb;
 
 #[derive(Clone)]
@@ -50,9 +54,14 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/products/{id}", patch(update_product).delete(delete_product))
         .route("/s/{token}/meal-plan", get(list_meal_plan).post(create_meal_plan))
         .route("/s/{token}/meal-plan/{id}", delete(delete_meal_plan))
+        .route("/s/{token}/cuisines", get(list_cuisines).post(create_cuisine))
+        .route("/s/{token}/catalog", axum::routing::post(create_catalog_item))
         .route("/s/{token}/assets/guest.css", get(asset_css))
         .route("/s/{token}/assets/guest.js", get(asset_js))
         .route("/s/{token}/assets/guest_recipes.js", get(asset_js_recipes))
+        .route("/s/{token}/assets/guest_recipe_add.js", get(asset_js_recipe_add))
+        .route("/s/{token}/assets/guest_recipe_ingredients.js", get(asset_js_recipe_ingredients))
+        .route("/s/{token}/assets/guest_recipe_steps.js", get(asset_js_recipe_steps))
         .route("/s/{token}/assets/guest_products.js", get(asset_js_products))
         .route("/s/{token}/assets/guest_meal_plan.js", get(asset_js_meal_plan))
         .with_state(state);

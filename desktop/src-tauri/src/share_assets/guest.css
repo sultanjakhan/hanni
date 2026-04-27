@@ -253,3 +253,54 @@ b { color: var(--text-primary); }
 .mp-recipe-option:last-child { border-bottom: none; }
 .mp-recipe-option:hover { background: var(--bg-hover); }
 .mp-recipe-option.active { background: var(--accent-fill); color: var(--bg-card); }
+
+/* ══ ADD-RECIPE MODAL (ingredient/step rows, autocomplete, accordion chips) ══ */
+.req { color: var(--color-red); }
+.input-error { border-color: var(--color-red) !important; }
+.add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* Accordion (Тип блюда / Сложность / БЖУ) */
+.rf-acc { border-bottom: 1px solid var(--border-subtle); margin-bottom: 8px; }
+.rf-acc:last-of-type { border-bottom: none; }
+.rf-acc-header { display: flex; align-items: center; gap: 6px; padding: 8px 0; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-primary); user-select: none; }
+.rf-acc-header:hover { color: var(--accent-fill); }
+.rf-acc-arrow { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.rf-acc-body { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Ingredient rows */
+.ingr-row { margin-bottom: 8px; position: relative; }
+.ingr-row-main { display: flex; align-items: center; gap: 6px; }
+.ingr-name-input { flex: 2; min-width: 120px; }
+.ingr-amount-input { width: 70px; flex-shrink: 0; }
+.ingr-unit-acc { position: relative; flex-shrink: 0; }
+.ingr-unit-btn { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); white-space: nowrap; font-family: inherit; }
+.ingr-unit-btn:hover { border-color: var(--border-focus); }
+.ingr-unit-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); min-width: 80px; }
+.ingr-unit-opt { padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); }
+.ingr-unit-opt:hover { background: var(--bg-hover); }
+.ingr-unit-opt.active { background: var(--accent-fill); color: var(--bg-card); }
+.ingr-del-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted); padding: 0 4px; line-height: 1; flex-shrink: 0; font-family: inherit; }
+.ingr-del-btn:hover { color: var(--color-red); }
+.ingr-autocomplete { position: absolute; left: 0; top: 100%; z-index: 1000; width: 220px; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); max-height: 220px; overflow-y: auto; box-shadow: var(--shadow-md); }
+.ingr-autocomplete-item { padding: 6px 10px; font-size: 13px; cursor: pointer; color: var(--text-primary); }
+.ingr-autocomplete-item:hover { background: var(--bg-hover); }
+.ingr-autocomplete-create { color: var(--accent-blue); font-weight: 500; }
+.ingr-cat-picker { max-height: 220px; }
+.ingr-cat-btn { display: flex; justify-content: space-between; align-items: center; }
+.ingr-cat-count { color: var(--text-muted); font-size: 12px; }
+.ingr-back-link { color: var(--accent-blue); font-weight: 500; border-bottom: 1px solid var(--border-default); }
+.ingr-product-row { display: flex; justify-content: space-between; align-items: center; }
+
+/* Step rows */
+.step-row { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 8px; }
+.step-num { font-size: 13px; font-weight: 600; color: var(--text-muted); min-width: 20px; padding-top: 6px; }
+.step-fields { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.step-line { display: flex; gap: 6px; align-items: center; }
+.step-acc-wrap { position: relative; }
+.step-acc-btn { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-secondary); white-space: nowrap; font-family: inherit; }
+.step-acc-btn:hover { border-color: var(--border-focus); color: var(--text-primary); }
+.step-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); min-width: 140px; max-height: 180px; overflow-y: auto; }
+.step-dd-opt { padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); }
+.step-dd-opt:hover { background: var(--bg-hover); }
+.step-time-input { width: 60px; }
+.step-note-input { font-size: 14px; color: var(--text-secondary); }

@@ -40,6 +40,7 @@ mod share_routes_comments;
 mod share_routes_products_read;
 mod share_routes_products_write;
 mod share_routes_meal_plan;
+mod share_routes_food_meta;
 mod share_static;
 mod share_tunnel;
 mod commands_share;

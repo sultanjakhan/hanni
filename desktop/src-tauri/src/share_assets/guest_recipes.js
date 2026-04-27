@@ -131,28 +131,11 @@
   }
 
   function openAddModal() {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `<div class="modal" role="dialog" aria-label="Добавить рецепт">
-      <div class="modal-title">Добавить рецепт</div>
-      <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="f-name" autofocus></div>
-      <div class="form-group"><label class="form-label">Ингредиенты (через запятую)</label><textarea class="form-textarea" id="f-ingr" rows="3"></textarea></div>
-      <div class="form-group"><label class="form-label">Инструкции (новый шаг — с новой строки)</label><textarea class="form-textarea" id="f-inst" rows="4"></textarea></div>
-      <div class="form-group"><label class="form-label">Ваше имя (опц.)</label><input class="form-input" id="f-author" value="${esc(recallAuthor())}"></div>
-      <div id="f-msg"></div>
-      <div class="modal-actions">
-        <button class="btn-secondary" id="f-cancel">Отмена</button>
-        <button class="btn-primary" id="f-save">Отправить</button>
-      </div>
-    </div>`;
-    document.body.appendChild(overlay);
-    const close = () => { overlay.remove(); document.removeEventListener('keydown', escHandler); };
-    const escHandler = (e) => { if (e.key === 'Escape') close(); };
-    document.addEventListener('keydown', escHandler);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    overlay.querySelector('#f-cancel').addEventListener('click', close);
-    overlay.querySelector('#f-save').addEventListener('click', () => submitNew(overlay, close));
-    setTimeout(() => overlay.querySelector('#f-name')?.focus(), 50);
+    const mod = (window.HanniGuest || {}).recipeAdd;
+    if (!mod) { alert('Модуль добавления не загружен'); return; }
+    // Pass catalog as array of { name, category } for autocomplete + "+ Создать" flow.
+    const catalog = Object.entries(state.catalog).map(([name, category]) => ({ name, category, tags: '' }));
+    mod.showAddRecipeModal(catalog, load);
   }
 
   async function openDetail(id) {
@@ -216,21 +199,6 @@
   function render() {
     if (state.view === 'detail' && state.current) { state.mount.innerHTML = detailHtml(); bindDetail(); }
     else { state.mount.innerHTML = listHtml(); bindList(); }
-  }
-
-  async function submitNew(scope, onDone) {
-    const root = scope || state.mount, msg = root.querySelector('#f-msg');
-    const name = root.querySelector('#f-name').value.trim();
-    if (!name) { msg.innerHTML = '<div class="err">Название обязательно</div>'; return; }
-    const author = root.querySelector('#f-author').value.trim() || 'guest';
-    rememberAuthor(author);
-    msg.innerHTML = '<div class="muted">Отправка…</div>';
-    try {
-      await api('/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, ingredients: root.querySelector('#f-ingr').value, instructions: root.querySelector('#f-inst').value, author }) });
-      msg.innerHTML = '<div class="ok">Готово!</div>';
-      setTimeout(() => { if (onDone) onDone(); load(); }, 500);
-    } catch (e) { msg.innerHTML = `<div class="err">${esc(e.message || e)}</div>`; }
   }
 
   async function submitComment() {
