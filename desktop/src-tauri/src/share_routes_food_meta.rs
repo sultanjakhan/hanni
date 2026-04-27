@@ -29,6 +29,40 @@ fn check_food_memory_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (Stat
     Ok(())
 }
 
+pub async fn list_fridge(
+    Path(token): Path<String>,
+    AxumState(state): AxumState<ShareServerState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    rate_limit_check(&state, &token)?;
+    let db = state.app.state::<HanniDb>();
+    let conn = db.conn();
+    let ctx = load_link(&conn, &token)?;
+    require_perm(&ctx, "view")?;
+    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "fridge") {
+        return Err((StatusCode::FORBIDDEN, "Scope does not include fridge".into()));
+    }
+    let mut stmt = conn.prepare(
+        "SELECT id, name, category, quantity, unit, expiry_date, location, notes
+         FROM products
+         ORDER BY (expiry_date IS NULL), expiry_date, name
+         LIMIT 500"
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "name": r.get::<_, String>(1)?,
+            "category": r.get::<_, String>(2)?,
+            "quantity": r.get::<_, f64>(3)?,
+            "unit": r.get::<_, String>(4)?,
+            "expiry_date": r.get::<_, Option<String>>(5)?,
+            "location": r.get::<_, String>(6)?,
+            "notes": r.get::<_, String>(7)?,
+        }))
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+      .filter_map(|r| r.ok()).collect();
+    Ok(Json(serde_json::json!({ "items": rows, "label": ctx.label })))
+}
+
 pub async fn list_blacklist(
     Path(token): Path<String>,
     AxumState(state): AxumState<ShareServerState>,

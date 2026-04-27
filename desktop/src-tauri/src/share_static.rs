@@ -28,6 +28,15 @@ pub async fn asset_js_memory() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_memory.js"))
 }
 
+pub async fn asset_js_fridge() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_fridge.js"))
+}
+
+// Shared fridge UI — same source file as Hanni.
+pub async fn asset_js_fridge_shared() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("../../src/js/fridge-shared.js"))
+}
+
 pub async fn asset_js_recipe_add() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_recipe_add.js"))
 }

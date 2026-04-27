@@ -255,6 +255,24 @@ async function loadFood(subTab) {
       const { renderProductCatalogPane } = await import('./food-product-catalog.js');
       await renderProductCatalogPane(paneEl);
     },
+    renderFridge: async (paneEl) => {
+      if (!window.HanniFridge) { paneEl.innerHTML = '<div class="empty">fridge-shared.js не загружен</div>'; return; }
+      window.HanniFridge.mountInventory({
+        el: paneEl,
+        backend: {
+          list: () => invoke('get_products', {}),
+          add: (p) => invoke('add_product', {
+            name: p.name, category: p.category, quantity: p.quantity, unit: p.unit,
+            expiryDate: p.expiry_date, location: p.location, notes: p.notes,
+          }),
+          update: (id, p) => invoke('update_product', {
+            id, name: p.name, quantity: p.quantity, expiryDate: p.expiry_date,
+            location: p.location, notes: p.notes,
+          }),
+          remove: (id) => invoke('delete_product', { id }),
+        },
+      });
+    },
   });
 }
 
