@@ -18,12 +18,6 @@ async function loadTimeline(subTab) {
     title: 'Timeline',
     subtitle: '24-часовой обзор активности',
     icon: '⏱️',
-    defaultPane: 'today',
-
-    renderToday: async (paneEl) => {
-      const { renderTimelineToday } = await import('./timeline-today.js');
-      await renderTimelineToday(paneEl);
-    },
 
     renderDash: async (paneEl) => {
       const { renderTimelineDash } = await import('./timeline-dash.js');
@@ -41,11 +35,19 @@ async function loadTimeline(subTab) {
   }, subTab);
 }
 
-async function renderBlocksTable(paneEl) {
-  const today = localDate();
-  const blocks = await invoke('get_timeline_blocks', { date: today }).catch(() => []);
+let tableOffset = 0;
 
-  const fmtDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('ru', { day: 'numeric', month: 'short' });
+function dateFromOffset(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function renderBlocksTable(paneEl) {
+  const dateStr = dateFromOffset(tableOffset);
+  const blocks = await invoke('get_timeline_blocks', { date: dateStr }).catch(() => []);
+
+  const fmtDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('ru', { day: 'numeric', month: 'short', weekday: 'short' });
 
   const rows = blocks.map(b => `
     <tr class="data-table-row" data-id="${b.id}">
@@ -61,6 +63,14 @@ async function renderBlocksTable(paneEl) {
   const addRow = `<tr class="dbv-add-row"><td colspan="7"><div class="dbv-add-row-label"><span class="dbv-add-row-plus">+</span></div></td></tr>`;
 
   paneEl.innerHTML = `
+    <div class="tl-toolbar">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button class="tl-nav-btn" data-dir="-1">◀</button>
+        <span class="tl-nav-label">${fmtDate(dateStr)}</span>
+        <button class="tl-nav-btn" data-dir="1">▶</button>
+        ${tableOffset !== 0 ? '<button class="tl-nav-btn tl-today-btn" data-dir="0">Сегодня</button>' : ''}
+      </div>
+    </div>
     <div class="dbv-table-wrap">
       <table class="data-table database-view">
         <thead><tr>
@@ -72,15 +82,23 @@ async function renderBlocksTable(paneEl) {
       <div class="dbv-table-footer"><span>Записей: ${blocks.length}</span></div>
     </div>`;
 
+  paneEl.querySelectorAll('.tl-nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const dir = parseInt(btn.dataset.dir);
+      tableOffset = dir === 0 ? 0 : tableOffset + dir;
+      renderBlocksTable(paneEl);
+    });
+  });
+
   paneEl.querySelector('.dbv-add-row')?.addEventListener('click', async () => {
     const { showBlockModal } = await import('./timeline-blocks.js');
-    await showBlockModal(today, null);
+    await showBlockModal(dateStr, null);
     await renderBlocksTable(paneEl);
   });
   paneEl.querySelectorAll('.data-table-row').forEach(row => {
     row.addEventListener('click', async () => {
       const { showBlockModal } = await import('./timeline-blocks.js');
-      await showBlockModal(today, null, parseInt(row.dataset.id));
+      await showBlockModal(dateStr, null, parseInt(row.dataset.id));
       await renderBlocksTable(paneEl);
     });
   });
