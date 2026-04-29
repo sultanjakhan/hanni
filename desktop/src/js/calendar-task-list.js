@@ -1,6 +1,4 @@
-// ── js/calendar-task-list.js — Calendar "Список задач" inner view ──
-// Day/Week/Month list with checkboxes and timer start/stop. Reads same
-// sources as Day-grid: events + recurring schedules + notes-tasks.
+// Calendar "Список задач" — Day/Week/Month list with checkboxes and timer start/stop.
 
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml } from './utils.js';
@@ -100,13 +98,13 @@ export function renderItemRow(item, dateStr) {
 }
 
 export function renderToolbar(mode, label, atCurrent) {
-  const navHtml = (mode === 'day' || mode === 'week') ? `
+  const todayLabel = mode === 'week' ? 'Эта неделя' : mode === 'month' ? 'Этот месяц' : 'Сегодня';
+  const navHtml = `
     <button class="calendar-nav-btn" id="ctl-prev">&lt;</button>
     <div class="calendar-month-label">${escapeHtml(label)}</div>
     <button class="calendar-nav-btn" id="ctl-next">&gt;</button>
-    ${!atCurrent ? `<button class="cal-today-btn" id="ctl-today">${mode === 'week' ? 'Эта неделя' : 'Сегодня'}</button>` : ''}
-    <button class="btn-primary" id="ctl-add" style="margin-left:auto;">+ Событие</button>
-  ` : `<div class="calendar-month-label">Скоро</div>`;
+    ${!atCurrent ? `<button class="cal-today-btn" id="ctl-today">${todayLabel}</button>` : ''}
+    <button class="btn-primary" id="ctl-add" style="margin-left:auto;">+ Событие</button>`;
   return `<div class="cal-list-toolbar">
     <div class="cal-list-nav">${navHtml}</div>
     <div class="cal-list-mode dev-filters">
@@ -161,13 +159,25 @@ export function wireToolbar(el, currentMode) {
       renderCalendarTaskList(el);
     });
   });
-  const step = currentMode === 'week' ? 7 : 1;
-  const onPrev = () => { if (currentMode === 'week') S.calWeekOffset = (S.calWeekOffset || 0) - 1; else S.calDayDate = shiftDate(S.calDayDate || todayStr(), -step); renderCalendarTaskList(el); };
-  const onNext = () => { if (currentMode === 'week') S.calWeekOffset = (S.calWeekOffset || 0) + 1; else S.calDayDate = shiftDate(S.calDayDate || todayStr(), step); renderCalendarTaskList(el); };
-  const onToday = () => { if (currentMode === 'week') S.calWeekOffset = 0; else S.calDayDate = todayStr(); renderCalendarTaskList(el); };
-  el.querySelector('#ctl-prev')?.addEventListener('click', onPrev);
-  el.querySelector('#ctl-next')?.addEventListener('click', onNext);
-  el.querySelector('#ctl-today')?.addEventListener('click', onToday);
+  const shift = (delta) => {
+    if (currentMode === 'week') S.calWeekOffset = (S.calWeekOffset || 0) + delta;
+    else if (currentMode === 'month') {
+      S.calendarMonth += delta;
+      if (S.calendarMonth < 0) { S.calendarMonth = 11; S.calendarYear--; }
+      else if (S.calendarMonth > 11) { S.calendarMonth = 0; S.calendarYear++; }
+    } else S.calDayDate = shiftDate(S.calDayDate || todayStr(), delta);
+    renderCalendarTaskList(el);
+  };
+  const goToday = () => {
+    const t = new Date();
+    if (currentMode === 'week') S.calWeekOffset = 0;
+    else if (currentMode === 'month') { S.calendarMonth = t.getMonth(); S.calendarYear = t.getFullYear(); }
+    else S.calDayDate = todayStr();
+    renderCalendarTaskList(el);
+  };
+  el.querySelector('#ctl-prev')?.addEventListener('click', () => shift(-1));
+  el.querySelector('#ctl-next')?.addEventListener('click', () => shift(1));
+  el.querySelector('#ctl-today')?.addEventListener('click', goToday);
   const openAdd = () => { S.selectedCalendarDate = S.calDayDate || todayStr(); tabLoaders.openCalendarAddEvent?.(); };
   el.querySelector('#ctl-add')?.addEventListener('click', openAdd);
   el.querySelector('#ctl-add-empty')?.addEventListener('click', openAdd);
@@ -208,14 +218,6 @@ export function wireRowActions(el) {
   });
 }
 
-async function renderStub(el, mode) {
-  el.innerHTML = renderToolbar(mode, '', false) + `<div class="ctl-empty">
-    <div class="ctl-empty-title">Скоро</div>
-    <div class="ctl-empty-desc">Месяц — в следующем коммите</div>
-  </div>`;
-  wireToolbar(el, mode);
-}
-
 export async function renderCalendarTaskList(el) {
   const mode = loadMode();
   if (mode === 'day') return renderDayList(el);
@@ -223,5 +225,6 @@ export async function renderCalendarTaskList(el) {
     const { renderWeekList } = await import('./calendar-task-list-week.js');
     return renderWeekList(el);
   }
-  return renderStub(el, mode);
+  const { renderMonthList } = await import('./calendar-task-list-month.js');
+  return renderMonthList(el);
 }
