@@ -26,6 +26,7 @@ import { loadFocus, createFocusWidget, updateFocusWidget, updateFocusWidgetVisib
 import { initNotificationWidget } from './js/notification-widget.js';
 import { initMusicWidget } from './js/music-widget.js';
 import { initQuotesWidget } from './js/quotes-widget.js';
+import { initTaskControlWidget } from './js/task-control-widget.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
   loadHome, loadMindset, loadFood, loadMoney, loadPeople,
@@ -297,6 +298,9 @@ document.addEventListener('keydown', (e) => {
 
   // Quotes widget (above music)
   initQuotesWidget();
+
+  // Task-control widget (above quotes)
+  initTaskControlWidget();
 
   // Music widget (above notifications)
   initMusicWidget();

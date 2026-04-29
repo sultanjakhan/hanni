@@ -848,3 +848,9 @@ async function renderCalendarIntegrations(el) {
 }
 
 export { loadCalendar };
+// Refresh day-view when task starts/stops from elsewhere (e.g. global widget)
+window.addEventListener('task-state-changed', () => {
+  const innerEl = document.getElementById('calendar-inner-content');
+  if (innerEl) refreshCalendarInner();
+});
+

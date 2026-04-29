@@ -548,6 +548,105 @@
   gap: 8px;
 }
 
+/* ── Task-control widget (above quotes) ── */
+
+.task-widget {
+  position: absolute;
+  bottom: 280px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.tw-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  position: relative;
+  box-shadow: var(--shadow-card);
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.tw-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+  transform: scale(1.05);
+}
+.tw-btn.tw-active {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+  animation: tw-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tw-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.tw-panel {
+  width: 280px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-card);
+  margin-bottom: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  order: -1;
+}
+.tw-panel-header {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-default);
+}
+.tw-panel-body { padding: 6px; }
+.tw-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.tw-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: background 0.1s;
+}
+.tw-item:hover { background: var(--bg-hover); }
+.tw-item-icon { flex-shrink: 0; font-size: 14px; }
+.tw-item-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tw-item-time {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .qw-btn {
   width: 40px;
   height: 40px;
