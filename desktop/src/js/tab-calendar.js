@@ -28,6 +28,7 @@ let calDayScrolled = false;
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
+  if (!tabLoaders.openCalendarAddEvent) tabLoaders.openCalendarAddEvent = showAddEventModal;
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'calendar', {
@@ -96,7 +97,8 @@ async function refreshCalendarInner() {
   } else if (activeView === 'table') {
     await renderCalendarTable(innerEl);
   } else if (activeView === 'list') {
-    await renderCalendarList(innerEl);
+    const { renderCalendarTaskList } = await import('./calendar-task-list.js');
+    await renderCalendarTaskList(innerEl);
   } else {
     const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
     const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
@@ -689,79 +691,6 @@ async function renderDayCalendar(el, events) {
       }
       await invoke('toggle_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('day sch:', err));
       refreshCalendarInner();
-    });
-  });
-}
-
-// ── Calendar List view (Notion-style table) ──
-async function renderCalendarList(el) {
-  const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-  const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []) || [];
-
-  const sourceLabel = (s) => s === 'apple' ? '🍎 Apple' : s === 'google' ? '📅 Google' : '✏️ Вручную';
-  const sourceColor = (s) => s === 'apple' ? '#4F9768' : s === 'google' ? '#447ACB' : 'var(--text-secondary)';
-
-  let rowsHtml = '';
-  if (events.length === 0) {
-    rowsHtml = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">Нет событий</td></tr>';
-  } else {
-    for (const ev of events) {
-      const endTime = ev.time && ev.duration_minutes ? (() => {
-        const [h, m] = ev.time.split(':').map(Number);
-        const total = h * 60 + m + ev.duration_minutes;
-        return `${String(Math.floor(total / 60) % 24).padStart(2,'0')}:${String(total % 60).padStart(2,'0')}`;
-      })() : '';
-      const timeRange = ev.time ? (endTime ? `${ev.time} – ${endTime}` : ev.time) : 'Весь день';
-      rowsHtml += `<tr class="cal-list-row" data-id="${ev.id}">
-        <td style="color:var(--text-primary);font-weight:500;">${escapeHtml(ev.title)}</td>
-        <td>${ev.date}</td>
-        <td>${timeRange}</td>
-        <td>${ev.duration_minutes ? ev.duration_minutes + ' мин' : '—'}</td>
-        <td><span style="color:${sourceColor(ev.source)};font-size:12px;">${sourceLabel(ev.source)}</span></td>
-        <td style="color:var(--text-muted);font-size:12px;">${escapeHtml(ev.category || '')}</td>
-      </tr>`;
-    }
-  }
-
-  el.innerHTML = `
-    <div class="calendar-nav">
-      <button class="calendar-nav-btn" id="list-prev">&lt;</button>
-      <div class="calendar-month-label">${monthNames[S.calendarMonth]} ${S.calendarYear}</div>
-      <button class="calendar-nav-btn" id="list-next">&gt;</button>
-      <button class="btn-primary" id="list-add-event" style="margin-left:16px;">+ Событие</button>
-      <span style="color:var(--text-muted);font-size:12px;margin-left:auto;">${events.length} событий</span>
-    </div>
-    <div style="overflow-x:auto;">
-      <table class="cal-list-table">
-        <thead>
-          <tr>
-            <th>Название</th>
-            <th>Дата</th>
-            <th>Время</th>
-            <th>Длит.</th>
-            <th>Источник</th>
-            <th>Категория</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    </div>`;
-
-  document.getElementById('list-prev')?.addEventListener('click', () => {
-    S.calendarMonth--;
-    if (S.calendarMonth < 0) { S.calendarMonth = 11; S.calendarYear--; }
-    refreshCalendarInner();
-  });
-  document.getElementById('list-next')?.addEventListener('click', () => {
-    S.calendarMonth++;
-    if (S.calendarMonth > 11) { S.calendarMonth = 0; S.calendarYear++; }
-    refreshCalendarInner();
-  });
-  document.getElementById('list-add-event')?.addEventListener('click', () => showAddEventModal());
-  el.querySelectorAll('.cal-list-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const ev = events.find(e => e.id === Number(row.dataset.id));
-      if (ev) { S.selectedCalendarDate = ev.date; S.calDayDate = ev.date; const dd = new Date(ev.date); S.calendarMonth = dd.getMonth(); S.calendarYear = dd.getFullYear(); S._calendarInner = 'day'; refreshCalendarInner(); }
     });
   });
 }

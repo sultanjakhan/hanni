@@ -128,20 +128,64 @@
   font-size: 12px; padding: 2px 8px; border-radius: var(--radius-sm);
 }
 
-/* ── Calendar List (table view) ── */
-.cal-list-table {
-  width: 100%; border-collapse: collapse; font-size: 14px;
+/* ── Calendar Task List (Список задач) ── */
+.cal-list-toolbar {
+  display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;
 }
-.cal-list-table th {
-  text-align: left; padding: 8px 12px; color: var(--text-muted); font-weight: 500;
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--border-default); background: var(--bg-card);
+.cal-list-nav { display: flex; align-items: center; gap: 8px; }
+.cal-list-mode { display: flex; gap: 4px; }
+.ctl-body { display: flex; flex-direction: column; gap: 16px; }
+.ctl-section {
+  background: var(--bg-card); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); padding: 8px 0; overflow: hidden;
 }
-.cal-list-table td {
-  padding: 10px 12px; color: var(--text-secondary); border-bottom: 1px solid var(--bg-hover);
+.ctl-section-title {
+  padding: 4px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); font-weight: 600;
 }
-.cal-list-row { cursor: pointer; }
-.cal-list-row:hover td { background: var(--bg-card); }
+.ctl-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; border-top: 1px solid var(--bg-hover);
+  font-size: 14px;
+}
+.ctl-section-title + .ctl-row { border-top: none; }
+.ctl-row:hover { background: var(--bg-hover); }
+.ctl-row.ctl-active {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
+.ctl-row.ctl-done .ctl-title { color: var(--text-muted); text-decoration: line-through; }
+.ctl-check {
+  width: 18px; height: 18px; border: 1.5px solid var(--border-default);
+  border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--text-muted); cursor: pointer;
+  flex-shrink: 0; transition: all 0.15s;
+}
+.ctl-check:hover { border-color: var(--accent-blue); }
+.ctl-check.done { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+.ctl-icon { font-size: 14px; flex-shrink: 0; }
+.ctl-title { flex: 1; color: var(--text-primary); cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctl-time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; }
+.ctl-duration {
+  font-size: 11px; color: var(--text-muted); padding: 2px 6px;
+  background: var(--bg-hover); border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.ctl-track {
+  width: 28px; height: 28px; border: none; border-radius: 50%;
+  background: var(--bg-hover); color: var(--text-secondary);
+  cursor: pointer; font-size: 12px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.ctl-track:hover { background: var(--accent-blue); color: #fff; }
+.ctl-track.ctl-stop { background: var(--color-red, #d32f2f); color: #fff; }
+.ctl-track.ctl-stop:hover { background: var(--color-red, #d32f2f); opacity: 0.85; }
+.ctl-track:disabled { opacity: 0.5; cursor: wait; }
+.ctl-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 64px 16px; gap: 12px; text-align: center;
+}
+.ctl-empty-title { font-size: 16px; color: var(--text-secondary); }
+.ctl-empty-desc { font-size: 13px; color: var(--text-muted); }
 
 /* ── Week Calendar (Apple Calendar style) ── */
 .wk-header {
