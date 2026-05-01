@@ -187,42 +187,8 @@
 .ctl-empty-title { font-size: 16px; color: var(--text-secondary); }
 .ctl-empty-desc { font-size: 13px; color: var(--text-muted); }
 
-/* Week-list */
-.ctl-week-today {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 1px var(--accent-blue) inset;
-}
-.ctl-week-past { opacity: 0.6; }
-.ctl-week-header {
-  cursor: pointer;
-  padding: 8px 14px;
-  font-size: 12px;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--bg-hover);
-}
-.ctl-week-header:hover { background: var(--bg-hover); }
-.ctl-week-today .ctl-week-header { color: var(--accent-blue); font-weight: 600; }
-.ctl-week-empty {
-  padding: 8px 14px; font-size: 12px; color: var(--text-faint); font-style: italic;
-}
-
-/* Month-list */
-.ctl-month-week-header {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 13px; font-weight: 500; color: var(--text-primary);
-  text-transform: none; letter-spacing: 0;
-}
-.ctl-month-chevron { color: var(--text-muted); font-size: 11px; }
-.ctl-month-day { padding: 4px 0; }
-.ctl-month-day-header {
-  padding: 6px 14px; font-size: 11px; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.5px;
-  background: var(--bg-hover); cursor: pointer;
-}
-.ctl-month-day-header:hover { background: var(--border-default); }
-.ctl-month-day-header.ctl-week-today { color: var(--accent-blue); font-weight: 600; }
+/* Day-mode toggle (Календарь / Список) */
+.day-mode-tabs { margin-bottom: 12px; }
 
 /* ── Week Calendar (Apple Calendar style) ── */
 .wk-header {

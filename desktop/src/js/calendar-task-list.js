@@ -1,19 +1,15 @@
-// Calendar "Список задач" — Day/Week/Month list with checkboxes and timer start/stop.
+// Calendar Day "Список" — flat task list with checkboxes and timer start/stop.
 
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml } from './utils.js';
 
 const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
-const LS_MODE_KEY = 'hanni_calendar_list_mode';
 
-function loadMode() { try { return localStorage.getItem(LS_MODE_KEY) || 'day'; } catch { return 'day'; } }
-function saveMode(m) { try { localStorage.setItem(LS_MODE_KEY, m); } catch {} }
-
-export function todayStr() {
+function todayStr() {
   const t = new Date();
   return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
 }
-export function shiftDate(dateStr, days) {
+function shiftDate(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00'); d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
@@ -31,15 +27,7 @@ function scheduleMatchesDate(sch, dateStr) {
   return false;
 }
 
-function fmtTimeRange(start, durMin) {
-  if (!start) return '—';
-  if (!durMin) return start;
-  const [h, m] = start.split(':').map(Number);
-  const total = h * 60 + m + durMin;
-  return `${start}–${String(Math.floor(total/60)%24).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
-}
-
-export async function loadDayItems(date) {
+async function loadDayItems(date) {
   const d = new Date(date + 'T12:00:00');
   const [events, scheds, completions, tasks, blocks] = await Promise.all([
     invoke('get_events', { month: d.getMonth() + 1, year: d.getFullYear() }).catch(() => []),
@@ -54,35 +42,22 @@ export async function loadDayItems(date) {
 
   const items = [];
   for (const e of (events || []).filter(e => e.date === date)) {
-    items.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', time: e.time || '', durationMinutes: e.duration_minutes || null, icon: '📅', done: !!e.completed, block: blockBySrc.get(`event:${e.id}`) });
+    items.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done: !!e.completed, block: blockBySrc.get(`event:${e.id}`) });
   }
   for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date))) {
-    items.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', time: s.time_of_day || '', durationMinutes: null, icon: SCH_CAT_ICONS[s.category] || '🔁', done: completedIds.has(s.id), block: blockBySrc.get(`schedule:${s.id}`) });
+    items.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done: completedIds.has(s.id), block: blockBySrc.get(`schedule:${s.id}`) });
   }
   for (const t of (tasks || []).filter(t => t.due_date === date)) {
-    items.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', time: '', durationMinutes: null, icon: '📝', done: t.status === 'done', block: blockBySrc.get(`note:${t.id}`) });
+    items.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: '99:99', icon: '📝', done: t.status === 'done', block: blockBySrc.get(`note:${t.id}`) });
   }
+  items.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
   return items;
 }
 
-function bucketByPartOfDay(items) {
-  const b = { morning: [], afternoon: [], evening: [], untimed: [] };
-  for (const it of items) {
-    if (!it.time) { b.untimed.push(it); continue; }
-    const h = parseInt(it.time.split(':')[0]);
-    if (h >= 6 && h < 12) b.morning.push(it);
-    else if (h >= 12 && h < 18) b.afternoon.push(it);
-    else b.evening.push(it);
-  }
-  for (const k of Object.keys(b)) b[k].sort((a, c) => (a.time || '99').localeCompare(c.time || '99'));
-  return b;
-}
-
-export function renderItemRow(item, dateStr) {
+function renderItemRow(item, dateStr) {
   const active = item.block?.is_active;
   const done = !!item.done;
   const cls = ['ctl-row', done && 'ctl-done', active && 'ctl-active'].filter(Boolean).join(' ');
-  const timeText = item.time ? fmtTimeRange(item.time, item.durationMinutes) : '—';
   const durBadge = item.block?.duration_minutes ? `<span class="ctl-duration">${item.block.duration_minutes} мин</span>` : '';
   const trackBtn = active
     ? `<button class="ctl-track ctl-stop" data-ctl-stop="${item.block.id}" title="Завершить">■</button>`
@@ -91,31 +66,28 @@ export function renderItemRow(item, dateStr) {
     <div class="ctl-check${done ? ' done' : ''}" data-ctl-check>${done ? '✓' : ''}</div>
     <span class="ctl-icon">${item.icon}</span>
     <span class="ctl-title">${escapeHtml(item.title)}</span>
-    <span class="ctl-time">${timeText}</span>
     ${durBadge}
     ${trackBtn}
   </div>`;
 }
 
-export function renderToolbar(mode, label, atCurrent) {
-  const todayLabel = mode === 'week' ? 'Эта неделя' : mode === 'month' ? 'Этот месяц' : 'Сегодня';
-  const navHtml = `
-    <button class="calendar-nav-btn" id="ctl-prev">&lt;</button>
-    <div class="calendar-month-label">${escapeHtml(label)}</div>
-    <button class="calendar-nav-btn" id="ctl-next">&gt;</button>
-    ${!atCurrent ? `<button class="cal-today-btn" id="ctl-today">${todayLabel}</button>` : ''}
-    <button class="btn-primary" id="ctl-add" style="margin-left:auto;">+ Событие</button>`;
+function renderToolbar(dayLabel, isToday) {
   return `<div class="cal-list-toolbar">
-    <div class="cal-list-nav">${navHtml}</div>
-    <div class="cal-list-mode dev-filters">
-      <button class="dev-filter-btn${mode==='day'?' active':''}" data-ctl-mode="day">📋 День</button>
-      <button class="dev-filter-btn${mode==='week'?' active':''}" data-ctl-mode="week">📋 Неделя</button>
-      <button class="dev-filter-btn${mode==='month'?' active':''}" data-ctl-mode="month">📋 Месяц</button>
+    <div class="cal-list-nav">
+      <button class="calendar-nav-btn" id="ctl-prev">&lt;</button>
+      <div class="calendar-month-label">${escapeHtml(dayLabel)}</div>
+      <button class="calendar-nav-btn" id="ctl-next">&gt;</button>
+      ${!isToday ? `<button class="cal-today-btn" id="ctl-today">Сегодня</button>` : ''}
+      <button class="btn-primary" id="ctl-add" style="margin-left:auto;">+ Событие</button>
+    </div>
+    <div class="day-mode-tabs dev-filters">
+      <button class="dev-filter-btn" data-day-mode="grid">📅 Календарь</button>
+      <button class="dev-filter-btn active" data-day-mode="list">📋 Список</button>
     </div>
   </div>`;
 }
 
-export async function toggleDone(kind, id, date, willBeDone) {
+async function toggleDone(kind, id, date, willBeDone) {
   if (kind === 'event') {
     await invoke('update_event', { id, title: null, description: null, date: null, time: null, durationMinutes: null, category: null, color: null, completed: willBeDone });
   } else if (kind === 'schedule') {
@@ -125,65 +97,26 @@ export async function toggleDone(kind, id, date, willBeDone) {
   }
 }
 
-async function renderDayList(el) {
-  if (!S.calDayDate) S.calDayDate = todayStr();
-  const date = S.calDayDate;
-  const d = new Date(date + 'T12:00:00');
-  const monthsGen = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
-  const dayNames = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
-  const dayLabel = `${d.getDate()} ${monthsGen[d.getMonth()]} · ${dayNames[d.getDay()]}`;
-  const isToday = date === todayStr();
-
-  const items = await loadDayItems(date);
-  let bodyHtml;
-  if (!items.length) {
-    bodyHtml = `<div class="ctl-empty">
-      <div class="ctl-empty-title">${isToday ? 'Сегодня свободно' : 'На этот день ничего не запланировано'}</div>
-      <button class="btn-primary" id="ctl-add-empty">+ Запланировать</button>
-    </div>`;
-  } else {
-    const b = bucketByPartOfDay(items);
-    const sec = (label, list) => list.length ? `<div class="ctl-section"><div class="ctl-section-title">${label}</div>${list.map(it => renderItemRow(it, date)).join('')}</div>` : '';
-    bodyHtml = sec('Утро', b.morning) + sec('День', b.afternoon) + sec('Вечер', b.evening) + sec('Без времени', b.untimed);
-  }
-  el.innerHTML = renderToolbar('day', dayLabel, isToday) + `<div class="ctl-body">${bodyHtml}</div>`;
-  wireToolbar(el, 'day');
-  wireRowActions(el);
+function setDayMode(mode) {
+  S.calDayMode = mode;
+  try { localStorage.setItem('hanni_calendar_day_mode', mode); } catch {}
 }
 
-export function wireToolbar(el, currentMode) {
-  el.querySelectorAll('[data-ctl-mode]').forEach(btn => {
+function wire(el) {
+  el.querySelectorAll('[data-day-mode]').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (btn.dataset.ctlMode === currentMode) return;
-      saveMode(btn.dataset.ctlMode);
-      renderCalendarTaskList(el);
+      if (btn.dataset.dayMode === 'list') return;
+      setDayMode('grid');
+      window.dispatchEvent(new Event('task-state-changed'));
     });
   });
-  const shift = (delta) => {
-    if (currentMode === 'week') S.calWeekOffset = (S.calWeekOffset || 0) + delta;
-    else if (currentMode === 'month') {
-      S.calendarMonth += delta;
-      if (S.calendarMonth < 0) { S.calendarMonth = 11; S.calendarYear--; }
-      else if (S.calendarMonth > 11) { S.calendarMonth = 0; S.calendarYear++; }
-    } else S.calDayDate = shiftDate(S.calDayDate || todayStr(), delta);
-    renderCalendarTaskList(el);
-  };
-  const goToday = () => {
-    const t = new Date();
-    if (currentMode === 'week') S.calWeekOffset = 0;
-    else if (currentMode === 'month') { S.calendarMonth = t.getMonth(); S.calendarYear = t.getFullYear(); }
-    else S.calDayDate = todayStr();
-    renderCalendarTaskList(el);
-  };
-  el.querySelector('#ctl-prev')?.addEventListener('click', () => shift(-1));
-  el.querySelector('#ctl-next')?.addEventListener('click', () => shift(1));
-  el.querySelector('#ctl-today')?.addEventListener('click', goToday);
+  el.querySelector('#ctl-prev')?.addEventListener('click', () => { S.calDayDate = shiftDate(S.calDayDate || todayStr(), -1); renderCalendarTaskList(el); });
+  el.querySelector('#ctl-next')?.addEventListener('click', () => { S.calDayDate = shiftDate(S.calDayDate || todayStr(), 1); renderCalendarTaskList(el); });
+  el.querySelector('#ctl-today')?.addEventListener('click', () => { S.calDayDate = todayStr(); renderCalendarTaskList(el); });
   const openAdd = () => { S.selectedCalendarDate = S.calDayDate || todayStr(); tabLoaders.openCalendarAddEvent?.(); };
   el.querySelector('#ctl-add')?.addEventListener('click', openAdd);
   el.querySelector('#ctl-add-empty')?.addEventListener('click', openAdd);
-}
 
-export function wireRowActions(el) {
   el.querySelectorAll('.ctl-row').forEach(row => {
     const kind = row.dataset.kind;
     const id = parseInt(row.dataset.id);
@@ -219,12 +152,21 @@ export function wireRowActions(el) {
 }
 
 export async function renderCalendarTaskList(el) {
-  const mode = loadMode();
-  if (mode === 'day') return renderDayList(el);
-  if (mode === 'week') {
-    const { renderWeekList } = await import('./calendar-task-list-week.js');
-    return renderWeekList(el);
-  }
-  const { renderMonthList } = await import('./calendar-task-list-month.js');
-  return renderMonthList(el);
+  if (!S.calDayDate) S.calDayDate = todayStr();
+  const date = S.calDayDate;
+  const d = new Date(date + 'T12:00:00');
+  const monthsGen = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const dayNames = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+  const dayLabel = `${d.getDate()} ${monthsGen[d.getMonth()]} · ${dayNames[d.getDay()]}`;
+  const isToday = date === todayStr();
+
+  const items = await loadDayItems(date);
+  const bodyHtml = items.length
+    ? items.map(it => renderItemRow(it, date)).join('')
+    : `<div class="ctl-empty">
+        <div class="ctl-empty-title">${isToday ? 'Сегодня свободно' : 'На этот день ничего не запланировано'}</div>
+        <button class="btn-primary" id="ctl-add-empty">+ Запланировать</button>
+      </div>`;
+  el.innerHTML = renderToolbar(dayLabel, isToday) + `<div class="ctl-body">${bodyHtml}</div>`;
+  wire(el);
 }

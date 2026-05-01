@@ -61,9 +61,10 @@ async function loadCalendar(subTab) {
         { id: 'month', label: 'Месяц' },
         { id: 'week', label: 'Неделя' },
         { id: 'day', label: 'День' },
-        { id: 'list', label: 'Список' },
         { id: 'table', label: 'Таблица' },
       ];
+      // Migrate old "list" inner-view (now lives as Day-mode toggle)
+      if (S._calendarInner === 'list') { S._calendarInner = 'day'; S.calDayMode = 'list'; }
       const activeView = S._calendarInner || 'month';
       paneEl.innerHTML = `
         <div class="dev-filters" id="calendar-view-tabs">
@@ -96,7 +97,7 @@ async function refreshCalendarInner() {
     await renderCalendarIntegrations(innerEl);
   } else if (activeView === 'table') {
     await renderCalendarTable(innerEl);
-  } else if (activeView === 'list') {
+  } else if (activeView === 'day' && getDayMode() === 'list') {
     const { renderCalendarTaskList } = await import('./calendar-task-list.js');
     await renderCalendarTaskList(innerEl);
   } else {
@@ -106,6 +107,17 @@ async function refreshCalendarInner() {
     else if (activeView === 'day') await renderDayCalendar(innerEl, events || []);
     else await renderCalendar(innerEl, events || [], tasks || []);
   }
+}
+
+function getDayMode() {
+  if (S.calDayMode) return S.calDayMode;
+  try { S.calDayMode = localStorage.getItem('hanni_calendar_day_mode') || 'grid'; } catch { S.calDayMode = 'grid'; }
+  return S.calDayMode;
+}
+
+function setDayMode(mode) {
+  S.calDayMode = mode;
+  try { localStorage.setItem('hanni_calendar_day_mode', mode); } catch {}
 }
 
 async function renderCalendarTable(el) {
@@ -621,6 +633,7 @@ async function renderDayCalendar(el, events) {
   const { renderMealPlanBlock } = await import('./food-meal-plan.js');
   const mealPlanHtml = await renderMealPlanBlock(S.calDayDate);
 
+  const dayMode = getDayMode();
   el.innerHTML = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="day-prev">&lt;</button>
@@ -628,6 +641,10 @@ async function renderDayCalendar(el, events) {
       <button class="calendar-nav-btn" id="day-next">&gt;</button>
       <button class="btn-secondary" id="day-today" style="margin-left:8px;">Сегодня</button>
       <button class="btn-primary" id="day-add-event" style="margin-left:4px;">+ Событие</button>
+    </div>
+    <div class="day-mode-tabs dev-filters">
+      <button class="dev-filter-btn${dayMode==='grid'?' active':''}" data-day-mode="grid">📅 Календарь</button>
+      <button class="dev-filter-btn${dayMode==='list'?' active':''}" data-day-mode="list">📋 Список</button>
     </div>
     ${mealPlanHtml}
     ${allDayHtml}
@@ -641,6 +658,13 @@ async function renderDayCalendar(el, events) {
     scrollParent.scrollTop = savedScroll;
   }
 
+  el.querySelectorAll('[data-day-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.dayMode === getDayMode()) return;
+      setDayMode(btn.dataset.dayMode);
+      refreshCalendarInner();
+    });
+  });
   document.getElementById('day-prev')?.addEventListener('click', () => {
     const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() - 1);
     S.calDayDate = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;
