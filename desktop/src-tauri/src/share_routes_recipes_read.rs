@@ -57,11 +57,16 @@ pub async fn list_recipes(
       .filter_map(|r| r.ok()).collect();
     drop(stmt);
 
-    // Ingredient catalog (name → category) — small enough to ship inline
-    let mut cat_stmt = conn.prepare("SELECT name, category FROM ingredient_catalog")
+    // Ingredient catalog (id, name, category, tags) — small enough to ship inline
+    let mut cat_stmt = conn.prepare("SELECT id, name, category, COALESCE(tags,'') FROM ingredient_catalog")
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let catalog: Vec<serde_json::Value> = cat_stmt.query_map([], |r| {
-        Ok(serde_json::json!({ "name": r.get::<_, String>(0)?, "category": r.get::<_, String>(1)? }))
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "name": r.get::<_, String>(1)?,
+            "category": r.get::<_, String>(2)?,
+            "tags": r.get::<_, String>(3)?,
+        }))
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
       .filter_map(|r| r.ok()).collect();
     drop(cat_stmt);
@@ -115,15 +120,22 @@ pub async fn get_recipe(
         }))
     ).map_err(|_| (StatusCode::NOT_FOUND, "Recipe not found".into()))?;
 
-    // Structured ingredient items (name, amount, unit) — for amount-with-unit display
+    // Structured ingredient items + catalog metadata (when linked).
     let mut ing_stmt = conn.prepare(
-        "SELECT name, amount, unit FROM recipe_ingredients WHERE recipe_id=?1"
+        "SELECT ri.name, ri.amount, ri.unit, ri.catalog_id, \
+                COALESCE(c.category,''), COALESCE(c.tags,'') \
+         FROM recipe_ingredients ri \
+         LEFT JOIN ingredient_catalog c ON c.id = ri.catalog_id \
+         WHERE ri.recipe_id=?1"
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let items: Vec<serde_json::Value> = ing_stmt.query_map(rusqlite::params![id], |r| {
         Ok(serde_json::json!({
             "name": r.get::<_, String>(0)?,
             "amount": r.get::<_, f64>(1)?,
             "unit": r.get::<_, String>(2)?,
+            "catalog_id": r.get::<_, Option<i64>>(3).unwrap_or(None),
+            "catalog_category": r.get::<_, String>(4)?,
+            "catalog_tags": r.get::<_, String>(5)?,
         }))
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
       .filter_map(|r| r.ok()).collect();
