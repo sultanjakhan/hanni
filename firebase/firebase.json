@@ -1,0 +1,27 @@
+{
+  "firestore": {
+    "rules":   "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "public": "../apps/guest-cloud",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=300" }
+        ]
+      },
+      {
+        "source": "**/index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      }
+    ]
+  }
+}

@@ -44,6 +44,7 @@ mod share_routes_food_meta;
 mod share_static;
 mod share_tunnel;
 mod commands_share;
+mod sync_share;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -702,6 +703,10 @@ pub fn run() {
             commands_share::delete_share_link,
             commands_share::get_share_activity,
             commands_share::tunnel_status,
+            // Cloud-share (Firebase mirror) — Stage A: dry-run only
+            sync_share::cloud_share_set_config,
+            sync_share::cloud_share_get_config,
+            sync_share::cloud_share_push,
         ])
         .setup(move |app| {
             // Android: resolve data dir from Tauri, then init DB

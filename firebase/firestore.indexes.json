@@ -1,0 +1,45 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "recipes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "owner_uid",  "order": "ASCENDING" },
+        { "fieldPath": "updated_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "recipe_ingredients",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipe_id", "order": "ASCENDING" },
+        { "fieldPath": "id",        "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "products",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "owner_uid",   "order": "ASCENDING" },
+        { "fieldPath": "expiry_date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipe_id",  "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "meal_plan",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "owner_uid", "order": "ASCENDING" },
+        { "fieldPath": "date",      "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
