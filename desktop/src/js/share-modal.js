@@ -2,6 +2,7 @@
 
 import { invoke } from './state.js';
 import { escapeHtml, confirmModal } from './utils.js';
+import { openCloudShareModal } from './cloud-share-modal.js';
 
 const PERM_LABELS = { view: 'Просмотр', add: 'Добавление', edit: 'Редактирование', delete: 'Удаление', comment: 'Комментарии' };
 const SCOPE_LABELS = {
@@ -19,7 +20,10 @@ export function openShareModal(tabId) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal share-modal">
-    <div class="modal-title">Общий доступ · ${escapeHtml(tabId)} <span id="share-tunnel-status" class="share-tunnel-dot" title="Статус туннеля"></span></div>
+    <div class="modal-title" style="display:flex;align-items:center;gap:8px;justify-content:space-between">
+      <span>Общий доступ · ${escapeHtml(tabId)} <span id="share-tunnel-status" class="share-tunnel-dot" title="Статус туннеля"></span></span>
+      <button class="share-icon-btn" id="share-cloud-cfg" title="Облачный share (Firebase)" style="font-size:16px">☁</button>
+    </div>
     <div id="share-body"><div style="color:var(--text-muted);padding:12px 0;">Загрузка…</div></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="share-close">Закрыть</button>
@@ -30,6 +34,7 @@ export function openShareModal(tabId) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#share-close').addEventListener('click', () => overlay.remove());
   overlay.querySelector('#share-new').addEventListener('click', () => showCreateForm(overlay, tabId));
+  overlay.querySelector('#share-cloud-cfg').addEventListener('click', () => openCloudShareModal());
 
   refreshList(overlay, tabId);
   updateTunnelStatus(overlay);
@@ -72,6 +77,21 @@ async function refreshList(overlay, tabId) {
       await invoke('delete_share_link', { id });
       refreshList(overlay, tabId);
     }));
+    body.querySelectorAll('[data-cloud-push]').forEach(btn => btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.cloudPush);
+      const orig = btn.textContent;
+      btn.textContent = '↑ Пушим…'; btn.disabled = true;
+      try {
+        const out = await invoke('cloud_share_push', { shareId: id });
+        const w = out.written || {};
+        const total = Object.values(w).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+        btn.textContent = `✓ ${total} строк`;
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+      } catch (e) {
+        btn.textContent = orig; btn.disabled = false;
+        alert('Облачный push не удался: ' + (e?.message || e) + '\n\nНастрой через ☁ в шапке.');
+      }
+    }));
     body.querySelectorAll('[data-qr]').forEach(btn => btn.addEventListener('click', () => {
       const row = btn.dataset.row;
       const qrBox = body.querySelector(`#share-qr-${row}`);
@@ -113,6 +133,7 @@ function renderList(links, tabId) {
       </div>
       <div class="share-qr" id="share-qr-${l.id}" style="display:none"></div>` : ''}
       <div class="share-row-actions">
+        ${isActive ? `<button class="btn-link" data-cloud-push="${l.id}" title="Залить snapshot в Firebase">☁ Push</button>` : ''}
         ${isActive ? `<button class="btn-link-danger" data-revoke="${l.id}">Отозвать</button>` : ''}
         <button class="btn-link-danger" data-delete="${l.id}">Удалить навсегда</button>
       </div>
