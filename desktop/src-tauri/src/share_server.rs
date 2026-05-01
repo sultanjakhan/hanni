@@ -20,7 +20,7 @@ use crate::share_routes_meal_plan::{create_meal_plan, delete_meal_plan, list_mea
 use crate::share_routes_products_read::list_products;
 use crate::share_routes_products_write::{create_product, delete_product, update_product};
 use crate::share_routes_recipes_read::{get_recipe, list_recipes};
-use crate::share_routes_recipes_write::{create_recipe, update_recipe};
+use crate::share_routes_recipes_write::{create_recipe, update_recipe, delete_recipe};
 use crate::share_static::{
     asset_css, asset_js, asset_js_fridge, asset_js_fridge_shared, asset_js_meal_plan,
     asset_js_memory, asset_js_products, asset_js_recipe_add, asset_js_recipe_shared,
@@ -49,7 +49,7 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/share/health", get(health))
         .route("/s/{token}", get(landing))
         .route("/s/{token}/recipes", get(list_recipes).post(create_recipe))
-        .route("/s/{token}/recipes/{id}", get(get_recipe).patch(update_recipe))
+        .route("/s/{token}/recipes/{id}", get(get_recipe).patch(update_recipe).delete(delete_recipe))
         .route("/s/{token}/recipes/{id}/comments", get(list_comments).post(create_comment))
         .route("/s/{token}/products", get(list_products).post(create_product))
         .route("/s/{token}/products/{id}", patch(update_product).delete(delete_product))

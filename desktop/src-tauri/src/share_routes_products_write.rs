@@ -32,6 +32,7 @@ struct CreateProductReq {
     location: Option<String>,
     notes: Option<String>,
     author: Option<String>,
+    catalog_id: Option<i64>,
 }
 
 pub async fn create_product(
@@ -66,17 +67,31 @@ pub async fn create_product(
     } else {
         prev_notes
     };
+    let trimmed_name = req.name.trim();
+    // Match Hanni's add_product: auto-resolve catalog_id and inherit canonical category.
+    let resolved_cat_id: Option<i64> = match req.catalog_id {
+        Some(id) => Some(id),
+        None => crate::db::resolve_catalog_id_by_name(&conn, trimmed_name),
+    };
+    let final_category: String = match resolved_cat_id {
+        Some(id) => conn.query_row(
+            "SELECT category FROM ingredient_catalog WHERE id=?1",
+            rusqlite::params![id], |r| r.get::<_, String>(0),
+        ).unwrap_or_else(|_| req.category.clone().unwrap_or_else(|| "other".into())),
+        None => req.category.unwrap_or_else(|| "other".into()),
+    };
     conn.execute(
-        "INSERT INTO products (name, category, quantity, unit, expiry_date, location, notes, purchased_at, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)",
+        "INSERT INTO products (name, category, quantity, unit, expiry_date, location, notes, purchased_at, created_at, catalog_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,?9)",
         rusqlite::params![
-            req.name.trim(),
-            req.category.unwrap_or_else(|| "other".into()),
+            trimmed_name,
+            final_category,
             req.quantity.unwrap_or(1.0),
             req.unit.unwrap_or_else(|| "шт".into()),
             req.expiry_date,
             req.location.unwrap_or_else(|| "fridge".into()),
             notes, now,
+            resolved_cat_id,
         ],
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let product_id = conn.last_insert_rowid();
@@ -96,6 +111,7 @@ struct UpdateProductReq {
     location: Option<String>,
     notes: Option<String>,
     author: Option<String>,
+    catalog_id: Option<i64>,
 }
 
 pub async fn update_product(
@@ -129,6 +145,13 @@ pub async fn update_product(
     add!("expiry_date", req.expiry_date.clone());
     add!("location", req.location.clone());
     add!("notes", req.notes.clone());
+    if let Some(cid) = req.catalog_id {
+        updates.push("catalog_id=?".into()); params.push(Box::new(cid));
+    } else if let Some(ref nm) = req.name {
+        // Auto-resolve catalog_id from new name when caller didn't pass it.
+        let auto: Option<i64> = crate::db::resolve_catalog_id_by_name(&conn, nm);
+        updates.push("catalog_id=?".into()); params.push(Box::new(auto));
+    }
     if updates.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "No fields to update".into()));
     }

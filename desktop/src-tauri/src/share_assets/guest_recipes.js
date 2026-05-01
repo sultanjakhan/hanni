@@ -165,7 +165,13 @@
     const stepsHtml = steps.length ? `<ol class="recipe-instructions">${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : '<div class="muted">Нет инструкций.</div>';
     const cuisine = CUISINES[r.cuisine] || `🌍 ${r.cuisine || ''}`;
 
+    const editBtn = can('edit') ? '<button class="btn-secondary" id="r-edit" style="font-size:13px;padding:4px 10px">Изменить</button>' : '';
+    const delBtn = can('delete') ? '<button class="btn-danger" id="r-del" style="font-size:13px;padding:4px 10px">Удалить</button>' : '';
+    const actions = (editBtn || delBtn)
+      ? `<div class="detail-actions" style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px">${editBtn}${delBtn}</div>`
+      : '';
     return `<button class="detail-back" id="back">← Назад к списку</button>
+      ${actions}
       <div class="detail-title-row">
         <div class="detail-title">${r.favorite ? '★ ' : ''}${esc(r.name)}</div>
       </div>
@@ -194,6 +200,74 @@
   function bindDetail() {
     state.mount.querySelector('#back')?.addEventListener('click', () => { state.view = 'list'; state.current = null; render(); });
     state.mount.querySelector('#c-save')?.addEventListener('click', submitComment);
+    state.mount.querySelector('#r-edit')?.addEventListener('click', openEditModal);
+    state.mount.querySelector('#r-del')?.addEventListener('click', confirmDelete);
+  }
+
+  async function confirmDelete() {
+    const r = state.current;
+    if (!r || !confirm(`Удалить рецепт «${r.name}»? Это действие необратимо.`)) return;
+    try {
+      await api(`/recipes/${r.id}`, { method: 'DELETE' });
+      state.recipes = state.recipes.filter(x => x.id !== r.id);
+      state.current = null;
+      state.view = 'list';
+      render();
+    } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+  }
+
+  function openEditModal() {
+    const r = state.current;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal" style="max-width:480px;max-height:90vh;overflow-y:auto">
+      <div class="modal-title">Изменить рецепт</div>
+      <div class="form-group"><label class="form-label">Название</label>
+        <input class="form-input" id="re-name" value="${esc(r.name)}"></div>
+      <div class="form-group"><label class="form-label">Описание</label>
+        <textarea class="form-textarea" id="re-desc" rows="2">${esc(r.description || '')}</textarea></div>
+      <div class="form-group"><label class="form-label">Приготовление</label>
+        <textarea class="form-textarea" id="re-instr" rows="4">${esc(r.instructions || '')}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="form-group"><label class="form-label">Подготовка (мин)</label>
+          <input class="form-input" id="re-prep" type="number" value="${r.prep_time || 0}"></div>
+        <div class="form-group"><label class="form-label">Готовка (мин)</label>
+          <input class="form-input" id="re-cook" type="number" value="${r.cook_time || 0}"></div>
+        <div class="form-group"><label class="form-label">Порций</label>
+          <input class="form-input" id="re-serv" type="number" value="${r.servings || 1}"></div>
+        <div class="form-group"><label class="form-label">Калории</label>
+          <input class="form-input" id="re-kcal" type="number" value="${r.calories || 0}"></div>
+      </div>
+      <div id="re-msg"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="re-cancel">Отмена</button>
+        <button class="btn-primary" id="re-save">Сохранить</button>
+      </div></div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.querySelector('#re-cancel').onclick = close;
+    overlay.querySelector('#re-save').onclick = async () => {
+      const msg = overlay.querySelector('#re-msg');
+      const payload = {
+        name: overlay.querySelector('#re-name').value.trim(),
+        description: overlay.querySelector('#re-desc').value,
+        instructions: overlay.querySelector('#re-instr').value,
+        prep_time: parseInt(overlay.querySelector('#re-prep').value) || 0,
+        cook_time: parseInt(overlay.querySelector('#re-cook').value) || 0,
+        servings: parseInt(overlay.querySelector('#re-serv').value) || 1,
+        calories: parseInt(overlay.querySelector('#re-kcal').value) || 0,
+        author: recallAuthor() || 'guest',
+      };
+      if (!payload.name) { msg.innerHTML = '<div class="err">Название обязательно</div>'; return; }
+      msg.innerHTML = '<div class="muted">Сохраняем…</div>';
+      try {
+        await api(`/recipes/${r.id}`, { method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        close();
+        await openDetail(r.id);
+      } catch (e) { msg.innerHTML = `<div class="err">${esc(e.message || e)}</div>`; }
+    };
   }
 
   function render() {

@@ -191,3 +191,30 @@ pub async fn update_recipe(
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
+
+pub async fn delete_recipe(
+    Path((token, id)): Path<(String, i64)>,
+    AxumState(state): AxumState<ShareServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    rate_limit_check(&state, &token)?;
+    let (ua, ip) = ua_ip(&headers, &addr);
+
+    let db = state.app.state::<HanniDb>();
+    let conn = db.conn();
+    let ctx = load_link(&conn, &token)?;
+    require_perm(&ctx, "delete")?;
+    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "recipes") {
+        return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
+    }
+    // recipe_ingredients and meal_plan rows are cleared by ON DELETE CASCADE.
+    let changed = conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if changed == 0 {
+        return Err((StatusCode::NOT_FOUND, "Recipe not found".into()));
+    }
+    log_activity(&conn, ctx.id, "delete_recipe",
+        &serde_json::json!({ "recipe_id": id }).to_string(), &ip, &ua);
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
