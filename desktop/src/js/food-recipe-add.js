@@ -22,8 +22,11 @@ export async function showAddRecipeModal(reloadFn) {
       getCatalog: () => invoke('get_ingredient_catalog').catch(() => []),
       getCuisines: () => loadCuisines(),
       getBlacklist: () => getBlacklist(),
-      addCatalogItem: ({ name, category }) => invoke('add_ingredient_to_catalog', { name, category })
-        .then(() => invalidateCatalogCache()),
+      addCatalogItem: async ({ name, category }) => {
+        const id = await invoke('add_ingredient_to_catalog', { name, category });
+        invalidateCatalogCache();
+        return id;
+      },
       addCuisine: ({ code, name, emoji }) => invoke('add_cuisine', { code, name, emoji })
         .then(() => invalidateCuisineCache()),
       createRecipe: (payload) => invoke('create_recipe', toCamel(payload)),

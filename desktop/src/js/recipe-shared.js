@@ -284,7 +284,7 @@
       opt.className = 'ingr-autocomplete-item ingr-product-row';
       const ns = document.createElement('span');
       ns.textContent = item.name;
-      ns.onmousedown = (e) => { e.preventDefault(); selectItem(input, item.name, row); };
+      ns.onmousedown = (e) => { e.preventDefault(); selectItem(input, item.name, row, item.id); };
       opt.appendChild(ns);
       dd.appendChild(opt);
     }
@@ -297,17 +297,22 @@
       if (blocked) create.style.color = 'var(--color-red)';
       create.onmousedown = async (e) => {
         e.preventDefault(); if (blocked) return;
-        try { await backend.addCatalogItem({ name: typed, category: cat });
-          catalog.push({ name: typed, category: cat, tags: '' }); } catch {}
-        selectItem(input, typed, row);
+        let newId;
+        try {
+          newId = await backend.addCatalogItem({ name: typed, category: cat });
+          catalog.push({ id: newId, name: typed, category: cat, tags: '' });
+        } catch {}
+        selectItem(input, typed, row, newId);
       };
       dd.appendChild(create);
     }
     row.querySelector('.ingr-row-main').appendChild(dd);
     input.oninput = () => showProductList(row, input, catalog, cat, blacklist, backend);
   }
-  function selectItem(input, name, row) {
+  function selectItem(input, name, row, catalogId) {
     input.value = name; input.readOnly = true; input.oninput = null;
+    if (catalogId != null) row.dataset.catalogId = String(catalogId);
+    else delete row.dataset.catalogId;
     closeAC(row); row.querySelector('.ingr-amount-input')?.focus();
   }
   function closeAC(row) { row.querySelector('.ingr-autocomplete')?.remove(); }
@@ -318,7 +323,10 @@
       if (!name) return;
       const amount = parseFloat(row.querySelector('.ingr-amount-input')?.value) || 0;
       const unit = row.querySelector('.ingr-unit-opt.active')?.dataset.val || 'г';
-      items.push({ name, amount, unit });
+      const item = { name, amount, unit };
+      const cid = row.dataset.catalogId;
+      if (cid) item.catalog_id = Number(cid);
+      items.push(item);
     });
     return items;
   }

@@ -28,7 +28,8 @@ export async function showBlacklistModal(onChange) {
         <select class="form-input bl-type" style="width:140px">
           ${Object.entries(TYPE_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
         </select>
-        <input class="form-input bl-value" placeholder="Значение..." style="flex:1">
+        <input class="form-input bl-value" placeholder="Значение..." style="flex:1" autocomplete="off">
+        <datalist id="bl-prod-list">${catalog.map(c => `<option value="${escapeHtml(c.name)}">`).join('')}</datalist>
         <button class="btn-primary bl-add-btn" style="font-size:13px;padding:6px 14px">Добавить</button>
       </div>
       <div class="bl-hint" style="color:var(--text-muted);font-size:12px"></div>
@@ -62,13 +63,16 @@ export async function showBlacklistModal(onChange) {
 
   function renderHint() {
     const type = typeSel.value;
+    // datalist autocomplete only for type=product (catalog names)
+    if (type === 'product') valueInp.setAttribute('list', 'bl-prod-list');
+    else valueInp.removeAttribute('list');
     if (type === 'tag') {
       const tags = [...new Set(catalog.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
       hintEl.textContent = `Теги из каталога: ${tags.slice(0, 12).join(', ')}${tags.length > 12 ? '...' : ''}`;
     } else if (type === 'category') {
       hintEl.textContent = 'Категории: ' + CAT_ORDER.map(c => `${c} (${CAT_LABELS[c]})`).join(', ');
     } else if (type === 'product') {
-      hintEl.textContent = 'Название продукта из каталога (например: «кефир»).';
+      hintEl.textContent = 'Начните вводить — подскажу из каталога.';
     } else {
       hintEl.textContent = 'Любая подстрока (например: «свин» — заблокирует «свинина», «фарш свиной», «бекон»).';
     }
@@ -84,6 +88,13 @@ export async function showBlacklistModal(onChange) {
     if (onChange) onChange();
   }
 
+  function lookupCatalogId(name) {
+    const norm = String(name || '').trim().toLowerCase();
+    if (!norm) return null;
+    const hit = catalog.find(c => String(c.name).trim().toLowerCase() === norm);
+    return hit ? hit.id : null;
+  }
+
   async function addEntry() {
     const value = valueInp.value.trim();
     if (!value) return;
@@ -91,9 +102,14 @@ export async function showBlacklistModal(onChange) {
     const hits = await invoke('find_recipes_matching_blacklist', { entryType: type, value }).catch(() => []);
     const preview = hits.length ? `\n\nБудет удалено ${hits.length} рецептов:\n• ${hits.slice(0, 8).map(h => h.name).join('\n• ')}${hits.length > 8 ? '\n• ...' : ''}` : '';
     if (!await confirmModal(`Заблокировать «${value}»?${preview}`, 'Заблокировать')) return;
-    const id = await invoke('add_food_blacklist', { entryType: type, value });
+    const args = { entryType: type, value };
+    if (type === 'product') {
+      const cid = lookupCatalogId(value);
+      if (cid) args.catalogId = cid;
+    }
+    const id = await invoke('add_food_blacklist', args);
     if (hits.length) await invoke('delete_recipes_matching_blacklist', { entryType: type, value });
-    entries.push({ id, type, value: value.toLowerCase() });
+    entries.push({ id, type, value: value.toLowerCase(), catalog_id: args.catalogId || null });
     valueInp.value = '';
     invalidateBlacklistCache();
     renderList();

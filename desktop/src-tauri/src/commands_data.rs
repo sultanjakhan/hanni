@@ -2077,12 +2077,13 @@ pub fn create_recipe(
             let n = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let a = item.get("amount").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let u = item.get("unit").and_then(|v| v.as_str()).unwrap_or("г");
-            if !n.is_empty() {
-                let _ = conn.execute(
-                    "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit) VALUES (?1,?2,?3,?4)",
-                    rusqlite::params![recipe_id, n, a, u],
-                );
-            }
+            if n.is_empty() { continue; }
+            let cat_id: Option<i64> = item.get("catalog_id").and_then(|v| v.as_i64())
+                .or_else(|| crate::db::resolve_catalog_id_by_name(&conn, n));
+            let _ = conn.execute(
+                "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit, catalog_id) VALUES (?1,?2,?3,?4,?5)",
+                rusqlite::params![recipe_id, n, a, u, cat_id],
+            );
         }
     }
     Ok(recipe_id)
@@ -2151,12 +2152,13 @@ pub fn get_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::
     ).map_err(|e| format!("Recipe not found: {}", e))?;
     // Attach structured ingredients
     let mut stmt = conn.prepare(
-        "SELECT id, name, amount, unit FROM recipe_ingredients WHERE recipe_id=?1 ORDER BY id"
+        "SELECT id, name, amount, unit, catalog_id FROM recipe_ingredients WHERE recipe_id=?1 ORDER BY id"
     ).map_err(|e| format!("DB error: {}", e))?;
     let items: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![id], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
             "amount": row.get::<_, f64>(2)?, "unit": row.get::<_, String>(3)?,
+            "catalog_id": row.get::<_, Option<i64>>(4).unwrap_or(None),
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     recipe.as_object_mut().unwrap().insert("ingredient_items".into(), serde_json::json!(items));
@@ -2274,14 +2276,20 @@ pub fn update_ingredient_in_catalog(
         conn.execute("UPDATE ingredient_catalog SET name=?1 WHERE id=?2",
             rusqlite::params![new_name, id]).map_err(|e| format!("DB error: {}", e))?;
         // Cascade by catalog_id (new soft-link), then by name (legacy rows still without catalog_id).
+        let lower_new = new_name.trim().to_lowercase();
+        let lower_old = old_name.trim().to_lowercase();
         let _ = conn.execute("UPDATE products SET name=?1 WHERE catalog_id=?2",
             rusqlite::params![new_name, id]);
         let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE catalog_id=?2",
             rusqlite::params![new_name, id]);
+        let _ = conn.execute("UPDATE food_blacklist SET value=?1 WHERE catalog_id=?2 AND type='product'",
+            rusqlite::params![lower_new, id]);
         let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE catalog_id IS NULL AND name=?2 COLLATE NOCASE",
             rusqlite::params![new_name, old_name]);
         let _ = conn.execute("UPDATE products SET name=?1 WHERE catalog_id IS NULL AND name=?2 COLLATE NOCASE",
             rusqlite::params![new_name, old_name]);
+        let _ = conn.execute("UPDATE food_blacklist SET value=?1 WHERE catalog_id IS NULL AND type='product' AND value=?2",
+            rusqlite::params![lower_new, lower_old]);
     }
     if let Some(ref cat) = category {
         conn.execute("UPDATE ingredient_catalog SET category=?1 WHERE id=?2",
@@ -2401,25 +2409,46 @@ fn recipes_matching_keywords(conn: &rusqlite::Connection, kws: &[String]) -> Vec
 #[tauri::command]
 pub fn list_food_blacklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
-    let mut stmt = conn.prepare("SELECT id, type, value FROM food_blacklist ORDER BY type, value")
-        .map_err(|e| format!("DB error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT b.id, b.type, b.value, b.catalog_id, COALESCE(c.name,'') \
+         FROM food_blacklist b \
+         LEFT JOIN ingredient_catalog c ON c.id = b.catalog_id \
+         ORDER BY b.type, b.value"
+    ).map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
-        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "type": row.get::<_, String>(1)?,
-            "value": row.get::<_, String>(2)? }))
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "type": row.get::<_, String>(1)?,
+            "value": row.get::<_, String>(2)?,
+            "catalog_id": row.get::<_, Option<i64>>(3).unwrap_or(None),
+            "catalog_name": row.get::<_, String>(4).unwrap_or_default(),
+        }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn add_food_blacklist(entry_type: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn add_food_blacklist(
+    entry_type: String, value: String,
+    catalog_id: Option<i64>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
     if !["tag","product","category","keyword"].contains(&entry_type.as_str()) {
         return Err("invalid type".into());
     }
     let conn = db.conn();
     let v = value.trim().to_lowercase();
     if v.is_empty() { return Err("empty value".into()); }
-    conn.execute("INSERT OR IGNORE INTO food_blacklist (type, value) VALUES (?1, ?2)",
-        rusqlite::params![entry_type, v]).map_err(|e| format!("DB error: {}", e))?;
+    // Auto-resolve catalog_id for type=product when not provided.
+    let cat_id: Option<i64> = match catalog_id {
+        Some(id) => Some(id),
+        None if entry_type == "product" => crate::db::resolve_catalog_id_by_name(&conn, &v),
+        None => None,
+    };
+    conn.execute(
+        "INSERT OR IGNORE INTO food_blacklist (type, value, catalog_id) VALUES (?1, ?2, ?3)",
+        rusqlite::params![entry_type, v, cat_id],
+    ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM food_blacklist WHERE type=?1 AND value=?2",
         rusqlite::params![entry_type, v], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
     Ok(id)
