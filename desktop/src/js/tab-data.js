@@ -266,12 +266,16 @@ async function loadFood(subTab) {
             expiryDate: p.expiry_date, location: p.location, notes: p.notes,
             catalogId: p.catalog_id ?? null,
           }),
-          update: (id, p) => invoke('update_product', {
-            id, name: p.name, quantity: p.quantity, expiryDate: p.expiry_date,
-            location: p.location, notes: p.notes,
-            catalogId: p.catalog_id ?? null,
-            clearCatalog: p.catalog_id == null,
-          }),
+          update: (id, p) => {
+            // Only forward catalogId when the modal actually resolved a catalog match.
+            // Backend's name-changed branch will auto-resolve when nothing is sent.
+            const args = {
+              id, name: p.name, quantity: p.quantity, expiryDate: p.expiry_date,
+              location: p.location, notes: p.notes,
+            };
+            if (p.catalog_id != null) args.catalogId = p.catalog_id;
+            return invoke('update_product', args);
+          },
           remove: (id) => invoke('delete_product', { id }),
           getCatalog: async () => {
             const cat = await invoke('get_ingredient_catalog');

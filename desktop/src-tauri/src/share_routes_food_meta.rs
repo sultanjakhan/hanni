@@ -177,11 +177,16 @@ pub async fn create_catalog_item(
     require_perm(&ctx, "add")?;
     check_food_recipes_scope(&ctx)?;
     let cat = req.category.unwrap_or_else(|| "other".into());
+    let trimmed = req.name.trim();
     conn.execute(
         "INSERT OR IGNORE INTO ingredient_catalog (name, category, tags) VALUES (?1,?2,'')",
-        rusqlite::params![req.name.trim(), cat],
+        rusqlite::params![trimmed, cat],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let id: i64 = conn.query_row(
+        "SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE",
+        rusqlite::params![trimmed], |r| r.get(0),
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     log_activity(&conn, ctx.id, "add_catalog_item",
         &serde_json::json!({ "name": req.name, "category": cat }).to_string(), &ip, &ua);
-    Ok(Json(serde_json::json!({ "status": "ok" })))
+    Ok(Json(serde_json::json!({ "id": id, "status": "ok" })))
 }

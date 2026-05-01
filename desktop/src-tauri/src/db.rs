@@ -1755,14 +1755,15 @@ fn seed_catalog_hierarchy(conn: &rusqlite::Connection) {
         );
     }
 
-    // Pass 2: resolve parent_id by name lookup
-    for (name, _cat, _sg, _tags, parent) in items {
+    // Pass 2: resolve parent_id by name lookup. Restrict to the same category so a user's
+    // pre-existing row with the same name in a different category isn't silently re-parented.
+    for (name, cat, _sg, _tags, parent) in items {
         if let Some(parent_name) = parent {
             let _ = conn.execute(
                 "UPDATE ingredient_catalog \
-                 SET parent_id = (SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE) \
-                 WHERE name=?2 COLLATE NOCASE AND parent_id IS NULL",
-                rusqlite::params![parent_name, name],
+                 SET parent_id = (SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE AND category=?3) \
+                 WHERE name=?2 COLLATE NOCASE AND category=?3 AND parent_id IS NULL",
+                rusqlite::params![parent_name, name, cat],
             );
         }
     }
@@ -1771,6 +1772,38 @@ fn seed_catalog_hierarchy(conn: &rusqlite::Connection) {
 // Trim + Unicode-aware lowercase. SQLite's built-in LOWER() is ASCII-only,
 // so all name normalization is done in Rust.
 pub fn normalize_name(s: &str) -> String { s.trim().to_lowercase() }
+
+// Unicode-aware cascade rename for legacy rows (catalog_id IS NULL) where SQLite COLLATE NOCASE
+// can't fold Cyrillic. Scans rows in Rust and updates only those whose normalized name matches.
+pub fn rename_legacy_by_name(
+    conn: &rusqlite::Connection,
+    table: &str,
+    name_col: &str,
+    old_name: &str,
+    new_name: &str,
+    extra_where: &str,
+) {
+    let target = normalize_name(old_name);
+    if target.is_empty() { return; }
+    let select_sql = format!(
+        "SELECT id, {} FROM {} WHERE catalog_id IS NULL{}",
+        name_col, table,
+        if extra_where.is_empty() { "".to_string() } else { format!(" AND {}", extra_where) },
+    );
+    let rows: Vec<(i64, String)> = match conn.prepare(&select_sql) {
+        Ok(mut stmt) => stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .map(|m| m.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default(),
+        Err(_) => return,
+    };
+    let update_sql = format!("UPDATE {} SET {}=?1 WHERE id=?2", table, name_col);
+    for (row_id, raw_name) in rows {
+        if normalize_name(&raw_name) == target {
+            let _ = conn.execute(&update_sql, rusqlite::params![new_name, row_id]);
+        }
+    }
+}
 
 // Look up a catalog row by name with Unicode-aware case-insensitive comparison.
 pub fn resolve_catalog_id_by_name(conn: &rusqlite::Connection, name: &str) -> Option<i64> {

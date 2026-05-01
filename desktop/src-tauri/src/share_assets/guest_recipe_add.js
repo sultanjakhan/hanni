@@ -14,10 +14,13 @@
         getCatalog: async () => catalog,
         getCuisines: async () => (await api('/cuisines').catch(() => ({ cuisines: [] }))).cuisines || [],
         getBlacklist: async () => [],
-        addCatalogItem: ({ name, category }) => api('/catalog', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, category }),
-        }),
+        addCatalogItem: async ({ name, category }) => {
+          const resp = await api('/catalog', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, category }),
+          });
+          return resp && typeof resp.id === 'number' ? resp.id : null;
+        },
         addCuisine: ({ code, name, emoji }) => api('/cuisines', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code, name, emoji }),

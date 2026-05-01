@@ -44,10 +44,12 @@
     }
 
     async function ensureCatalog() {
-      if (state.catalog || !backend.getCatalog) return state.catalog || [];
-      try { state.catalog = await backend.getCatalog(); }
-      catch { state.catalog = []; }
-      return state.catalog;
+      if (!backend.getCatalog) return [];
+      // Retry on next call if the previous attempt failed (state.catalog stays null).
+      if (state.catalog) return state.catalog;
+      try { state.catalog = await backend.getCatalog() || []; }
+      catch { state.catalog = null; }
+      return state.catalog || [];
     }
     function lookupCatalog(name) {
       if (!state.catalog) return null;

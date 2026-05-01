@@ -2275,21 +2275,18 @@ pub fn update_ingredient_in_catalog(
             rusqlite::params![id], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
         conn.execute("UPDATE ingredient_catalog SET name=?1 WHERE id=?2",
             rusqlite::params![new_name, id]).map_err(|e| format!("DB error: {}", e))?;
-        // Cascade by catalog_id (new soft-link), then by name (legacy rows still without catalog_id).
+        // Cascade by catalog_id first (Stage 2 soft-link), then Unicode-aware fallback for legacy rows.
         let lower_new = new_name.trim().to_lowercase();
-        let lower_old = old_name.trim().to_lowercase();
         let _ = conn.execute("UPDATE products SET name=?1 WHERE catalog_id=?2",
             rusqlite::params![new_name, id]);
         let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE catalog_id=?2",
             rusqlite::params![new_name, id]);
         let _ = conn.execute("UPDATE food_blacklist SET value=?1 WHERE catalog_id=?2 AND type='product'",
             rusqlite::params![lower_new, id]);
-        let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE catalog_id IS NULL AND name=?2 COLLATE NOCASE",
-            rusqlite::params![new_name, old_name]);
-        let _ = conn.execute("UPDATE products SET name=?1 WHERE catalog_id IS NULL AND name=?2 COLLATE NOCASE",
-            rusqlite::params![new_name, old_name]);
-        let _ = conn.execute("UPDATE food_blacklist SET value=?1 WHERE catalog_id IS NULL AND type='product' AND value=?2",
-            rusqlite::params![lower_new, lower_old]);
+        // SQLite COLLATE NOCASE doesn't fold Cyrillic — normalize_name() does.
+        crate::db::rename_legacy_by_name(&conn, "products", "name", &old_name, new_name, "");
+        crate::db::rename_legacy_by_name(&conn, "recipe_ingredients", "name", &old_name, new_name, "");
+        crate::db::rename_legacy_by_name(&conn, "food_blacklist", "value", &old_name, &lower_new, "type='product'");
     }
     if let Some(ref cat) = category {
         conn.execute("UPDATE ingredient_catalog SET category=?1 WHERE id=?2",
