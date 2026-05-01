@@ -707,8 +707,18 @@ pub fn run() {
             // Android: resolve data dir from Tauri, then init DB
             #[cfg(target_os = "android")]
             {
+                // Tauri 2.x app_data_dir() can return a relative path
+                // ("Library/Application Support/Hanni") on Android, which
+                // breaks SQLite. Fall back to the package's private files
+                // dir if Tauri's API doesn't give us an absolute path.
                 let data_dir = app.path().app_data_dir()
-                    .expect("Cannot resolve app_data_dir on Android");
+                    .ok()
+                    .filter(|p| p.is_absolute())
+                    .unwrap_or_else(|| {
+                        std::path::PathBuf::from("/data/data/com.sultanjakhan.hanni/files")
+                    });
+                eprintln!("[hanni] android data_dir = {:?}", data_dir);
+                let _ = std::fs::create_dir_all(&data_dir);
                 types::set_data_dir(data_dir);
                 let hanni_db = init_database();
                 app.manage(hanni_db);
