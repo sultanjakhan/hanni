@@ -60,6 +60,10 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
   display: flex;
   align-items: center;
   height: 48px;
+  /* Push header below status bar (notch / camera punchhole) so hamburger
+     button isn't covered by system UI and stays tappable. */
+  padding-top: env(safe-area-inset-top, 24px);
+  box-sizing: content-box;
   padding: 0 var(--space-3);
   background: var(--bg-sidebar);
   border-bottom: 1px solid var(--border-subtle);
@@ -109,7 +113,8 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  padding: var(--space-3) 0;
+  /* Match safe-area top so drawer items aren't hidden behind notch. */
+  padding: calc(env(safe-area-inset-top, 24px) + var(--space-3)) 0 var(--space-3);
 }
 .mobile #tab-bar.drawer-open {
   transform: translateX(0);
