@@ -2211,33 +2211,62 @@ pub fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), Strin
 #[tauri::command]
 pub fn get_ingredient_catalog(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
-    let mut stmt = conn.prepare("SELECT id, name, category, tags, COALESCE(subgroup,'') FROM ingredient_catalog ORDER BY name")
-        .map_err(|e| format!("DB error: {}", e))?;
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.name, c.category, c.tags, COALESCE(c.subgroup,''), \
+                c.parent_id, COALESCE(p.name,'') \
+         FROM ingredient_catalog c \
+         LEFT JOIN ingredient_catalog p ON p.id = c.parent_id \
+         ORDER BY c.name"
+    ).map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
             "category": row.get::<_, String>(2)?, "tags": row.get::<_, String>(3)?,
             "subgroup": row.get::<_, String>(4)?,
+            "parent_id": row.get::<_, Option<i64>>(5)?,
+            "parent_name": row.get::<_, String>(6)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn add_ingredient_to_catalog(name: String, category: Option<String>, tags: Option<String>, subgroup: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn add_ingredient_to_catalog(
+    name: String, category: Option<String>, tags: Option<String>,
+    subgroup: Option<String>, parent_id: Option<i64>, parent_name: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
     let conn = db.conn();
     let cat = category.unwrap_or_else(|| "other".into());
     let t = tags.unwrap_or_default();
     let sg = subgroup.filter(|s| !s.is_empty());
-    conn.execute("INSERT OR IGNORE INTO ingredient_catalog (name, category, tags, subgroup) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![name, cat, t, sg]).map_err(|e| format!("DB error: {}", e))?;
+    let pid: Option<i64> = match parent_id {
+        Some(id) => Some(id),
+        None => parent_name.and_then(|pn| {
+            let trimmed = pn.trim().to_string();
+            if trimmed.is_empty() { None } else {
+                conn.query_row(
+                    "SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE",
+                    rusqlite::params![trimmed], |r| r.get::<_, i64>(0),
+                ).ok()
+            }
+        }),
+    };
+    conn.execute(
+        "INSERT OR IGNORE INTO ingredient_catalog (name, category, tags, subgroup, parent_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![name, cat, t, sg, pid],
+    ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE",
         rusqlite::params![name], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
     Ok(id)
 }
 
 #[tauri::command]
-pub fn update_ingredient_in_catalog(id: i64, name: Option<String>, category: Option<String>, tags: Option<String>, subgroup: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_ingredient_in_catalog(
+    id: i64, name: Option<String>, category: Option<String>, tags: Option<String>,
+    subgroup: Option<String>, parent_id: Option<i64>, clear_parent: Option<bool>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
     let conn = db.conn();
     if let Some(ref new_name) = name {
         let old_name: String = conn.query_row("SELECT name FROM ingredient_catalog WHERE id=?1",
@@ -2260,6 +2289,22 @@ pub fn update_ingredient_in_catalog(id: i64, name: Option<String>, category: Opt
         conn.execute("UPDATE ingredient_catalog SET subgroup=?1 WHERE id=?2",
             rusqlite::params![val, id]).map_err(|e| format!("DB error: {}", e))?;
     }
+    if clear_parent.unwrap_or(false) {
+        conn.execute("UPDATE ingredient_catalog SET parent_id=NULL WHERE id=?1",
+            rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    } else if let Some(pid) = parent_id {
+        if pid == id { return Err("Cannot set self as parent".into()); }
+        // Stage 1: hierarchy is strictly 2 levels — parent must be top-level.
+        let parent_of_parent: Option<i64> = conn.query_row(
+            "SELECT parent_id FROM ingredient_catalog WHERE id=?1",
+            rusqlite::params![pid], |r| r.get(0),
+        ).unwrap_or(None);
+        if parent_of_parent.is_some() {
+            return Err("Parent must be top-level (no grandparents)".into());
+        }
+        conn.execute("UPDATE ingredient_catalog SET parent_id=?1 WHERE id=?2",
+            rusqlite::params![pid, id]).map_err(|e| format!("DB error: {}", e))?;
+    }
     Ok(())
 }
 
@@ -2278,6 +2323,9 @@ pub fn list_catalog_subgroups(category: String, db: tauri::State<'_, HanniDb>) -
 #[tauri::command]
 pub fn delete_ingredient_from_catalog(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
+    // Detach children first (we don't rely on PRAGMA foreign_keys being on).
+    let _ = conn.execute("UPDATE ingredient_catalog SET parent_id=NULL WHERE parent_id=?1",
+        rusqlite::params![id]);
     conn.execute("DELETE FROM ingredient_catalog WHERE id=?1",
         rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())

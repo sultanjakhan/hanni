@@ -1,6 +1,7 @@
 // ── food-product-modal.js — Create/edit product modal ──
 import { invoke } from './state.js';
-import { CAT_LABELS, CAT_ORDER, invalidateCatalogCache } from './food-recipe-filters.js';
+import { CAT_LABELS, CAT_ORDER, invalidateCatalogCache, loadCatalog } from './food-recipe-filters.js';
+import { HIERARCHICAL_CATS } from './food-product-views.js';
 
 export function showProductModal(reloadFn, product, defaults = {}) {
   const isEdit = !!product;
@@ -15,6 +16,11 @@ export function showProductModal(reloadFn, product, defaults = {}) {
       <div class="add-chips pm-cats">${CAT_ORDER.map(c =>
         `<button type="button" class="rf-chip${c === state.cat ? ' active' : ''}" data-val="${c}">${CAT_LABELS[c]}</button>`
       ).join('')}</div></div>
+    <div class="form-group" id="pm-parent-wrap" style="display:none">
+      <label class="form-label">Разновидность чего? <span style="color:var(--text-secondary);font-size:11px">(необязательно)</span></label>
+      <select class="form-input" id="pm-parent">
+        <option value="">— нет (самостоятельный продукт) —</option>
+      </select></div>
     <div class="form-group"><label class="form-label">Подгруппа</label>
       <input class="form-input" id="pm-subgroup" value="${esc(product?.subgroup || defaults.subgroup || '')}" placeholder="например: говядина, курица, кисломолочные" list="pm-subgroup-list">
       <datalist id="pm-subgroup-list"></datalist></div>
@@ -38,11 +44,36 @@ export function showProductModal(reloadFn, product, defaults = {}) {
   }
   refreshSubgroups();
 
+  async function refreshParents() {
+    const wrap = overlay.querySelector('#pm-parent-wrap');
+    const sel = overlay.querySelector('#pm-parent');
+    if (!HIERARCHICAL_CATS.has(state.cat)) {
+      wrap.style.display = 'none';
+      sel.value = '';
+      return;
+    }
+    wrap.style.display = '';
+    let cat;
+    try { cat = await loadCatalog(); } catch { cat = []; }
+    const candidates = cat.filter(p =>
+      p.category === state.cat
+      && !p.parent_id
+      && (!product || p.id !== product.id)
+    ).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    const currentParentId = product?.parent_id ?? '';
+    sel.innerHTML = '<option value="">— нет (самостоятельный продукт) —</option>'
+      + candidates.map(c =>
+          `<option value="${c.id}"${c.id === currentParentId ? ' selected' : ''}>${esc(c.name)}</option>`
+        ).join('');
+  }
+  refreshParents();
+
   overlay.querySelectorAll('.pm-cats .rf-chip').forEach(btn => {
     btn.onclick = () => {
       state.cat = btn.dataset.val;
       overlay.querySelectorAll('.pm-cats .rf-chip').forEach(b => b.classList.toggle('active', b.dataset.val === state.cat));
       refreshSubgroups();
+      refreshParents();
     };
   });
 
@@ -51,6 +82,8 @@ export function showProductModal(reloadFn, product, defaults = {}) {
     if (!name) { overlay.querySelector('#pm-name').classList.add('input-error'); return; }
     const tags = overlay.querySelector('#pm-tags').value.trim();
     const subgroup = overlay.querySelector('#pm-subgroup').value.trim();
+    const parentRaw = overlay.querySelector('#pm-parent').value;
+    const parentId = (HIERARCHICAL_CATS.has(state.cat) && parentRaw) ? Number(parentRaw) : null;
     try {
       if (isEdit) {
         const changes = {};
@@ -58,11 +91,18 @@ export function showProductModal(reloadFn, product, defaults = {}) {
         if (state.cat !== product.category) changes.category = state.cat;
         if (tags !== (product.tags || '')) changes.tags = tags;
         if (subgroup !== (product.subgroup || '')) changes.subgroup = subgroup;
+        const oldParent = product.parent_id ?? null;
+        if (parentId !== oldParent) {
+          if (parentId === null) changes.clearParent = true;
+          else changes.parentId = parentId;
+        }
         if (Object.keys(changes).length) {
           await invoke('update_ingredient_in_catalog', { id: product.id, ...changes });
         }
       } else {
-        await invoke('add_ingredient_to_catalog', { name, category: state.cat, tags, subgroup });
+        const args = { name, category: state.cat, tags, subgroup };
+        if (parentId !== null) args.parentId = parentId;
+        await invoke('add_ingredient_to_catalog', args);
       }
       invalidateCatalogCache();
       overlay.remove();

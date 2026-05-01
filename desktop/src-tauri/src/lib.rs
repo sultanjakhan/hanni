@@ -159,6 +159,7 @@ fn init_database() -> HanniDb {
     db::migrate_sports_catalog(&conn);
     db::migrate_food_blacklist(&conn);
     db::migrate_catalog_subgroup(&conn);
+    db::migrate_catalog_parent(&conn);
     db::migrate_share_links(&conn);
     db::enable_crr_tables(&conn);
 

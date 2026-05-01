@@ -1637,6 +1637,168 @@ pub fn migrate_catalog_subgroup(conn: &rusqlite::Connection) {
     let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('catalog_subgroup_autofill')", []);
 }
 
+// v0.53: parent_id hierarchy in ingredient_catalog (Stage 1: meat + fish)
+pub fn migrate_catalog_parent(conn: &rusqlite::Connection) {
+    let has_col = conn.prepare("SELECT parent_id FROM ingredient_catalog LIMIT 1").is_ok();
+    if !has_col {
+        let _ = conn.execute(
+            "ALTER TABLE ingredient_catalog ADD COLUMN parent_id INTEGER REFERENCES ingredient_catalog(id) ON DELETE SET NULL",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_catalog_parent ON ingredient_catalog(parent_id)",
+            [],
+        );
+    }
+
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='catalog_parent_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+
+    seed_catalog_hierarchy(conn);
+    relink_legacy_catalog_parents(conn);
+
+    let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('catalog_parent_v1')", []);
+}
+
+// Inserts new meat/fish/semifinished items and links them to parents by name.
+fn seed_catalog_hierarchy(conn: &rusqlite::Connection) {
+    // (name, category, subgroup, tags, parent_name)
+    let items: &[(&str, &str, &str, &str, Option<&str>)] = &[
+        // New top-level roots
+        ("свинина", "meat", "свинина", "свинина", None),
+        ("полуфабрикаты мясные", "meat", "полуфабрикаты", "полуфабрикаты", None),
+
+        // Курица children
+        ("куриная грудка", "meat", "птица", "птица", Some("курица")),
+        ("куриная голень", "meat", "птица", "птица", Some("курица")),
+        ("куриный окорочок", "meat", "птица", "птица", Some("курица")),
+        ("куриные сердечки", "meat", "субпродукты", "субпродукты,птица", Some("курица")),
+        ("куриные желудки", "meat", "субпродукты", "субпродукты,птица", Some("курица")),
+
+        // Говядина children
+        ("говяжья вырезка", "meat", "говядина", "говядина", Some("говядина")),
+        ("говяжья грудинка", "meat", "говядина", "говядина", Some("говядина")),
+        ("говяжья лопатка", "meat", "говядина", "говядина", Some("говядина")),
+        ("говяжья голяшка", "meat", "говядина", "говядина", Some("говядина")),
+        ("говяжьи рёбра", "meat", "говядина", "говядина", Some("говядина")),
+        ("говяжье сердце", "meat", "субпродукты", "субпродукты,говядина", Some("говядина")),
+        ("говяжьи почки", "meat", "субпродукты", "субпродукты,говядина", Some("говядина")),
+
+        // Свинина children
+        ("свиная вырезка", "meat", "свинина", "свинина", Some("свинина")),
+        ("свиная корейка", "meat", "свинина", "свинина", Some("свинина")),
+        ("свиная шея", "meat", "свинина", "свинина", Some("свинина")),
+        ("свиные рёбра", "meat", "свинина", "свинина", Some("свинина")),
+        ("свиная грудинка", "meat", "свинина", "свинина", Some("свинина")),
+        ("свиная лопатка", "meat", "свинина", "свинина", Some("свинина")),
+        ("фарш свиной", "meat", "свинина", "свинина,фарш", Some("свинина")),
+        ("сало", "meat", "свинина", "свинина,сало", Some("свинина")),
+        ("свиная печень", "meat", "субпродукты", "субпродукты,свинина", Some("свинина")),
+
+        // Баранина children
+        ("баранья лопатка", "meat", "баранина", "баранина", Some("баранина")),
+        ("бараньи рёбрышки", "meat", "баранина", "баранина", Some("баранина")),
+        ("баранья корейка", "meat", "баранина", "баранина", Some("баранина")),
+        ("баранья нога", "meat", "баранина", "баранина", Some("баранина")),
+        ("баранья голяшка", "meat", "баранина", "баранина", Some("баранина")),
+        ("фарш бараний", "meat", "баранина", "баранина,фарш", Some("баранина")),
+        ("баранья печень", "meat", "субпродукты", "субпродукты,баранина", Some("баранина")),
+
+        // Полуфабрикаты children
+        ("пельмени", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("манты", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("вареники мясные", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("котлеты", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("тефтели", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("бургер-патти", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("наггетсы куриные", "meat", "полуфабрикаты", "полуфабрикаты,птица", Some("полуфабрикаты мясные")),
+        ("чебуреки", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("хинкали", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("купаты", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+        ("шашлык маринованный", "meat", "полуфабрикаты", "полуфабрикаты", Some("полуфабрикаты мясные")),
+
+        // Fish — red fish breakdown
+        ("лосось филе", "fish", "красная рыба", "красная рыба", Some("лосось")),
+        ("лосось стейк", "fish", "красная рыба", "красная рыба", Some("лосось")),
+        ("лосось слабосолёный", "fish", "красная рыба", "красная рыба", Some("лосось")),
+        ("сёмга филе", "fish", "красная рыба", "красная рыба", Some("сёмга")),
+        ("сёмга стейк", "fish", "красная рыба", "красная рыба", Some("сёмга")),
+        ("форель филе", "fish", "красная рыба", "красная рыба", Some("форель")),
+        ("форель радужная", "fish", "красная рыба", "красная рыба", Some("форель")),
+
+        // Fish — white fish breakdown
+        ("треска филе", "fish", "белая рыба", "белая рыба", Some("треска")),
+        ("треска стейк", "fish", "белая рыба", "белая рыба", Some("треска")),
+        ("минтай филе", "fish", "белая рыба", "белая рыба", Some("минтай")),
+        ("тунец стейк", "fish", "белая рыба", "белая рыба", Some("тунец")),
+        ("тунец консервированный", "fish", "белая рыба", "белая рыба,консервы", Some("тунец")),
+
+        // Fish — seafood variants
+        ("креветки тигровые", "fish", "морепродукты", "морепродукты", Some("креветки")),
+        ("креветки королевские", "fish", "морепродукты", "морепродукты", Some("креветки")),
+        ("креветки коктейльные", "fish", "морепродукты", "морепродукты", Some("креветки")),
+        ("креветки очищенные", "fish", "морепродукты", "морепродукты", Some("креветки")),
+        ("кальмар тушка", "fish", "морепродукты", "морепродукты", Some("кальмар")),
+        ("кальмар кольца", "fish", "морепродукты", "морепродукты", Some("кальмар")),
+        ("кальмар филе", "fish", "морепродукты", "морепродукты", Some("кальмар")),
+        ("мидии в раковинах", "fish", "морепродукты", "морепродукты", Some("мидии")),
+        ("мидии очищенные", "fish", "морепродукты", "морепродукты", Some("мидии")),
+    ];
+
+    // Pass 1: insert all rows (parents auto-created if absent; children with parent_id=NULL initially)
+    for (name, cat, sg, tags, _parent) in items {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO ingredient_catalog (name, category, tags, subgroup) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![name, cat, tags, sg],
+        );
+    }
+
+    // Pass 2: resolve parent_id by name lookup
+    for (name, _cat, _sg, _tags, parent) in items {
+        if let Some(parent_name) = parent {
+            let _ = conn.execute(
+                "UPDATE ingredient_catalog \
+                 SET parent_id = (SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE) \
+                 WHERE name=?2 COLLATE NOCASE AND parent_id IS NULL",
+                rusqlite::params![parent_name, name],
+            );
+        }
+    }
+}
+
+// Re-parents existing flat catalog entries (forshmaks, organs of курица/говядина) under their species.
+fn relink_legacy_catalog_parents(conn: &rusqlite::Connection) {
+    let pairs: &[(&str, &str)] = &[
+        // Курица
+        ("куриное филе", "курица"),
+        ("куриные бёдра", "курица"),
+        ("куриные крылышки", "курица"),
+        ("фарш куриный", "курица"),
+        ("печень куриная", "курица"),
+        // Говядина
+        ("фарш говяжий", "говядина"),
+        ("печень говяжья", "говядина"),
+        ("язык говяжий", "говядина"),
+    ];
+    for (child, parent) in pairs {
+        let _ = conn.execute(
+            "UPDATE ingredient_catalog \
+             SET parent_id = (SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE) \
+             WHERE name=?2 COLLATE NOCASE AND parent_id IS NULL",
+            rusqlite::params![parent, child],
+        );
+    }
+    // Tag legacy organ names with subgroup='субпродукты' for cleaner UI grouping.
+    let _ = conn.execute(
+        "UPDATE ingredient_catalog SET subgroup='субпродукты' \
+         WHERE name IN ('печень куриная','печень говяжья','язык говяжий') \
+         AND (subgroup IS NULL OR subgroup='' OR subgroup<>'субпродукты')",
+        [],
+    );
+}
+
 pub fn migrate_sports_catalog(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS exercise_catalog (
