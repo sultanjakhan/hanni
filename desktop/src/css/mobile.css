@@ -5,6 +5,18 @@
 
 /* ── Mobile fixes (toolbar + FAB + Day-grid) ── */
 
+/* Sub-tab bar (Дашборд / Таблица / Цели / Заметки / Память):
+   on narrow viewports the last tab gets cut off. Make the row
+   horizontally scrollable so all tabs remain reachable. */
+.mobile .uni-tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex-wrap: nowrap;
+}
+.mobile .uni-tabs::-webkit-scrollbar { display: none; }
+.mobile .uni-tab { flex-shrink: 0; padding: 8px 10px; font-size: 13px; }
+
 /* "+ Событие" toolbar buttons → icon-only on mobile to fit narrow header */
 .mobile #day-add-event,
 .mobile #ctl-add,
