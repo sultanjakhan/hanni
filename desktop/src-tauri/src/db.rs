@@ -1768,6 +1768,98 @@ fn seed_catalog_hierarchy(conn: &rusqlite::Connection) {
     }
 }
 
+// Trim + Unicode-aware lowercase. SQLite's built-in LOWER() is ASCII-only,
+// so all name normalization is done in Rust.
+pub fn normalize_name(s: &str) -> String { s.trim().to_lowercase() }
+
+// Look up a catalog row by name with Unicode-aware case-insensitive comparison.
+pub fn resolve_catalog_id_by_name(conn: &rusqlite::Connection, name: &str) -> Option<i64> {
+    let target = normalize_name(name);
+    if target.is_empty() { return None; }
+    let mut stmt = conn.prepare("SELECT id, name FROM ingredient_catalog").ok()?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).ok()?;
+    for row in rows.flatten() {
+        if normalize_name(&row.1) == target { return Some(row.0); }
+    }
+    None
+}
+
+// v0.54: catalog_id soft-link in products / recipe_ingredients / food_blacklist.
+// Existing rows are auto-linked via Unicode-aware strict equality on trimmed lowercase names.
+pub fn migrate_catalog_links(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT catalog_id FROM products LIMIT 1").is_err() {
+        let _ = conn.execute(
+            "ALTER TABLE products ADD COLUMN catalog_id INTEGER REFERENCES ingredient_catalog(id) ON DELETE SET NULL",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_products_catalog ON products(catalog_id)",
+            [],
+        );
+    }
+    if conn.prepare("SELECT catalog_id FROM recipe_ingredients LIMIT 1").is_err() {
+        let _ = conn.execute(
+            "ALTER TABLE recipe_ingredients ADD COLUMN catalog_id INTEGER REFERENCES ingredient_catalog(id) ON DELETE SET NULL",
+            [],
+        );
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_catalog ON recipe_ingredients(catalog_id)",
+            [],
+        );
+    }
+    if conn.prepare("SELECT catalog_id FROM food_blacklist LIMIT 1").is_err() {
+        let _ = conn.execute(
+            "ALTER TABLE food_blacklist ADD COLUMN catalog_id INTEGER REFERENCES ingredient_catalog(id) ON DELETE SET NULL",
+            [],
+        );
+    }
+
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    // v2 supersedes the broken v1 (which used SQLite LOWER() that doesn't fold Cyrillic).
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='catalog_link_v2'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+
+    let mut catalog: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT id, name FROM ingredient_catalog") {
+        if let Ok(iter) = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
+            for row in iter.flatten() {
+                catalog.entry(normalize_name(&row.1)).or_insert(row.0);
+            }
+        }
+    }
+    if !catalog.is_empty() {
+        backfill_catalog_id(conn, "products", "name", &catalog, "catalog_id IS NULL");
+        backfill_catalog_id(conn, "recipe_ingredients", "name", &catalog, "catalog_id IS NULL");
+        backfill_catalog_id(conn, "food_blacklist", "value", &catalog, "catalog_id IS NULL AND type='product'");
+    }
+
+    let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('catalog_link_v2')", []);
+}
+
+fn backfill_catalog_id(
+    conn: &rusqlite::Connection,
+    table: &str,
+    name_col: &str,
+    catalog: &std::collections::HashMap<String, i64>,
+    where_clause: &str,
+) {
+    let select_sql = format!("SELECT id, {} FROM {} WHERE {}", name_col, table, where_clause);
+    let rows: Vec<(i64, String)> = match conn.prepare(&select_sql) {
+        Ok(mut stmt) => stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .map(|m| m.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default(),
+        Err(_) => return,
+    };
+    let update_sql = format!("UPDATE {} SET catalog_id=?1 WHERE id=?2", table);
+    for (row_id, raw_name) in rows {
+        if let Some(cid) = catalog.get(&normalize_name(&raw_name)) {
+            let _ = conn.execute(&update_sql, rusqlite::params![cid, row_id]);
+        }
+    }
+}
+
 // Re-parents existing flat catalog entries (forshmaks, organs of курица/говядина) under their species.
 fn relink_legacy_catalog_parents(conn: &rusqlite::Connection) {
     let pairs: &[(&str, &str)] = &[

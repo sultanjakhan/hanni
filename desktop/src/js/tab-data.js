@@ -264,12 +264,19 @@ async function loadFood(subTab) {
           add: (p) => invoke('add_product', {
             name: p.name, category: p.category, quantity: p.quantity, unit: p.unit,
             expiryDate: p.expiry_date, location: p.location, notes: p.notes,
+            catalogId: p.catalog_id ?? null,
           }),
           update: (id, p) => invoke('update_product', {
             id, name: p.name, quantity: p.quantity, expiryDate: p.expiry_date,
             location: p.location, notes: p.notes,
+            catalogId: p.catalog_id ?? null,
+            clearCatalog: p.catalog_id == null,
           }),
           remove: (id) => invoke('delete_product', { id }),
+          getCatalog: async () => {
+            const cat = await invoke('get_ingredient_catalog');
+            return cat.map(c => ({ id: c.id, name: c.name, category: c.category }));
+          },
         },
       });
     },

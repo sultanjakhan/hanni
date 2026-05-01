@@ -2273,7 +2273,14 @@ pub fn update_ingredient_in_catalog(
             rusqlite::params![id], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
         conn.execute("UPDATE ingredient_catalog SET name=?1 WHERE id=?2",
             rusqlite::params![new_name, id]).map_err(|e| format!("DB error: {}", e))?;
-        let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE name=?2 COLLATE NOCASE",
+        // Cascade by catalog_id (new soft-link), then by name (legacy rows still without catalog_id).
+        let _ = conn.execute("UPDATE products SET name=?1 WHERE catalog_id=?2",
+            rusqlite::params![new_name, id]);
+        let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE catalog_id=?2",
+            rusqlite::params![new_name, id]);
+        let _ = conn.execute("UPDATE recipe_ingredients SET name=?1 WHERE catalog_id IS NULL AND name=?2 COLLATE NOCASE",
+            rusqlite::params![new_name, old_name]);
+        let _ = conn.execute("UPDATE products SET name=?1 WHERE catalog_id IS NULL AND name=?2 COLLATE NOCASE",
             rusqlite::params![new_name, old_name]);
     }
     if let Some(ref cat) = category {
@@ -2474,16 +2481,31 @@ pub fn add_cuisine(code: String, name: String, emoji: Option<String>, db: tauri:
 pub fn add_product(
     name: String, category: Option<String>, quantity: Option<f64>, unit: Option<String>,
     expiry_date: Option<String>, location: Option<String>, notes: Option<String>,
+    catalog_id: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
+    // Strict auto-link by name when caller didn't provide catalog_id explicitly.
+    let resolved_cat_id: Option<i64> = match catalog_id {
+        Some(id) => Some(id),
+        None => crate::db::resolve_catalog_id_by_name(&conn, &name),
+    };
+    // If linked, inherit category from catalog so it stays canonical.
+    let final_category: String = match resolved_cat_id {
+        Some(id) => conn.query_row(
+            "SELECT category FROM ingredient_catalog WHERE id=?1",
+            rusqlite::params![id], |r| r.get::<_, String>(0),
+        ).unwrap_or_else(|_| category.clone().unwrap_or_else(|| "other".into())),
+        None => category.unwrap_or_else(|| "other".into()),
+    };
     conn.execute(
-        "INSERT INTO products (name, category, quantity, unit, expiry_date, location, notes, purchased_at, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-        rusqlite::params![name, category.unwrap_or_else(|| "other".into()), quantity.unwrap_or(1.0),
+        "INSERT INTO products (name, category, quantity, unit, expiry_date, location, notes, purchased_at, created_at, catalog_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
+        rusqlite::params![name, final_category, quantity.unwrap_or(1.0),
             unit.unwrap_or_else(|| "шт".into()), expiry_date,
-            location.unwrap_or_else(|| "fridge".into()), notes.unwrap_or_default(), now],
+            location.unwrap_or_else(|| "fridge".into()), notes.unwrap_or_default(), now,
+            resolved_cat_id],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
@@ -2491,16 +2513,17 @@ pub fn add_product(
 #[tauri::command]
 pub fn get_products(location: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
+    let select = "SELECT p.id, p.name, p.category, p.quantity, p.unit, p.expiry_date, p.location, p.notes, \
+                         p.catalog_id, COALESCE(c.name,'') \
+                  FROM products p LEFT JOIN ingredient_catalog c ON c.id = p.catalog_id";
     if let Some(loc) = location {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, category, quantity, unit, expiry_date, location, notes FROM products WHERE location=?1 ORDER BY expiry_date NULLS LAST"
-        ).map_err(|e| format!("DB error: {}", e))?;
+        let sql = format!("{} WHERE p.location=?1 ORDER BY p.expiry_date NULLS LAST", select);
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![loc], |row| product_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
     } else {
-        let mut stmt = conn.prepare(
-            "SELECT id, name, category, quantity, unit, expiry_date, location, notes FROM products ORDER BY expiry_date NULLS LAST"
-        ).map_err(|e| format!("DB error: {}", e))?;
+        let sql = format!("{} ORDER BY p.expiry_date NULLS LAST", select);
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map([], |row| product_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
     }
@@ -2512,20 +2535,41 @@ pub fn product_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqli
         "category": row.get::<_, String>(2)?, "quantity": row.get::<_, f64>(3)?,
         "unit": row.get::<_, String>(4)?, "expiry_date": row.get::<_, Option<String>>(5)?,
         "location": row.get::<_, String>(6)?, "notes": row.get::<_, String>(7)?,
+        "catalog_id": row.get::<_, Option<i64>>(8).unwrap_or(None),
+        "catalog_name": row.get::<_, String>(9).unwrap_or_default(),
     }))
 }
 
 #[tauri::command]
-pub fn update_product(id: i64, name: Option<String>, quantity: Option<f64>, expiry_date: Option<String>, location: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_product(
+    id: i64, name: Option<String>, quantity: Option<f64>, expiry_date: Option<String>,
+    location: Option<String>, notes: Option<String>,
+    catalog_id: Option<i64>, clear_catalog: Option<bool>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
     let conn = db.conn();
     let mut updates = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 1;
-    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    let name_changed = name.is_some();
+    if let Some(ref v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v.clone())); idx += 1; }
     if let Some(v) = quantity { updates.push(format!("quantity=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = expiry_date { updates.push(format!("expiry_date=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = location { updates.push(format!("location=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = notes { updates.push(format!("notes=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if clear_catalog.unwrap_or(false) {
+        updates.push(format!("catalog_id=NULL"));
+    } else if let Some(cid) = catalog_id {
+        updates.push(format!("catalog_id=?{}", idx)); params.push(Box::new(cid)); idx += 1;
+    } else if name_changed {
+        // Auto-resolve by new name if caller didn't set explicitly.
+        if let Some(ref nm) = name {
+            let auto: Option<i64> = crate::db::resolve_catalog_id_by_name(&conn, nm);
+            updates.push(format!("catalog_id=?{}", idx));
+            params.push(Box::new(auto));
+            idx += 1;
+        }
+    }
     if updates.is_empty() { return Ok(()); }
     params.push(Box::new(id));
     let sql = format!("UPDATE products SET {} WHERE id=?{}", updates.join(","), idx);

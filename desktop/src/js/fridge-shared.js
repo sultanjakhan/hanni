@@ -2,10 +2,11 @@
 // Loaded as a plain <script>. Registers `window.HanniFridge.mountInventory({ el, backend })`.
 //
 // Backend interface (Promise-returning):
-//   list()                        → [{ id, name, category, quantity, unit, expiry_date, location, notes }]
-//   add?(payload)                 → void   // optional — hides add button if missing
-//   update?(id, payload)          → void   // optional — hides edit
-//   remove?(id)                   → void   // optional — hides delete
+//   list()                        → [{ id, name, category, quantity, unit, expiry_date, location, notes, catalog_id?, catalog_name? }]
+//   add?(payload)                 → void   // payload may include catalog_id
+//   update?(id, payload)          → void   // payload may include catalog_id
+//   remove?(id)                   → void
+//   getCatalog?()                 → [{ id, name, category }]   // optional — enables name autocomplete
 (function () {
   const CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', fruit: 'Фрукты',
     grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи',
@@ -34,12 +35,25 @@
   }
 
   async function mountInventory({ el, backend }) {
-    const state = { items: [], loc: 'all' };
+    const state = { items: [], loc: 'all', catalog: null };
     const canAdd = !!backend.add, canEdit = !!backend.update, canDelete = !!backend.remove;
 
     async function load() {
       try { state.items = await backend.list(); render(); }
       catch (e) { el.innerHTML = `<div class="err">Ошибка: ${esc(e.message || e)}</div>`; }
+    }
+
+    async function ensureCatalog() {
+      if (state.catalog || !backend.getCatalog) return state.catalog || [];
+      try { state.catalog = await backend.getCatalog(); }
+      catch { state.catalog = []; }
+      return state.catalog;
+    }
+    function lookupCatalog(name) {
+      if (!state.catalog) return null;
+      const norm = String(name || '').trim().toLowerCase();
+      if (!norm) return null;
+      return state.catalog.find(c => String(c.name).trim().toLowerCase() === norm) || null;
     }
 
     function locFilter(p) { return state.loc === 'all' || p.location === state.loc; }
@@ -94,8 +108,10 @@
       openModal(p);
     }
 
-    function openModal(p) {
+    async function openModal(p) {
       const isEdit = !!p;
+      await ensureCatalog();
+      const hasCatalog = !!state.catalog && state.catalog.length > 0;
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
       const catChips = Object.entries(CAT_LABELS).map(([v, l]) =>
@@ -105,9 +121,15 @@
       const unitChips = UNITS.map(un =>
         `<button type="button" class="rf-chip ${(p ? p.unit : 'шт') === un ? 'active' : ''}" data-unit="${un}">${esc(un)}</button>`).join('');
       const delBtn = isEdit && canDelete ? `<button class="btn-danger" id="fr-del">Удалить</button>` : '';
+      const datalistHtml = hasCatalog
+        ? `<datalist id="fr-name-list">${state.catalog.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`
+        : '';
+      const linkBadge = isEdit && p && p.catalog_id ? '<span class="badge badge-gray" id="fr-link-badge" title="Связан с каталогом">📚</span>' : '';
       overlay.innerHTML = `<div class="modal" style="max-width:480px;max-height:90vh;overflow-y:auto;">
         <div class="modal-title">${isEdit ? 'Изменить продукт' : 'Новый продукт'}</div>
-        <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="fr-name" value="${esc(p ? p.name : '')}"></div>
+        <div class="form-group"><label class="form-label">Название ${linkBadge}</label>
+          <input class="form-input" id="fr-name" value="${esc(p ? p.name : '')}" ${hasCatalog ? 'list="fr-name-list" placeholder="Начните вводить — подскажу из каталога"' : ''}>
+          ${datalistHtml}</div>
         <div class="form-group"><label class="form-label">Категория</label><div class="add-chips" data-group="cat">${catChips}</div></div>
         <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px">
           <div class="form-group"><label class="form-label">Кол-во</label><input class="form-input" id="fr-qty" type="number" step="0.1" value="${p ? p.quantity ?? 1 : 1}"></div>
@@ -139,18 +161,32 @@
           g.querySelectorAll('.rf-chip').forEach(c => c.classList.toggle('active', c === btn));
         });
       });
+      // Auto-update category chip when typed name matches catalog (UX hint, server still resolves authoritative).
+      const nameInput = overlay.querySelector('#fr-name');
+      const catGroup = overlay.querySelector('[data-group="cat"]');
+      function syncCategoryFromCatalog() {
+        const match = lookupCatalog(nameInput.value);
+        if (!match || !match.category) return;
+        catGroup.dataset.value = match.category;
+        catGroup.querySelectorAll('.rf-chip').forEach(c =>
+          c.classList.toggle('active', c.dataset.cat === match.category));
+      }
+      if (hasCatalog) nameInput.addEventListener('change', syncCategoryFromCatalog);
+
       overlay.querySelector('#fr-save').onclick = async () => {
-        const name = overlay.querySelector('#fr-name').value.trim();
+        const name = nameInput.value.trim();
         const msg = overlay.querySelector('#fr-msg');
         if (!name) { msg.innerHTML = '<div class="err">Название обязательно</div>'; return; }
+        const match = lookupCatalog(name);
         const payload = {
           name,
-          category: overlay.querySelector('[data-group="cat"]').dataset.value || 'other',
+          category: match?.category || catGroup.dataset.value || 'other',
           quantity: parseFloat(overlay.querySelector('#fr-qty').value) || 1,
           unit: overlay.querySelector('[data-group="unit"]').dataset.value || 'шт',
           expiry_date: overlay.querySelector('#fr-exp').value || null,
           location: overlay.querySelector('[data-group="loc"]').dataset.value || 'fridge',
           notes: overlay.querySelector('#fr-notes').value.trim(),
+          catalog_id: match ? match.id : null,
         };
         msg.innerHTML = '<div class="muted">Сохраняем…</div>';
         try {
