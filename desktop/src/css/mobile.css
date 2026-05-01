@@ -1,3 +1,50 @@
+/* ── Mobile preview mode (force-mobile via localStorage flag) ──
+   Constrains body width to 360px so desktop dev window can preview mobile. */
+.mobile-preview body, html.mobile-preview body { max-width: 360px; min-width: 360px; margin-left: 0; box-shadow: 2px 0 0 var(--accent-blue, #4f8cff); overflow-x: hidden; }
+.mobile-preview { background: var(--bg-base, #1a1a1a); }
+
+/* ── Mobile fixes (toolbar + FAB + Day-grid) ── */
+
+/* "+ Событие" toolbar buttons → icon-only on mobile to fit narrow header */
+.mobile #day-add-event,
+.mobile #ctl-add,
+.mobile #cal-add-event,
+.mobile #week-add-event {
+  font-size: 0;
+  padding: 6px;
+  min-width: 32px;
+  line-height: 1;
+}
+.mobile #day-add-event::before,
+.mobile #ctl-add::before,
+.mobile #cal-add-event::before,
+.mobile #week-add-event::before {
+  content: '+';
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* Hide FAB widgets while drawer sidebar is open (no accidental clicks) */
+body:has(#tab-bar.drawer-open) #task-control-widget,
+body:has(#tab-bar.drawer-open) #quotes-widget,
+body:has(#tab-bar.drawer-open) #music-widget,
+body:has(#tab-bar.drawer-open) #notification-widget,
+body:has(#tab-bar.drawer-open) #focus-widget,
+body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
+
+/* Day-grid: tighter rows on mobile so labels don't wrap into 3 lines */
+.mobile .day-hour-row { min-height: 44px; }
+.mobile .day-hour-label {
+  font-size: 10px; min-width: 32px; max-width: 32px;
+  padding-left: 4px; padding-right: 2px;
+}
+.mobile .day-event {
+  padding: 4px 6px; gap: 4px; font-size: 12px;
+}
+.mobile .day-event-time { font-size: 10px; min-width: 36px; }
+.mobile .day-event-title { font-size: 12px; line-height: 1.2; }
+.mobile .day-event-dur { font-size: 10px; }
+
 /* ── Mobile Layout — ChatGPT/Claude-style drawer sidebar ── */
 
 /* Hide drag region on mobile */

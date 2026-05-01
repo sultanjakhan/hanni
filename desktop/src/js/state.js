@@ -4,9 +4,11 @@ export const { invoke } = window.__TAURI__.core;
 export const { listen, emit } = window.__TAURI__.event;
 
 // ── Platform detection ──
-export const IS_MOBILE = /android/i.test(navigator.userAgent) || window.innerWidth < 640;
+const FORCE_MOBILE = (() => { try { return localStorage.getItem('hanni_force_mobile') === '1'; } catch { return false; } })();
+export const IS_MOBILE = /android/i.test(navigator.userAgent) || window.innerWidth < 640 || FORCE_MOBILE;
 export const IS_DESKTOP = !IS_MOBILE;
 document.documentElement.classList.add(IS_MOBILE ? 'mobile' : 'desktop');
+if (FORCE_MOBILE) document.documentElement.classList.add('mobile-preview');
 
 // ── DOM Refs ──
 export const chat = document.getElementById('chat');
