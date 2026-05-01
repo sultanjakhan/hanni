@@ -11,7 +11,7 @@
 - `desktop/src-tauri/src/sync_share.rs` — Tauri команды для cloud-share + snapshot builder. Stage A: **dry-run** — собирает payload, но в Firestore пока не пишет (раскомментировать `firestore_upsert_snapshot` когда нужно).
 - `scripts/firebase-setup.sh` — однокликовая настройка project + Firestore + Hosting.
 
-## Что нужно сделать тебе завтра (один раз, ~5 минут)
+## Что нужно сделать тебе (один раз, ~10 минут)
 
 ### 1. Залогиниться в Firebase
 
@@ -19,7 +19,7 @@
 firebase login
 ```
 
-Откроется системный браузер, жмёшь «Allow». Терминал ответит `Success!`.
+Откроется системный браузер, жмёшь «Allow».
 
 ### 2. Запустить setup-скрипт
 
@@ -28,26 +28,33 @@ cd /Users/sultanbekjakhanov/hanni
 ./scripts/firebase-setup.sh
 ```
 
-Скрипт:
-1. Создаёт project `hanni-share-<hash>` (Spark plan, бесплатно).
-2. Включает Firestore native в `us-central1`.
-3. Деплоит security rules + indexes.
-4. Деплоит `apps/guest-cloud/` на Firebase Hosting.
-5. В конце печатает Web SDK config — JSON примерно такого вида:
+Скрипт создаёт project (Spark plan, бесплатно), включает Firestore + Hosting, деплоит rules/indexes/static-guest и печатает Web SDK config.
 
-   ```js
-   {
-     "projectId": "hanni-share-abc12345",
-     "appId": "1:...",
-     "apiKey": "AIza...",
-     "authDomain": "hanni-share-abc12345.firebaseapp.com",
-     ...
-   }
-   ```
+### 3. Скачать **service-account JSON** (для Hanni-side writes)
 
-### 3. Сохранить config в `apps/guest-cloud/firebase-config.js`
+Без service-account Hanni не сможет писать в Firestore (rules блокируют unauth writes). Spark plan не позволяет Cloud Functions, поэтому единственный путь — service-account JSON.
 
-Замени содержимое:
+1. Открой <https://console.firebase.google.com/project/hanni-share-XXXXX/settings/serviceaccounts/adminsdk>
+2. «Generate new private key» → подтверди → скачается JSON файл
+3. **Никогда** не коммить его — это полный admin доступ
+
+### 4. Сохранить web-config + service-account в Hanni
+
+DevTools console в открытом Hanni:
+
+```js
+await window.__TAURI__.core.invoke('cloud_share_set_config', {
+  projectId: 'hanni-share-abc12345',
+  apiKey:    'AIza...',
+  serviceAccountJson: `<полное содержимое скачанного JSON одной строкой>`
+});
+```
+
+Конфиг сохраняется в SQLite `app_settings`, owner_uid генерится автоматически и не меняется. Service-account JSON дальше backend никуда не уходит.
+
+### 5. Сохранить web-config в guest-side
+
+Замени `apps/guest-cloud/firebase-config.js`:
 
 ```js
 window.HANNI_FIREBASE_CONFIG = {
@@ -58,38 +65,37 @@ window.HANNI_FIREBASE_CONFIG = {
 };
 ```
 
-И задеплой ещё раз — `firebase deploy --only hosting --project hanni-share-abc12345`.
+И задеплой:
 
-### 4. Сохранить config в Hanni (через DevTools, пока нет UI)
-
-Открой Hanni, в DevTools console:
-
-```js
-await window.__TAURI__.core.invoke('cloud_share_set_config', {
-  projectId: 'hanni-share-abc12345',
-  apiKey:    'AIza...'
-});
+```bash
+firebase deploy --only hosting --project hanni-share-abc12345
 ```
 
-Это сохраняет конфиг в SQLite `app_settings` и генерит owner_uid. Один раз.
+### 6. Тестовый push
 
-### 5. Проверить snapshot для существующей share-link
+DevTools:
 
 ```js
-const status = await window.__TAURI__.core.invoke('cloud_share_push', { shareId: 1 });
-console.log(status);
-// → {"status":"dry-run","counts":{"recipes":25,"recipe_ingredients":150,...}}
+// Dry-run сначала — посмотреть counts
+await __TAURI__.core.invoke('cloud_share_push', { shareId: 1, dryRun: true });
+// → {"status":"dry-run","counts":{"recipes":25,...}}
+
+// Боевой push в Firestore
+await __TAURI__.core.invoke('cloud_share_push', { shareId: 1 });
+// → {"status":"ok","written":{"recipes":25,"share_links":1,...}}
 ```
 
-Это **dry-run** — подсчитает что было бы выгружено, но в Firestore пока не пишет.
+Открой `https://hanni-share-abc12345.web.app/?t=<share_token>` — гость видит данные, **даже если Hanni закрыт**.
 
-## Что осталось доделать после твоей настройки
+## Stage B (после Stage A)
 
-Я (Claude) включу боевую запись в Firestore — это правка одной строки в `sync_share.rs::cloud_share_push` (раскомментировать `firestore_upsert_snapshot`) + написать `firestore_upsert_snapshot` (Stage A) — REST PATCH на каждый документ через `https://firestore.googleapis.com/v1/projects/<id>/databases/(default)/documents/...?key=<api_key>` с auth по custom JWT.
+Stage A — read-only для гостя. Гость видит данные но не пишет (write требует custom JWT с `share_token` claim, который генерится только Cloud Function — а CF недоступны на Spark plan).
 
-После того как Stage A работает (read-only гость), Stage B — Cloud Function `mintToken` который принимает `share_token` и возвращает Firebase Custom JWT с claim `share_token`. Тогда guest может писать с проверкой rules.
+Варианты для Stage B:
+- **Перейти на Blaze plan** (pay-as-you-go, на нашем объёме = ~$0/мес). Развернуть Cloud Function `mintToken`. Гость зайдёт через `signInWithCustomToken`, rules пропустят писать.
+- **Альтернативно** — запросы гостя проксируются через Hanni-side endpoint, когда Hanni online (текущий cloudflared туннель). Когда Hanni offline — write-операции дисэйблятся в UI.
 
-Оценка: после твоего setup — ещё **1-2 сессии моей работы** до полностью рабочего сценария «гость видит и пишет, когда Mac закрыт».
+Я могу реализовать оба варианта в следующей сессии. По умолчанию рекомендую первый — Cloud Function маленький, запросы редкие, Blaze не выставит счёт пока в free quota (1M invocations/мес).
 
 ## Команды-памятка
 
