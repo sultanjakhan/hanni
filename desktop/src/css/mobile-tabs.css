@@ -8,21 +8,28 @@
   grid-template-columns: 1fr;
 }
 
-/* ── Calendar: 7-col → 3-col on mobile ── */
-.mobile .cal-weekdays,
-.mobile .cal-grid {
-  grid-template-columns: repeat(3, 1fr);
-}
+/* ── Calendar Month: keep 7 cols, shrink cells & hide pills ── */
 .mobile .cal-day {
-  min-height: 70px;
+  min-height: 56px;
+  padding: 2px;
+}
+.mobile .cal-day-num {
+  font-size: 11px; width: 18px; height: 18px;
+}
+.mobile .cal-pills { display: none; }
+.mobile .cal-weekday {
+  padding: 4px 2px; font-size: 9px; letter-spacing: 0; text-align: center;
 }
 
-/* Week view: narrower on mobile */
+/* Week view: keep 7 day cols, narrower hour gutter */
 .mobile .wk-header,
 .mobile .wk-allday,
 .mobile .wk-grid {
-  grid-template-columns: 48px repeat(3, 1fr);
+  grid-template-columns: 32px repeat(7, 1fr);
 }
+.mobile .wk-hdr-d { font-size: 14px; }
+.mobile .wk-hdr-wd { font-size: 9px; }
+.mobile .wk-time { font-size: 9px; }
 
 /* DatabaseView completion calendar — keep 7 cols but smaller */
 .mobile .dbv-cal-grid {
