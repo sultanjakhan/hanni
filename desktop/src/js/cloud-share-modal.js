@@ -56,7 +56,20 @@ export async function openCloudShareModal() {
 
     <div id="cs-msg" style="min-height:18px;font-size:13px"></div>
 
-    <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
+    <hr style="border:none;border-top:1px solid var(--border-subtle);margin:16px 0">
+    <div style="font-weight:600;margin-bottom:8px">🔄 Синхронизация устройств (Mac ↔ Mobile)</div>
+    <p style="color:var(--text-secondary);font-size:12px;margin:0 0 8px">
+      Push — отправляет CRDT-changes этого устройства в Firestore. Pull — забирает changes других устройств с тем же Owner UID и применяет.
+    </p>
+    <div id="cs-owner-status" style="font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-secondary" id="cs-owner-push">⬆ Push</button>
+      <button class="btn-secondary" id="cs-owner-pull">⬇ Pull</button>
+      <button class="btn-primary"   id="cs-owner-sync">🔄 Sync now</button>
+    </div>
+    <div id="cs-owner-msg" style="min-height:18px;font-size:13px;margin-top:8px"></div>
+
+    <div class="modal-actions" style="flex-wrap:wrap;gap:8px;margin-top:16px">
       <button class="btn-secondary" id="cs-close">Закрыть</button>
       <button class="btn-secondary" id="cs-dry">Dry-run push #1</button>
       <button class="btn-primary"   id="cs-save">Сохранить</button>
@@ -87,6 +100,45 @@ export async function openCloudShareModal() {
       overlay.querySelector('#cs-owner').value = saved.owner_uid;
       showOk('✓ Сохранено. Owner UID: ' + saved.owner_uid);
     } catch (e) { showErr('Ошибка: ' + (e?.message || e)); }
+  };
+
+  // Owner sync (mac ↔ mobile)
+  const ownerMsg = overlay.querySelector('#cs-owner-msg');
+  const ownerStatus = overlay.querySelector('#cs-owner-status');
+  function ownerOk(t)  { ownerMsg.innerHTML = `<div style="color:var(--color-green)">${escapeHtml(t)}</div>`; }
+  function ownerErr(t) { ownerMsg.innerHTML = `<div style="color:var(--color-red)">${escapeHtml(t)}</div>`; }
+  function ownerHint(t){ ownerMsg.innerHTML = `<div style="color:var(--text-muted)">${escapeHtml(t)}</div>`; }
+  async function refreshOwnerStatus() {
+    try {
+      const st = await invoke('cloud_owner_status');
+      ownerStatus.textContent = `site_id: ${(st.site_id || '').slice(0, 12)}…  ·  pending push: ${st.pending_changes}  ·  last pull: ${st.last_pull_ts || 'никогда'}`;
+    } catch (e) { ownerStatus.textContent = 'статус: ' + (e?.message || e); }
+  }
+  refreshOwnerStatus();
+  overlay.querySelector('#cs-owner-push').onclick = async () => {
+    ownerHint('Пушим changes…');
+    try {
+      const out = await invoke('cloud_owner_push');
+      ownerOk(`✓ Push: ${out.pushed} changes (db_version=${out.db_version})`);
+      refreshOwnerStatus();
+    } catch (e) { ownerErr('Ошибка push: ' + (e?.message || e)); }
+  };
+  overlay.querySelector('#cs-owner-pull').onclick = async () => {
+    ownerHint('Тянем changes…');
+    try {
+      const out = await invoke('cloud_owner_pull');
+      ownerOk(`✓ Pull: applied ${out.applied}, skipped own ${out.skipped_own}, total in cloud ${out.total}`);
+      refreshOwnerStatus();
+    } catch (e) { ownerErr('Ошибка pull: ' + (e?.message || e)); }
+  };
+  overlay.querySelector('#cs-owner-sync').onclick = async () => {
+    ownerHint('Sync (push + pull)…');
+    try {
+      const push = await invoke('cloud_owner_push');
+      const pull = await invoke('cloud_owner_pull');
+      ownerOk(`✓ Sync: pushed ${push.pushed}, pulled ${pull.applied} (skipped own ${pull.skipped_own})`);
+      refreshOwnerStatus();
+    } catch (e) { ownerErr('Ошибка sync: ' + (e?.message || e)); }
   };
 
   overlay.querySelector('#cs-dry').onclick = async () => {

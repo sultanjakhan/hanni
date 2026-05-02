@@ -79,6 +79,8 @@ fn token_cache() -> &'static std::sync::RwLock<Option<(String, u64)>> {
     CACHED_TOKEN.get_or_init(|| std::sync::RwLock::new(None))
 }
 
+pub(crate) fn firestore_host() -> &'static str { FIRESTORE_HOST }
+
 pub fn load_config(conn: &rusqlite::Connection) -> Option<CloudShareConfig> {
     if let Ok(g) = cfg_cache().read() {
         if let Some(c) = g.as_ref() { return Some(c.clone()); }
@@ -117,7 +119,7 @@ fn now_secs() -> u64 {
 
 // ── OAuth2 access-token via service-account JWT ───────────────────────────
 
-async fn get_access_token(cfg: &CloudShareConfig) -> Result<String, String> {
+pub(crate) async fn get_access_token(cfg: &CloudShareConfig) -> Result<String, String> {
     if let Ok(g) = token_cache().read() {
         if let Some((tok, exp)) = g.as_ref() {
             if *exp > now_secs() + 30 { return Ok(tok.clone()); }
@@ -164,7 +166,7 @@ async fn get_access_token(cfg: &CloudShareConfig) -> Result<String, String> {
 // ── Firestore document encoding ───────────────────────────────────────────
 // Firestore REST wants every value tagged: { "stringValue": "..." }, etc.
 
-fn json_to_field(v: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn json_to_field(v: &serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
     match v {
         Value::Null         => serde_json::json!({ "nullValue": null }),
@@ -198,7 +200,7 @@ fn doc_payload(row: &serde_json::Value, owner_uid: &str) -> serde_json::Value {
     serde_json::json!({ "fields": fields })
 }
 
-async fn patch_doc(
+pub(crate) async fn patch_doc(
     client: &reqwest::Client,
     cfg: &CloudShareConfig,
     token: &str,

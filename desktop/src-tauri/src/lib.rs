@@ -45,6 +45,7 @@ mod share_static;
 mod share_tunnel;
 mod commands_share;
 mod sync_share;
+mod sync_owner;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -707,6 +708,10 @@ pub fn run() {
             sync_share::cloud_share_set_config,
             sync_share::cloud_share_get_config,
             sync_share::cloud_share_push,
+            // Owner sync (Mac ↔ Android via Firestore + cr-sqlite changes)
+            sync_owner::cloud_owner_push,
+            sync_owner::cloud_owner_pull,
+            sync_owner::cloud_owner_status,
         ])
         .setup(move |app| {
             // Android: resolve data dir from Tauri, then init DB
