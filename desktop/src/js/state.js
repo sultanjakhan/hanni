@@ -118,6 +118,7 @@ document.documentElement.setAttribute('data-theme', S.theme);
     document.querySelectorAll('.version-label, .version-label-bar').forEach(el => {
       el.textContent = `v${S.APP_VERSION}`;
     });
+    document.dispatchEvent(new CustomEvent('hanni:version-loaded', { detail: S.APP_VERSION }));
   } catch (_) {}
 })();
 
