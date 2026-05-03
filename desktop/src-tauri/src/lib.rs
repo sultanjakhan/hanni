@@ -79,6 +79,12 @@ use tauri::{Emitter, Manager};
 #[cfg(not(target_os = "android"))]
 use chrono::{Timelike, Datelike};
 
+// Note on Android TLS:
+// reqwest is built with `rustls-tls-webpki-roots` (see Cargo.toml). That
+// bundles Mozilla's CA roots into the binary, so HTTPS works on Android
+// without rustls-platform-verifier or any JNI bootstrap. Sufficient for
+// talking to Google/Firestore (chains to Mozilla-known CAs).
+
 /// Load cr-sqlite extension for CRDT-based sync
 fn load_crsqlite(conn: &rusqlite::Connection) {
     unsafe { conn.load_extension_enable().ok(); }
@@ -91,23 +97,33 @@ fn load_crsqlite(conn: &rusqlite::Connection) {
 }
 
 fn crsqlite_lib_path() -> std::path::PathBuf {
+    // Android: rely on the linker's default search path. Native libs from
+    // the APK are extracted to /data/app/<pkg>/lib/<arch>/, which is on
+    // LD_LIBRARY_PATH for the app process — passing the bare `libcrsqlite.so`
+    // lets dlopen() resolve it without us knowing the volatile install path.
+    #[cfg(target_os = "android")]
+    {
+        return std::path::PathBuf::from("libcrsqlite.so");
+    }
+
     #[cfg(target_os = "macos")]
     let name = "crsqlite.dylib";
-    #[cfg(target_os = "android")]
-    let name = "crsqlite.so";
     #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let name = "crsqlite.so";
 
     // In dev mode, load from libs/ relative to src-tauri
-    let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("libs")
-        .join(if cfg!(target_os = "macos") { "darwin-aarch64" } else { "android-aarch64" })
-        .join(name);
-    if dev_path.exists() { return dev_path; }
+    #[cfg(not(target_os = "android"))]
+    {
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("libs")
+            .join(if cfg!(target_os = "macos") { "darwin-aarch64" } else { "android-aarch64" })
+            .join(name);
+        if dev_path.exists() { return dev_path; }
 
-    // In production, load from Tauri resource dir
-    let data_dir = types::hanni_data_dir();
-    data_dir.parent().unwrap_or(&data_dir).join(name)
+        // In production, load from Tauri resource dir
+        let data_dir = types::hanni_data_dir();
+        data_dir.parent().unwrap_or(&data_dir).join(name)
+    }
 }
 
 /// Initialize SQLite database: register extensions, open connection, run migrations.
@@ -197,6 +213,12 @@ fn init_database() -> HanniDb {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Note on Android TLS: reqwest is configured with `rustls-tls-webpki-roots`
+    // (see Cargo.toml). That bundles Mozilla CA roots inside the binary, so
+    // we don't need rustls-platform-verifier or any JNI bootstrap — verifier
+    // hooks are bypassed. Suitable for talking to Google/Firestore (which
+    // chain to Mozilla-known CAs).
+
     // Desktop: init DB before builder (dirs crate works on macOS)
     #[cfg(not(target_os = "android"))]
     let proactive_settings = load_proactive_settings();
@@ -271,8 +293,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(health_connect_plugin::init());
+
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
     // Desktop: manage DB state on builder (initialized before builder)
     #[cfg(not(target_os = "android"))]
@@ -678,6 +702,8 @@ pub fn run() {
             commands_timeline_today::get_today_planned,
             commands_timeline_today::start_task_block,
             commands_timeline_today::complete_task_block,
+            commands_timeline_today::pause_task_block,
+            commands_timeline_today::finish_task_block,
             commands_timeline_today::get_active_block,
             // Sync
             sync_commands::sync_now,
