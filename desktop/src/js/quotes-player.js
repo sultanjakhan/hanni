@@ -3,6 +3,11 @@ import { nextQuote, prevQuote, getQuote, canGoBack } from './quotes-data.js';
 
 let panel = null;
 
+function syncBodyOpenClass() {
+  if (!panel) return;
+  document.body.classList.toggle('qw-popover-open', !panel.classList.contains('hidden'));
+}
+
 function renderQuote() {
   if (!panel) return;
   const q = getQuote();
@@ -19,6 +24,7 @@ function togglePanel() {
   if (wasHidden) nextQuote();
   panel.classList.toggle('hidden');
   if (wasHidden) renderQuote();
+  syncBodyOpenClass();
 }
 
 export function initQuotesPlayer() {
@@ -79,6 +85,7 @@ export function initQuotesPlayer() {
   document.addEventListener('click', (e) => {
     if (panel && !panel.classList.contains('hidden') && !widget.contains(e.target)) {
       panel.classList.add('hidden');
+      syncBodyOpenClass();
     }
   });
 }

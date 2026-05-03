@@ -106,7 +106,7 @@ export function startFixedCellEdit(cell, reloadFn) {
     return;
   }
 
-  const inputType = editType === 'number' ? 'number' : editType === 'date' ? 'date' : editType === 'phone' ? 'tel' : 'text';
+  const inputType = (editType === 'number' || editType === 'minutes') ? 'number' : editType === 'date' ? 'date' : editType === 'phone' ? 'tel' : 'text';
   const cleanVal = rawVal === '\u2014' ? '' : rawVal;
   const editor = overlayEditor(cell, inputType, cleanVal);
   if (inputType === 'number') { editor.step = 'any'; }

@@ -27,3 +27,35 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         })
         .build()
 }
+
+/// Returns whether all required Health Connect permissions are granted.
+/// On non-Android platforms always returns false (no Health Connect available).
+#[tauri::command]
+pub async fn health_has_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<HealthConnectHandle<R>>();
+        match handle.0.run_mobile_plugin::<serde_json::Value>("hasPermissions", &()) {
+            Ok(v) => Ok(v.get("granted").and_then(|g| g.as_bool()).unwrap_or(false)),
+            Err(e) => Err(format!("{e}")),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Ok(false) }
+}
+
+/// Triggers the Health Connect permission UI on Android. Resolves with the
+/// final granted state once the user closes the system dialog.
+#[tauri::command]
+pub async fn health_request_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<HealthConnectHandle<R>>();
+        match handle.0.run_mobile_plugin::<serde_json::Value>("requestHealthPermissions", &()) {
+            Ok(v) => Ok(v.get("granted").and_then(|g| g.as_bool()).unwrap_or(false)),
+            Err(e) => Err(format!("{e}")),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Err("Health Connect is only available on Android".into()) }
+}

@@ -32,6 +32,7 @@ mod health_connect_plugin;
 mod health_import;
 mod sleep_analysis;
 mod timeline_health;
+mod calendar_health;
 mod share_server;
 mod share_auth;
 mod share_routes_recipes_read;
@@ -186,6 +187,7 @@ fn init_database() -> HanniDb {
     db::migrate_share_links(&conn);
     db::migrate_priority(&conn);
     db::migrate_drop_mindset(&conn);
+    db::migrate_sync_meta(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -534,6 +536,7 @@ pub fn run() {
             commands_data::get_recipes,
             commands_data::update_recipe,
             commands_data::delete_recipe,
+            commands_data::duplicate_recipe,
             commands_data::get_ingredient_catalog,
             commands_data::add_ingredient_to_catalog,
             commands_data::update_ingredient_in_catalog,
@@ -699,6 +702,7 @@ pub fn run() {
             timeline_afk::sync_afk_blocks,
             timeline_afk::sync_timeline_auto,
             timeline_health::sync_health_to_timeline,
+            calendar_health::sync_health_to_calendar,
             commands_timeline_today::get_today_planned,
             commands_timeline_today::start_task_block,
             commands_timeline_today::complete_task_block,
@@ -718,6 +722,8 @@ pub fn run() {
             health_import::import_health_connect_all,
             health_import::get_heart_rate_samples,
             health_import::get_health_summary,
+            health_connect_plugin::health_has_permissions,
+            health_connect_plugin::health_request_permissions,
             sleep_analysis::get_sleep_analysis,
             // Share links
             commands_share::create_share_link,
@@ -734,6 +740,7 @@ pub fn run() {
             sync_owner::cloud_owner_push,
             sync_owner::cloud_owner_pull,
             sync_owner::cloud_owner_status,
+            sync_owner::debug_owner_list,
             sync_share::cloud_owner_set_uid,
             sync_share::cloud_owner_get_uid,
             sync_owner_auto::cloud_owner_set_auto,

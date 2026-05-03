@@ -66,7 +66,7 @@ pub async fn create_recipe(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "add")?;
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "recipes") {
+    if ctx.tab != "food" || !ctx.has_scope("recipes") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
     }
     let now = chrono::Local::now().to_rfc3339();
@@ -113,11 +113,14 @@ pub async fn create_recipe(
                     it.amount.unwrap_or(0.0), it.unit.clone().unwrap_or_else(|| "г".into())],
             );
         }
+        crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     }
 
     log_activity(&conn, ctx.id, "create_recipe",
         &serde_json::json!({ "recipe_id": recipe_id, "author": author_tag }).to_string(),
         &ip, &ua);
+
+    crate::sync_share::mark_dirty(&conn, "recipes");
 
     Ok(Json(serde_json::json!({ "status": "ok", "id": recipe_id })))
 }
@@ -154,7 +157,7 @@ pub async fn update_recipe(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "edit")?;
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "recipes") {
+    if ctx.tab != "food" || !ctx.has_scope("recipes") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
     }
     let now = chrono::Local::now().to_rfc3339();
@@ -189,6 +192,8 @@ pub async fn update_recipe(
         &serde_json::json!({ "recipe_id": id, "author": author_tag }).to_string(),
         &ip, &ua);
 
+    crate::sync_share::mark_dirty(&conn, "recipes");
+
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -205,7 +210,7 @@ pub async fn delete_recipe(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "delete")?;
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "recipes") {
+    if ctx.tab != "food" || !ctx.has_scope("recipes") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
     }
     // recipe_ingredients and meal_plan rows are cleared by ON DELETE CASCADE.
@@ -216,5 +221,7 @@ pub async fn delete_recipe(
     }
     log_activity(&conn, ctx.id, "delete_recipe",
         &serde_json::json!({ "recipe_id": id }).to_string(), &ip, &ua);
+    crate::sync_share::mark_dirty(&conn, "recipes");
+    crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }

@@ -1,14 +1,14 @@
 /* ── Vertical Tab Bar (left sidebar) ── */
 
 #tab-bar {
-  width: 48px;
-  min-width: 48px;
+  width: 56px;
+  min-width: 56px;
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 6px 0;
+  padding: 7px 0;
   overflow: hidden;
   -webkit-app-region: no-drag;
 }
@@ -30,11 +30,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   -webkit-app-region: no-drag;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -63,9 +63,9 @@
   background: var(--accent-blue);
 }
 
-.tab-item-icon { flex-shrink: 0; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 16px; }
-.tab-item-icon svg { width: 18px; height: 18px; }
-.tab-item-icon-emoji { font-size: 15px; }
+.tab-item-icon { flex-shrink: 0; width: 21px; height: 21px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 19px; }
+.tab-item-icon svg { width: 21px; height: 21px; }
+.tab-item-icon-emoji { font-size: 18px; }
 .tab-item.active .tab-item-icon { color: var(--text-primary); }
 .tab-item-label { display: none; }
 
@@ -85,13 +85,13 @@
 .tab-ctx-separator { height:1px; background:var(--border-subtle); margin:4px 0; }
 
 #tab-add {
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-md);
   border: none;
   background: transparent;
   color: var(--text-faint);
-  font-size: 16px;
+  font-size: 19px;
   cursor: pointer;
   display: flex;
   align-items: center;

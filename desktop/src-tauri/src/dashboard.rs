@@ -108,10 +108,6 @@ fn get_default_widgets(tab_id: &str) -> Vec<serde_json::Value> {
             stat_args("Всего вещей", "blue", "get_home_items", serde_json::json!({"category": null, "neededOnly": false}), "_count"),
             stat_args("Нужно купить", "yellow", "get_home_items", serde_json::json!({"category": null, "neededOnly": true}), "_count"),
         ],
-        "mindset" => vec![
-            stat_args("Настроение", "blue", "get_journal_entry", serde_json::json!({"date": null}), "mood"),
-            stat_args("Энергия", "yellow", "get_journal_entry", serde_json::json!({"date": null}), "energy"),
-        ],
         "development" => vec![
             stat_args("Всего", "blue", "get_learning_items", serde_json::json!({"typeFilter": null}), "_count"),
             stat_args("В процессе", "green", "get_learning_items", serde_json::json!({"typeFilter": null}), "_filter:status=in_progress"),

@@ -16,14 +16,14 @@ use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
 
 fn check_food_recipes_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "recipes") {
+    if ctx.tab != "food" || !ctx.has_scope("recipes") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
     }
     Ok(())
 }
 
 fn check_food_memory_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "memory") {
+    if ctx.tab != "food" || !ctx.has_scope("memory") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include memory".into()));
     }
     Ok(())
@@ -38,7 +38,7 @@ pub async fn list_fridge(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "view")?;
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "fridge") {
+    if ctx.tab != "food" || !ctx.has_scope("fridge") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include fridge".into()));
     }
     let mut stmt = conn.prepare(
@@ -188,5 +188,6 @@ pub async fn create_catalog_item(
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     log_activity(&conn, ctx.id, "add_catalog_item",
         &serde_json::json!({ "name": req.name, "category": cat }).to_string(), &ip, &ua);
+    crate::sync_share::mark_dirty(&conn, "ingredient_catalog");
     Ok(Json(serde_json::json!({ "id": id, "status": "ok" })))
 }

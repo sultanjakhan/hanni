@@ -8,7 +8,10 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.*
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +23,8 @@ import java.time.Instant
 class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
 
     private var healthClient: HealthConnectClient? = null
+    private var permLauncher: ActivityResultLauncher<Set<String>>? = null
+    @Volatile private var pendingPermInvoke: Invoke? = null
 
     private val requiredPermissions = setOf(
         HealthPermission.getReadPermission(SleepSessionRecord::class),
@@ -29,9 +34,32 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     )
 
     override fun load(webView: WebView) {
-        val status = HealthConnectClient.getSdkStatus(activity)
-        if (status == HealthConnectClient.SDK_AVAILABLE) {
-            healthClient = HealthConnectClient.getOrCreate(activity)
+        try {
+            val status = HealthConnectClient.getSdkStatus(activity)
+            if (status == HealthConnectClient.SDK_AVAILABLE) {
+                healthClient = HealthConnectClient.getOrCreate(activity)
+            }
+        } catch (_: Throwable) {
+            // SDK probe failed (provider missing, old Android, etc.) — leave
+            // healthClient null; commands will reject with "not available".
+        }
+        // Register permission launcher so requestPermissions() can drive the
+        // Health Connect system UI on demand. Wrapped in try/catch because
+        // registerForActivityResult on a non-ComponentActivity or after the
+        // host's onCreate has fully resolved can throw.
+        try {
+            (activity as? ComponentActivity)?.let { ca ->
+                val contract = PermissionController.createRequestPermissionResultContract()
+                permLauncher = ca.activityResultRegistry.register("hc_perm", contract) { granted ->
+                    val invoke = pendingPermInvoke
+                    pendingPermInvoke = null
+                    val ret = JSObject()
+                    ret.put("granted", granted.containsAll(requiredPermissions))
+                    invoke?.resolve(ret)
+                }
+            }
+        } catch (_: Throwable) {
+            permLauncher = null
         }
     }
 
@@ -55,6 +83,35 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
         val end = Instant.now()
         val start = end.minusSeconds(30L * 24 * 3600)
         return Pair(start, end)
+    }
+
+    @Command
+    fun hasPermissions(invoke: Invoke) {
+        val client = healthClient
+        if (client == null) {
+            val ret = JSObject(); ret.put("granted", false); ret.put("available", false)
+            invoke.resolve(ret); return
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val granted = client.permissionController.getGrantedPermissions()
+                val ret = JSObject()
+                ret.put("granted", granted.containsAll(requiredPermissions))
+                ret.put("available", true)
+                invoke.resolve(ret)
+            } catch (e: Exception) {
+                invoke.reject("Health Connect error: ${e.message}")
+            }
+        }
+    }
+
+    @Command
+    fun requestHealthPermissions(invoke: Invoke) {
+        val launcher = permLauncher
+        if (launcher == null) { invoke.reject("Permission launcher not available"); return }
+        if (pendingPermInvoke != null) { invoke.reject("Permission request already in progress"); return }
+        pendingPermInvoke = invoke
+        activity.runOnUiThread { launcher.launch(requiredPermissions) }
     }
 
     @Command

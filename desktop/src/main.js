@@ -29,12 +29,13 @@ import { initQuotesWidget } from './js/quotes-widget.js';
 import { initTaskControlWidget } from './js/task-control-widget.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
-  loadHome, loadMindset, loadFood, loadMoney, loadPeople,
+  loadHome, loadFood, loadMoney, loadPeople,
   loadMemoryTab, loadAbout, loadJobs, loadProjects, loadDevelopment,
   loadHobbies, loadSports, loadHealth, loadCustomPage,
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
 import './js/tab-timeline.js';
+import { autoImportHealth } from './js/health-auto-sync.js';
 
 // ── One-time migration: work → jobs tab rename ──
 (() => {
@@ -125,7 +126,6 @@ tabLoaders.loadHome = loadHome;
 tabLoaders.loadHobbies = loadHobbies;
 tabLoaders.loadSports = loadSports;
 tabLoaders.loadHealth = loadHealth;
-tabLoaders.loadMindset = loadMindset;
 tabLoaders.loadFood = loadFood;
 tabLoaders.loadMoney = loadMoney;
 tabLoaders.loadPeople = loadPeople;
@@ -308,14 +308,16 @@ document.addEventListener('keydown', (e) => {
   // Notification widget (above focus)
   initNotificationWidget();
 
-  // Focus floating widget
-  createFocusWidget();
-  updateFocusWidget();
-  S.focusWidgetPollInterval = setInterval(() => updateFocusWidget(), 3000);
+  // Focus floating widget — disabled while MLX is offline
+  // TODO: re-enable when MLX is back
+  // createFocusWidget();
+  // updateFocusWidget();
+  // S.focusWidgetPollInterval = setInterval(() => updateFocusWidget(), 3000);
 
-  // Chat floating overlay
-  createChatOverlay();
-  updateChatOverlayVisibility();
+  // Chat floating overlay — disabled while MLX is offline
+  // TODO: re-enable when MLX is back
+  // createChatOverlay();
+  // updateChatOverlayVisibility();
 
   // Auto-restore last conversation (reuse loadConversation to get feedback buttons + ratings)
   try {
@@ -328,8 +330,14 @@ document.addEventListener('keydown', (e) => {
   loadConversationsList();
 
   // Auto-sync health data from Health Connect (Android only)
+  // Triggered on cold start and whenever the app returns to foreground —
+  // this is the "wake up, open Hanni" path: Watch → Health Connect → Hanni
+  // → Firestore CRDT → Mac.
   if (IS_MOBILE) {
-    invoke('import_health_connect_all').catch(() => {});
+    autoImportHealth();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') autoImportHealth();
+    });
   }
 
   // Android back button: close overlays, then go to previous tab
@@ -349,8 +357,8 @@ document.addEventListener('keydown', (e) => {
       // Close any modal
       const modal = document.querySelector('.modal-overlay');
       if (modal) { modal.remove(); return; }
-      // Switch to chat (home)
-      if (S.activeTab !== 'chat') { switchTab('chat'); return; }
+      // Switch to calendar (home) — chat tab is disabled while MLX is offline
+      if (S.activeTab !== 'calendar') { switchTab('calendar'); return; }
     });
   }
 })();

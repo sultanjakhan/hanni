@@ -16,7 +16,7 @@ use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
 
 fn check_food_products_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "products") {
+    if ctx.tab != "food" || !ctx.has_scope("products") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include products".into()));
     }
     Ok(())
@@ -100,6 +100,8 @@ pub async fn create_product(
         &serde_json::json!({ "product_id": product_id, "author": author_tag }).to_string(),
         &ip, &ua);
 
+    crate::sync_share::mark_dirty(&conn, "products");
+
     Ok(Json(serde_json::json!({ "status": "ok", "id": product_id })))
 }
 
@@ -168,6 +170,8 @@ pub async fn update_product(
         &serde_json::json!({ "product_id": id, "author": author_tag }).to_string(),
         &ip, &ua);
 
+    crate::sync_share::mark_dirty(&conn, "products");
+
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -193,5 +197,6 @@ pub async fn delete_product(
     }
     log_activity(&conn, ctx.id, "delete_product",
         &serde_json::json!({ "product_id": id }).to_string(), &ip, &ua);
+    crate::sync_share::mark_dirty(&conn, "products");
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }

@@ -9,14 +9,16 @@ pub fn create_note(
     title: String, content: String, tags: String,
     tab_name: Option<String>, status: Option<String>,
     due_date: Option<String>, reminder_at: Option<String>,
+    priority: Option<i32>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let st = status.unwrap_or_else(|| "note".to_string());
+    let pr = priority.unwrap_or(0);
     conn.execute(
-        "INSERT INTO notes (title, content, tags, tab_name, status, due_date, reminder_at, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-        rusqlite::params![title, content, tags, tab_name, st, due_date, reminder_at, now],
+        "INSERT INTO notes (title, content, tags, tab_name, status, due_date, reminder_at, priority, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+        rusqlite::params![title, content, tags, tab_name, st, due_date, reminder_at, pr, now],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
@@ -28,14 +30,15 @@ pub fn update_note(
     tab_name: Option<String>, status: Option<String>,
     due_date: Option<String>, reminder_at: Option<String>,
     content_blocks: Option<String>,
+    priority: Option<i32>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    let (cur_pinned, cur_archived, cur_tab, cur_status, cur_due, cur_reminder, cur_blocks): (i32, i32, Option<String>, String, Option<String>, Option<String>, Option<String>) = conn.query_row(
-        "SELECT pinned, archived, tab_name, status, due_date, reminder_at, content_blocks FROM notes WHERE id=?1", rusqlite::params![id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3).unwrap_or_else(|_| "note".into()), row.get(4)?, row.get(5)?, row.get(6)?)),
-    ).unwrap_or((0, 0, None, "note".into(), None, None, None));
+    let (cur_pinned, cur_archived, cur_tab, cur_status, cur_due, cur_reminder, cur_blocks, cur_priority): (i32, i32, Option<String>, String, Option<String>, Option<String>, Option<String>, i32) = conn.query_row(
+        "SELECT pinned, archived, tab_name, status, due_date, reminder_at, content_blocks, priority FROM notes WHERE id=?1", rusqlite::params![id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3).unwrap_or_else(|_| "note".into()), row.get(4)?, row.get(5)?, row.get(6)?, row.get::<_, i32>(7).unwrap_or(0))),
+    ).unwrap_or((0, 0, None, "note".into(), None, None, None, 0));
     let p = pinned.map(|v| v as i32).unwrap_or(cur_pinned);
     let a = archived.map(|v| v as i32).unwrap_or(cur_archived);
     let tn = if tab_name.is_some() { tab_name } else { cur_tab };
@@ -43,9 +46,10 @@ pub fn update_note(
     let dd = if due_date.is_some() { due_date } else { cur_due };
     let ra = if reminder_at.is_some() { reminder_at } else { cur_reminder };
     let cb = if content_blocks.is_some() { content_blocks } else { cur_blocks };
+    let pr = priority.unwrap_or(cur_priority);
     conn.execute(
-        "UPDATE notes SET title=?1, content=?2, tags=?3, pinned=?4, archived=?5, tab_name=?6, status=?7, due_date=?8, reminder_at=?9, updated_at=?10, content_blocks=?11 WHERE id=?12",
-        rusqlite::params![title, content, tags, p, a, tn, st, dd, ra, now, cb, id],
+        "UPDATE notes SET title=?1, content=?2, tags=?3, pinned=?4, archived=?5, tab_name=?6, status=?7, due_date=?8, reminder_at=?9, updated_at=?10, content_blocks=?11, priority=?12 WHERE id=?13",
+        rusqlite::params![title, content, tags, p, a, tn, st, dd, ra, now, cb, pr, id],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -91,7 +95,7 @@ pub fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::Stat
             else {
                 let fts_query = words.join(" OR ");
                 let mut stmt = conn.prepare(
-                    "SELECT n.id, n.title, n.content, n.tags, n.pinned, n.archived, n.created_at, n.updated_at, n.tab_name, n.status, n.due_date, n.reminder_at, n.sort_order
+                    "SELECT n.id, n.title, n.content, n.tags, n.pinned, n.archived, n.created_at, n.updated_at, n.tab_name, n.status, n.due_date, n.reminder_at, n.sort_order, n.content_blocks, n.priority
                      FROM notes_fts fts JOIN notes n ON n.id = fts.rowid
                      WHERE notes_fts MATCH ?1 ORDER BY rank LIMIT 50"
                 ).map_err(|e| format!("DB error: {}", e))?;
@@ -103,14 +107,14 @@ pub fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::Stat
     } else if let Some(ref f) = filter {
         if f == "tasks" {
             let mut stmt = conn.prepare(
-                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
+                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks, priority FROM notes
                  WHERE status IN ('task','done') AND archived=0 ORDER BY CASE WHEN status='done' THEN 1 ELSE 0 END, due_date ASC NULLS LAST, updated_at DESC LIMIT 200"
             ).map_err(|e| format!("DB error: {}", e))?;
             let result: Vec<serde_json::Value> = stmt.query_map([], |row| note_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
             result
         } else if let Some(tab) = f.strip_prefix("tab:") {
             let mut stmt = conn.prepare(
-                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
+                "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks, priority FROM notes
                  WHERE tab_name=?1 AND archived=0 ORDER BY pinned DESC, sort_order ASC, updated_at DESC LIMIT 200"
             ).map_err(|e| format!("DB error: {}", e))?;
             let result: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![tab], |row| note_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
@@ -126,7 +130,7 @@ pub fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::Stat
 
 pub fn get_notes_all(conn: &rusqlite::Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks, priority FROM notes
          ORDER BY pinned DESC, updated_at DESC LIMIT 200"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| note_from_row(row))
@@ -150,6 +154,7 @@ pub fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite:
         "reminder_at": row.get::<_, Option<String>>(11)?,
         "sort_order": row.get::<_, i32>(12)?,
         "content_blocks": row.get::<_, Option<String>>(13)?,
+        "priority": row.get::<_, i32>(14).unwrap_or(0),
     }))
 }
 
@@ -157,7 +162,7 @@ pub fn note_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlite:
 pub fn get_note(id: i64, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
     conn.query_row(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes WHERE id=?1",
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks, priority FROM notes WHERE id=?1",
         rusqlite::params![id],
         |row| note_from_row(row),
     ).map_err(|e| format!("Not found: {}", e))
@@ -214,7 +219,7 @@ pub fn set_note_tag_color(name: String, color: String, db: tauri::State<'_, Hann
 pub fn get_notes_for_tab(tab_name: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks FROM notes
+        "SELECT id, title, content, tags, pinned, archived, created_at, updated_at, tab_name, status, due_date, reminder_at, sort_order, content_blocks, priority FROM notes
          WHERE tab_name=?1 AND archived=0 ORDER BY pinned DESC, sort_order ASC, updated_at DESC LIMIT 100"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map(rusqlite::params![tab_name], |row| note_from_row(row))

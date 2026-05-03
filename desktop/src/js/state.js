@@ -66,8 +66,8 @@ export const S = {
   inProactiveView: false,
   lastProactiveText: null,
   typingTimeout: null,
-  openTabs: ['chat'],
-  activeTab: 'chat',
+  openTabs: ['calendar'],
+  activeTab: 'calendar',
   activeSubTab: {},
   chatSidebarCollapsed: !!localStorage.getItem('hanni_chat_sidebar_collapsed'),
   tabDragState: null,
@@ -115,7 +115,7 @@ document.documentElement.setAttribute('data-theme', S.theme);
 (async () => {
   try {
     S.APP_VERSION = await invoke('get_app_version');
-    document.querySelectorAll('.version-label').forEach(el => {
+    document.querySelectorAll('.version-label, .version-label-bar').forEach(el => {
       el.textContent = `v${S.APP_VERSION}`;
     });
   } catch (_) {}
@@ -155,7 +155,6 @@ export const TAB_ICONS = {
   hobbies:     _s('<line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>'),
   sports:      _s('<path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m2.515 18.657a2 2 0 1 1 2.828 2.829l1.768-1.768a2 2 0 1 1 2.828 2.829l-6.364-6.364a2 2 0 1 1-2.828-2.829l1.767-1.768a2 2 0 1 1-2.829-2.828z"/>'),
   health:      _s('<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'),
-  mindset:     _s('<path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 4.5 17.5a2.5 2.5 0 0 1-.44-4.96A2.5 2.5 0 0 1 4.5 9.5a2.5 2.5 0 0 1 .44-4.96A2.5 2.5 0 0 1 9.5 2z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.54-2.94 2.5 2.5 0 0 0 .44-4.96A2.5 2.5 0 0 0 19.5 9.5a2.5 2.5 0 0 0-.44-4.96A2.5 2.5 0 0 0 14.5 2z"/>'),
   food:        _s('<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'),
   money:       _s('<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>'),
   body:        _s('<path d="M12 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/><path d="M20 21v-2a4 4 0 0 0-3-3.87M4 21v-2a4 4 0 0 1 3-3.87"/><path d="M12 10v4m-2 2l-2 5m6-5l2 5"/>'),
@@ -166,9 +165,11 @@ export const TAB_ICONS = {
 
 // ── Tab Registry ──
 export const TAB_REGISTRY = {
-  chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: [], subIcons: {} },
+  // Chat & Focus tabs disabled while MLX is offline
+  // TODO: re-enable when MLX is back
+  // chat:        { label: 'Chat',        icon: TAB_ICONS.chat, closable: false, subTabs: [], subIcons: {} },
   calendar:    { label: 'Calendar',    icon: '📅', closable: true,  subTabs: [] },
-  focus:       { label: 'Focus',       icon: '🎯', closable: true,  subTabs: [] },
+  // focus:       { label: 'Focus',       icon: '🎯', closable: true,  subTabs: [] },
   notes:       { label: 'Notes',       icon: TAB_ICONS.notes, closable: true,  subTabs: [] },
   jobs:        { label: 'Jobs',        icon: '💼', closable: true,  subTabs: [] },
   projects:    { label: 'Projects',   icon: '📁', closable: true,  subTabs: [] },
@@ -177,7 +178,6 @@ export const TAB_REGISTRY = {
   hobbies:     { label: 'Hobbies',     icon: '🎮', closable: true,  subTabs: [] },
   sports:      { label: 'Sports',      icon: '⚽', closable: true,  subTabs: [] },
   health:      { label: 'Health',      icon: '❤️',  closable: true,  subTabs: [] },
-  mindset:     { label: 'Mindset',     icon: '🧠', closable: true,  subTabs: [] },
   food:        { label: 'Food',        icon: '🍔', closable: true,  subTabs: [] },
   money:       { label: 'Money',       icon: '💰', closable: true,  subTabs: [] },
   people:      { label: 'People',      icon: '👥', closable: true,  subTabs: [] },
@@ -197,7 +197,6 @@ export const TAB_DESCRIPTIONS = {
   hobbies: 'Media collections — track what you watch, read, play',
   sports: 'Workouts, martial arts, and fitness stats',
   health: 'Daily health metrics and habit tracking',
-  mindset: 'Journal, mood tracking, and personal principles',
   food: 'Food log, recipes, and product inventory',
   money: 'Expenses, income, budgets, and savings',
   people: 'Contacts and relationship management',
@@ -259,7 +258,6 @@ export const TAB_SETTINGS_DEFS = {
   hobbies: [],
   sports: [],
   health: [],
-  mindset: [],
   food: [],
   money: [],
   people: [],
@@ -307,18 +305,23 @@ for (const [id, reg] of Object.entries(TAB_REGISTRY)) {
 S.activeSubTab.chat = null; // Chat view shows chat by default, not settings
 
 // Restore from localStorage
+// Default tab switched from 'chat' to 'calendar' while MLX is offline.
+// TODO: revert defaults when MLX is back.
 try {
   const saved = JSON.parse(localStorage.getItem('hanni_tabs'));
   if (saved) {
-    S.openTabs = (saved.open || ['chat']).filter(id => TAB_REGISTRY[id]);
-    if (!S.openTabs.includes('chat')) S.openTabs.unshift('chat');
-    S.activeTab = TAB_REGISTRY[saved.active] ? saved.active : 'chat';
+    S.openTabs = (saved.open || ['calendar']).filter(id => TAB_REGISTRY[id]);
+    S.activeTab = TAB_REGISTRY[saved.active] ? saved.active : 'calendar';
     if (saved.sub) {
       Object.assign(S.activeSubTab, saved.sub);
       if (S.activeSubTab.chat && S.activeSubTab.chat !== 'Настройки') S.activeSubTab.chat = null;
     }
   }
 } catch (_) {}
+
+// Calendar is always pinned to the first slot in the left tab bar
+S.openTabs = S.openTabs.filter(id => id !== 'calendar');
+S.openTabs.unshift('calendar');
 
 export function saveTabs() {
   localStorage.setItem('hanni_tabs', JSON.stringify({ open: S.openTabs, active: S.activeTab, sub: S.activeSubTab }));

@@ -32,12 +32,10 @@ pub struct ShareLinkRow {
     pub url: Option<String>,
 }
 
-fn tunnel_url(tunnel: &State<'_, ShareTunnel>) -> Option<String> {
-    tunnel.0.lock().ok().and_then(|s| s.url.clone())
-}
-
-fn full_url(base: &Option<String>, token: &str) -> Option<String> {
-    base.as_ref().map(|u| format!("{}/s/{}", u.trim_end_matches('/'), token))
+// Static cloud URL — works 24/7 even when Hanni is closed (read from
+// Firestore via Firebase Hosting).
+fn cloud_url(token: &str) -> String {
+    format!("https://hanni-2e5d0.web.app/s/{}", token)
 }
 
 #[tauri::command]
@@ -60,6 +58,18 @@ pub async fn create_share_link(
     if permissions.is_empty() {
         return Err("At least one permission is required".into());
     }
+    // Scope is "all" or a CSV of known keys for the tab. We don't enforce
+    // tab-specific keys here — share_routes check ctx.has_scope() at request time.
+    let allowed_scope_parts = ["all", "recipes", "products", "fridge", "meal_plan", "memory"];
+    let scope_trimmed = scope.trim();
+    if scope_trimmed.is_empty() {
+        return Err("Scope is required".into());
+    }
+    for part in scope_trimmed.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if !allowed_scope_parts.contains(&part) {
+            return Err(format!("Unknown scope: {}", part));
+        }
+    }
     let lifetime_val = lifetime.unwrap_or_else(|| "permanent".into());
     if !["once", "permanent", "expires"].contains(&lifetime_val.as_str()) {
         return Err(format!("Unknown lifetime: {}", lifetime_val));
@@ -77,23 +87,36 @@ pub async fn create_share_link(
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)",
             rusqlite::params![token, tab, scope, perms_json, label_val, lifetime_val, expires_at, now],
         ).map_err(|e| format!("DB error: {}", e))?;
-        conn.last_insert_rowid()
+        // Capture rowid BEFORE mark_dirty — mark_dirty's app_settings INSERT
+        // would otherwise become last_insert_rowid().
+        let new_id = conn.last_insert_rowid();
+        // Backfill cloud mirror: mark every relevant table dirty so the
+        // background loop pushes a full snapshot for this new share-link.
+        for tbl in &["recipes", "recipe_ingredients", "ingredient_catalog",
+                     "products", "food_blacklist", "meal_plan"] {
+            crate::sync_share::mark_dirty(&conn, tbl);
+        }
+        new_id
     };
 
-    // Lazy-start the Cloudflare tunnel so the link has a reachable URL.
-    let base = match share_tunnel::ensure_running(app.clone(), share_port()).await {
-        Ok(u) => Some(u),
-        Err(e) => {
-            eprintln!("[share] tunnel unavailable: {}", e);
-            None
-        }
-    };
+    // Lazy-start the Cloudflare tunnel so writes from the guest can reach
+    // axum (read-only access doesn't need it — Firebase Hosting + Firestore).
+    // Tunnel URL is also persisted via share_tunnel.rs and mirrored to
+    // Firestore so guests on Firebase Hosting know where to POST.
+    if let Err(e) = share_tunnel::ensure_running(app.clone(), share_port()).await {
+        eprintln!("[share] tunnel unavailable: {}", e);
+    }
+
+    // Static cloud URL — works 24/7 even when Hanni is closed (read from
+    // Firestore). Writes still require Hanni online for the axum tunnel.
+    let url = format!("https://hanni-2e5d0.web.app/s/{}", token);
+
     Ok(ShareLinkRow {
         id, token: token.clone(), tab, scope, permissions, label: label_val,
         lifetime: lifetime_val, expires_at,
         used_count: 0, revoked_at: None,
         created_at: now.clone(), updated_at: now,
-        url: full_url(&base, &token),
+        url: Some(url),
     })
 }
 
@@ -101,10 +124,9 @@ pub async fn create_share_link(
 pub fn list_share_links(
     tab: Option<String>,
     db: State<'_, HanniDb>,
-    tunnel: State<'_, ShareTunnel>,
+    _tunnel: State<'_, ShareTunnel>,
 ) -> Result<Vec<ShareLinkRow>, String> {
     let conn = db.conn();
-    let base = tunnel_url(&tunnel);
     let rows: Vec<ShareLinkRow> = match tab {
         Some(t) => {
             let mut stmt = conn.prepare(
@@ -115,7 +137,7 @@ pub fn list_share_links(
             let iter = stmt.query_map(rusqlite::params![t], |r| row_to_link(r))
                 .map_err(|e| format!("Query error: {}", e))?;
             iter.filter_map(|x| x.ok())
-                .map(|mut l| { l.url = full_url(&base, &l.token); l })
+                .map(|mut l| { l.url = Some(cloud_url(&l.token)); l })
                 .collect()
         }
         None => {
@@ -127,7 +149,7 @@ pub fn list_share_links(
             let iter = stmt.query_map([], |r| row_to_link(r))
                 .map_err(|e| format!("Query error: {}", e))?;
             iter.filter_map(|x| x.ok())
-                .map(|mut l| { l.url = full_url(&base, &l.token); l })
+                .map(|mut l| { l.url = Some(cloud_url(&l.token)); l })
                 .collect()
         }
     };

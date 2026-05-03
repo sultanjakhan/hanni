@@ -35,5 +35,9 @@ export function formatPropValue(val, prop) {
     const n = parseInt(val) || 0;
     return Array.from({ length: 5 }, (_, i) => `<span class="cell-star${i < n ? ' filled' : ''}">★</span>`).join('');
   }
+  if (prop.type === 'minutes') {
+    const n = parseInt(val);
+    return isNaN(n) ? '<span class="text-faint">—</span>' : `<span class="cell-minutes">${n} мин</span>`;
+  }
   return escapeHtml(val);
 }

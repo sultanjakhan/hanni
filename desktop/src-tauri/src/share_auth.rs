@@ -17,6 +17,16 @@ pub struct LinkCtx {
     pub tab: String,
 }
 
+impl LinkCtx {
+    /// `scope` may be a single keyword (`"all"`, `"recipes"`) or a CSV
+    /// (`"recipes,fridge"`). `"all"` covers everything; otherwise membership
+    /// is by explicit listing.
+    pub fn has_scope(&self, target: &str) -> bool {
+        let s = self.scope.trim();
+        s == "all" || s.split(',').any(|part| part.trim() == target)
+    }
+}
+
 pub fn load_link(conn: &rusqlite::Connection, token: &str) -> Result<LinkCtx, (StatusCode, String)> {
     let row: Result<(i64, String, String, String, String, Option<String>, Option<String>), _> = conn.query_row(
         "SELECT id, tab, scope, permissions, label, expires_at, revoked_at

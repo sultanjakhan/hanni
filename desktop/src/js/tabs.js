@@ -198,6 +198,11 @@ function renderTabBar() {
       }
     });
     bottom.appendChild(gear);
+
+    const ver = document.createElement('div');
+    ver.className = 'version-label-bar';
+    ver.textContent = `v${S.APP_VERSION}`;
+    bottom.appendChild(ver);
   }
 }
 
@@ -660,7 +665,6 @@ function loadSubTabContent(tabId, subTab) {
     case 'hobbies': tabLoaders.loadHobbies?.(subTab); break;
     case 'sports': tabLoaders.loadSports?.(subTab); break;
     case 'health': tabLoaders.loadHealth?.(subTab); break;
-    case 'mindset': tabLoaders.loadMindset?.(subTab); break;
     case 'food': tabLoaders.loadFood?.(subTab); break;
     case 'money': tabLoaders.loadMoney?.(subTab); break;
     case 'people': tabLoaders.loadPeople?.(subTab); break;
@@ -794,8 +798,10 @@ document.addEventListener('click', () => {
 
 document.addEventListener('keydown', (e) => {
   if (!e.metaKey && !e.ctrlKey) return;
-  if (e.shiftKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); tabLoaders.toggleFocusWidgetPopover?.(); return; }
-  if (e.shiftKey && (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С')) { e.preventDefault(); tabLoaders.toggleChatOverlay?.(); return; }
+  // Focus / Chat hotkeys disabled while MLX is offline
+  // TODO: re-enable when MLX is back
+  // if (e.shiftKey && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); tabLoaders.toggleFocusWidgetPopover?.(); return; }
+  // if (e.shiftKey && (e.key === 'c' || e.key === 'C' || e.key === 'с' || e.key === 'С')) { e.preventDefault(); tabLoaders.toggleChatOverlay?.(); return; }
   if (e.key === 'w') { e.preventDefault(); if (TAB_REGISTRY[S.activeTab]?.closable) closeTab(S.activeTab); return; }
   if (e.key === 't') { e.preventDefault(); document.getElementById('tab-add')?.click(); return; }
   const num = parseInt(e.key);
@@ -1030,7 +1036,7 @@ function wireManageControls(el, tabId) {
       delete TAB_REGISTRY[tabId];
     }
     closeTab(tabId);
-    switchTab('chat');
+    switchTab('calendar');
   });
 }
 

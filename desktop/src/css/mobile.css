@@ -45,7 +45,7 @@ body:has(#tab-bar.drawer-open) #focus-widget,
 body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 
 /* Day-grid: tighter rows on mobile so labels don't wrap into 3 lines */
-.mobile .day-hour-row { min-height: 44px; }
+.mobile .day-timeline { --day-hour-px: 44px; }
 .mobile .day-hour-label {
   font-size: 10px; min-width: 32px; max-width: 32px;
   padding-left: 4px; padding-right: 2px;
@@ -234,8 +234,23 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 }
 
 /* ── Content area: full width ── */
+/* Reserve space for the Android nav bar (3-button or gesture pill).
+   env(safe-area-inset-bottom) only resolves to >0 when the WebView is
+   configured edge-to-edge; fallback covers older Tauri/Android. */
 .mobile #content-area {
-  padding-bottom: 0;
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 48px);
+}
+
+/* Bottom-anchored fixed elements: shift above the nav bar. */
+.mobile #version-overlay {
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), 48px) + var(--space-1));
+}
+.mobile .music-widget,
+.mobile .notification-widget,
+.mobile .task-control-widget,
+.mobile #task-control-widget,
+.mobile .quotes-widget {
+  margin-bottom: max(env(safe-area-inset-bottom, 0px), 48px);
 }
 
 /* Touch-friendly targets */

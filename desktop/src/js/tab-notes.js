@@ -678,6 +678,8 @@ async function saveCurrentNote(id) {
   const status = document.getElementById('note-status-select')?.value || null;
   const dueDate = document.getElementById('note-due-date')?.value || null;
   const reminderAt = document.getElementById('note-reminder')?.value || null;
+  const priorityRaw = document.getElementById('note-priority')?.value;
+  const priority = priorityRaw == null || priorityRaw === '' ? null : parseInt(priorityRaw, 10);
   // Get content from Editor.js if available
   let content = '';
   let contentBlocks = null;
@@ -688,7 +690,7 @@ async function saveCurrentNote(id) {
       content = blocksToPlainText(output);
     } catch (e) { console.error('Editor.js save error:', e); }
   }
-  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null, tabName, status, dueDate, reminderAt, contentBlocks });
+  return invoke('update_note', { id, title, content, tags, pinned: null, archived: null, tabName, status, dueDate, reminderAt, contentBlocks, priority });
 }
 
 async function renderNoteEditor(el, id) {
@@ -721,6 +723,11 @@ async function renderNoteEditor(el, id) {
           <option value="note" ${note.status === 'note' ? 'selected' : ''}>Заметка</option>
           <option value="task" ${note.status === 'task' ? 'selected' : ''}>Задача</option>
           <option value="done" ${note.status === 'done' ? 'selected' : ''}>Выполнено</option>
+        </select>
+        <select class="form-select note-priority-select" id="note-priority">
+          <option value="0" ${(note.priority || 0) === 0 ? 'selected' : ''}>Обычная</option>
+          <option value="1" ${(note.priority || 0) === 1 ? 'selected' : ''}>Важная</option>
+          <option value="2" ${(note.priority || 0) === 2 ? 'selected' : ''}>Критическая</option>
         </select>
         <input type="date" class="form-input note-due-input" id="note-due-date" value="${note.due_date || ''}" placeholder="Дедлайн">
         <input type="datetime-local" class="form-input note-reminder-input" id="note-reminder" value="${note.reminder_at || ''}" placeholder="Напомнить">
@@ -768,6 +775,7 @@ async function renderNoteEditor(el, id) {
 
     document.getElementById('note-title')?.addEventListener('input', autoSave);
     document.getElementById('note-status-select')?.addEventListener('change', autoSave);
+    document.getElementById('note-priority')?.addEventListener('change', autoSave);
     document.getElementById('note-due-date')?.addEventListener('change', autoSave);
     document.getElementById('note-reminder')?.addEventListener('change', autoSave);
     document.getElementById('note-tab-select')?.addEventListener('change', autoSave);

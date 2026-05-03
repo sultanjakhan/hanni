@@ -11,6 +11,8 @@ export const TYPE_REGISTRY = {
   text:         { id: 'text',         icon: 'Aa', name: 'Текст',        editor: 'text',     filters: F_TEXT },
   number:       { id: 'number',       icon: '#',  name: 'Число',        editor: 'number',   filters: F_NUM,
                   validate: v => v === '' || !isNaN(parseFloat(v)) },
+  minutes:      { id: 'minutes',      icon: '⏱', name: 'Минуты',       editor: 'number',   filters: F_NUM,
+                  validate: v => v === '' || /^\d+$/.test(v) },
   select:       { id: 'select',       icon: '◉', name: 'Select',       editor: 'select',   filters: F_CHOICE },
   date:         { id: 'date',         icon: '◫', name: 'Дата',         editor: 'date',     filters: F_DATE },
   time:         { id: 'time',         icon: '⏰', name: 'Время',       editor: 'time',     filters: F_TIME,

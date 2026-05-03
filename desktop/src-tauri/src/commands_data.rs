@@ -1053,11 +1053,12 @@ pub fn create_workout_from_template(template_id: i64, db: tauri::State<'_, Hanni
 // ── Schedules commands ──
 
 #[tauri::command]
-pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
+    let to = track_overdue.unwrap_or(false) as i64;
     conn.execute(
-        "INSERT INTO schedules (title, category, frequency, frequency_days, time_of_day, details, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), chrono::Local::now().to_rfc3339()],
+        "INSERT INTO schedules (title, category, frequency, frequency_days, time_of_day, details, track_overdue, target_minutes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), to, target_minutes, chrono::Local::now().to_rfc3339()],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
@@ -1066,9 +1067,9 @@ pub fn create_schedule(title: String, category: String, frequency: String, frequ
 pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let sql = if category.is_some() {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date FROM schedules WHERE category=?1 ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes FROM schedules WHERE category=?1 ORDER BY title"
     } else {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date FROM schedules ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes FROM schedules ORDER BY title"
     };
     let mut stmt = conn.prepare(sql).map_err(|e| format!("DB error: {}", e))?;
     let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cat) = category {
@@ -1087,13 +1088,15 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
             "created_at": row.get::<_, Option<String>>(8)?,
             "marks_previous_day": row.get::<_, i64>(9).unwrap_or(0) == 1,
             "until_date": row.get::<_, Option<String>>(10).unwrap_or(None),
+            "track_overdue": row.get::<_, i64>(11).unwrap_or(0) == 1,
+            "target_minutes": row.get::<_, Option<i64>>(12).unwrap_or(None),
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(v) = title { conn.execute("UPDATE schedules SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = category { conn.execute("UPDATE schedules SET category=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
@@ -1107,6 +1110,8 @@ pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>,
         let val: Option<String> = if v.is_empty() { None } else { Some(v) };
         conn.execute("UPDATE schedules SET until_date=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
     }
+    if let Some(v) = track_overdue { conn.execute("UPDATE schedules SET track_overdue=?1 WHERE id=?2", rusqlite::params![v as i64, id]).ok(); }
+    if let Some(v) = target_minutes { conn.execute("UPDATE schedules SET target_minutes=?1 WHERE id=?2", rusqlite::params![if v <= 0 { None } else { Some(v) }, id]).ok(); }
     Ok(())
 }
 
@@ -1188,7 +1193,9 @@ pub fn get_dan_koe_entry(date: Option<String>, db: tauri::State<'_, HanniDb>) ->
     let conn = db.conn();
     let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let entry = conn.query_row(
-        "SELECT id, date, contemplation, pattern_interrupt, vision, integration, notes FROM dan_koe_entries WHERE date=?1",
+        "SELECT id, date, contemplation, pattern_interrupt, vision, integration, notes,
+                contemplation_text, vision_text, integration_text
+         FROM dan_koe_entries WHERE date=?1",
         rusqlite::params![d], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
@@ -1198,6 +1205,9 @@ pub fn get_dan_koe_entry(date: Option<String>, db: tauri::State<'_, HanniDb>) ->
                 "vision": row.get::<_, i64>(4)? == 1,
                 "integration": row.get::<_, i64>(5)? == 1,
                 "notes": row.get::<_, String>(6)?,
+                "contemplation_text": row.get::<_, String>(7)?,
+                "vision_text": row.get::<_, String>(8)?,
+                "integration_text": row.get::<_, String>(9)?,
             }))
         },
     ).ok();
@@ -1205,13 +1215,34 @@ pub fn get_dan_koe_entry(date: Option<String>, db: tauri::State<'_, HanniDb>) ->
 }
 
 #[tauri::command]
-pub fn save_dan_koe_entry(date: Option<String>, contemplation: bool, pattern_interrupt: bool, vision: bool, integration: bool, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn save_dan_koe_entry(
+    date: Option<String>,
+    pattern_interrupt: Option<bool>,
+    contemplation_text: Option<String>,
+    vision_text: Option<String>,
+    integration_text: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
     let conn = db.conn();
     let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let c_text = contemplation_text.unwrap_or_default();
+    let v_text = vision_text.unwrap_or_default();
+    let i_text = integration_text.unwrap_or_default();
+    let pi = pattern_interrupt.unwrap_or(false);
+    // Boolean flags derived from text presence — text = done.
+    let c_done = !c_text.trim().is_empty();
+    let v_done = !v_text.trim().is_empty();
+    let i_done = !i_text.trim().is_empty();
     conn.execute(
-        "INSERT INTO dan_koe_entries (date, contemplation, pattern_interrupt, vision, integration, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(date) DO UPDATE SET contemplation=?2, pattern_interrupt=?3, vision=?4, integration=?5, notes=?6",
-        rusqlite::params![d, contemplation as i64, pattern_interrupt as i64, vision as i64, integration as i64, notes.unwrap_or_default(), chrono::Local::now().to_rfc3339()],
+        "INSERT INTO dan_koe_entries (date, contemplation, pattern_interrupt, vision, integration,
+                                      contemplation_text, vision_text, integration_text, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(date) DO UPDATE SET contemplation=?2, pattern_interrupt=?3, vision=?4, integration=?5,
+                                          contemplation_text=?6, vision_text=?7, integration_text=?8",
+        rusqlite::params![
+            d, c_done as i64, pi as i64, v_done as i64, i_done as i64,
+            c_text, v_text, i_text, chrono::Local::now().to_rfc3339(),
+        ],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
@@ -1221,7 +1252,9 @@ pub fn get_dan_koe_history(days: i64, db: tauri::State<'_, HanniDb>) -> Result<V
     let conn = db.conn();
     let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
     let mut stmt = conn.prepare(
-        "SELECT id, date, contemplation, pattern_interrupt, vision, integration, notes FROM dan_koe_entries WHERE date>=?1 ORDER BY date DESC"
+        "SELECT id, date, contemplation, pattern_interrupt, vision, integration, notes,
+                contemplation_text, vision_text, integration_text
+         FROM dan_koe_entries WHERE date>=?1 ORDER BY date DESC"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map(rusqlite::params![since], |row| {
         Ok(serde_json::json!({
@@ -1232,6 +1265,9 @@ pub fn get_dan_koe_history(days: i64, db: tauri::State<'_, HanniDb>) -> Result<V
             "vision": row.get::<_, i64>(4)? == 1,
             "integration": row.get::<_, i64>(5)? == 1,
             "notes": row.get::<_, String>(6)?,
+            "contemplation_text": row.get::<_, String>(7)?,
+            "vision_text": row.get::<_, String>(8)?,
+            "integration_text": row.get::<_, String>(9)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -2085,7 +2121,9 @@ pub fn create_recipe(
                 rusqlite::params![recipe_id, n, a, u, cat_id],
             );
         }
+        crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     }
+    crate::sync_share::mark_dirty(&conn, "recipes");
     Ok(recipe_id)
 }
 
@@ -2183,6 +2221,7 @@ pub fn update_recipe(id: i64, name: Option<String>, prep_time: Option<i64>, cook
     let sql = format!("UPDATE recipes SET {} WHERE id=?{}", updates.join(","), idx);
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "recipes");
     Ok(())
 }
 
@@ -2192,6 +2231,7 @@ pub fn toggle_favorite_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<
     let cur: i64 = conn.query_row("SELECT favorite FROM recipes WHERE id=?1", rusqlite::params![id], |r| r.get(0)).unwrap_or(0);
     let next = if cur == 0 { 1 } else { 0 };
     conn.execute("UPDATE recipes SET favorite=?1 WHERE id=?2", rusqlite::params![next, id]).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "recipes");
     Ok(next)
 }
 
@@ -2200,6 +2240,7 @@ pub fn mark_recipe_cooked(id: i64, db: tauri::State<'_, HanniDb>) -> Result<Stri
     let conn = db.conn();
     let now = chrono::Local::now().format("%Y-%m-%d").to_string();
     conn.execute("UPDATE recipes SET last_cooked=?1 WHERE id=?2", rusqlite::params![now, id]).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "recipes");
     Ok(now)
 }
 
@@ -2207,7 +2248,31 @@ pub fn mark_recipe_cooked(id: i64, db: tauri::State<'_, HanniDb>) -> Result<Stri
 pub fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "recipes");
+    crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     Ok(())
+}
+
+#[tauri::command]
+pub fn duplicate_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO recipes (name, description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, created_at, updated_at, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked) \
+         SELECT name || ' (копия)', description, ingredients, instructions, prep_time, cook_time, servings, calories, tags, ?1, ?1, difficulty, cuisine, health_score, price_score, protein, fat, carbs, 0, NULL \
+         FROM recipes WHERE id=?2",
+        rusqlite::params![now, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let new_id = conn.last_insert_rowid();
+    if new_id == 0 { return Err("Recipe not found".into()); }
+    conn.execute(
+        "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit, catalog_id) \
+         SELECT ?1, name, amount, unit, catalog_id FROM recipe_ingredients WHERE recipe_id=?2",
+        rusqlite::params![new_id, id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "recipes");
+    crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
+    Ok(new_id)
 }
 
 #[tauri::command]
@@ -2260,6 +2325,7 @@ pub fn add_ingredient_to_catalog(
     ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM ingredient_catalog WHERE name=?1 COLLATE NOCASE",
         rusqlite::params![name], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "ingredient_catalog");
     Ok(id)
 }
 
@@ -2317,6 +2383,10 @@ pub fn update_ingredient_in_catalog(
         conn.execute("UPDATE ingredient_catalog SET parent_id=?1 WHERE id=?2",
             rusqlite::params![pid, id]).map_err(|e| format!("DB error: {}", e))?;
     }
+    crate::sync_share::mark_dirty(&conn, "ingredient_catalog");
+    crate::sync_share::mark_dirty(&conn, "products");
+    crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
+    crate::sync_share::mark_dirty(&conn, "food_blacklist");
     Ok(())
 }
 
@@ -2340,6 +2410,7 @@ pub fn delete_ingredient_from_catalog(id: i64, db: tauri::State<'_, HanniDb>) ->
         rusqlite::params![id]);
     conn.execute("DELETE FROM ingredient_catalog WHERE id=?1",
         rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "ingredient_catalog");
     Ok(())
 }
 
@@ -2448,6 +2519,7 @@ pub fn add_food_blacklist(
     ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM food_blacklist WHERE type=?1 AND value=?2",
         rusqlite::params![entry_type, v], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "food_blacklist");
     Ok(id)
 }
 
@@ -2456,6 +2528,7 @@ pub fn remove_food_blacklist(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(
     let conn = db.conn();
     conn.execute("DELETE FROM food_blacklist WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "food_blacklist");
     Ok(())
 }
 
@@ -2477,6 +2550,10 @@ pub fn delete_recipes_matching_blacklist(entry_type: String, value: String, db: 
     let count = hits.len();
     for (id, _) in hits {
         let _ = conn.execute("DELETE FROM recipes WHERE id=?1", rusqlite::params![id]);
+    }
+    if count > 0 {
+        crate::sync_share::mark_dirty(&conn, "recipes");
+        crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     }
     Ok(count)
 }
@@ -2533,7 +2610,9 @@ pub fn add_product(
             location.unwrap_or_else(|| "fridge".into()), notes.unwrap_or_default(), now,
             resolved_cat_id],
     ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
+    let new_id = conn.last_insert_rowid();
+    crate::sync_share::mark_dirty(&conn, "products");
+    Ok(new_id)
 }
 
 #[tauri::command]
@@ -2601,6 +2680,7 @@ pub fn update_product(
     let sql = format!("UPDATE products SET {} WHERE id=?{}", updates.join(","), idx);
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     conn.execute(&sql, param_refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "products");
     Ok(())
 }
 
@@ -2608,6 +2688,7 @@ pub fn update_product(
 pub fn delete_product(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM products WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "products");
     Ok(())
 }
 
@@ -2635,7 +2716,9 @@ pub fn plan_meal(date: String, meal_type: String, recipe_id: i64, notes: Option<
         "INSERT INTO meal_plan (date, meal_type, recipe_id, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![date, meal_type, recipe_id, notes.unwrap_or_default(), now],
     ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
+    let new_id = conn.last_insert_rowid();
+    crate::sync_share::mark_dirty(&conn, "meal_plan");
+    Ok(new_id)
 }
 
 #[tauri::command]
@@ -2660,6 +2743,7 @@ pub fn get_meal_plan(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<
 pub fn delete_meal_plan(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM meal_plan WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
+    crate::sync_share::mark_dirty(&conn, "meal_plan");
     Ok(())
 }
 

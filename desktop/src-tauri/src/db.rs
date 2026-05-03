@@ -488,39 +488,6 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
             created_at TEXT NOT NULL
         );
 
-        -- v0.8.0: Mindset
-        CREATE TABLE IF NOT EXISTS journal_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL UNIQUE,
-            mood INTEGER DEFAULT 3,
-            energy INTEGER DEFAULT 3,
-            stress INTEGER DEFAULT 3,
-            gratitude TEXT NOT NULL DEFAULT '',
-            reflection TEXT NOT NULL DEFAULT '',
-            wins TEXT NOT NULL DEFAULT '',
-            struggles TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS mood_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL,
-            time TEXT NOT NULL,
-            mood INTEGER NOT NULL,
-            note TEXT NOT NULL DEFAULT '',
-            trigger_text TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS principles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            category TEXT NOT NULL DEFAULT 'discipline',
-            active INTEGER DEFAULT 1,
-            created_at TEXT NOT NULL
-        );
-
         -- v0.8.0: Blocklist
         CREATE TABLE IF NOT EXISTS blocklist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -699,8 +666,6 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_proactive_history_sent ON proactive_history(sent_at);
         CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category);
         CREATE INDEX IF NOT EXISTS idx_conversations_started ON conversations(started_at);
-        CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
-        CREATE INDEX IF NOT EXISTS idx_mood_date ON mood_log(date);
         CREATE INDEX IF NOT EXISTS idx_activities_started ON activities(started_at);
         CREATE INDEX IF NOT EXISTS idx_habit_checks_date ON habit_checks(date);
         CREATE INDEX IF NOT EXISTS idx_conversation_insights_conv ON conversation_insights(conversation_id);
@@ -1137,6 +1102,9 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
             vision INTEGER DEFAULT 0,
             integration INTEGER DEFAULT 0,
             notes TEXT DEFAULT '',
+            contemplation_text TEXT NOT NULL DEFAULT '',
+            vision_text TEXT NOT NULL DEFAULT '',
+            integration_text TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS proactive_messages (
@@ -1149,6 +1117,34 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
     ).ok();
     // v0.40: schedule end date (after which it's considered expired)
     conn.execute("ALTER TABLE schedules ADD COLUMN until_date TEXT", []).ok();
+    // v0.70: Dan Koe text responses for contemplation/vision/integration
+    conn.execute("ALTER TABLE dan_koe_entries ADD COLUMN contemplation_text TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE dan_koe_entries ADD COLUMN vision_text TEXT NOT NULL DEFAULT ''", []).ok();
+    conn.execute("ALTER TABLE dan_koe_entries ADD COLUMN integration_text TEXT NOT NULL DEFAULT ''", []).ok();
+    // v0.74: track_overdue — show missed schedule occurrences as overdue (manual flag per item)
+    conn.execute("ALTER TABLE schedules ADD COLUMN track_overdue INTEGER NOT NULL DEFAULT 0", []).ok();
+    // v0.74: target_minutes — daily target duration for the schedule (NULL = no target, single completion)
+    conn.execute("ALTER TABLE schedules ADD COLUMN target_minutes INTEGER", []).ok();
+    // v0.74: reflection fields
+    // notes.estimate_minutes — planned duration set by user
+    conn.execute("ALTER TABLE notes ADD COLUMN estimate_minutes INTEGER", []).ok();
+    // timeline_blocks.quality (0..5), reflection (text), mood ('happy'|'neutral'|'sad') — collected on ✓ Готово
+    conn.execute("ALTER TABLE timeline_blocks ADD COLUMN quality INTEGER NOT NULL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE timeline_blocks ADD COLUMN reflection TEXT", []).ok();
+    conn.execute("ALTER TABLE timeline_blocks ADD COLUMN mood TEXT", []).ok();
+}
+
+/// v0.70: Remove Mindset tab data (journal_entries, mood_log, principles)
+pub fn migrate_drop_mindset(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='drop_mindset_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if !done {
+        let _ = conn.execute("DROP TABLE IF EXISTS journal_entries", []);
+        let _ = conn.execute("DROP TABLE IF EXISTS mood_log", []);
+        let _ = conn.execute("DROP TABLE IF EXISTS principles", []);
+        let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('drop_mindset_v1')", []);
+    }
 }
 
 pub fn migrate_activity_tracking(conn: &rusqlite::Connection) {
@@ -1530,8 +1526,7 @@ pub fn enable_crr_tables(conn: &rusqlite::Connection) {
         "workouts", "exercises", "health_log", "habits", "habit_checks",
         "media_items", "user_lists", "list_items", "food_log", "recipes",
         "products", "transactions", "budgets", "savings_goals",
-        "subscriptions", "debts", "journal_entries", "mood_log",
-        "principles", "blocklist", "tab_goals", "home_items",
+        "subscriptions", "debts", "blocklist", "tab_goals", "home_items",
         "contacts", "contact_blocks", "page_meta", "property_definitions",
         "property_values", "view_configs", "ui_state", "activity_snapshots",
         "proactive_history", "message_feedback", "conversation_insights",
@@ -2007,4 +2002,164 @@ pub fn migrate_share_links(conn: &rusqlite::Connection) {
         );
         CREATE INDEX IF NOT EXISTS idx_share_comments_entity ON share_comments(entity_type, entity_id);"
     ).ok();
+}
+
+/// Returns the column names of `table` from `PRAGMA table_info`. Returns
+/// Err if the table doesn't exist (caller decides whether to skip).
+pub fn table_columns_in(conn: &rusqlite::Connection, table: &str) -> Result<Vec<String>, String> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))
+        .map_err(|e| format!("table_info {}: {}", table, e))?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(1))
+        .map_err(|e| format!("query: {}", e))?;
+    let mut out = Vec::new();
+    for r in rows { out.push(r.map_err(|e| e.to_string())?); }
+    if out.is_empty() {
+        return Err(format!("table {} not found", table));
+    }
+    Ok(out)
+}
+
+pub fn migrate_priority(conn: &rusqlite::Connection) {
+    // Importance/priority for tasks (notes with status='task') and calendar events.
+    // 0 = normal, 1 = important, 2 = critical.
+    conn.execute("ALTER TABLE notes ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
+    conn.execute("ALTER TABLE events ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
+}
+
+/// Stage D — schema prep for snapshot-based owner sync.
+///
+/// 1. Adds `updated_at` to tables that didn't have it (events, transactions,
+///    body_records, conversations) and an AFTER UPDATE trigger that keeps it
+///    fresh. LWW conflict resolution needs a per-row timestamp.
+/// 2. Creates `sync_tombstones (table_name, row_id, deleted_at)` plus
+///    AFTER DELETE triggers on the 7 sync targets so deletes are observable
+///    without touching the existing delete handlers.
+/// 3. Generates a stable `device_id` UUID stored in app_settings.
+/// Tables synced by Stage D owner-sync. Every entry must:
+///   - have an INTEGER `id` PK,
+///   - own a stable `created_at` (or analogous) text column to backfill from,
+///   - be `id`-addressable (no composite PKs).
+/// TEXT PK / composite PK tables (page_meta, ui_state, custom_pages, note_tags,
+/// tab_page_blocks) are excluded — they're config-shaped and rarely diverge.
+pub const SYNC_TABLES: &[&str] = &[
+    "facts", "conversations", "activities", "notes", "events",
+    "projects", "tasks", "learning_items", "hobbies", "hobby_entries",
+    "workouts", "exercises", "health_log", "habits", "habit_checks",
+    "media_items", "user_lists", "list_items", "food_log", "recipes",
+    "products", "transactions", "budgets", "savings_goals",
+    "subscriptions", "debts", "blocklist", "tab_goals", "home_items",
+    "contacts", "contact_blocks", "property_definitions",
+    "property_values", "view_configs", "activity_snapshots",
+    "proactive_history", "message_feedback", "conversation_insights",
+    "reminders", "flywheel_cycles", "schedules", "schedule_completions",
+    "dan_koe_entries", "proactive_messages", "project_records",
+    "body_records", "job_sources", "job_roles", "job_vacancies",
+    "job_search_log", "dashboard_widgets", "timeline_activity_types",
+    "timeline_blocks", "timeline_goals", "sleep_sessions", "sleep_stages",
+    "heart_rate_samples",
+];
+
+pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
+    // 1. Add `updated_at TEXT NOT NULL DEFAULT ''` everywhere it's missing.
+    // SQLite forbids non-constant DEFAULTs in ALTER ADD, hence the empty
+    // string sentinel + backfill loop below.
+    for table in SYNC_TABLES {
+        let sql = format!(
+            "ALTER TABLE {table} ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"
+        );
+        conn.execute(&sql, []).ok();
+    }
+
+    // 2. Backfill existing rows. We try the most-likely timestamp columns
+    // in order and fall back to now(). Trying a non-existent column would
+    // raise SQL error, so probe each table's schema first.
+    let candidates = ["created_at", "started_at", "date", "logged_at"];
+    for table in SYNC_TABLES {
+        let cols = match table_columns_in(conn, table) {
+            Ok(c) => c,
+            Err(_) => continue, // table may not exist on this install
+        };
+        let mut coalesce_args = Vec::<String>::new();
+        for col in &candidates {
+            if cols.iter().any(|c| c == *col) {
+                coalesce_args.push(format!("NULLIF({col}, '')"));
+            }
+        }
+        coalesce_args.push("datetime('now')".into());
+        let sql = format!(
+            "UPDATE {table} SET updated_at = COALESCE({}) \
+             WHERE updated_at = '' OR updated_at IS NULL",
+            coalesce_args.join(", ")
+        );
+        conn.execute(&sql, []).ok();
+    }
+
+    // 3. AFTER INSERT triggers — set updated_at for fresh rows when the
+    // INSERT didn't supply one. Avoids NULL/'' rows breaking LWW.
+    for table in SYNC_TABLES {
+        let trig = format!(
+            "CREATE TRIGGER IF NOT EXISTS {table}_set_updated_at_on_insert \
+             AFTER INSERT ON {table} \
+             FOR EACH ROW \
+             WHEN NEW.updated_at IS NULL OR NEW.updated_at = '' \
+             BEGIN \
+                 UPDATE {table} SET updated_at = datetime('now') WHERE rowid = NEW.rowid; \
+             END"
+        );
+        conn.execute_batch(&trig).ok();
+    }
+
+    // 4. AFTER UPDATE triggers — bump updated_at on every row mutation. Skip
+    // when the new updated_at differs from old (caller already set it, e.g.
+    // sync_owner pulling remote rows with a remote timestamp).
+    for table in SYNC_TABLES {
+        let trig = format!(
+            "CREATE TRIGGER IF NOT EXISTS {table}_bump_updated_at \
+             AFTER UPDATE ON {table} \
+             FOR EACH ROW \
+             WHEN NEW.updated_at = OLD.updated_at \
+             BEGIN \
+                 UPDATE {table} SET updated_at = datetime('now') WHERE rowid = NEW.rowid; \
+             END"
+        );
+        conn.execute_batch(&trig).ok();
+    }
+
+    // 3. Tombstones table + AFTER DELETE triggers
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_tombstones (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            row_id INTEGER NOT NULL,
+            deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(table_name, row_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted_at
+            ON sync_tombstones(deleted_at);"
+    ).ok();
+    for table in SYNC_TABLES {
+        let trig = format!(
+            "CREATE TRIGGER IF NOT EXISTS {table}_tombstone \
+             AFTER DELETE ON {table} \
+             FOR EACH ROW \
+             BEGIN \
+                 INSERT OR REPLACE INTO sync_tombstones (table_name, row_id, deleted_at) \
+                 VALUES ('{table}', OLD.id, datetime('now')); \
+             END"
+        );
+        conn.execute_batch(&trig).ok();
+    }
+
+    // 4. Stable device_id (used by sync to skip echoes from this device)
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM app_settings WHERE key='device_id'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    if exists == 0 {
+        let id = uuid::Uuid::new_v4().to_string();
+        let _ = conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('device_id', ?1)",
+            rusqlite::params![id],
+        );
+    }
 }

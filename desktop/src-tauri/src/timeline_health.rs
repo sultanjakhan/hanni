@@ -88,7 +88,7 @@ fn get_type_id(conn: &rusqlite::Connection, name: &str) -> Result<i64, String> {
 }
 
 /// Normalize time: HH:MM from various formats (ISO, HH:MM, etc.)
-fn normalize_time(t: &str) -> String {
+pub(crate) fn normalize_time(t: &str) -> String {
     if t.len() == 5 && t.contains(':') { return t.to_string(); }
     if let Some(pos) = t.find('T') {
         let rest = &t[pos + 1..];

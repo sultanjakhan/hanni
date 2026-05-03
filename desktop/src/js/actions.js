@@ -55,10 +55,6 @@ export async function executeAction(actionJson) {
     }
     let actionType = action.action || action.type;
     let result;
-    // If log_health has only mood, redirect to log_mood
-    if (actionType === 'log_health' && action.mood && !action.sleep && !action.water && !action.steps && !action.weight) {
-      actionType = 'log_mood';
-    }
 
     // S5: Confirmation for dangerous actions
     const DANGEROUS_ACTIONS = ['run_shell', 'close_app', 'quit_app', 'open_app', 'start_focus'];
@@ -266,20 +262,6 @@ export async function executeAction(actionJson) {
           amount: action.amount || 0, currency: action.currency || 'KZT',
           category: action.category || 'other', description: action.description || '',
           recurring: action.recurring || false, recurringPeriod: action.recurring_period || null,
-        });
-        break;
-      // Mindset
-      case 'log_mood':
-        result = await invoke('log_mood', {
-          mood: action.mood || 3, note: action.note || null,
-          trigger: action.trigger || null,
-        });
-        break;
-      case 'save_journal':
-        result = await invoke('save_journal_entry', {
-          mood: action.mood || 3, energy: action.energy || 3, stress: action.stress || 3,
-          gratitude: action.gratitude || null, reflection: action.reflection || null,
-          wins: action.wins || null, struggles: action.struggles || null,
         });
         break;
       // Calendar events

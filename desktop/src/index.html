@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8234 http://127.0.0.1:8235 http://127.0.0.1:8236 http://127.0.0.1:8237 ws://127.0.0.1:1430 ws://127.0.0.1:1431; media-src 'self' asset: http://asset.localhost blob:; worker-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Hanni</title>
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('hanni_theme') || 'light')</script>
@@ -106,7 +106,6 @@
     <div id="view-home" class="view"><div id="home-content" class="tab-content"></div></div>
     <div id="view-sports" class="view"><div id="sports-content" class="tab-content"></div></div>
     <div id="view-health" class="view"><div id="health-content" class="tab-content"></div></div>
-    <div id="view-mindset" class="view"><div id="mindset-content" class="tab-content"></div></div>
     <div id="view-food" class="view"><div id="food-content" class="tab-content"></div></div>
     <div id="view-money" class="view"><div id="money-content" class="tab-content"></div></div>
     <div id="view-people" class="view"><div id="people-content" class="tab-content"></div></div>
@@ -149,9 +148,11 @@
 <script src="vendor/drag-drop.min.js"></script>
 <script src="vendor/three-bundle.min.js"></script>
 <script src="vendor/html2canvas.min.js"></script>
-<script src="js/recipe-shared.js?v=1"></script>
+<script src="js/recipe-shared-ingredients.js?v=1"></script>
+<script src="js/recipe-shared.js?v=2"></script>
 <script src="js/fridge-shared.js?v=1"></script>
 <script type="module" src="main.js?v=279"></script>
 
+<div id="version-overlay">v?</div>
 </body>
 </html>

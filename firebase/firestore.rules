@@ -1,122 +1,39 @@
 rules_version = '2';
 
-// Hanni share-link cloud mirror.
-// Auth model: gosti pass `t=<share_token>` in URL. JS reads it and calls
-// Firestore via REST with that token in `Authorization: Bearer <token>`.
-// We don't use Firebase Auth users — RLS is purely token-based against the
-// share_links collection.
+// Hanni share-link cloud mirror — Stage C-1.
 //
-// Hanni-side writes use the Web SDK with API key + the share-link token,
-// so the same rules apply. Admin SDK (service-account) bypasses these rules
-// and is used for one-time bootstrap migrations.
+// Auth model: token in URL is the secret. Same trust assumption as the local
+// axum tunnel — anyone with the link can read the data, no Firebase Auth
+// required. This avoids needing Cloud Functions to mint custom JWTs (Spark
+// plan friendly). All writes are deny — Hanni mirrors via Admin SDK
+// (service-account JWT) which bypasses these rules.
+//
+// Stage C-2 will add guest writes (still token-as-secret), and C-3 may
+// migrate to anonymous Auth + custom claims for proper isolation.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helpers ------------------------------------------------------------
-
-    function token() {
-      // Caller must provide ?t=<share_token> via custom claim or X-Token.
-      // For REST, set `Authorization: Bearer <token>` and we read it from
-      // the JWT subject. For Web SDK, sign in anonymously then call a
-      // Cloud Function that mints a custom JWT with `share_token` claim.
-      return request.auth.token.share_token;
-    }
-
-    function linkDoc() {
-      return get(/databases/$(database)/documents/share_links/$(token()));
-    }
-
-    function linkValid() {
-      let l = linkDoc().data;
-      return l != null
-        && l.revoked_at == null
-        && (l.expires_at == null || l.expires_at > request.time);
-    }
-
-    function hasPerm(p) {
-      return linkValid() && p in linkDoc().data.permissions;
-    }
-
-    function inScope(area) {
-      let l = linkDoc().data;
-      return linkValid() && l.tab == 'food' && (l.scope == 'all' || l.scope == area);
-    }
-
-    // share_links --------------------------------------------------------
-    // Hanni writes here when create_share_link runs. Guests can read their
-    // own row (to discover scope/permissions) but never list or write.
-
-    match /share_links/{tokenId} {
-      allow read: if tokenId == token();
-      allow create, update, delete: if false;  // Admin SDK only.
-    }
-
-    // recipes ------------------------------------------------------------
-
-    match /recipes/{recipeId} {
-      allow read: if hasPerm('view') && inScope('recipes');
-
-      allow create: if hasPerm('add') && inScope('recipes')
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0;
-
-      allow update: if hasPerm('edit') && inScope('recipes');
-      allow delete: if hasPerm('delete') && inScope('recipes');
-
-      // Comments live as a sub-collection.
-      match /comments/{cid} {
-        allow read: if hasPerm('view') && inScope('recipes');
-        allow create: if hasPerm('comment') && inScope('recipes')
-          && request.resource.data.text is string;
-        allow update, delete: if false;
-      }
-    }
-
-    // recipe_ingredients are normalized so the Hanni-side mirror stays
-    // consistent with the local SQLite shape. Most clients just read.
-    match /recipe_ingredients/{id} {
-      allow read: if hasPerm('view') && inScope('recipes');
-      allow create, update, delete:
-        if (hasPerm('add') || hasPerm('edit') || hasPerm('delete'))
-        && inScope('recipes');
-    }
-
-    // ingredient_catalog is read-only for guests (Hanni mirrors the canonical
-    // catalog). Adding a new product through the recipe picker triggers an
-    // Admin-SDK upsert from Hanni, not a direct guest write.
-    match /ingredient_catalog/{id} {
-      allow read: if linkValid() && linkDoc().data.tab == 'food';
+    // share_links/{token} — top-level doc + every sub-collection (recipes,
+    // products, ingredient_catalog, food_blacklist, meal_plan,
+    // recipe_ingredients) is publicly readable to anyone who knows the
+    // token. Writes are denied: Hanni's mirror loop uses the service
+    // account, which bypasses rules anyway.
+    match /share_links/{token}/{document=**} {
+      allow read: if true;
       allow write: if false;
     }
 
-    // products = fridge inventory. Scope `all` or `products` (we mirror the
-    // existing Hanni naming where `/products` route is the fridge table).
-    match /products/{id} {
-      allow read: if hasPerm('view') && inScope('products');
-      allow create: if hasPerm('add') && inScope('products');
-      allow update: if hasPerm('edit') && inScope('products');
-      allow delete: if hasPerm('delete') && inScope('products');
-    }
-
-    // food_blacklist is exposed only when scope=all (Память tab in guest).
-    match /food_blacklist/{id} {
-      allow read: if linkValid() && linkDoc().data.scope == 'all';
-      allow write: if false;
-    }
-
-    // meal_plan ----------------------------------------------------------
-
-    match /meal_plan/{id} {
-      allow read: if hasPerm('view') && inScope('meal_plan');
-      allow create: if hasPerm('add') && inScope('meal_plan');
-      allow delete: if hasPerm('delete') && inScope('meal_plan');
-      allow update: if false;  // Plans are immutable, replace via delete+create.
-    }
-
-    // Activity log — writes only by Hanni Admin SDK. Guests don't see it.
+    // Activity log — neither read nor write from clients.
     match /activity/{id} {
       allow read, write: if false;
+    }
+
+    // owners/{uid}/... — Stage D owner-side sync. Each user can read/write
+    // documents under their own owner_uid (matches Firebase Auth uid from
+    // Sign-in-with-Google). No cross-user access.
+    match /owners/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
     }
   }
 }

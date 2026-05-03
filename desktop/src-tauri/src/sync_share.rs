@@ -235,12 +235,70 @@ pub(crate) async fn patch_doc(
     Ok(())
 }
 
+/// List doc IDs currently in `share_links/{token}/{coll}` on Firestore.
+/// Used by mirror to compute the orphan set (docs the snapshot no longer
+/// contains, so they should be deleted from cloud).
+async fn list_collection_ids(
+    client: &reqwest::Client, cfg: &CloudShareConfig, token: &str, path: &str,
+) -> Result<Vec<(String, i64)>, String> {
+    // Returns Vec<(full_resource_name, parsed_id)>. Walks pageToken so we
+    // see every doc, not just the first page.
+    let mut out = Vec::new();
+    let mut page_token: Option<String> = None;
+    for _ in 0..20 { // hard cap: 20 pages × 300 = 6000 docs
+        let mut url = format!(
+            "{}/projects/{}/databases/(default)/documents/{}?pageSize=300",
+            FIRESTORE_HOST, cfg.project_id, path,
+        );
+        if let Some(t) = &page_token {
+            url.push_str(&format!("&pageToken={}", t));
+        }
+        let resp = client.get(&url).bearer_auth(token).send().await
+            .map_err(|e| format!("LIST {}: {}", path, e))?;
+        if !resp.status().is_success() {
+            // 404 on empty sub-collection is normal for fresh share-links.
+            return Ok(out);
+        }
+        let body: serde_json::Value = resp.json().await
+            .map_err(|e| format!("LIST {} parse: {}", path, e))?;
+        if let Some(arr) = body.get("documents").and_then(|v| v.as_array()) {
+            for d in arr {
+                if let Some(name) = d.get("name").and_then(|v| v.as_str()) {
+                    let id_str = name.rsplit('/').next().unwrap_or("");
+                    if let Ok(id) = id_str.parse::<i64>() {
+                        out.push((name.to_string(), id));
+                    }
+                }
+            }
+        }
+        page_token = body.get("nextPageToken").and_then(|v| v.as_str()).map(String::from);
+        if page_token.is_none() { break; }
+    }
+    Ok(out)
+}
+
+async fn delete_doc_by_name(
+    client: &reqwest::Client, token: &str, full_name: &str,
+) -> Result<(), String> {
+    // Firestore delete URL: https://firestore.googleapis.com/v1/{full_name}
+    let url = format!("https://firestore.googleapis.com/v1/{}", full_name);
+    let resp = client.delete(&url).bearer_auth(token).send().await
+        .map_err(|e| format!("DELETE {}: {}", full_name, e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(format!("Firestore DELETE {} {}: {}", full_name, status, txt));
+    }
+    Ok(())
+}
+
 async fn firestore_upsert_snapshot(cfg: &CloudShareConfig, snap: &Snapshot)
     -> Result<serde_json::Value, String>
 {
     let token = get_access_token(cfg).await?;
     let client = reqwest::Client::new();
     let mut written = std::collections::BTreeMap::<String, usize>::new();
+    let mut deleted = std::collections::BTreeMap::<String, usize>::new();
 
     let token_id = snap.share_link.get("token").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if token_id.is_empty() {
@@ -257,18 +315,33 @@ async fn firestore_upsert_snapshot(cfg: &CloudShareConfig, snap: &Snapshot)
     // Sub-collections live under share_links/{token}/{coll}/{id}. Path is
     // built once per collection, doc-id is just the local SQLite rowid
     // (uniqueness is per share-link, not global).
-    macro_rules! push_sub {
+    //
+    // Sync semantics:
+    //   1. Upsert every row from the snapshot (PATCH).
+    //   2. List Firestore-side docs and DELETE any whose id isn't in the
+    //      snapshot — that handles deletions on the Hanni side.
+    macro_rules! sync_sub {
         ($coll:literal, $rows:expr) => {{
             let path = format!("share_links/{}/{}", token_id, $coll);
-            let mut n = 0usize;
+            let mut kept_ids = std::collections::HashSet::<i64>::new();
             for row in $rows {
                 let id = row.get("id").and_then(|v| v.as_i64())
                     .ok_or_else(|| format!("{} row missing id", $coll))?;
                 patch_doc(&client, cfg, &token, &path, &id.to_string(),
                           doc_payload(row, &cfg.owner_uid)).await?;
-                n += 1;
+                kept_ids.insert(id);
             }
-            written.insert($coll.into(), n);
+            written.insert($coll.into(), kept_ids.len());
+            // Orphan sweep
+            let existing = list_collection_ids(&client, cfg, &token, &path).await?;
+            let mut del_n = 0usize;
+            for (name, id) in existing {
+                if !kept_ids.contains(&id) {
+                    delete_doc_by_name(&client, &token, &name).await?;
+                    del_n += 1;
+                }
+            }
+            if del_n > 0 { deleted.insert($coll.into(), del_n); }
         }};
     }
 
@@ -281,23 +354,26 @@ async fn firestore_upsert_snapshot(cfg: &CloudShareConfig, snap: &Snapshot)
     let need_catalog   = need_recipes || need_products;
 
     if need_recipes {
-        push_sub!("recipes", &snap.recipes);
-        push_sub!("recipe_ingredients", &snap.recipe_ingredients);
+        sync_sub!("recipes", &snap.recipes);
+        sync_sub!("recipe_ingredients", &snap.recipe_ingredients);
     }
     if need_catalog {
-        push_sub!("ingredient_catalog", &snap.ingredient_catalog);
+        sync_sub!("ingredient_catalog", &snap.ingredient_catalog);
     }
     if need_products {
-        push_sub!("products", &snap.products);
+        sync_sub!("products", &snap.products);
     }
     if need_blacklist {
-        push_sub!("food_blacklist", &snap.food_blacklist);
+        sync_sub!("food_blacklist", &snap.food_blacklist);
     }
     if need_meal_plan {
-        push_sub!("meal_plan", &snap.meal_plan);
+        sync_sub!("meal_plan", &snap.meal_plan);
     }
 
-    Ok(serde_json::json!({ "status": "ok", "scope": scope, "written": written }))
+    Ok(serde_json::json!({
+        "status": "ok", "scope": scope,
+        "written": written, "deleted": deleted,
+    }))
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────
@@ -423,6 +499,14 @@ fn build_snapshot(db: &HanniDb, share_id: i64) -> Result<Snapshot, String> {
     let conn = db.conn();
     let mut s = Snapshot::default();
 
+    // Latest tunnel URL — guests on Firebase Hosting read this from
+    // share_links/{token}.tunnel_url and POST writes there. Null when
+    // cloudflared isn't running (host offline → guest goes read-only).
+    let tunnel_url: Option<String> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='share_tunnel_url'",
+        [], |r| r.get(0),
+    ).ok();
+
     s.share_link = conn.query_row(
         "SELECT id, token, tab, scope, permissions, label, expires_at, revoked_at, created_at \
          FROM share_links WHERE id=?1",
@@ -437,6 +521,7 @@ fn build_snapshot(db: &HanniDb, share_id: i64) -> Result<Snapshot, String> {
             "expires_at": r.get::<_, Option<String>>(6).unwrap_or(None),
             "revoked_at": r.get::<_, Option<String>>(7).unwrap_or(None),
             "created_at": r.get::<_, String>(8)?,
+            "tunnel_url": tunnel_url,
         })),
     ).map_err(|e| format!("share_link {} not found: {}", share_id, e))?;
 
@@ -558,6 +643,10 @@ fn clear_dirty(conn: &rusqlite::Connection) {
 
 /// Returns true if a share-link with `scope` mirrors writes to `table`.
 fn scope_covers(scope: &str, table: &str) -> bool {
+    // share_links metadata (incl. tunnel_url) is pushed for every active link
+    // regardless of scope — guests on Firebase Hosting read it to discover
+    // where to POST writes.
+    if table == "share_links" { return true; }
     match (scope, table) {
         ("all", _) => true,
         ("recipes", "recipes" | "recipe_ingredients" | "ingredient_catalog") => true,

@@ -1,4 +1,4 @@
-// ── js/tab-data.js — Data tab loaders: Home, Mindset, Food, Money, People, Memory, Work, Development, Hobbies, Sports, Health, About, Custom Pages ──
+// ── js/tab-data.js — Data tab loaders: Home, Food, Money, People, Memory, Work, Development, Hobbies, Sports, Health, About, Custom Pages ──
 
 import { S, invoke, tabLoaders, TAB_REGISTRY, TAB_ICONS, MEDIA_TYPES, MEDIA_LABELS, STATUS_LABELS, MEMORY_CATEGORIES } from './state.js';
 import { showEmojiPicker } from './emoji-picker.js';
@@ -166,62 +166,6 @@ async function loadShoppingList(el) {
         await invoke('toggle_home_item_needed', { id: parseInt(btn.dataset.bought) }).catch(()=>{});
         loadShoppingList(el);
       });
-    });
-  } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
-}
-
-// ── Mindset ──
-async function loadMindset(subTab) {
-  const el = document.getElementById('mindset-content');
-  if (!el) return;
-
-  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
-  await renderUnifiedLayout(el, 'mindset', {
-    title: 'Mindset',
-    subtitle: 'Дневник, настроение, принципы',
-    icon: '🧠',
-    renderTable: async (paneEl) => {
-      await loadJournal(paneEl);
-    },
-  });
-}
-
-async function loadJournal(el) {
-  try {
-    const today = await invoke('get_journal_entry', { date: null }).catch(() => null);
-    const entries = await invoke('get_journal_entries', { days: 7 }).catch(() => []);
-    const mood = today?.mood || 3, energy = today?.energy || 3, stress = today?.stress || 3;
-    el.innerHTML = `
-      <div class="module-header"><h2>Journal</h2></div>
-      <div class="settings-section">
-        <div class="settings-section-title">Today</div>
-        <div class="settings-row"><span class="settings-label">Mood (1-5)</span><input class="form-input" id="j-mood" type="number" min="1" max="5" value="${mood}" style="width:60px;"></div>
-        <div class="settings-row"><span class="settings-label">Energy (1-5)</span><input class="form-input" id="j-energy" type="number" min="1" max="5" value="${energy}" style="width:60px;"></div>
-        <div class="settings-row"><span class="settings-label">Stress (1-5)</span><input class="form-input" id="j-stress" type="number" min="1" max="5" value="${stress}" style="width:60px;"></div>
-        <div class="form-group"><label class="form-label">Gratitude</label><textarea class="form-textarea" id="j-gratitude" rows="2">${escapeHtml(today?.gratitude||'')}</textarea></div>
-        <div class="form-group"><label class="form-label">Wins</label><textarea class="form-textarea" id="j-wins" rows="2">${escapeHtml(today?.wins||'')}</textarea></div>
-        <div class="form-group"><label class="form-label">Struggles</label><textarea class="form-textarea" id="j-struggles" rows="2">${escapeHtml(today?.struggles||'')}</textarea></div>
-        <div class="form-group"><label class="form-label">Reflection</label><textarea class="form-textarea" id="j-reflection" rows="3">${escapeHtml(today?.reflection||'')}</textarea></div>
-        <button class="btn-primary" id="j-save" style="margin-top:8px;">Save</button>
-      </div>
-      ${entries.length > 0 ? `<div class="module-card-title" style="margin-top:16px;">Recent Entries</div>
-        ${entries.map(e => `<div class="focus-log-item">
-          <span class="focus-log-time">${e.date}</span>
-          <span class="focus-log-title">Mood:${e.mood} Energy:${e.energy} Stress:${e.stress}</span>
-        </div>`).join('')}` : ''}`;
-    document.getElementById('j-save')?.addEventListener('click', async () => {
-      try {
-        await invoke('save_journal_entry', {
-          mood: parseInt(document.getElementById('j-mood')?.value)||3,
-          energy: parseInt(document.getElementById('j-energy')?.value)||3,
-          stress: parseInt(document.getElementById('j-stress')?.value)||3,
-          gratitude: document.getElementById('j-gratitude')?.value||null,
-          reflection: document.getElementById('j-reflection')?.value||null,
-          wins: document.getElementById('j-wins')?.value||null,
-          struggles: document.getElementById('j-struggles')?.value||null,
-        });
-        loadJournal(el);
-      } catch (err) { alert('Error: ' + err); }
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
@@ -2137,6 +2081,10 @@ async function loadSchedule(subTab) {
             if (!r.details) return '<span class="text-faint">—</span>';
             return `<span style="font-size:12px;color:var(--text-secondary);">${escapeHtml(r.details)}</span>`;
           }},
+          { key: 'target_minutes', label: 'Цель', editable: true, editType: 'minutes', rawValue: r => r.target_minutes ?? '', render: r => {
+            return r.target_minutes ? `<span class="cell-minutes">${r.target_minutes} мин</span>` : '<span class="text-faint">—</span>';
+          }},
+          { key: 'track_overdue', label: '⚠️', render: r => `<div class="habit-check${r.track_overdue ? ' checked' : ''}" data-overdue-id="${r.id}" style="cursor:pointer;" title="${r.track_overdue ? 'Пропуск = просрочка' : 'Пропуск игнорируется'}">${r.track_overdue ? '&#10003;' : ''}</div>` },
         ],
         idField: 'id',
         addButton: '+ Расписание',
@@ -2161,6 +2109,9 @@ async function loadSchedule(subTab) {
               params.untilDate = r.until || '';
               await invoke('update_schedule', params);
             } catch {}
+          } else if (key === 'target_minutes') {
+            const n = parseInt(value);
+            await invoke('update_schedule', { id: recordId, targetMinutes: isNaN(n) || n <= 0 ? 0 : n });
           } else {
             const keyMap = { title: 'title', category: 'category', details: 'details' };
             const params = { id: recordId };
@@ -2199,6 +2150,15 @@ async function loadSchedule(subTab) {
           const wasChecked = chk.classList.contains('checked');
           chk.classList.toggle('checked', !wasChecked);
           chk.innerHTML = wasChecked ? '' : '&#10003;';
+          return;
+        }
+        const ov = e.target.closest('[data-overdue-id]');
+        if (ov) {
+          const id = parseInt(ov.dataset.overdueId);
+          const wasOn = ov.classList.contains('checked');
+          await invoke('update_schedule', { id, trackOverdue: !wasOn });
+          ov.classList.toggle('checked', !wasOn);
+          ov.innerHTML = wasOn ? '' : '&#10003;';
           return;
         }
         const tog = e.target.closest('[data-toggle-id]');
@@ -2265,7 +2225,7 @@ function showScheduleModal() {
 
 const DK_PRACTICES = [
   {
-    key: 'contemplation', label: 'Contemplation', icon: '🧘',
+    key: 'contemplation', label: 'Contemplation', icon: '🧘', hasText: true,
     what: 'Тихое созерцание — 10-15 минут без отвлечений',
     why: 'Тренирует осознанность, снижает реактивность ума, помогает замечать автоматические мысли вместо того, чтобы следовать за ними.',
     how: [
@@ -2274,9 +2234,10 @@ const DK_PRACTICES = [
       'Когда замечаешь, что увлёкся мыслью — мягко возвращайся к наблюдению',
       'Начни с 5 минут, постепенно увеличивай до 15-20',
     ],
+    placeholder: 'Что заметил во время созерцания? Какие мысли возвращались? Что ощущал?',
   },
   {
-    key: 'pattern_interrupt', label: 'Pattern Interrupt', icon: '⚡',
+    key: 'pattern_interrupt', label: 'Pattern Interrupt', icon: '⚡', hasText: false,
     what: 'Прерывание автоматических паттернов поведения',
     why: 'Большинство действий выполняются на автопилоте. Прерывая паттерны, ты возвращаешь контроль над вниманием и решениями.',
     how: [
@@ -2288,7 +2249,7 @@ const DK_PRACTICES = [
     examples: 'Потянулся к Instagram → паузу → "мне скучно, я могу почитать/погулять". Хочу сладкое → "голоден или стресс?"',
   },
   {
-    key: 'vision', label: 'Vision', icon: '🔭',
+    key: 'vision', label: 'Vision', icon: '🔭', hasText: true,
     what: 'Вопросы о видении будущего — 5-10 минут рефлексии',
     why: 'Без ясного видения будущего ты реагируешь на обстоятельства вместо того, чтобы создавать жизнь по своему дизайну.',
     how: [
@@ -2304,9 +2265,10 @@ const DK_PRACTICES = [
       'Что я откладываю и почему?',
       'Каким человеком я хочу стать?',
     ],
+    placeholder: 'Возьми один вопрос выше и пиши свободно. Не редактируй — фиксируй.',
   },
   {
-    key: 'integration', label: 'Integration', icon: '🔗',
+    key: 'integration', label: 'Integration', icon: '🔗', hasText: true,
     what: 'Одно конкретное действие, основанное на практиках выше',
     why: 'Инсайты без действий — просто развлечение. Integration превращает осознанность в реальные изменения.',
     how: [
@@ -2315,61 +2277,185 @@ const DK_PRACTICES = [
       'Запиши, что сделал — это усиливает привычку',
     ],
     examples: 'Vision → "хочу быть здоровее" → Integration → "сегодня пойду на 30-мин прогулку вместо скролла"',
+    placeholder: 'Какое одно конкретное действие сделаю сегодня?',
   },
 ];
+
+const DK_TEXT_FIELD = { contemplation: 'contemplation_text', vision: 'vision_text', integration: 'integration_text' };
+const DK_TEXT_TABS = ['contemplation', 'vision', 'integration'];
+const DK_VIEWS = ['instructions', 'history'];
+
+function dkWordCount(text) {
+  return (text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+function dkPreview(text, max = 80) {
+  const t = (text || '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? t.slice(0, max) + '…' : t;
+}
+
+function dkRenderHeader(active) {
+  const tabs = [
+    { key: 'instructions', icon: '📖', label: 'Инструкция' },
+    { key: 'history', icon: '📊', label: 'История' },
+  ];
+  const pills = tabs.map(t => {
+    const isActive = active === t.key;
+    return `<button class="dk-tab" data-view="${t.key}" style="padding:6px 14px;border-radius:var(--radius-1);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-active)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;">${t.icon} ${escapeHtml(t.label)}</button>`;
+  }).join('');
+  return `
+    <div class="module-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:22px;">🧠</span>
+        <div>
+          <h2 style="margin:0;font-size:18px;">Dan Koe Protocol</h2>
+          <div style="font-size:12px;color:var(--text-muted);">Ежедневная практика осознанности · запись через календарь</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${pills}</div>
+    </div>`;
+}
+
+function dkBindTabs(el) {
+  el.querySelectorAll('.dk-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S._dkView = btn.dataset.view;
+      loadDanKoe(S._dkView);
+    });
+  });
+}
 
 async function loadDanKoe(subTab) {
   const el = document.getElementById('dankoe-content');
   if (!el) return;
-  const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
-  const today = new Date().toISOString().slice(0, 10);
-  const schedules = await invoke('get_schedules', { category: 'practice' }).catch(() => []);
-  const completions = await invoke('get_schedule_completions', { date: today }).catch(() => []);
-  const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
-  const schByLabel = {};
-  for (const s of schedules) schByLabel[s.title.toLowerCase()] = s;
+  const view = DK_VIEWS.includes(subTab) ? subTab : (DK_VIEWS.includes(S._dkView) ? S._dkView : 'instructions');
+  S._dkView = view;
+  if (view === 'instructions') {
+    dkRenderInstructions(el);
+  } else {
+    await dkRenderHistory(el);
+  }
+  dkBindTabs(el);
+}
 
-  await renderUnifiedLayout(el, 'dankoe', {
-    title: 'Dan Koe Protocol',
-    subtitle: 'Ежедневная практика осознанности',
-    icon: '🧠',
-    renderTable: async (paneEl) => {
-      paneEl.innerHTML = DK_PRACTICES.map(p => {
-        const sch = schByLabel[p.label.toLowerCase()];
-        const done = sch && completedIds.has(sch.id);
-        const statusHtml = sch
-          ? `<div style="margin-top:12px;padding:6px 10px;border-radius:var(--radius-1);background:${done ? 'var(--color-green-bg)' : 'var(--bg-hover)'};font-size:12px;color:${done ? 'var(--color-green)' : 'var(--text-muted)'};">${done ? '✓ Выполнено сегодня' : '○ Не выполнено сегодня'}</div>`
-          : '<div style="margin-top:12px;font-size:12px;color:var(--text-faint);">⚠ Нет в Schedule — добавьте через Шаблоны</div>';
-        return `
-        <div style="margin-bottom:24px;padding:16px;border-radius:var(--radius-2);border:1px solid var(--border-subtle);">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-            <span style="font-size:20px;">${p.icon}</span>
-            <span style="font-size:16px;font-weight:600;color:var(--text-primary);">${p.label}</span>
-          </div>
-          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">${p.what}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-1);">
-            <b>Зачем:</b> ${p.why}
-          </div>
-          <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Как делать:</div>
-          <ul style="margin:0 0 8px 16px;padding:0;font-size:13px;color:var(--text-secondary);line-height:1.7;">
-            ${p.how.map(h => `<li>${h}</li>`).join('')}
-          </ul>
-          ${p.questions ? `
-            <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Вопросы для рефлексии:</div>
-            <ul style="margin:0 0 8px 16px;padding:0;font-size:13px;color:var(--text-muted);line-height:1.7;font-style:italic;">
-              ${p.questions.map(q => `<li>${q}</li>`).join('')}
-            </ul>` : ''}
-          ${p.examples ? `<div style="font-size:12px;color:var(--text-faint);margin-top:8px;">💡 <i>${p.examples}</i></div>` : ''}
-          ${statusHtml}
-        </div>`;
-      }).join('');
-    },
+function dkRenderInstructions(el) {
+  const cards = DK_PRACTICES.map(p => `
+    <div style="padding:18px;border-radius:var(--radius-2);border:1px solid var(--border-subtle);background:var(--bg-card);margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-size:22px;">${p.icon}</span>
+        <span style="font-size:16px;font-weight:600;color:var(--text-primary);">${escapeHtml(p.label)}</span>
+      </div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">${escapeHtml(p.what)}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-1);"><b>Зачем:</b> ${escapeHtml(p.why)}</div>
+      <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Как делать:</div>
+      <ul style="margin:0 0 10px 16px;padding:0;font-size:13px;color:var(--text-secondary);line-height:1.7;">
+        ${p.how.map(h => `<li>${escapeHtml(h)}</li>`).join('')}
+      </ul>
+      ${p.questions ? `<div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Вопросы для рефлексии:</div>
+        <ul style="margin:0 0 10px 16px;padding:0;font-size:13px;color:var(--text-muted);line-height:1.7;font-style:italic;">
+          ${p.questions.map(q => `<li>${escapeHtml(q)}</li>`).join('')}
+        </ul>` : ''}
+      ${p.examples ? `<div style="font-size:12px;color:var(--text-faint);margin-top:6px;">💡 <i>${escapeHtml(p.examples)}</i></div>` : ''}
+    </div>`).join('');
+  el.innerHTML = `
+    ${dkRenderHeader('instructions')}
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;padding:10px 12px;border-radius:var(--radius-1);background:var(--bg-hover);">
+      ℹ️ Запись практик за день — через событие в календаре. Здесь — только описание и история.
+    </div>
+    ${cards}`;
+}
+
+async function dkRenderHistory(el) {
+  const filter = DK_TEXT_TABS.includes(S._dkFilter) || S._dkFilter === 'all' ? S._dkFilter : 'all';
+  const history = await invoke('get_dan_koe_history', { days: 30 }).catch(() => []);
+  const meta = Object.fromEntries(DK_PRACTICES.map(p => [p.key, p]));
+  const today = new Date().toISOString().slice(0, 10);
+
+  const filterTypes = [
+    { key: 'all', icon: '∗', label: 'All' },
+    ...DK_TEXT_TABS.map(k => ({ key: k, icon: meta[k].icon, label: meta[k].label })),
+  ];
+  const chips = filterTypes.map(t => {
+    const isActive = filter === t.key;
+    return `<button class="dk-chip" data-filter="${t.key}" style="padding:6px 12px;border-radius:var(--radius-1);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-active)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;margin-right:6px;">${t.icon} ${escapeHtml(t.label)}</button>`;
+  }).join('');
+
+  const visibleKeys = filter === 'all' ? DK_TEXT_TABS : [filter];
+  const flatRows = [];
+  for (const e of history) {
+    for (const k of visibleKeys) {
+      const txt = e[DK_TEXT_FIELD[k]] || '';
+      if (!txt.trim()) continue;
+      flatRows.push({ date: e.date, key: k, text: txt });
+    }
+  }
+
+  const showType = filter === 'all';
+  const rows = flatRows.map((r, idx) => {
+    const m = meta[r.key];
+    const isToday = r.date === today;
+    return `<tr class="dk-row" data-idx="${idx}" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">
+      <td style="padding:8px 10px;font-size:13px;color:var(--text-primary);white-space:nowrap;">${escapeHtml(r.date)}${isToday ? ' <span style="color:var(--color-green);font-size:11px;">· сегодня</span>' : ''}</td>
+      ${showType ? `<td style="padding:8px 10px;font-size:13px;color:var(--text-secondary);white-space:nowrap;">${m.icon} ${escapeHtml(m.label)}</td>` : ''}
+      <td style="padding:8px 10px;font-size:13px;color:var(--text-secondary);">${escapeHtml(dkPreview(r.text))}</td>
+      <td style="padding:8px 10px;font-size:12px;color:var(--text-muted);text-align:right;white-space:nowrap;">${dkWordCount(r.text)}</td>
+    </tr>`;
+  }).join('');
+
+  const tableHeader = `
+    <thead><tr style="background:var(--bg-hover);">
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:500;width:140px;">Дата</th>
+      ${showType ? '<th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:500;width:160px;">Тип</th>' : ''}
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:500;">Содержание</th>
+      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-weight:500;width:60px;">Слов</th>
+    </tr></thead>`;
+  const colSpan = showType ? 4 : 3;
+  const tableBody = rows
+    ? `<tbody>${rows}</tbody>`
+    : `<tbody><tr><td colspan="${colSpan}" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:13px;">Пока пусто. Записи появятся здесь после заполнения через событие в календаре.</td></tr></tbody>`;
+  const tableHtml = `<table style="width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:var(--radius-2);overflow:hidden;border:1px solid var(--border-subtle);">${tableHeader}${tableBody}</table>`;
+
+  el.innerHTML = `
+    ${dkRenderHeader('history')}
+    <div style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
+    ${tableHtml}`;
+
+  el.querySelectorAll('.dk-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      S._dkFilter = btn.dataset.filter;
+      dkRenderHistory(el).then(() => dkBindTabs(el));
+    });
   });
+  el.querySelectorAll('.dk-row').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const r = flatRows[parseInt(tr.dataset.idx, 10)];
+      if (!r) return;
+      const m = meta[r.key];
+      dkOpenViewer(r.date, m.label, m.icon, r.text);
+    });
+  });
+}
+
+function dkOpenViewer(date, label, icon, text) {
+  document.querySelector('.dk-viewer-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'dk-viewer-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:var(--bg-card);border-radius:var(--radius-2);max-width:600px;width:90%;max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--border-subtle);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;">
+        <div style="font-size:14px;font-weight:600;color:var(--text-primary);">${icon} ${escapeHtml(label)} · ${escapeHtml(date)}</div>
+        <button class="dk-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);">×</button>
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);white-space:pre-wrap;line-height:1.6;">${escapeHtml(text)}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('.dk-close')?.addEventListener('click', () => overlay.remove());
 }
 
 export {
   loadHome,
-  loadMindset,
   loadFood,
   loadMoney,
   loadPeople,
@@ -2391,7 +2477,7 @@ export {
 
 // Register in tabLoaders for tabs.js switchTab()
 Object.assign(tabLoaders, {
-  loadHome, loadMindset, loadFood, loadMoney, loadPeople,
+  loadHome, loadFood, loadMoney, loadPeople,
   loadJobs, loadProjects, loadDevelopment,
   loadHobbies, loadSports, loadHealth,
   loadCustomPage, loadSchedule, loadDanKoe,

@@ -125,6 +125,20 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
             guard.error = None;
             guard.child = Some(child);
             drop(guard);
+            // Persist tunnel URL + mark share_links dirty so the mirror loop
+            // pushes the new URL into Firestore — guests on Firebase Hosting
+            // read it from share_links/{token}.tunnel_url to know where to
+            // POST writes.
+            {
+                let db = app.state::<crate::types::HanniDb>();
+                let conn = db.conn();
+                let _ = conn.execute(
+                    "INSERT INTO app_settings (key, value) VALUES ('share_tunnel_url', ?1) \
+                     ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    rusqlite::params![u],
+                );
+                crate::sync_share::mark_dirty(&conn, "share_links");
+            }
             let _ = app.emit("tunnel-up", u.clone());
             Ok(u)
         }

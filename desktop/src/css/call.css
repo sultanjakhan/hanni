@@ -561,6 +561,12 @@
   gap: 8px;
 }
 
+/* Hide '+' while quotes popover is open so it does not overlay the popover */
+body.qw-popover-open #task-control-widget {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .tw-btn {
   width: 40px;
   height: 40px;
@@ -646,6 +652,24 @@
   color: var(--text-secondary);
   font-size: 11px;
 }
+.tw-action {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 10px; border: none;
+  background: transparent; cursor: pointer; border-radius: var(--radius-sm);
+  text-align: left; color: var(--text-primary);
+  transition: background 0.12s;
+}
+.tw-action:hover { background: var(--bg-hover); }
+.tw-action-icon {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.tw-action-pause .tw-action-icon { background: #fef3c7; color: #d97706; }
+.tw-action-finish .tw-action-icon { background: #dcfce7; color: #16a34a; }
+.tw-action-cancel .tw-action-icon { background: #fee2e2; color: #dc2626; }
+.tw-action-label { font-size: 13px; font-weight: 500; flex-shrink: 0; }
+.tw-action-hint { font-size: 11px; color: var(--text-muted); margin-left: auto; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .qw-btn {
   width: 40px;

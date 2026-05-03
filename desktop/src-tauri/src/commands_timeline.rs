@@ -75,7 +75,8 @@ pub fn create_timeline_block(type_id: i64, date: String, start_time: String, end
 pub fn get_timeline_blocks(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT b.id, b.type_id, b.date, b.start_time, b.end_time, b.duration_minutes, b.source, b.notes, t.name, t.color, t.icon
+        "SELECT b.id, b.type_id, b.date, b.start_time, b.end_time, b.duration_minutes, b.source, b.notes, t.name, t.color, t.icon,
+                COALESCE(b.is_active,0), b.source_type, b.source_id, COALESCE(b.quality,0), b.reflection, b.mood
          FROM timeline_blocks b JOIN timeline_activity_types t ON t.id = b.type_id
          WHERE b.date=?1 ORDER BY b.start_time"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -92,6 +93,12 @@ pub fn get_timeline_blocks(date: String, db: tauri::State<'_, HanniDb>) -> Resul
             "type_name": row.get::<_, String>(8)?,
             "type_color": row.get::<_, String>(9)?,
             "type_icon": row.get::<_, String>(10)?,
+            "is_active": row.get::<_, i64>(11)? == 1,
+            "source_type": row.get::<_, Option<String>>(12)?,
+            "source_id": row.get::<_, Option<i64>>(13)?,
+            "quality": row.get::<_, i64>(14)?,
+            "reflection": row.get::<_, Option<String>>(15)?,
+            "mood": row.get::<_, Option<String>>(16)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -136,5 +143,7 @@ pub fn calc_duration(start: &str, end: &str) -> i64 {
     };
     let s = parse(start);
     let e = parse(end);
-    if e > s { e - s } else { (24 * 60 - s) + e }
+    // e == s ⇒ 0 (just started/finished within the same minute);
+    // e < s  ⇒ wraps past midnight.
+    if e >= s { e - s } else { (24 * 60 - s) + e }
 }

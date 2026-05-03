@@ -144,8 +144,10 @@ function renderList(links, tabId) {
 function showCreateForm(overlay, tabId) {
   const body = overlay.querySelector('#share-body');
   const scopeMap = SCOPE_LABELS[tabId] || { all: 'Вся вкладка' };
-  const scopeRadios = Object.entries(scopeMap).map(([v, l], i) =>
-    `<label class="share-radio"><input type="radio" name="scope" value="${v}" ${i === 0 ? 'checked' : ''}>${escapeHtml(l)}</label>`
+  // First entry is treated as "all" (covers everything). Render as checkbox so
+  // user can pick a subset or stick with "all".
+  const scopeChecks = Object.entries(scopeMap).map(([v, l], i) =>
+    `<label class="share-check"><input type="checkbox" name="scope" value="${v}" ${i === 0 ? 'checked' : ''}>${escapeHtml(l)}</label>`
   ).join('');
   const permChecks = Object.entries(PERM_LABELS).map(([v, l]) =>
     `<label class="share-check"><input type="checkbox" name="perm" value="${v}" ${v === 'view' ? 'checked' : ''}>${escapeHtml(l)}</label>`
@@ -156,11 +158,15 @@ function showCreateForm(overlay, tabId) {
   const expiresOpts = EXPIRY_OPTIONS.map(o => `<option value="${o.v}">${escapeHtml(o.l)}</option>`).join('');
 
   body.innerHTML = `<div class="share-form">
+    <div class="form-group" style="margin-bottom:12px">
+      <button type="button" class="btn-secondary" id="s-grant-all" style="font-size:12px;padding:5px 10px">🔓 Полный доступ</button>
+      <span style="color:var(--text-muted);font-size:11px;margin-left:8px">Вся еда + все права</span>
+    </div>
     <div class="form-group"><label class="form-label">Подпись</label>
       <input class="form-input" id="s-label" placeholder="Для жены, для мамы...">
     </div>
     <div class="form-group"><label class="form-label">Что шарим</label>
-      <div class="share-group">${scopeRadios}</div>
+      <div class="share-group">${scopeChecks}</div>
     </div>
     <div class="form-group"><label class="form-label">Права</label>
       <div class="share-group">${permChecks}</div>
@@ -172,9 +178,27 @@ function showCreateForm(overlay, tabId) {
     <div id="s-msg"></div>
   </div>`;
 
+  // Scope checkboxes: "all" is mutually-exclusive with the specific scopes.
+  // Picking "all" clears specifics; picking a specific scope clears "all".
+  // The first scope key is treated as "all" (e.g. food → "all" / "Вся еда").
+  const scopeBoxes = Array.from(body.querySelectorAll('input[name="scope"]'));
+  const allScope = scopeBoxes[0]?.value;
+  scopeBoxes.forEach(cb => cb.addEventListener('change', () => {
+    if (cb.value === allScope && cb.checked) {
+      scopeBoxes.forEach(o => { if (o.value !== allScope) o.checked = false; });
+    } else if (cb.value !== allScope && cb.checked) {
+      const allBox = scopeBoxes.find(o => o.value === allScope);
+      if (allBox) allBox.checked = false;
+    }
+  }));
+
+  body.querySelector('#s-grant-all').addEventListener('click', () => {
+    scopeBoxes.forEach(o => { o.checked = o.value === allScope; });
+    body.querySelectorAll('input[name="perm"]').forEach(p => { p.checked = true; });
+  });
+
   const expirySel = body.querySelector('#s-expiry');
   body.querySelectorAll('input[name="lifetime"]').forEach(r => r.addEventListener('change', () => {
-    expirySel.style.display = r.checked && r.value === 'expires' ? '' : expirySel.style.display;
     expirySel.style.display = body.querySelector('input[name="lifetime"]:checked').value === 'expires' ? '' : 'none';
   }));
 
@@ -189,7 +213,14 @@ function showCreateForm(overlay, tabId) {
 async function submitCreate(overlay, tabId) {
   const body = overlay.querySelector('#share-body');
   const label = body.querySelector('#s-label').value.trim();
-  const scope = body.querySelector('input[name="scope"]:checked')?.value || 'all';
+  const scopeBoxes = Array.from(body.querySelectorAll('input[name="scope"]:checked')).map(c => c.value);
+  // First key in the scope map is the "all" sentinel; collapse to "all" when
+  // it's selected (alone) or when nothing else is picked.
+  const allKey = Object.keys(SCOPE_LABELS[tabId] || { all: '' })[0] || 'all';
+  let scope;
+  if (!scopeBoxes.length) { body.querySelector('#s-msg').innerHTML = '<div class="share-err">Выберите хотя бы один раздел</div>'; return; }
+  else if (scopeBoxes.includes(allKey)) scope = allKey;
+  else scope = scopeBoxes.join(',');
   const lifetime = body.querySelector('input[name="lifetime"]:checked')?.value || 'permanent';
   const permissions = Array.from(body.querySelectorAll('input[name="perm"]:checked')).map(c => c.value);
   const msg = body.querySelector('#s-msg');

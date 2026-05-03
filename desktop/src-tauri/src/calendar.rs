@@ -6,12 +6,13 @@ use chrono::Timelike;
 // ── v0.7.0: Events (Calendar) commands ──
 
 #[tauri::command]
-pub fn create_event(title: String, description: String, date: String, time: String, duration_minutes: i64, category: String, color: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn create_event(title: String, description: String, date: String, time: String, duration_minutes: i64, category: String, color: String, priority: Option<i32>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
+    let pr = priority.unwrap_or(0);
     conn.execute(
-        "INSERT INTO events (title, description, date, time, duration_minutes, category, color, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![title, description, date, time, duration_minutes, category, color, now],
+        "INSERT INTO events (title, description, date, time, duration_minutes, category, color, priority, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![title, description, date, time, duration_minutes, category, color, pr, now],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
@@ -21,7 +22,7 @@ pub fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Resul
     let conn = db.conn();
     let prefix = format!("{}-{:02}", year, month);
     let mut stmt = conn.prepare(
-        "SELECT id, title, description, date, time, duration_minutes, category, color, completed, COALESCE(source,'manual') FROM events WHERE date LIKE ?1 ORDER BY date, time"
+        "SELECT id, title, description, date, time, duration_minutes, category, color, completed, COALESCE(source,'manual'), COALESCE(priority,0) FROM events WHERE date LIKE ?1 ORDER BY date, time"
     ).map_err(|e| format!("DB error: {}", e))?;
     let pattern = format!("{}%", prefix);
     let rows = stmt.query_map(rusqlite::params![pattern], |row| {
@@ -36,6 +37,7 @@ pub fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Resul
             "color": row.get::<_, String>(7)?,
             "completed": row.get::<_, i32>(8)? != 0,
             "source": row.get::<_, String>(9)?,
+            "priority": row.get::<_, i32>(10)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -49,7 +51,7 @@ pub fn delete_event(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn update_event(id: i64, title: Option<String>, description: Option<String>, date: Option<String>, time: Option<String>, duration_minutes: Option<i64>, category: Option<String>, color: Option<String>, completed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_event(id: i64, title: Option<String>, description: Option<String>, date: Option<String>, time: Option<String>, duration_minutes: Option<i64>, category: Option<String>, color: Option<String>, completed: Option<bool>, priority: Option<i32>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     let mut updates = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -62,6 +64,7 @@ pub fn update_event(id: i64, title: Option<String>, description: Option<String>,
     if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = color { updates.push(format!("color=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = completed { updates.push(format!("completed=?{}", idx)); params.push(Box::new(v as i64)); idx += 1; }
+    if let Some(v) = priority { updates.push(format!("priority=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if updates.is_empty() { return Ok(()); }
     params.push(Box::new(id));
     let sql = format!("UPDATE events SET {} WHERE id=?{}", updates.join(","), idx);

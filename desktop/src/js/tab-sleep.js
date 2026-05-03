@@ -1,6 +1,7 @@
 // tab-sleep.js — Sleep sessions pane for Health tab
-import { invoke } from './state.js';
+import { invoke, IS_MOBILE } from './state.js';
 import { escapeHtml } from './utils.js';
+import { autoImportHealth } from './health-auto-sync.js';
 
 const STAGE_COLORS = {
   deep: 'var(--color-purple)', rem: 'var(--accent-blue)',
@@ -26,8 +27,19 @@ export async function renderSleepPane(el) {
     ]);
   } catch(e) { console.error('sleep load:', e); }
 
+  // Check Health Connect permission state on Android — drives whether we show
+  // "Разрешить" or "Импорт" as the primary action
+  let hcGranted = false;
+  if (IS_MOBILE) {
+    try { hcGranted = !!(await invoke('health_has_permissions')); } catch(_) {}
+  }
+
   const avgH = Math.floor(stats.avg_duration_minutes / 60);
   const avgM = Math.round(stats.avg_duration_minutes % 60);
+
+  const importBtnHtml = hcGranted
+    ? `<button class="btn-smallall mobile-only" id="sleep-import-btn">📱 Импорт из Samsung Health</button>`
+    : `<button class="btn-smallall mobile-only" id="sleep-grant-btn">🔓 Разрешить доступ к Health Connect</button>`;
 
   el.innerHTML = `
     <div class="sleep-stats">
@@ -38,12 +50,19 @@ export async function renderSleepPane(el) {
     </div>
     <div class="sleep-actions">
       <button class="btn-smallall" id="sleep-add-btn">+ Добавить</button>
-      <button class="btn-smallall mobile-only" id="sleep-import-btn">📱 Импорт из Samsung Health</button>
+      ${importBtnHtml}
     </div>
     <div class="sleep-list">${renderSessionList(sessions)}</div>`;
 
   el.querySelector('#sleep-add-btn')?.addEventListener('click', () => addManualSleep(el));
   el.querySelector('#sleep-import-btn')?.addEventListener('click', () => importFromHealthConnect(el));
+  el.querySelector('#sleep-grant-btn')?.addEventListener('click', () => grantAndImport(el));
+
+  // Lazy auto-import on enter (throttled inside autoImportHealth) — runs in
+  // the background so the pane stays responsive
+  if (IS_MOBILE && hcGranted) {
+    autoImportHealth().then(ok => { if (ok) renderSleepPane(el); });
+  }
 }
 
 function renderSessionList(sessions) {
@@ -111,6 +130,16 @@ async function addManualSleep(el) {
 async function importFromHealthConnect(el) {
   try {
     await invoke('import_health_connect_sleep');
+    renderSleepPane(el);
+  } catch(e) { alert(e); }
+}
+
+async function grantAndImport(el) {
+  try {
+    const granted = await invoke('health_request_permissions');
+    if (granted) {
+      await autoImportHealth({ force: true });
+    }
     renderSleepPane(el);
   } catch(e) { alert(e); }
 }

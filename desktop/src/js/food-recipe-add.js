@@ -13,6 +13,12 @@ function toCamel(obj) {
   return out;
 }
 
+export async function duplicateRecipe(id, reloadFn) {
+  const newId = await invoke('duplicate_recipe', { id });
+  if (reloadFn) await reloadFn();
+  return newId;
+}
+
 export async function showAddRecipeModal(reloadFn) {
   if (!window.HanniRecipe) {
     alert('Модуль recipe-shared.js не загружен'); return;

@@ -116,9 +116,16 @@ export async function renderRecipesPane(el) {
     grid.innerHTML = '';
     if (!list.length) { grid.innerHTML = '<div class="uni-empty">Нет рецептов</div>'; return; }
     for (const r of list) {
-      const card = renderCard(r, (ingr) => {
-        F.q = ingr.toLowerCase(); el.querySelector('.recipe-search').value = F.q; updateGrid();
-      });
+      const card = renderCard(
+        r,
+        (ingr) => {
+          F.q = ingr.toLowerCase(); el.querySelector('.recipe-search').value = F.q; updateGrid();
+        },
+        async (id) => {
+          const { duplicateRecipe } = await import('./food-recipe-add.js');
+          try { await duplicateRecipe(id, fullReload); } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+        },
+      );
       card.onclick = async () => {
         const { showRecipeDetail } = await import('./food-recipe-modals.js');
         showRecipeDetail(parseInt(card.dataset.id), fullReload);

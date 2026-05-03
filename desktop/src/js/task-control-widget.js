@@ -56,7 +56,7 @@ function closeDropdown() {
   if (panel) { panel.remove(); panel = null; }
 }
 
-async function openDropdown() {
+async function openStartDropdown() {
   closeDropdown();
   const planned = await invoke('get_today_planned', { date: localDate() }).catch(() => []);
   const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done');
@@ -91,17 +91,58 @@ async function openDropdown() {
   });
 }
 
+function openActiveActions() {
+  closeDropdown();
+  if (!activeBlock) return;
+  const label = activeBlock.notes || activeBlock.type_name || 'таск';
+  panel = document.createElement('div');
+  panel.className = 'tw-panel tw-panel-actions';
+  panel.innerHTML = `
+    <div class="tw-panel-header">Идёт: ${escapeHtml(label)} с ${activeBlock.start_time}</div>
+    <div class="tw-panel-body">
+      <button class="tw-action tw-action-pause" data-action="pause">
+        <span class="tw-action-icon">⏸</span>
+        <span class="tw-action-label">Пауза</span>
+        <span class="tw-action-hint">блок закрывается, статус не меняется</span>
+      </button>
+      <button class="tw-action tw-action-finish" data-action="finish">
+        <span class="tw-action-icon">✓</span>
+        <span class="tw-action-label">Завершить</span>
+        <span class="tw-action-hint">отметить как сделано</span>
+      </button>
+      <button class="tw-action tw-action-cancel" data-action="cancel">
+        <span class="tw-action-icon">✕</span>
+        <span class="tw-action-label">Отмена</span>
+        <span class="tw-action-hint">удалить блок без зачёта времени</span>
+      </button>
+    </div>`;
+  widget.appendChild(panel);
+
+  panel.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!activeBlock) return;
+      const id = activeBlock.id;
+      const action = btn.dataset.action;
+      try {
+        if (action === 'pause') await invoke('pause_task_block', { blockId: id });
+        else if (action === 'finish') await invoke('complete_task_block', { blockId: id });
+        else if (action === 'cancel') await invoke('delete_timeline_block', { id });
+      } catch (err) { console.error('tw action:', err); }
+      closeDropdown();
+      window.dispatchEvent(new Event('task-state-changed'));
+      await refreshState();
+    });
+  });
+}
+
 async function onBtnClick(e) {
   e.stopPropagation();
+  if (panel) { closeDropdown(); return; }
   if (activeBlock) {
-    await invoke('complete_task_block', { blockId: activeBlock.id })
-      .catch(err => console.error('tw complete:', err));
-    window.dispatchEvent(new Event('task-state-changed'));
-    await refreshState();
+    openActiveActions();
     return;
   }
-  if (panel) { closeDropdown(); return; }
-  await openDropdown();
+  await openStartDropdown();
 }
 
 export function initTaskControlWidget() {

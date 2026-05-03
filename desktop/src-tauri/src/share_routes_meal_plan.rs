@@ -19,7 +19,7 @@ use crate::types::HanniDb;
 const MEAL_TYPES: &[&str] = &["breakfast", "lunch", "dinner", "snack"];
 
 fn check_food_meal_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "meal_plan") {
+    if ctx.tab != "food" || !ctx.has_scope("meal_plan") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include meal plan".into()));
     }
     Ok(())
@@ -157,6 +157,8 @@ pub async fn create_meal_plan(
             "meal_type": req.meal_type, "author": author_tag,
         }).to_string(), &ip, &ua);
 
+    crate::sync_share::mark_dirty(&conn, "meal_plan");
+
     Ok(Json(serde_json::json!({ "status": "ok", "id": meal_id })))
 }
 
@@ -182,5 +184,6 @@ pub async fn delete_meal_plan(
     }
     log_activity(&conn, ctx.id, "delete_meal",
         &serde_json::json!({ "meal_id": id }).to_string(), &ip, &ua);
+    crate::sync_share::mark_dirty(&conn, "meal_plan");
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }

@@ -36,35 +36,36 @@ async function loadCalendar(subTab) {
     subtitle: 'Расписание и события',
     icon: '📅',
     renderDash: async (paneEl) => {
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-      const events = await invoke('get_events', { month: today.getMonth() + 1, year: today.getFullYear() }).catch(() => []);
-      const todayEvents = events.filter(e => e.date === todayStr);
-      const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
-      const todayTasks = tasks.filter(t => t.due_date === todayStr);
-      const allSchedules = await invoke('get_schedules', { category: null }).catch(() => []);
-      const todaySchedules = allSchedules.filter(s => scheduleMatchesDate(s, todayStr));
-      const todayCompletions = await invoke('get_schedule_completions', { date: todayStr }).catch(() => []);
-      const schDone = todaySchedules.filter(s => todayCompletions.some(c => c.schedule_id === s.id && c.completed)).length;
-      const focusLog = await invoke('get_activity_log', { date: null }).catch(() => []);
-
+      let sub = S.calDashSub;
+      if (sub !== 'today' && sub !== 'chart') {
+        try { sub = localStorage.getItem('hanni_cal_dash_sub') || 'today'; } catch { sub = 'today'; }
+      }
+      S.calDashSub = sub;
       paneEl.innerHTML = `
-        <div class="uni-dash-grid">
-          <div class="uni-dash-card blue"><div class="uni-dash-value">${todayEvents.length}</div><div class="uni-dash-label">Событий</div></div>
-          <div class="uni-dash-card green"><div class="uni-dash-value">${todayTasks.length}</div><div class="uni-dash-label">Задач</div></div>
-          <div class="uni-dash-card purple"><div class="uni-dash-value">${schDone}/${todaySchedules.length}</div><div class="uni-dash-label">Расписание</div></div>
-          <div class="uni-dash-card yellow"><div class="uni-dash-value">${focusLog.length}</div><div class="uni-dash-label">Фокус</div></div>
-        </div>`;
+        <div class="dev-filters cal-dash-subtabs">
+          <button class="dev-filter-btn${sub === 'today' ? ' active' : ''}" data-cal-dash-sub="today">Сегодня</button>
+          <button class="dev-filter-btn${sub === 'chart' ? ' active' : ''}" data-cal-dash-sub="chart">График</button>
+        </div>
+        <div id="cal-dash-content"></div>`;
+      paneEl.querySelectorAll('[data-cal-dash-sub]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          S.calDashSub = btn.dataset.calDashSub;
+          try { localStorage.setItem('hanni_cal_dash_sub', S.calDashSub); } catch {}
+          paneEl.querySelectorAll('[data-cal-dash-sub]').forEach(b => b.classList.toggle('active', b.dataset.calDashSub === S.calDashSub));
+          renderDashSub(paneEl.querySelector('#cal-dash-content'));
+        });
+      });
+      await renderDashSub(paneEl.querySelector('#cal-dash-content'));
     },
     renderTable: async (paneEl) => {
       const views = [
         { id: 'month', label: 'Месяц' },
         { id: 'week', label: 'Неделя' },
         { id: 'day', label: 'День' },
-        { id: 'table', label: 'Таблица' },
       ];
-      // Migrate old "list" inner-view (now lives as Day-mode toggle)
-      if (S._calendarInner === 'list') { S._calendarInner = 'day'; S.calDayMode = 'list'; }
+      // Migrate old views: 'list' (legacy) and 'table' (removed) → 'day' grid
+      if (S._calendarInner === 'list') { S._calendarInner = 'day'; setViewMode('day', 'list'); }
+      if (S._calendarInner === 'table') S._calendarInner = 'month';
       const activeView = S._calendarInner || 'month';
       paneEl.innerHTML = `
         <div class="dev-filters" id="calendar-view-tabs">
@@ -88,6 +89,36 @@ async function loadCalendar(subTab) {
   });
 }
 
+async function renderDashSub(contentEl) {
+  if (!contentEl) return;
+  if (S.calDashSub === 'chart') {
+    const { renderCalendarChart } = await import('./calendar-chart.js');
+    await renderCalendarChart(contentEl);
+    return;
+  }
+  // 'today' — 4 cards
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const [events, tasks, allSchedules, todayCompletions, focusLog] = await Promise.all([
+    invoke('get_events', { month: today.getMonth() + 1, year: today.getFullYear() }).catch(() => []),
+    invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []),
+    invoke('get_schedules', { category: null }).catch(() => []),
+    invoke('get_schedule_completions', { date: todayStr }).catch(() => []),
+    invoke('get_activity_log', { date: null }).catch(() => []),
+  ]);
+  const todayEvents = events.filter(e => e.date === todayStr);
+  const todayTasks = tasks.filter(t => t.due_date === todayStr);
+  const todaySchedules = allSchedules.filter(s => scheduleMatchesDate(s, todayStr));
+  const schDone = todaySchedules.filter(s => todayCompletions.some(c => c.schedule_id === s.id && c.completed)).length;
+  contentEl.innerHTML = `
+    <div class="uni-dash-grid">
+      <div class="uni-dash-card blue"><div class="uni-dash-value">${todayEvents.length}</div><div class="uni-dash-label">Событий</div></div>
+      <div class="uni-dash-card green"><div class="uni-dash-value">${todayTasks.length}</div><div class="uni-dash-label">Задач</div></div>
+      <div class="uni-dash-card purple"><div class="uni-dash-value">${schDone}/${todaySchedules.length}</div><div class="uni-dash-label">Расписание</div></div>
+      <div class="uni-dash-card yellow"><div class="uni-dash-value">${focusLog.length}</div><div class="uni-dash-label">Фокус</div></div>
+    </div>`;
+}
+
 // Lightweight refresh: only updates #calendar-inner-content, no layout re-render
 async function refreshCalendarInner() {
   const innerEl = document.getElementById('calendar-inner-content');
@@ -95,73 +126,128 @@ async function refreshCalendarInner() {
   const activeView = S._calendarInner || 'month';
   if (activeView === 'integrations') {
     await renderCalendarIntegrations(innerEl);
-  } else if (activeView === 'table') {
-    await renderCalendarTable(innerEl);
-  } else if (activeView === 'day' && getDayMode() === 'list') {
+    return;
+  }
+  if (getViewMode(activeView) === 'list') {
     const { renderCalendarTaskList } = await import('./calendar-task-list.js');
-    await renderCalendarTaskList(innerEl);
-  } else {
-    const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
-    const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
-    if (activeView === 'week') await renderWeekCalendar(innerEl, events || []);
-    else if (activeView === 'day') await renderDayCalendar(innerEl, events || []);
-    else await renderCalendar(innerEl, events || [], tasks || []);
+    if (activeView === 'day') {
+      await renderCalendarTaskList(innerEl);
+    } else {
+      const { start, end } = getViewPeriod(activeView);
+      await renderCalendarTaskList(innerEl, { start, end, includeSchedules: false, view: activeView });
+    }
+    return;
+  }
+  const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
+  const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
+  if (activeView === 'week') await renderWeekCalendar(innerEl, events || []);
+  else if (activeView === 'day') await renderDayCalendar(innerEl, events || []);
+  else await renderCalendar(innerEl, events || [], tasks || []);
+}
+
+function getViewMode(view) {
+  if (!S.calViewMode) {
+    S.calViewMode = {};
+    // Migrate legacy hanni_calendar_day_mode → per-view storage
+    try {
+      const legacy = localStorage.getItem('hanni_calendar_day_mode');
+      if (legacy) S.calViewMode.day = legacy;
+    } catch {}
+  }
+  if (S.calViewMode[view]) return S.calViewMode[view];
+  try { S.calViewMode[view] = localStorage.getItem(`hanni_calendar_view_mode_${view}`) || 'grid'; }
+  catch { S.calViewMode[view] = 'grid'; }
+  return S.calViewMode[view];
+}
+
+function setViewMode(view, mode) {
+  if (!S.calViewMode) S.calViewMode = {};
+  S.calViewMode[view] = mode;
+  try { localStorage.setItem(`hanni_calendar_view_mode_${view}`, mode); } catch {}
+}
+
+const DAY_ZOOM_LEVELS = [32, 48, 72, 96, 144];
+const DAY_ZOOM_DEFAULT = 48;
+
+function getDayZoom() {
+  if (S.calDayZoom != null) return S.calDayZoom;
+  let v = DAY_ZOOM_DEFAULT;
+  try { v = parseInt(localStorage.getItem('hanni_calendar_day_zoom')) || DAY_ZOOM_DEFAULT; } catch {}
+  if (!DAY_ZOOM_LEVELS.includes(v)) v = DAY_ZOOM_DEFAULT;
+  S.calDayZoom = v;
+  return v;
+}
+
+function changeDayZoom(delta) {
+  const cur = getDayZoom();
+  const idx = DAY_ZOOM_LEVELS.indexOf(cur);
+  const next = DAY_ZOOM_LEVELS[Math.max(0, Math.min(DAY_ZOOM_LEVELS.length - 1, idx + delta))];
+  if (next === cur) return false;
+  S.calDayZoom = next;
+  try { localStorage.setItem('hanni_calendar_day_zoom', String(next)); } catch {}
+  return true;
+}
+
+function renderDayZoomControls() {
+  const z = getDayZoom();
+  const idx = DAY_ZOOM_LEVELS.indexOf(z);
+  const atMin = idx <= 0;
+  const atMax = idx >= DAY_ZOOM_LEVELS.length - 1;
+  return `<div class="day-zoom" data-day-zoom>
+    <button class="day-zoom-btn" data-zoom-delta="-1" title="Уменьшить" ${atMin ? 'disabled' : ''}>−</button>
+    <span class="day-zoom-label">${z}px/ч</span>
+    <button class="day-zoom-btn" data-zoom-delta="1" title="Увеличить" ${atMax ? 'disabled' : ''}>+</button>
+  </div>`;
+}
+
+function renderViewModeToggle(view, mode) {
+  const m = mode || getViewMode(view);
+  const zoomCtrl = (view === 'day' && m === 'grid') ? renderDayZoomControls() : '';
+  return `<div class="day-mode-tabs dev-filters" data-view-toggle="${view}">
+    <button class="dev-filter-btn${m==='grid'?' active':''}" data-view-mode="grid">📅 Календарь</button>
+    <button class="dev-filter-btn${m==='list'?' active':''}" data-view-mode="list">📋 Список</button>
+    ${zoomCtrl}
+  </div>`;
+}
+
+function wireViewModeToggle(el, view) {
+  el.querySelectorAll(`[data-view-toggle="${view}"] [data-view-mode]`).forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.viewMode === getViewMode(view)) return;
+      setViewMode(view, btn.dataset.viewMode);
+      refreshCalendarInner();
+    });
+  });
+  if (view === 'day') {
+    el.querySelectorAll('[data-day-zoom] [data-zoom-delta]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!changeDayZoom(parseInt(btn.dataset.zoomDelta))) return;
+        refreshCalendarInner();
+      });
+    });
   }
 }
 
-function getDayMode() {
-  if (S.calDayMode) return S.calDayMode;
-  try { S.calDayMode = localStorage.getItem('hanni_calendar_day_mode') || 'grid'; } catch { S.calDayMode = 'grid'; }
-  return S.calDayMode;
-}
-
-function setDayMode(mode) {
-  S.calDayMode = mode;
-  try { localStorage.setItem('hanni_calendar_day_mode', mode); } catch {}
-}
-
-async function renderCalendarTable(el) {
-  const { DatabaseView } = await import('./db-view/db-view.js');
-  const events = await invoke('get_all_events').catch(() => []);
-  const calCatColors = { general: 'gray', work: 'yellow', personal: 'blue', health: 'green', education: 'purple', social: 'pink', travel: 'orange' };
-  const catOptions = ['general', 'work', 'personal', 'health', 'education', 'social', 'travel'].map(v => ({ value: v, label: v, color: calCatColors[v] || 'gray' }));
-
-  el.innerHTML = '';
-  const dbvEl = document.createElement('div');
-  el.appendChild(dbvEl);
-  const reload = () => renderCalendarTable(el);
-
-  const dbv = new DatabaseView(dbvEl, {
-    tabId: 'calendar_events',
-    recordTable: 'events',
-    records: events,
-    idField: 'id',
-    fixedColumns: [
-      { key: 'title', label: 'Название', editable: true, editType: 'text',
-        render: r => `<span class="data-table-title">${escapeHtml(r.title || '')}</span>` },
-      { key: 'date', label: 'Дата', editable: true, editType: 'date',
-        render: r => `<span>${r.date || '—'}</span>` },
-      { key: 'time', label: 'Время', editable: true, editType: 'text',
-        render: r => `<span>${r.time || '—'}</span>` },
-      { key: 'duration_minutes', label: 'Длительность', editable: true, editType: 'number',
-        render: r => `<span>${r.duration_minutes ? r.duration_minutes + ' мин' : '—'}</span>` },
-      { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: catOptions,
-        render: r => `<span class="badge badge-${calCatColors[r.category] || 'gray'}">${escapeHtml(r.category || '—')}</span>` },
-      { key: 'description', label: 'Описание', editable: true, editType: 'text',
-        render: r => `<span>${escapeHtml(r.description || '') || '—'}</span>` },
-    ],
-    onCellEdit: async (recordId, key, value) => {
-      const params = { id: recordId, title: null, description: null, date: null, time: null, durationMinutes: null, category: null, color: null, completed: null };
-      if (key === 'duration_minutes') params.durationMinutes = parseInt(value) || null;
-      else params[key] = value || null;
-      await invoke('update_event', params);
-      reload();
-    },
-    onDelete: async (id) => { await invoke('delete_event', { id }); },
-    reloadFn: reload,
-    availableViews: ['table'],
-  });
-  await dbv.render();
+// Compute [start, end] dates (YYYY-MM-DD) for a view's current period
+function getViewPeriod(view) {
+  const today = new Date();
+  if (view === 'day') {
+    const d = S.calDayDate || `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    return { start: d, end: d };
+  }
+  if (view === 'week') {
+    const dow = today.getDay() || 7;
+    const ws = new Date(today);
+    ws.setDate(today.getDate() - dow + 1 + (S.calWeekOffset || 0) * 7);
+    const we = new Date(ws); we.setDate(ws.getDate() + 6);
+    const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    return { start: fmt(ws), end: fmt(we) };
+  }
+  // month
+  const y = S.calendarYear, m = S.calendarMonth;
+  const last = new Date(y, m + 1, 0).getDate();
+  const pad = (n) => String(n).padStart(2,'0');
+  return { start: `${y}-${pad(m+1)}-01`, end: `${y}-${pad(m+1)}-${pad(last)}` };
 }
 
 async function autoSyncCalendar(viewName) {
@@ -187,6 +273,8 @@ const CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 
 
 async function renderCalendar(el, events, tasks) {
   tasks = tasks || [];
+  // Calendar grid shows only events with explicit time. Time-less events live in Day-view list.
+  events = (events || []).filter(e => e.time && e.time.trim());
   const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const MAX_PILLS = 4;
@@ -217,11 +305,10 @@ async function renderCalendar(el, events, tasks) {
   const tasksByDate = {};
   for (const t of tasks) { if (!t.due_date) continue; if (!tasksByDate[t.due_date]) tasksByDate[t.due_date] = []; tasksByDate[t.due_date].push(t); }
 
-  // Build pills for a date
+  // Build pills for a date — calendar grid shows ONLY events with explicit time.
+  // Schedules and time-less items live in Day-view "Список" only.
   function dayPills(dateStr) {
     const items = [];
-    const dayScheds = schedules.filter(s => scheduleMatchesDate(s, dateStr));
-    for (const s of dayScheds) items.push({ title: s.title, icon: SCH_CAT_ICONS[s.category] || '📌', color: CAT_COLORS[s.category] || 'blue' });
     for (const e of (eventsByDate[dateStr] || [])) items.push({ title: e.title, icon: '', color: 'orange' });
     for (const t of (tasksByDate[dateStr] || [])) items.push({ title: t.title || 'Задача', icon: '', color: 'green' });
     const visible = items.slice(0, MAX_PILLS);
@@ -309,9 +396,11 @@ async function renderCalendar(el, events, tasks) {
       <button class="cal-today-btn" id="cal-go-today">Сегодня</button>
       <button class="btn-primary" id="cal-add-event">+ Событие</button>
     </div>
+    ${renderViewModeToggle('month')}
     <div class="cal-weekdays">${weekdays.map(d => `<div class="cal-weekday">${d}</div>`).join('')}</div>
     <div class="cal-grid">${daysHtml}</div>
     ${dayPanelHtml}`;
+  wireViewModeToggle(el, 'month');
 
   // Nav
   document.getElementById('cal-prev')?.addEventListener('click', () => {
@@ -381,6 +470,7 @@ async function renderCalendar(el, events, tasks) {
 }
 
 async function renderWeekCalendar(el, events) {
+  events = (events || []).filter(e => e.time && e.time.trim());
   const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const monthsShort = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
   const today = new Date();
@@ -417,13 +507,10 @@ async function renderWeekCalendar(el, events) {
   for (let i = 0; i < 7; i++) {
     const dateStr = dayDates[i];
     const isToday = dateStr === todayStr;
-    const noTimeScheds = schedules.filter(s => scheduleMatchesDate(s, dateStr) && !s.time_of_day);
-    const noTimeEvts = (eventsByDate[dateStr] || []).filter(e => !e.time);
+    // Calendar grid shows only events with explicit time. Schedules and time-less
+    // items live in Day-view "Список" only.
+    const noTimeEvts = (eventsByDate[dateStr] || []).filter(() => false); // hide all from grid
     let cellHtml = '';
-    for (const s of noTimeScheds) {
-      const icon = SCH_CAT_ICONS[s.category] || '📌';
-      cellHtml += `<div class="wk-ev wk-ev-${CAT_COLORS[s.category] || 'blue'}">${icon} ${escapeHtml(s.title)}</div>`;
-    }
     for (const e of noTimeEvts) {
       cellHtml += `<div class="wk-ev wk-ev-orange">${escapeHtml(e.title)}</div>`;
     }
@@ -439,10 +526,10 @@ async function renderWeekCalendar(el, events) {
     for (let i = 0; i < 7; i++) {
       const dateStr = dayDates[i];
       const isToday = dateStr === todayStr;
-      // Events at this hour
+      // Events at this hour (with explicit time)
       const hourEvts = (eventsByDate[dateStr] || []).filter(e => e.time && parseInt(e.time.split(':')[0]) === h);
-      // Schedules at this hour
-      const hourScheds = schedules.filter(s => scheduleMatchesDate(s, dateStr) && s.time_of_day && parseInt(s.time_of_day.split(':')[0]) === h);
+      // Schedules hidden from grid by design — only events live here
+      const hourScheds = [];
 
       let cellHtml = '';
       for (const s of hourScheds) {
@@ -479,11 +566,13 @@ async function renderWeekCalendar(el, events) {
       <button class="cal-today-btn" id="week-today">Сегодня</button>
       <button class="btn-primary" id="week-add-event">+ Событие</button>
     </div>
+    ${renderViewModeToggle('week')}
     <div class="wk-header">${headerHtml}</div>
     ${hasAllDay ? `<div class="wk-allday">${allDayHtml}</div>` : ''}
     <div class="wk-scroll">
       <div class="wk-grid">${gridHtml}</div>
     </div>`;
+  wireViewModeToggle(el, 'week');
 
   // Auto-scroll to current hour
   if (isCurrentWeek) {
@@ -521,6 +610,11 @@ function showAddEventModal() {
     <div class="form-row">
       <input class="form-input" id="event-date" type="date" value="${S.selectedCalendarDate || new Date().toISOString().split('T')[0]}">
       <input class="form-input" id="event-time" type="time" style="max-width:120px;">
+      <select class="form-select" id="event-priority" style="max-width:140px;">
+        <option value="0">Обычное</option>
+        <option value="1">Важное</option>
+        <option value="2">Критическое</option>
+      </select>
     </div>
     <textarea class="form-textarea" id="event-desc" placeholder="Описание (необязательно)" rows="2"></textarea>
     <div class="modal-actions">
@@ -543,6 +637,7 @@ function showAddEventModal() {
         durationMinutes: 60,
         category: 'general',
         color: '#9B9B9B',
+        priority: parseInt(document.getElementById('event-priority')?.value || '0', 10),
       });
       overlay.remove();
       refreshCalendarInner();
@@ -552,8 +647,19 @@ function showAddEventModal() {
 
 // ── Day View ──
 async function renderDayCalendar(el, events) {
+  events = (events || []).filter(e => e.time && e.time.trim());
   const today = new Date();
   if (!S.calDayDate) S.calDayDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  // Pull Health-Connect-sourced sleep into events for this date so the Day-view
+  // shows it alongside manual entries. Idempotent (DELETE+INSERT by source).
+  try {
+    const added = await invoke('sync_health_to_calendar', { date: S.calDayDate });
+    if (added > 0) {
+      const dayD = new Date(S.calDayDate + 'T00:00:00');
+      const fresh = await invoke('get_events', { month: dayD.getMonth() + 1, year: dayD.getFullYear() }).catch(() => []);
+      events = (fresh || []).filter(e => e.time && e.time.trim());
+    }
+  } catch (_) {}
   const dayEvents = events.filter(e => e.date === S.calDayDate).map(e => {
     if (e.time && /^\d:\d{2}$/.test(e.time)) e.time = '0' + e.time;
     return e;
@@ -562,9 +668,9 @@ async function renderDayCalendar(el, events) {
   const dayNames = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
   const monthNames = ['Января', 'Февраля', 'Марта', 'Апреля', 'Мая', 'Июня', 'Июля', 'Августа', 'Сентября', 'Октября', 'Ноября', 'Декабря'];
 
-  // Load schedules for this day
-  const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
-  const dayScheds = schedules.filter(s => scheduleMatchesDate(s, S.calDayDate));
+  // Calendar grid shows only events with explicit time. Schedules live in Day-view "Список" only.
+  const schedules = [];
+  const dayScheds = [];
   const completions = await invoke('get_schedule_completions', { date: S.calDayDate }).catch(() => []);
   const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
   // Challenges mark completion for previous day
@@ -633,7 +739,7 @@ async function renderDayCalendar(el, events) {
   const { renderMealPlanBlock } = await import('./food-meal-plan.js');
   const mealPlanHtml = await renderMealPlanBlock(S.calDayDate);
 
-  const dayMode = getDayMode();
+  const dayMode = getViewMode('day');
   el.innerHTML = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="day-prev">&lt;</button>
@@ -642,13 +748,13 @@ async function renderDayCalendar(el, events) {
       <button class="btn-secondary" id="day-today" style="margin-left:8px;">Сегодня</button>
       <button class="btn-primary" id="day-add-event" style="margin-left:4px;">+ Событие</button>
     </div>
-    <div class="day-mode-tabs dev-filters">
-      <button class="dev-filter-btn${dayMode==='grid'?' active':''}" data-day-mode="grid">📅 Календарь</button>
-      <button class="dev-filter-btn${dayMode==='list'?' active':''}" data-day-mode="list">📋 Список</button>
-    </div>
+    ${renderViewModeToggle('day', dayMode)}
     ${mealPlanHtml}
     ${allDayHtml}
-    <div class="day-timeline">${timelineHtml}</div>`;
+    <div class="day-timeline" style="--day-hour-px:${getDayZoom()}px">${timelineHtml}</div>`;
+
+  // Overlay actual timeline blocks (real durations) on top of planned slots
+  import('./calendar-day-grid-overlay.js').then(m => m.injectTimelineOverlay(el.querySelector('.day-timeline'), S.calDayDate, dayEvents, getDayZoom())).catch(err => console.error('overlay:', err));
 
   // Auto-scroll to current time on first render, restore position on re-renders
   if (!calDayScrolled && isViewingToday) {
@@ -658,13 +764,7 @@ async function renderDayCalendar(el, events) {
     scrollParent.scrollTop = savedScroll;
   }
 
-  el.querySelectorAll('[data-day-mode]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.dayMode === getDayMode()) return;
-      setDayMode(btn.dataset.dayMode);
-      refreshCalendarInner();
-    });
-  });
+  wireViewModeToggle(el, 'day');
   document.getElementById('day-prev')?.addEventListener('click', () => {
     const dd = new Date(S.calDayDate + 'T12:00:00'); dd.setDate(dd.getDate() - 1);
     S.calDayDate = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`;

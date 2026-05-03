@@ -415,29 +415,6 @@ pub fn build_tool_definitions() -> Vec<serde_json::Value> {
             },
             "required": ["transaction_type","amount","category"]
         })),
-        // Mindset
-        tool("log_mood", "Log current mood (1-5 scale)", serde_json::json!({
-            "type": "object",
-            "properties": {
-                "mood": {"type": "integer", "minimum": 1, "maximum": 5},
-                "note": {"type": "string"},
-                "trigger": {"type": "string"}
-            },
-            "required": ["mood"]
-        })),
-        tool("save_journal", "Save a journal entry with mood, energy, stress", serde_json::json!({
-            "type": "object",
-            "properties": {
-                "mood": {"type": "integer", "minimum": 1, "maximum": 5},
-                "energy": {"type": "integer", "minimum": 1, "maximum": 5},
-                "stress": {"type": "integer", "minimum": 1, "maximum": 5},
-                "gratitude": {"type": "string"},
-                "reflection": {"type": "string"},
-                "wins": {"type": "string"},
-                "struggles": {"type": "string"}
-            },
-            "required": ["mood","energy","stress"]
-        })),
         // Home
         tool("add_home_item", "Track a home supply item", serde_json::json!({
             "type": "object",
@@ -555,10 +532,6 @@ pub fn select_relevant_tools(user_msg: &str) -> Vec<serde_json::Value> {
          &["add_product"]),
         (&["спал", "сон", "вод", "вес ", "шаг", "здоровь"],
          &["log_health"]),
-        (&["настроен", "mood", "грустн", "весел", "плохо", "хорошо"],
-         &["log_mood"]),
-        (&["дневник", "рефлекс", "журнал"],
-         &["save_journal"]),
         (&["тренировк", "зал ", "спорт", "бег ", "йога", "присед"],
          &["add_workout"]),
         (&["аниме", "манга", "фильм", "сериал", "книг", "музык", "игр", "подкаст", "смотрю", "читаю", "играю"],

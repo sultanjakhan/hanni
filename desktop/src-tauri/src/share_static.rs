@@ -12,6 +12,12 @@ pub async fn asset_js() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest.js"))
 }
 
+// Stage C-1 Firestore REST client. Loaded before guest.js so view-modules
+// can read window.HanniGuest.firestore from the moment they mount.
+pub async fn asset_js_firestore() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_firestore.js"))
+}
+
 pub async fn asset_js_recipes() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("share_assets/guest_recipes.js"))
 }
@@ -45,4 +51,9 @@ pub async fn asset_js_recipe_add() -> impl IntoResponse {
 // Compile-time inlined; both frontends always serve identical bytes.
 pub async fn asset_js_recipe_shared() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("../../src/js/recipe-shared.js"))
+}
+
+// Ingredient-row helpers; loaded BEFORE recipe-shared.js (registers HanniRecipe.ingredients).
+pub async fn asset_js_recipe_shared_ingredients() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("../../src/js/recipe-shared-ingredients.js"))
 }

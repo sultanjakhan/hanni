@@ -341,13 +341,6 @@ pub fn gather_evening_context() -> Result<String, String> {
         ctx.push_str(&format!("Tasks completed today: {}\n", completed));
     }
 
-    // Mood logged today?
-    let mood_logged: bool = conn.query_row(
-        "SELECT COUNT(*) FROM mood_log WHERE date = ?1",
-        rusqlite::params![&today], |row| row.get::<_, i64>(0),
-    ).unwrap_or(0) > 0;
-    ctx.push_str(&format!("Mood logged today: {}\n", if mood_logged { "yes" } else { "no" }));
-
     // Workouts today
     let workouts: i64 = conn.query_row(
         "SELECT COUNT(*) FROM workouts WHERE date = ?1",
@@ -356,13 +349,6 @@ pub fn gather_evening_context() -> Result<String, String> {
     if workouts > 0 {
         ctx.push_str(&format!("Workouts today: {}\n", workouts));
     }
-
-    // Journal entry today?
-    let journal: bool = conn.query_row(
-        "SELECT COUNT(*) FROM journal_entries WHERE date = ?1",
-        rusqlite::params![&today], |row| row.get::<_, i64>(0),
-    ).unwrap_or(0) > 0;
-    ctx.push_str(&format!("Journal today: {}\n", if journal { "yes" } else { "no" }));
 
     Ok(ctx)
 }
@@ -464,19 +450,8 @@ pub fn gather_smart_triggers() -> Vec<String> {
         }
     }
 
-    // 3. No mood logged today (after 20:00)
-    let hour = chrono::Local::now().hour();
-    if hour >= 20 {
-        let mood_today: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM mood_log WHERE date = ?1",
-            rusqlite::params![&today], |row| row.get(0),
-        ).unwrap_or(0);
-        if mood_today == 0 {
-            triggers.push("Настроение сегодня не записано".to_string());
-        }
-    }
-
     // 4. No water logged today (after 14:00)
+    let hour = chrono::Local::now().hour();
     if hour >= 14 {
         let water_today: i64 = conn.query_row(
             "SELECT COUNT(*) FROM health_log WHERE date = ?1 AND type = 'water'",
@@ -505,17 +480,7 @@ pub fn gather_morning_digest() -> Result<String, String> {
     ).unwrap_or(0);
     digest.push_str(&format!("Today's events: {}\n", event_count));
 
-    // Yesterday's mood
     let yesterday = (chrono::Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-    if let Ok((mood, note)) = conn.query_row(
-        "SELECT mood, note FROM mood_log WHERE date(created_at) = ?1 ORDER BY created_at DESC LIMIT 1",
-        rusqlite::params![yesterday],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
-    ) {
-        digest.push_str(&format!("Yesterday's mood: {}/5", mood));
-        if let Some(n) = note { digest.push_str(&format!(" ({})", n)); }
-        digest.push('\n');
-    }
 
     // Yesterday's sleep
     if let Ok(sleep) = conn.query_row(

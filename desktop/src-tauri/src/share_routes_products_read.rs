@@ -25,7 +25,7 @@ pub async fn list_products(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "view")?;
-    if ctx.tab != "food" || !(ctx.scope == "all" || ctx.scope == "products") {
+    if ctx.tab != "food" || !ctx.has_scope("products") {
         return Err((StatusCode::FORBIDDEN, "Scope does not include products".into()));
     }
     let mut stmt = conn.prepare(

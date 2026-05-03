@@ -223,7 +223,8 @@ pub fn complete_task_block(
     ).map_err(|e| format!("Block not found: {}", e))?;
 
     let close_end = if block_date == date_today { now_hm } else { "23:59".to_string() };
-    let dur = crate::commands_timeline::calc_duration(&start_time, &close_end);
+    // Min 1 minute: blocks closed within the same minute should still be visible in timeline
+    let dur = crate::commands_timeline::calc_duration(&start_time, &close_end).max(1);
     conn.execute(
         "UPDATE timeline_blocks SET is_active=0, end_time=?1, duration_minutes=?2 WHERE id=?3",
         rusqlite::params![close_end, dur, block_id],
@@ -253,6 +254,74 @@ pub fn complete_task_block(
         }
     }
 
+    Ok(())
+}
+
+/// Close active block WITHOUT auto-marking the source as done. Used for ⏸ Пауза:
+/// the user steps away but the task itself is not finished — they can ▶ Start again later.
+#[tauri::command]
+pub fn pause_task_block(
+    block_id: i64,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now();
+    let now_hm = now.format("%H:%M").to_string();
+    let date_today = now.format("%Y-%m-%d").to_string();
+    let (start_time, block_date): (String, String) = conn.query_row(
+        "SELECT start_time, date FROM timeline_blocks WHERE id=?1",
+        rusqlite::params![block_id], |r| Ok((r.get(0)?, r.get(1)?))
+    ).map_err(|e| format!("Block not found: {}", e))?;
+    let close_end = if block_date == date_today { now_hm } else { "23:59".to_string() };
+    // Min 1 minute: blocks closed within the same minute should still be visible in timeline
+    let dur = crate::commands_timeline::calc_duration(&start_time, &close_end).max(1);
+    conn.execute(
+        "UPDATE timeline_blocks SET is_active=0, end_time=?1, duration_minutes=?2 WHERE id=?3",
+        rusqlite::params![close_end, dur, block_id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+/// Close active block + mark source done + save reflection (quality 0..5, text, mood).
+/// All reflection fields are optional — passing None leaves the column unchanged from default.
+#[tauri::command]
+pub fn finish_task_block(
+    block_id: i64,
+    quality: Option<i32>,
+    reflection: Option<String>,
+    mood: Option<String>,
+    db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.conn();
+    let now = chrono::Local::now();
+    let now_hm = now.format("%H:%M").to_string();
+    let now_rfc = now.to_rfc3339();
+    let date_today = now.format("%Y-%m-%d").to_string();
+    let (start_time, source_type, source_id, block_date): (String, Option<String>, Option<i64>, String) = conn.query_row(
+        "SELECT start_time, source_type, source_id, date FROM timeline_blocks WHERE id=?1",
+        rusqlite::params![block_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+    ).map_err(|e| format!("Block not found: {}", e))?;
+    let close_end = if block_date == date_today { now_hm } else { "23:59".to_string() };
+    // Min 1 minute: blocks closed within the same minute should still be visible in timeline
+    let dur = crate::commands_timeline::calc_duration(&start_time, &close_end).max(1);
+    let q = quality.unwrap_or(0);
+    conn.execute(
+        "UPDATE timeline_blocks SET is_active=0, end_time=?1, duration_minutes=?2, quality=?3, reflection=?4, mood=?5 WHERE id=?6",
+        rusqlite::params![close_end, dur, q, reflection, mood, block_id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    if let (Some(st), Some(sid)) = (source_type, source_id) {
+        match st.as_str() {
+            "event" => { conn.execute("UPDATE events SET completed=1 WHERE id=?1", rusqlite::params![sid]).ok(); }
+            "schedule" => {
+                conn.execute(
+                    "INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, 1, ?3, 'done') ON CONFLICT(schedule_id, date) DO UPDATE SET completed=1, completed_at=?3, status='done'",
+                    rusqlite::params![sid, block_date, now_rfc],
+                ).ok();
+            }
+            "note" => { conn.execute("UPDATE notes SET status='done', updated_at=?1 WHERE id=?2", rusqlite::params![now_rfc, sid]).ok(); }
+            _ => {}
+        }
+    }
     Ok(())
 }
 

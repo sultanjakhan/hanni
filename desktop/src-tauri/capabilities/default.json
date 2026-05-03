@@ -9,6 +9,7 @@
     "opener:default",
     "fs:default",
     "updater:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "window-state:default"
   ]
 }

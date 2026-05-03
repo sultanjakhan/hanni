@@ -1755,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "hanni"
-version = "0.73.1"
+version = "0.77.0"
 dependencies = [
  "axum",
  "chrono",
@@ -1786,6 +1786,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+ "tower-http",
  "uuid",
  "voice_activity_detector",
  "whisper-rs",
