@@ -15,7 +15,9 @@
 //        to cr-sqlite's CRDT semantics).
 
 use crate::sync::{Change, get_local_changes, apply_remote_changes, get_db_version, get_site_id};
-use crate::sync_share::{CloudShareConfig, get_access_token, load_config, json_to_field, firestore_host};
+use crate::sync_share::{json_to_field, firestore_host};
+use crate::google_auth::{get_firebase_id_token, load_session as load_google_session,
+                          load_config as load_google_config};
 use crate::types::HanniDb;
 use serde::Serialize;
 use tauri::State;
@@ -92,15 +94,13 @@ fn doc_to_change(doc: &serde_json::Value) -> Option<Change> {
     })
 }
 
-// ── Tauri commands ───────────────────────────────────────────────────────
+// ── Inner async impls (callable from background loop without State<>) ────
 
-#[tauri::command]
-pub async fn cloud_owner_push(db: State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let cfg = {
-        let conn = db.conn();
-        load_config(&conn).ok_or_else(|| "cloud-share not configured".to_string())?
-    };
-    let token = get_access_token(&cfg).await?;
+const PULL_LIMIT: i32 = 500;
+const EPOCH_TS: &str = "1970-01-01T00:00:00Z";
+
+pub(crate) async fn push_inner(db: &HanniDb) -> Result<serde_json::Value, String> {
+    let (token, owner_uid, project_id) = get_firebase_id_token(db).await?;
     let client = reqwest::Client::new();
 
     let (changes, db_ver, site_id) = {
@@ -111,13 +111,13 @@ pub async fn cloud_owner_push(db: State<'_, HanniDb>) -> Result<serde_json::Valu
         (ch, get_db_version(&conn), get_site_id(&conn))
     };
 
-    let collection = format!("owners/{}/changes", cfg.owner_uid);
+    let collection = format!("owners/{}/changes", owner_uid);
     let mut pushed = 0usize;
     for c in &changes {
         let doc_id = format!("{}_{}_{}_{}", c.site_id, c.db_version, c.cl, c.seq);
         let url = format!(
             "{}/projects/{}/databases/(default)/documents/{}/{}",
-            firestore_host(), cfg.project_id, collection, doc_id
+            firestore_host(), project_id, collection, doc_id
         );
         let resp = client.patch(&url)
             .bearer_auth(&token)
@@ -139,52 +139,103 @@ pub async fn cloud_owner_push(db: State<'_, HanniDb>) -> Result<serde_json::Valu
     Ok(serde_json::json!({ "pushed": pushed, "db_version": db_ver, "site_id": site_id }))
 }
 
-#[tauri::command]
-pub async fn cloud_owner_pull(db: State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let (cfg, my_site_id) = {
+pub(crate) async fn pull_inner(db: &HanniDb) -> Result<serde_json::Value, String> {
+    let (token, owner_uid, project_id) = get_firebase_id_token(db).await?;
+    let (my_site_id, since_ts) = {
         let conn = db.conn();
-        let cfg = load_config(&conn).ok_or_else(|| "cloud-share not configured".to_string())?;
-        (cfg, get_site_id(&conn))
+        let since = get_setting(&conn, "cloud_owner_last_pull_ts")
+            .unwrap_or_else(|| EPOCH_TS.to_string());
+        (get_site_id(&conn), since)
     };
-    let token = get_access_token(&cfg).await?;
     let client = reqwest::Client::new();
 
-    let collection = format!("owners/{}/changes", cfg.owner_uid);
-    let url = format!(
-        "{}/projects/{}/databases/(default)/documents/{}?pageSize=300",
-        firestore_host(), cfg.project_id, collection
+    // Server-side filter: only docs created after our last pull. Cuts read
+    // count from O(N total) per tick to O(new since last pull) → keeps us
+    // inside the Firestore free tier under auto-sync.
+    let parent = format!(
+        "{}/projects/{}/databases/(default)/documents/owners/{}",
+        firestore_host(), project_id, owner_uid
     );
-    let resp = client.get(&url).bearer_auth(&token)
-        .send().await.map_err(|e| format!("GET changes: {}", e))?;
+    let url = format!("{}:runQuery", parent);
+    let body = serde_json::json!({
+        "structuredQuery": {
+            "from": [{"collectionId": "changes"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "created_at"},
+                    "op": "GREATER_THAN",
+                    "value": {"stringValue": since_ts}
+                }
+            },
+            "orderBy": [{
+                "field": {"fieldPath": "created_at"},
+                "direction": "ASCENDING"
+            }],
+            "limit": PULL_LIMIT
+        }
+    });
+    let resp = client.post(&url)
+        .bearer_auth(&token)
+        .json(&body)
+        .send().await.map_err(|e| format!("runQuery changes: {}", e))?;
     let status = resp.status();
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("body: {}", e))?;
+    let payload: serde_json::Value = resp.json().await.map_err(|e| format!("body: {}", e))?;
     if !status.is_success() {
-        return Err(format!("Firestore pull {}: {}", status, body));
+        return Err(format!("Firestore runQuery {}: {}", status, payload));
     }
 
-    let docs = body.get("documents").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    // runQuery returns an array; each item is either {document, readTime} or
+    // a sentinel {readTime} for an empty result-set.
+    let rows = payload.as_array().cloned().unwrap_or_default();
     let mut applied = 0usize;
     let mut skipped = 0usize;
+    let mut max_ts: Option<String> = None;
     {
         let conn = db.conn();
-        for doc in &docs {
+        for row in &rows {
+            let Some(doc) = row.get("document") else { continue };
+            if let Some(ts) = field_str(doc, "created_at") {
+                if max_ts.as_ref().map_or(true, |m| ts > *m) { max_ts = Some(ts); }
+            }
             if let Some(c) = doc_to_change(doc) {
                 if c.site_id == my_site_id { skipped += 1; continue; }
                 apply_remote_changes(&conn, std::slice::from_ref(&c))?;
                 applied += 1;
             }
         }
-        set_setting(&conn, "cloud_owner_last_pull_ts", &chrono::Utc::now().to_rfc3339());
+        if let Some(ts) = max_ts.as_ref() {
+            set_setting(&conn, "cloud_owner_last_pull_ts", ts);
+        }
     }
 
-    Ok(serde_json::json!({ "applied": applied, "skipped_own": skipped, "total": docs.len() }))
+    Ok(serde_json::json!({
+        "applied": applied,
+        "skipped_own": skipped,
+        "total": rows.iter().filter(|r| r.get("document").is_some()).count(),
+        "since": since_ts,
+        "advanced_to": max_ts,
+    }))
+}
+
+// ── Tauri commands ───────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn cloud_owner_push(db: State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    push_inner(&db).await
+}
+
+#[tauri::command]
+pub async fn cloud_owner_pull(db: State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    pull_inner(&db).await
 }
 
 #[tauri::command]
 pub fn cloud_owner_status(db: State<'_, HanniDb>) -> OwnerSyncStatus {
     let conn = db.conn();
-    let cfg = load_config(&conn);
-    let configured = cfg.as_ref().and_then(|c| c.service_account_json.as_ref()).is_some();
+    let session = load_google_session(&conn);
+    let cfg = load_google_config(&conn);
+    // "Configured" now means: Google Auth configured AND user signed in.
+    let configured = cfg.is_some() && session.is_some();
     let last_push: i64 = get_setting(&conn, "cloud_owner_last_push_ver")
         .and_then(|s| s.parse().ok()).unwrap_or(0);
     OwnerSyncStatus {
@@ -193,6 +244,6 @@ pub fn cloud_owner_status(db: State<'_, HanniDb>) -> OwnerSyncStatus {
         last_push_ver: last_push,
         last_pull_ts: get_setting(&conn, "cloud_owner_last_pull_ts"),
         pending_changes: get_local_changes(&conn, last_push).len(),
-        owner_uid: cfg.map(|c| c.owner_uid),
+        owner_uid: session.map(|s| s.uid),
     }
 }

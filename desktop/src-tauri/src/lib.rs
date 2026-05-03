@@ -45,7 +45,11 @@ mod share_static;
 mod share_tunnel;
 mod commands_share;
 mod sync_share;
+mod sync_share_auto;
 mod sync_owner;
+mod sync_owner_auto;
+mod google_auth;
+mod firestore_admin;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -164,6 +168,8 @@ fn init_database() -> HanniDb {
     db::migrate_catalog_parent(&conn);
     db::migrate_catalog_links(&conn);
     db::migrate_share_links(&conn);
+    db::migrate_priority(&conn);
+    db::migrate_drop_mindset(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -265,6 +271,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(health_connect_plugin::init());
 
     // Desktop: manage DB state on builder (initialized before builder)
@@ -549,17 +556,6 @@ pub fn run() {
             commands_data::get_debts,
             commands_data::update_debt,
             commands_data::delete_debt,
-            // Mindset
-            commands_meta::save_journal_entry,
-            commands_meta::get_journal_entries,
-            commands_meta::get_journal_entry,
-            commands_meta::log_mood,
-            commands_meta::get_mood_history,
-            commands_meta::create_principle,
-            commands_meta::get_principles,
-            commands_meta::update_principle,
-            commands_meta::delete_principle,
-            commands_meta::get_mindset_check,
             // Blocklist
             commands_meta::add_to_blocklist,
             commands_meta::remove_from_blocklist,
@@ -712,6 +708,16 @@ pub fn run() {
             sync_owner::cloud_owner_push,
             sync_owner::cloud_owner_pull,
             sync_owner::cloud_owner_status,
+            sync_share::cloud_owner_set_uid,
+            sync_share::cloud_owner_get_uid,
+            sync_owner_auto::cloud_owner_set_auto,
+            sync_owner_auto::cloud_owner_get_auto,
+            // Sign in with Google → Firebase Auth (Stage C.1)
+            google_auth::google_auth_status,
+            google_auth::google_auth_set_config,
+            google_auth::google_auth_signout,
+            google_auth::google_auth_start_signin,
+            firestore_admin::firestore_setup,
         ])
         .setup(move |app| {
             // Android: resolve data dir from Tauri, then init DB
@@ -742,6 +748,17 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(commands_meta::auto_check_on_startup(handle));
             }
+
+            // Owner-side cloud auto-sync (Mac ↔ Android via Firestore).
+            // Loop reads enabled/interval from app_settings each tick, so
+            // toggling from UI takes effect on the next cycle without a
+            // restart. No-op when not configured.
+            sync_owner_auto::start_auto_sync_loop(app.handle().clone());
+
+            // Stage C-1 share-link mirror loop. Pushes any dirty tables to
+            // Firestore for all active share-links every few seconds. Lets
+            // guests read /s/<token> URLs even when Hanni is closed.
+            sync_share_auto::start_mirror_loop(app.handle().clone());
 
             // Save system prompt for nightly training script
             let prompt_path = hanni_data_dir().join("system_prompt.txt");

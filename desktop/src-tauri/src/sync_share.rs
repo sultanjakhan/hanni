@@ -1,26 +1,17 @@
 // sync_share.rs — Hanni-side cloud sync engine for share-links.
 //
-// Stage A (this commit): full-snapshot push to Firestore via REST, signed
-// with the user's Firebase service-account JSON. The service-account scope
-// `datastore` bypasses Firestore security rules — appropriate because Hanni
-// is the data owner. Guests read through the Web SDK with rules that gate
-// access by share_token in the document path.
+// Stage A (initial): full-snapshot push to Firestore via REST, signed with
+// the user's Firebase service-account JSON. Service-account scope `datastore`
+// bypasses Firestore security rules — appropriate because Hanni is the data
+// owner.
 //
-// Activation
-//   1. `firebase login` + `./scripts/firebase-setup.sh`         (one-shot)
-//   2. Firebase Console → Project settings → Service accounts →
-//      «Generate new private key» → save the JSON.
-//   3. Hanni DevTools (or Settings UI when wired):
-//        await __TAURI__.core.invoke('cloud_share_set_config', {
-//          projectId, apiKey,
-//          serviceAccountJson: '<paste full file contents>'
-//        });
-//   4. await __TAURI__.core.invoke('cloud_share_push', { shareId: 1 });
-//      Pushes a snapshot for that share_link to Firestore.
-//
-// Stage B (later) will add per-write incremental sync + a Cloud Function
-// that mints custom JWTs so guests can write. This module is intentionally
-// kept self-contained so Stage B can plug in without churn.
+// Stage C-1 (current): mirror writes into per-share-link sub-collections
+// `share_links/{token}/{table}/{id}` so Firestore rules can grant `allow read`
+// on the whole sub-tree using the URL token as the only secret (no Firebase
+// Auth needed). Background loop in sync_share_auto.rs polls the dirty-flag
+// queue every few seconds; write-commands in commands_data.rs / commands_share.rs
+// call `mark_dirty(&conn, "recipes")` after a successful DB op, the loop
+// pushes affected share-links whose scope covers the dirty table.
 
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -111,6 +102,26 @@ fn gen_owner_uid() -> String {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::rng();
     (0..16).map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char).collect()
+}
+
+/// Deterministic owner_uid = first 16 hex chars of sha256(client_email).
+/// Two devices using the same Firebase service account get the same UID,
+/// so they share `owners/{uid}/changes/` automatically.
+pub(crate) fn derive_owner_uid_from_email(email: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(email.as_bytes());
+    hex::encode(&digest[..8])
+}
+
+/// Reset push/pull bookmarks so the next sync re-uploads everything under
+/// the new UID and re-pulls the foreign collection from scratch. Called
+/// whenever owner_uid changes (deterministic-derive or manual import).
+pub(crate) fn reset_sync_bookmarks(conn: &rusqlite::Connection) {
+    let _ = conn.execute(
+        "DELETE FROM app_settings WHERE key IN \
+         ('cloud_owner_last_push_ver','cloud_owner_last_pull_ts')",
+        [],
+    );
 }
 
 fn now_secs() -> u64 {
@@ -229,46 +240,64 @@ async fn firestore_upsert_snapshot(cfg: &CloudShareConfig, snap: &Snapshot)
 {
     let token = get_access_token(cfg).await?;
     let client = reqwest::Client::new();
-    let mut written = std::collections::BTreeMap::<&str, usize>::new();
+    let mut written = std::collections::BTreeMap::<String, usize>::new();
 
-    // share_links — keyed by token (path-friendly for guest reads).
     let token_id = snap.share_link.get("token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    if !token_id.is_empty() {
-        patch_doc(&client, cfg, &token, "share_links", &token_id,
-                  doc_payload(&snap.share_link, &cfg.owner_uid)).await?;
-        *written.entry("share_links").or_default() += 1;
+    if token_id.is_empty() {
+        return Err("share_link.token missing".into());
+    }
+    let scope = snap.share_link.get("scope").and_then(|v| v.as_str()).unwrap_or("all").to_string();
+
+    // share_links/{token} — top-level doc with scope/permissions/expires.
+    // Guest fetches this first to discover what views to render.
+    patch_doc(&client, cfg, &token, "share_links", &token_id,
+              doc_payload(&snap.share_link, &cfg.owner_uid)).await?;
+    written.insert("share_links".into(), 1);
+
+    // Sub-collections live under share_links/{token}/{coll}/{id}. Path is
+    // built once per collection, doc-id is just the local SQLite rowid
+    // (uniqueness is per share-link, not global).
+    macro_rules! push_sub {
+        ($coll:literal, $rows:expr) => {{
+            let path = format!("share_links/{}/{}", token_id, $coll);
+            let mut n = 0usize;
+            for row in $rows {
+                let id = row.get("id").and_then(|v| v.as_i64())
+                    .ok_or_else(|| format!("{} row missing id", $coll))?;
+                patch_doc(&client, cfg, &token, &path, &id.to_string(),
+                          doc_payload(row, &cfg.owner_uid)).await?;
+                n += 1;
+            }
+            written.insert($coll.into(), n);
+        }};
     }
 
-    async fn push_collection(
-        client: &reqwest::Client, cfg: &CloudShareConfig, token: &str,
-        collection: &str, rows: &[serde_json::Value], owner_uid: &str,
-    ) -> Result<usize, String> {
-        let mut n = 0;
-        for row in rows {
-            let id = row.get("id").and_then(|v| v.as_i64())
-                .ok_or_else(|| format!("{} row missing id", collection))?;
-            let doc_id = format!("{}_{}", owner_uid, id);
-            patch_doc(client, cfg, token, collection, &doc_id,
-                      doc_payload(row, owner_uid)).await?;
-            n += 1;
-        }
-        Ok(n)
+    let need_recipes   = matches!(scope.as_str(), "all" | "recipes" | "meal_plan");
+    let need_products  = matches!(scope.as_str(), "all" | "products" | "fridge");
+    let need_blacklist = matches!(scope.as_str(), "all" | "memory");
+    let need_meal_plan = matches!(scope.as_str(), "all" | "meal_plan");
+    // ingredient_catalog provides categories/colors for ingredient tags;
+    // useful anywhere that lists ingredients.
+    let need_catalog   = need_recipes || need_products;
+
+    if need_recipes {
+        push_sub!("recipes", &snap.recipes);
+        push_sub!("recipe_ingredients", &snap.recipe_ingredients);
+    }
+    if need_catalog {
+        push_sub!("ingredient_catalog", &snap.ingredient_catalog);
+    }
+    if need_products {
+        push_sub!("products", &snap.products);
+    }
+    if need_blacklist {
+        push_sub!("food_blacklist", &snap.food_blacklist);
+    }
+    if need_meal_plan {
+        push_sub!("meal_plan", &snap.meal_plan);
     }
 
-    written.insert("recipes",
-        push_collection(&client, cfg, &token, "recipes",            &snap.recipes,            &cfg.owner_uid).await?);
-    written.insert("recipe_ingredients",
-        push_collection(&client, cfg, &token, "recipe_ingredients", &snap.recipe_ingredients, &cfg.owner_uid).await?);
-    written.insert("ingredient_catalog",
-        push_collection(&client, cfg, &token, "ingredient_catalog", &snap.ingredient_catalog, &cfg.owner_uid).await?);
-    written.insert("products",
-        push_collection(&client, cfg, &token, "products",           &snap.products,           &cfg.owner_uid).await?);
-    written.insert("food_blacklist",
-        push_collection(&client, cfg, &token, "food_blacklist",     &snap.food_blacklist,     &cfg.owner_uid).await?);
-    written.insert("meal_plan",
-        push_collection(&client, cfg, &token, "meal_plan",          &snap.meal_plan,          &cfg.owner_uid).await?);
-
-    Ok(serde_json::json!({ "status": "ok", "written": written }))
+    Ok(serde_json::json!({ "status": "ok", "scope": scope, "written": written }))
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────
@@ -283,25 +312,57 @@ pub fn cloud_share_set_config(
     if project_id.trim().is_empty() || api_key.trim().is_empty() {
         return Err("project_id and api_key required".into());
     }
-    if let Some(ref sa) = service_account_json {
-        // Sanity-check it parses.
-        let _: ServiceAccount = serde_json::from_str(sa)
+    let parsed_email: Option<String> = if let Some(ref sa) = service_account_json {
+        let parsed: ServiceAccount = serde_json::from_str(sa)
             .map_err(|e| format!("service_account_json invalid: {}", e))?;
-    }
+        Some(parsed.client_email)
+    } else { None };
     let conn = db.conn();
     let existing = load_config(&conn);
-    let owner_uid = existing.as_ref().map(|c| c.owner_uid.clone()).unwrap_or_else(gen_owner_uid);
+    let prev_uid = existing.as_ref().map(|c| c.owner_uid.clone());
+    // Owner UID priority: deterministic from email (if SA provided) >
+    // existing UID (preserve) > random fallback (true fresh install).
+    let owner_uid = parsed_email
+        .as_deref()
+        .map(derive_owner_uid_from_email)
+        .or_else(|| prev_uid.clone())
+        .unwrap_or_else(gen_owner_uid);
     // Preserve previously-saved service_account if caller didn't pass a new one.
     let service_account_json = service_account_json
         .or_else(|| existing.and_then(|c| c.service_account_json));
     let cfg = CloudShareConfig {
         project_id: project_id.trim().to_string(),
         api_key: api_key.trim().to_string(),
-        owner_uid,
+        owner_uid: owner_uid.clone(),
         service_account_json,
     };
     save_config(&conn, &cfg)?;
+    if prev_uid.as_deref() != Some(owner_uid.as_str()) {
+        reset_sync_bookmarks(&conn);
+    }
     Ok(cfg)
+}
+
+/// Manually override owner_uid (UID-import flow: paste UID copied from
+/// another device that shares the same Firebase project). Resets push/pull
+/// bookmarks so the next sync round re-pushes/re-pulls everything.
+#[tauri::command]
+pub fn cloud_owner_set_uid(uid: String, db: State<'_, HanniDb>) -> Result<String, String> {
+    let uid = uid.trim().to_string();
+    if uid.is_empty() { return Err("uid is empty".into()); }
+    let conn = db.conn();
+    let mut cfg = load_config(&conn)
+        .ok_or_else(|| "cloud-share not configured (set project_id/api_key first)".to_string())?;
+    if cfg.owner_uid == uid { return Ok(uid); }
+    cfg.owner_uid = uid.clone();
+    save_config(&conn, &cfg)?;
+    reset_sync_bookmarks(&conn);
+    Ok(uid)
+}
+
+#[tauri::command]
+pub fn cloud_owner_get_uid(db: State<'_, HanniDb>) -> Option<String> {
+    load_config(&db.conn()).map(|c| c.owner_uid)
 }
 
 #[tauri::command]
@@ -324,7 +385,7 @@ pub async fn cloud_share_push(
 ) -> Result<serde_json::Value, String> {
     let cfg = load_config(&db.conn())
         .ok_or_else(|| "cloud-share not configured".to_string())?;
-    let snapshot = build_snapshot(&db, share_id)?;
+    let snapshot = build_snapshot(db.inner(), share_id)?;
 
     if dry_run.unwrap_or(false) {
         return Ok(serde_json::json!({
@@ -358,7 +419,7 @@ struct Snapshot {
     pub meal_plan: Vec<serde_json::Value>,
 }
 
-fn build_snapshot(db: &State<'_, HanniDb>, share_id: i64) -> Result<Snapshot, String> {
+fn build_snapshot(db: &HanniDb, share_id: i64) -> Result<Snapshot, String> {
     let conn = db.conn();
     let mut s = Snapshot::default();
 
@@ -459,3 +520,111 @@ fn build_snapshot(db: &State<'_, HanniDb>, share_id: i64) -> Result<Snapshot, St
 
     Ok(s)
 }
+
+// ── Dirty-flag mirror queue (Stage C-1) ──────────────────────────────────
+// Write-paths in commands_data.rs / commands_share.rs call mark_dirty(...)
+// after a successful DB op. The background loop in sync_share_auto.rs picks
+// up dirty flags every few seconds and pushes affected share-links.
+
+const DIRTY_PREFIX: &str = "cloud_share_dirty_";
+
+pub fn mark_dirty(conn: &rusqlite::Connection, table: &str) {
+    let key = format!("{}{}", DIRTY_PREFIX, table);
+    let _ = conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?1, '1') \
+         ON CONFLICT(key) DO UPDATE SET value='1'",
+        rusqlite::params![key],
+    );
+}
+
+fn list_dirty_tables(conn: &rusqlite::Connection) -> Vec<String> {
+    let pattern = format!("{}%", DIRTY_PREFIX);
+    let mut stmt = match conn.prepare(
+        "SELECT key FROM app_settings WHERE key LIKE ?1 AND value='1'"
+    ) { Ok(s) => s, Err(_) => return Vec::new() };
+    stmt.query_map(rusqlite::params![pattern], |r| r.get::<_, String>(0))
+        .map(|it| it.filter_map(|x| x.ok())
+            .map(|k| k.trim_start_matches(DIRTY_PREFIX).to_string()).collect())
+        .unwrap_or_default()
+}
+
+fn clear_dirty(conn: &rusqlite::Connection) {
+    let pattern = format!("{}%", DIRTY_PREFIX);
+    let _ = conn.execute(
+        "UPDATE app_settings SET value='0' WHERE key LIKE ?1",
+        rusqlite::params![pattern],
+    );
+}
+
+/// Returns true if a share-link with `scope` mirrors writes to `table`.
+fn scope_covers(scope: &str, table: &str) -> bool {
+    match (scope, table) {
+        ("all", _) => true,
+        ("recipes", "recipes" | "recipe_ingredients" | "ingredient_catalog") => true,
+        ("products", "products" | "ingredient_catalog") => true,
+        ("fridge", "products" | "ingredient_catalog") => true,
+        ("meal_plan", "meal_plan" | "recipes" | "recipe_ingredients" | "ingredient_catalog") => true,
+        ("memory", "food_blacklist") => true,
+        _ => false,
+    }
+}
+
+/// Push every active share-link whose scope covers any currently-dirty table.
+/// On full success, clears dirty flags. On any error, leaves them set so the
+/// next loop tick retries.
+pub(crate) async fn mirror_pending(db: &HanniDb) -> Result<serde_json::Value, String> {
+    let dirty: Vec<String> = list_dirty_tables(&db.conn());
+    if dirty.is_empty() {
+        return Ok(serde_json::json!({ "status": "clean" }));
+    }
+
+    let active: Vec<(i64, String)> = {
+        let conn = db.conn();
+        let now_iso = chrono::Utc::now().to_rfc3339();
+        let mut stmt = conn.prepare(
+            "SELECT id, scope FROM share_links \
+             WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?1)"
+        ).map_err(|e| e.to_string())?;
+        let mapped = stmt.query_map(rusqlite::params![now_iso],
+                          |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(i64, String)> = mapped.filter_map(|x| x.ok()).collect();
+        rows
+    };
+
+    if active.is_empty() {
+        clear_dirty(&db.conn());
+        return Ok(serde_json::json!({ "status": "no-active-links", "dirty": dirty }));
+    }
+
+    let cfg = match load_config(&db.conn()) {
+        Some(c) if c.service_account_json.is_some() => c,
+        _ => return Ok(serde_json::json!({ "status": "not-configured" })),
+    };
+
+    let mut pushed = Vec::new();
+    let mut errors = Vec::new();
+    for (share_id, scope) in &active {
+        if !dirty.iter().any(|t| scope_covers(scope, t)) { continue; }
+        let snap = match build_snapshot(db, *share_id) {
+            Ok(s) => s,
+            Err(e) => { errors.push(serde_json::json!({"share_id": share_id, "error": e})); continue; }
+        };
+        match firestore_upsert_snapshot(&cfg, &snap).await {
+            Ok(v) => pushed.push(serde_json::json!({"share_id": share_id, "scope": scope, "result": v})),
+            Err(e) => errors.push(serde_json::json!({"share_id": share_id, "scope": scope, "error": e})),
+        }
+    }
+
+    if errors.is_empty() {
+        clear_dirty(&db.conn());
+    }
+
+    Ok(serde_json::json!({
+        "status": if errors.is_empty() { "ok" } else { "partial" },
+        "dirty": dirty,
+        "pushed": pushed,
+        "errors": errors,
+    }))
+}
+

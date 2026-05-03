@@ -188,154 +188,7 @@ pub fn update_blocklist(apps: Option<Vec<String>>, sites: Option<Vec<String>>) -
     Ok("Blocklist updated".into())
 }
 
-// ── Mindset, Blocklist, Goals, Settings, Home, Contacts, Properties, Views ──
-// ── v0.8.0: Mindset commands ──
-
-#[tauri::command]
-pub fn save_journal_entry(
-    date: Option<String>, mood: i32, energy: i32, stress: i32,
-    gratitude: Option<String>, reflection: Option<String>,
-    wins: Option<String>, struggles: Option<String>,
-    db: tauri::State<'_, HanniDb>,
-) -> Result<i64, String> {
-    let conn = db.conn();
-    let now = chrono::Local::now();
-    let d = date.unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
-    conn.execute(
-        "INSERT INTO journal_entries (date, mood, energy, stress, gratitude, reflection, wins, struggles, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT(date) DO UPDATE SET mood=?2, energy=?3, stress=?4, gratitude=?5, reflection=?6, wins=?7, struggles=?8",
-        rusqlite::params![d, mood, energy, stress, gratitude.unwrap_or_default(),
-            reflection.unwrap_or_default(), wins.unwrap_or_default(), struggles.unwrap_or_default(), now.to_rfc3339()],
-    ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
-}
-
-#[tauri::command]
-pub fn get_journal_entries(period: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
-    let days = period.unwrap_or(30);
-    let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
-    let mut stmt = conn.prepare(
-        "SELECT id, date, mood, energy, stress, gratitude, reflection, wins, struggles FROM journal_entries WHERE date>=?1 ORDER BY date DESC"
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map(rusqlite::params![since], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
-            "mood": row.get::<_, i32>(2)?, "energy": row.get::<_, i32>(3)?,
-            "stress": row.get::<_, i32>(4)?, "gratitude": row.get::<_, String>(5)?,
-            "reflection": row.get::<_, String>(6)?, "wins": row.get::<_, String>(7)?,
-            "struggles": row.get::<_, String>(8)?,
-        }))
-    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
-    Ok(rows)
-}
-
-#[tauri::command]
-pub fn get_journal_entry(date: String, db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.conn();
-    conn.query_row(
-        "SELECT id, date, mood, energy, stress, gratitude, reflection, wins, struggles FROM journal_entries WHERE date=?1",
-        rusqlite::params![date], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
-                "mood": row.get::<_, i32>(2)?, "energy": row.get::<_, i32>(3)?,
-                "stress": row.get::<_, i32>(4)?, "gratitude": row.get::<_, String>(5)?,
-                "reflection": row.get::<_, String>(6)?, "wins": row.get::<_, String>(7)?,
-                "struggles": row.get::<_, String>(8)?,
-            }))
-        },
-    ).map_err(|e| format!("Not found: {}", e))
-}
-
-#[tauri::command]
-pub fn log_mood(mood: i32, note: Option<String>, trigger: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.conn();
-    let now = chrono::Local::now();
-    conn.execute(
-        "INSERT INTO mood_log (date, time, mood, note, trigger_text, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![now.format("%Y-%m-%d").to_string(), now.format("%H:%M").to_string(),
-            mood, note.unwrap_or_default(), trigger.unwrap_or_default(), now.to_rfc3339()],
-    ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
-}
-
-#[tauri::command]
-pub fn get_mood_history(days: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
-    let d = days.unwrap_or(7);
-    let since = (chrono::Local::now() - chrono::Duration::days(d)).format("%Y-%m-%d").to_string();
-    let mut stmt = conn.prepare(
-        "SELECT id, date, time, mood, note, trigger_text FROM mood_log WHERE date>=?1 ORDER BY date DESC, time DESC"
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map(rusqlite::params![since], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?, "date": row.get::<_, String>(1)?,
-            "time": row.get::<_, String>(2)?, "mood": row.get::<_, i32>(3)?,
-            "note": row.get::<_, String>(4)?, "trigger": row.get::<_, String>(5)?,
-        }))
-    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
-    Ok(rows)
-}
-
-#[tauri::command]
-pub fn create_principle(title: String, description: Option<String>, category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.conn();
-    let now = chrono::Local::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO principles (title, description, category, created_at) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![title, description.unwrap_or_default(), category.unwrap_or_else(|| "discipline".into()), now],
-    ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
-}
-
-#[tauri::command]
-pub fn get_principles(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
-    let mut stmt = conn.prepare(
-        "SELECT id, title, description, category, active FROM principles ORDER BY category, created_at"
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?, "title": row.get::<_, String>(1)?,
-            "description": row.get::<_, String>(2)?, "category": row.get::<_, String>(3)?,
-            "active": row.get::<_, i32>(4)? != 0,
-        }))
-    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
-    Ok(rows)
-}
-
-#[tauri::command]
-pub fn update_principle(id: i64, active: Option<bool>, title: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.conn();
-    if let Some(a) = active { conn.execute("UPDATE principles SET active=?1 WHERE id=?2", rusqlite::params![a as i32, id]).map_err(|e| format!("DB error: {}", e))?; }
-    if let Some(t) = title { conn.execute("UPDATE principles SET title=?1 WHERE id=?2", rusqlite::params![t, id]).map_err(|e| format!("DB error: {}", e))?; }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_principle(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    let conn = db.conn();
-    conn.execute("DELETE FROM principles WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_mindset_check(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.conn();
-    let week_ago = (chrono::Local::now() - chrono::Duration::days(7)).format("%Y-%m-%d").to_string();
-    let (avg_mood, avg_energy, avg_stress, journal_count): (f64, f64, f64, i64) = conn.query_row(
-        "SELECT COALESCE(AVG(mood),3), COALESCE(AVG(energy),3), COALESCE(AVG(stress),3), COUNT(*)
-         FROM journal_entries WHERE date>=?1",
-        rusqlite::params![week_ago], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    ).unwrap_or((3.0, 3.0, 3.0, 0));
-    let principles_count: i64 = conn.query_row("SELECT COUNT(*) FROM principles WHERE active=1", [], |row| row.get(0)).unwrap_or(0);
-    Ok(serde_json::json!({
-        "avg_mood": format!("{:.1}", avg_mood), "avg_energy": format!("{:.1}", avg_energy),
-        "avg_stress": format!("{:.1}", avg_stress), "journal_streak": journal_count,
-        "active_principles": principles_count,
-    }))
-}
+// ── Blocklist, Goals, Settings, Home, Contacts, Properties, Views ──
 
 // ── v0.8.0: Blocklist commands ──
 
@@ -1378,12 +1231,49 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         }
     }
 
+    #[derive(Deserialize)]
+    struct OauthCallback {
+        code:  Option<String>,
+        state: Option<String>,
+        error: Option<String>,
+    }
+
+    pub async fn google_oauth_callback(
+        AxumState(state): AxumState<ApiState>,
+        Query(q): Query<OauthCallback>,
+    ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], String) {
+        // No auth header — Google's redirect can't carry our Bearer token.
+        // We rely on the random `state` param (CSRF-protection) inside the handler.
+        let html_ok = "<html><body style='font-family:-apple-system,sans-serif;padding:40px;text-align:center'>\
+            <h2>✓ Signed in to Hanni</h2>\
+            <p>You can close this tab and return to the app.</p>\
+            <script>setTimeout(()=>window.close(),1500)</script></body></html>";
+        let ct = (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
+
+        if let Some(err) = q.error {
+            return (StatusCode::BAD_REQUEST, [ct],
+                format!("<h2>OAuth error</h2><pre>{}</pre>", err));
+        }
+        let (code, st) = match (q.code, q.state) {
+            (Some(c), Some(s)) => (c, s),
+            _ => return (StatusCode::BAD_REQUEST, [ct],
+                "<h2>Missing code or state</h2>".into()),
+        };
+        let db = state.app.state::<HanniDb>();
+        match crate::google_auth::handle_oauth_callback(&db, &state.app, &code, &st).await {
+            Ok(_) => (StatusCode::OK, [ct], html_ok.into()),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [ct],
+                format!("<h2>Sign-in failed</h2><pre>{}</pre>", e)),
+        }
+    }
+
     let app = Router::new()
         .route("/api/status", get(api_status))
         .route("/api/chat", post(api_chat))
         .route("/api/memory/search", get(api_memory_search))
         .route("/api/memory", post(api_memory_add))
         .route("/auto/eval", post(auto_eval))
+        .route("/oauth/google/callback", get(google_oauth_callback))
         .with_state(state);
 
     let port = if cfg!(debug_assertions) { 8236 } else { 8235 };

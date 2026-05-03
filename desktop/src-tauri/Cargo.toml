@@ -1,6 +1,6 @@
 [package]
 name = "hanni"
-version = "0.69.0"
+version = "0.73.0"
 description = "Hanni — personal AI assistant"
 authors = ["sultanjakhan"]
 edition = "2021"
@@ -17,6 +17,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"   # remember window position/size across restarts
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", features = ["json", "stream", "blocking"] }
@@ -36,6 +37,9 @@ sqlite-vec = "0.1"
 zerocopy = { version = "0.8", features = ["derive"] }
 rmcp = { version = "1.2", features = ["client", "transport-child-process"] }
 jsonwebtoken = "9"          # Firebase service-account JWT signing for cloud-share
+sha2 = "0.10"               # owner_uid derivation from service-account email (Stage C)
+hex = "0.4"
+percent-encoding = "2"      # URL-encode OAuth params (Stage C.1 Google Auth)
 
 # Desktop-only dependencies (not available on Android)
 [target.'cfg(not(target_os = "android"))'.dependencies]
