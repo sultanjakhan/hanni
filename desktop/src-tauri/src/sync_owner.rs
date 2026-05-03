@@ -221,6 +221,13 @@ async fn run_query(client: &reqwest::Client, token: &str, project_id: &str,
 
 // ── Per-table push ───────────────────────────────────────────────────────
 
+// Flat layout: owners/{uid}/data/{table}_{row_id}. Lets us pull every
+// table with a single non-collectionGroup query (REST forbids cgroups
+// outside the root parent).
+fn data_collection(owner_uid: &str) -> String { format!("owners/{}/data", owner_uid) }
+fn data_doc_id(table: &str, id: i64) -> String { format!("{}_{}", table, id) }
+fn tombstone_doc_id(table: &str, id: i64) -> String { format!("tombstone_{}_{}", table, id) }
+
 async fn push_table(db: &HanniDb, table: &str, client: &reqwest::Client,
                     token: &str, project_id: &str, owner_uid: &str)
                     -> Result<usize, String>
@@ -250,11 +257,11 @@ async fn push_table(db: &HanniDb, table: &str, client: &reqwest::Client,
         (payloads, max, dev)
     };
 
-    let path = format!("owners/{}/v2/{}/rows", owner_uid, table);
+    let path = data_collection(owner_uid);
     let mut pushed = 0usize;
     for (id, ts, row) in &rows {
         let body = encode_doc(row, &dev_id, ts, table);
-        patch_doc(client, token, project_id, &path, &id.to_string(), &body).await?;
+        patch_doc(client, token, project_id, &path, &data_doc_id(table, *id), &body).await?;
         pushed += 1;
     }
     if pushed > 0 {
@@ -288,15 +295,12 @@ async fn push_tombstones(db: &HanniDb, client: &reqwest::Client,
         (dirty, max, dev)
     };
 
-    let path = format!("owners/{}/v2/tombstones/rows", owner_uid);
+    let path = data_collection(owner_uid);
     let mut pushed = 0usize;
     for (table, id, ts) in &rows {
         let row = json!({ "_target_table": table, "_row_id": id, "_deleted": true });
-        let doc_id = format!("{}_{}", table, id);
-        // Use "tombstones" as the _table marker so the collectionGroup pull
-        // can distinguish tombstone docs from regular row docs.
         let body = encode_doc(&row, &dev_id, ts, "tombstones");
-        patch_doc(client, token, project_id, &path, &doc_id, &body).await?;
+        patch_doc(client, token, project_id, &path, &tombstone_doc_id(table, *id), &body).await?;
         pushed += 1;
     }
     if pushed > 0 {
@@ -316,6 +320,16 @@ fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, V
     let remote_ts = fields.get("_updated_at").and_then(|v| v.as_str())
         .unwrap_or("");
 
+    // Tolerate missing tables — devices may diverge if one shipped earlier
+    // schema. We still advance the pull cursor so we don't loop forever.
+    let cols = match table_columns(conn, table) {
+        Ok(c) => c,
+        Err(_) => {
+            eprintln!("[sync_owner] skip remote row for missing table {}", table);
+            return Ok(false);
+        }
+    };
+
     // LWW: skip if local is newer-or-equal.
     let local_ts: Option<String> = conn.query_row(
         &format!("SELECT updated_at FROM {} WHERE id = ?1", table),
@@ -325,7 +339,6 @@ fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, V
         if local.as_str() >= remote_ts { return Ok(false); }
     }
 
-    let cols = table_columns(conn, table)?;
     let cols: Vec<&str> = cols.iter().map(|s| s.as_str())
         .filter(|c| fields.contains_key(*c)).collect();
     if cols.is_empty() { return Ok(false); }
@@ -343,8 +356,11 @@ fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, V
         json_to_sqlite(fields.get(*c).unwrap_or(&Value::Null))
     }).collect();
     let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
-    conn.execute(&sql, refs.as_slice())
-        .map_err(|e| format!("upsert {} #{}: {}", table, id, e))?;
+    if let Err(e) = conn.execute(&sql, refs.as_slice()) {
+        // Don't fail the whole pull on one bad row — log and move on.
+        eprintln!("[sync_owner] upsert {} #{}: {}", table, id, e);
+        return Ok(false);
+    }
     Ok(true)
 }
 
@@ -377,8 +393,10 @@ async fn pull_all(db: &HanniDb, client: &reqwest::Client,
             .unwrap_or_else(|| EPOCH_TS.into());
         (s, device_id(&conn))
     };
+    // Single ordinary collection query — `data` lives directly under
+    // `owners/{uid}`, no collectionGroup required.
     let parent = format!("owners/{}", owner_uid);
-    let docs = run_query(client, token, project_id, &parent, "rows", &since, true).await?;
+    let docs = run_query(client, token, project_id, &parent, "data", &since, false).await?;
 
     let allowed: std::collections::HashSet<&str> = SYNC_TABLES.iter().copied().collect();
     let mut totals = serde_json::Map::new();

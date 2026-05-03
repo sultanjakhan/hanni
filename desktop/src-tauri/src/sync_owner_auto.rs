@@ -16,14 +16,15 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::sync_owner::{pull_inner, push_inner};
 use crate::types::HanniDb;
 
-// Stage D snapshot-based owner sync — chosen for "feels instant" UX.
-// At 3 s/tick × 7 tables ≈ 200K Firestore reads/day if 24/7. Free Spark
-// plan caps at 50K/day, so this assumes Hanni is open ≤ 6 h/day; bump
-// upward via cloud_owner_set_auto if you hit quotas in practice.
-const DEFAULT_INTERVAL_SECS: u64 = 3;
-const MIN_INTERVAL_SECS: u64 = 1;
+// Stage D snapshot-based owner sync. Pull is one collection query per tick
+// (Firestore counts that as 1 read), push grows with row writes. At 10 s
+// idle pull ≈ 8.6K reads/day per device — well inside Spark's 50K read
+// quota. Push hits the 20K write/day cap if you go aggressive and reset
+// cursors repeatedly; hence default 10 s and a long backoff on 429.
+const DEFAULT_INTERVAL_SECS: u64 = 10;
+const MIN_INTERVAL_SECS: u64 = 3;
 const MAX_INTERVAL_SECS: u64 = 600;
-const BACKOFF_CAP_SECS: u64 = 60;
+const BACKOFF_CAP_SECS: u64 = 1800;  // 30 min — quota errors take time to clear
 
 fn read_settings(db: &HanniDb) -> (bool, u64) {
     let conn = db.conn();

@@ -2060,6 +2060,33 @@ pub const SYNC_TABLES: &[&str] = &[
 ];
 
 pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
+    // 0. Heal divergent installs that shipped earlier init_db without the
+    // projects/tasks tables (e.g. Android v0.73.x). Idempotent for any host
+    // that already has them.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            color TEXT NOT NULL DEFAULT '#818cf8',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'todo',
+            priority TEXT NOT NULL DEFAULT 'normal',
+            due_date TEXT,
+            completed_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );"
+    ).ok();
+
     // 1. Add `updated_at TEXT NOT NULL DEFAULT ''` everywhere it's missing.
     // SQLite forbids non-constant DEFAULTs in ALTER ADD, hence the empty
     // string sentinel + backfill loop below.

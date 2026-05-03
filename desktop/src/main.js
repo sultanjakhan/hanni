@@ -268,11 +268,13 @@ document.addEventListener('keydown', (e) => {
   S.openTabs = S.openTabs.filter(id => TAB_REGISTRY[id]);
   if (!S.openTabs.includes('chat')) S.openTabs.unshift('chat');
 
-  // Mobile: ensure default tabs are present on fresh install
+  // Mobile: open every registered tab on fresh install. Earlier we limited
+  // mobile to ~6 default tabs, which made the drawer feel empty next to the
+  // desktop install (and there's no UX path to discover the rest before
+  // opening drawer + tapping `+`). Tabs are cheap, drawer is scrollable.
   if (IS_MOBILE && S.openTabs.length <= 1) {
-    const defaultMobileTabs = ['chat', 'notes', 'calendar', 'focus', 'health', 'timeline'];
-    for (const t of defaultMobileTabs) {
-      if (TAB_REGISTRY[t] && !S.openTabs.includes(t)) S.openTabs.push(t);
+    for (const id of Object.keys(TAB_REGISTRY)) {
+      if (!S.openTabs.includes(id)) S.openTabs.push(id);
     }
   }
 
