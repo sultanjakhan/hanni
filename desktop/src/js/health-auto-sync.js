@@ -33,14 +33,13 @@ export async function autoImportHealth(opts = {}) {
   inflight = (async () => {
     try {
       await invoke('import_health_connect_all');
-      const today = localDate(0);
-      const yest = localDate(-1);
-      await Promise.all([
-        invoke('sync_health_to_calendar', { date: today }).catch(() => {}),
-        invoke('sync_health_to_calendar', { date: yest }).catch(() => {}),
-        invoke('sync_health_to_timeline', { date: today }).catch(() => {}),
-        invoke('sync_health_to_timeline', { date: yest }).catch(() => {}),
-      ]);
+      // Sync the last 7 days into Calendar + Timeline so freshly imported
+      // sleep sessions land everywhere, not just today/yesterday.
+      const dates = Array.from({ length: 7 }, (_, i) => localDate(-i));
+      await Promise.all(dates.flatMap(date => [
+        invoke('sync_health_to_calendar', { date }).catch(() => {}),
+        invoke('sync_health_to_timeline', { date }).catch(() => {}),
+      ]));
       localStorage.setItem(LS_KEY, String(Date.now()));
       return true;
     } catch (_) {
@@ -50,4 +49,16 @@ export async function autoImportHealth(opts = {}) {
     }
   })();
   return inflight;
+}
+
+/**
+ * Periodic background poll. Health Connect doesn't push, so we poll every
+ * 15 min while the app is in the foreground. Combined with visibilitychange
+ * + foreground hook this gets sleep into Hanni within minutes of HC writing.
+ */
+let pollHandle = null;
+export function startHealthPolling() {
+  if (!IS_MOBILE) return;
+  if (pollHandle) return;
+  pollHandle = setInterval(() => { autoImportHealth().catch(() => {}); }, 15 * 60 * 1000);
 }

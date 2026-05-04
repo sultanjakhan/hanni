@@ -716,6 +716,8 @@ pub fn run() {
             // Health Connect / Sleep
             health_connect::get_sleep_sessions,
             health_connect::add_sleep_session,
+            health_connect::delete_sleep_session,
+            health_connect_plugin::health_debug_read,
             health_connect::get_sleep_stats,
             health_connect::import_health_connect_sleep,
             // Health import & analytics
@@ -1357,5 +1359,17 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Hanni")
-        .run(|_app, _event| {});
+        .run(|_app_handle, _event| {
+            // macOS cmd+Q does not emit per-window CloseRequested, so window-state plugin
+            // never auto-persists. Force save on ExitRequested + WindowEvent::CloseRequested.
+            #[cfg(not(target_os = "android"))]
+            {
+                use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+                if matches!(_event, tauri::RunEvent::ExitRequested { .. })
+                    || matches!(_event, tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. })
+                {
+                    let _ = _app_handle.save_window_state(StateFlags::all());
+                }
+            }
+        });
 }

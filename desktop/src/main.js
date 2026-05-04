@@ -35,7 +35,7 @@ import {
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
 import './js/tab-timeline.js';
-import { autoImportHealth } from './js/health-auto-sync.js';
+import { autoImportHealth, startHealthPolling } from './js/health-auto-sync.js';
 
 // ── One-time migration: work → jobs tab rename ──
 (() => {
@@ -340,6 +340,7 @@ document.addEventListener('keydown', (e) => {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') autoImportHealth();
     });
+    startHealthPolling(); // 15-min poll while foregrounded
   }
 
   // Android back button: close overlays, then go to previous tab

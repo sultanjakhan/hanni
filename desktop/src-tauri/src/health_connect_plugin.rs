@@ -46,6 +46,26 @@ pub async fn health_has_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Res
 
 /// Triggers the Health Connect permission UI on Android. Resolves with the
 /// final granted state once the user closes the system dialog.
+/// Debug helper — returns the raw JSON response from a Kotlin plugin
+/// command, so we can see whether Health Connect is actually returning
+/// data or just an empty list.
+#[tauri::command]
+pub async fn health_debug_read<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    cmd: String,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<HealthConnectHandle<R>>();
+        match handle.0.run_mobile_plugin::<serde_json::Value>(&cmd, &()) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(format!("{e}")),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = (app, cmd); Err("Android-only".into()) }
+}
+
 #[tauri::command]
 pub async fn health_request_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
     #[cfg(target_os = "android")]

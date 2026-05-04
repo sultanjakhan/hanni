@@ -97,6 +97,16 @@ pub fn add_sleep_session(db: State<'_, HanniDb>, session: SleepSession) -> Resul
 }
 
 #[tauri::command]
+pub fn delete_sleep_session(db: State<'_, HanniDb>, id: i64) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM sleep_stages WHERE session_id=?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM sleep_sessions WHERE id=?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_sleep_stats(db: State<'_, HanniDb>, days: i64) -> SleepStats {
     let conn = db.conn();
     let since = chrono::Utc::now() - chrono::Duration::days(days);

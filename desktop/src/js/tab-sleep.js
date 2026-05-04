@@ -93,16 +93,31 @@ function renderStagesBar(stages) {
   return `<div class="sleep-bar">${bars}</div>`;
 }
 
-function dur(stage) {
-  const s = new Date(stage.start_time), e = new Date(stage.end_time);
-  return (e - s) / 60000;
+function toMinutes(s) {
+  if (!s) return 0;
+  // "HH:MM" — Health Connect/local format
+  if (/^\d{2}:\d{2}$/.test(s)) {
+    const [h, m] = s.split(':').map(Number);
+    return h * 60 + m;
+  }
+  // ISO timestamp — manual entry uses toISOString()
+  const d = new Date(s);
+  return isNaN(d) ? 0 : d.getHours() * 60 + d.getMinutes();
 }
 
-function shortTime(iso) {
-  try {
-    const d = new Date(iso);
-    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-  } catch { return iso?.slice(11, 16) || ''; }
+function dur(stage) {
+  let m = toMinutes(stage.end_time) - toMinutes(stage.start_time);
+  if (m < 0) m += 24 * 60; // crossed midnight
+  return m;
+}
+
+function shortTime(s) {
+  if (!s) return '';
+  // Already "HH:MM" — keep as is.
+  if (/^\d{2}:\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (isNaN(d)) return s.slice(11, 16) || s;
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
 function fmt(d) { return d.toISOString().slice(0, 10); }
