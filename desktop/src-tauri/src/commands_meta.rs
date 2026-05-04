@@ -1510,6 +1510,11 @@ pub fn get_app_version(app: AppHandle) -> String {
 }
 
 #[tauri::command]
+pub fn is_debug_build() -> bool {
+    cfg!(debug_assertions)
+}
+
+#[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<String, String> {
     let updater = updater_with_headers(&app)?;
     updater_log("check_update: started");

@@ -27,6 +27,7 @@ import { initNotificationWidget } from './js/notification-widget.js';
 import { initMusicWidget } from './js/music-widget.js';
 import { initQuotesWidget } from './js/quotes-widget.js';
 import { initTaskControlWidget } from './js/task-control-widget.js';
+import { initWindowState } from './js/window-state.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
 import {
   loadHome, loadFood, loadMoney, loadPeople,
@@ -292,6 +293,10 @@ document.addEventListener('keydown', (e) => {
     } catch (_) {}
   }
   saveTabCustom();
+
+  // Restore window position/size early (before any UI work) so the window
+  // jumps to its saved spot before the user notices the default placement.
+  invoke('is_debug_build').then(isDev => initWindowState(isDev)).catch(() => {});
 
   // Render tab bar
   renderTabBar();

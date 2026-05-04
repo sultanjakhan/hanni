@@ -297,8 +297,12 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(health_connect_plugin::init());
 
-    // Use a separate window-state file for dev builds so dev and prod don't
-    // overwrite each other's last position (both share the bundle identifier).
+    // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
+    // POSITION/SIZE are handled in JS (window-state.js) using LogicalPosition,
+    // because the plugin uses PhysicalPosition which gets halved by tao on
+    // macOS multi-monitor setups (primary-monitor scale is applied to the
+    // target monitor's coordinates).
+    // Separate filenames keep dev and prod from clobbering each other.
     #[cfg(not(target_os = "android"))]
     let builder = builder.plugin(
         tauri_plugin_window_state::Builder::default()
@@ -307,7 +311,13 @@ pub fn run() {
             } else {
                 ".window-state.json"
             })
-            .build()
+            .with_state_flags(
+                tauri_plugin_window_state::StateFlags::MAXIMIZED
+                    | tauri_plugin_window_state::StateFlags::FULLSCREEN
+                    | tauri_plugin_window_state::StateFlags::DECORATIONS
+                    | tauri_plugin_window_state::StateFlags::VISIBLE,
+            )
+            .build(),
     );
 
     // Desktop: manage DB state on builder (initialized before builder)
@@ -340,6 +350,7 @@ pub fn run() {
             macos::get_now_playing,
             macos::get_browser_tab,
             commands_meta::get_app_version,
+            commands_meta::is_debug_build,
             commands_meta::check_update,
             commands_meta::restart_app,
             // Proactive

@@ -6,6 +6,11 @@
   "platforms": ["macOS", "windows", "linux"],
   "permissions": [
     "core:default",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-scale-factor",
     "opener:default",
     "fs:default",
     "updater:default",
