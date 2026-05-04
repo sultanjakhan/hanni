@@ -606,7 +606,7 @@ body.qw-popover-open #task-control-widget {
   border-radius: var(--radius-lg, 12px);
   box-shadow: var(--shadow-card);
   margin-bottom: 8px;
-  max-height: 360px;
+  max-height: min(360px, calc(100vh - 320px));
   overflow-y: auto;
   order: -1;
 }

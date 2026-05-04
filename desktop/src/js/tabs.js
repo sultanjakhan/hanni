@@ -448,8 +448,11 @@ function renderSubSidebar() {
     if (!(S.chatSidebarCollapsed && S.activeTab === 'chat')) {
       const ver = document.createElement('div');
       ver.className = 'version-label';
-      ver.textContent = `v${S.APP_VERSION}`;
+      ver.textContent = (S.APP_VERSION && S.APP_VERSION !== '?') ? `v${S.APP_VERSION}` : '';
       settingsBottom.appendChild(ver);
+      if (!S.APP_VERSION || S.APP_VERSION === '?') {
+        document.addEventListener('hanni:version-loaded', e => { ver.textContent = `v${e.detail}`; }, { once: true });
+      }
     }
   }
   loadGoalsWidget();

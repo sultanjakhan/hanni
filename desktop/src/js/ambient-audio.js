@@ -79,6 +79,7 @@ async function startSound(id) {
     node.source = source;
     node.gain = gain;
     node.playing = true;
+    onChange?.();
   } finally {
     node.starting = false;
   }
@@ -95,6 +96,7 @@ function stopSound(id) {
   node.source = null;
   node.gain = null;
   node.playing = false;
+  onChange?.();
 }
 
 export async function toggle(id) {

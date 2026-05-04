@@ -107,7 +107,7 @@ export function initAmbientPlayer() {
     }
   });
 
-  onStateChange(updateDot);
+  onStateChange(updateButtons);
   restore();
   updateDot();
 }

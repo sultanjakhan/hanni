@@ -297,8 +297,18 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(health_connect_plugin::init());
 
+    // Use a separate window-state file for dev builds so dev and prod don't
+    // overwrite each other's last position (both share the bundle identifier).
     #[cfg(not(target_os = "android"))]
-    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    let builder = builder.plugin(
+        tauri_plugin_window_state::Builder::default()
+            .with_filename(if cfg!(debug_assertions) {
+                ".window-state-dev.json"
+            } else {
+                ".window-state.json"
+            })
+            .build()
+    );
 
     // Desktop: manage DB state on builder (initialized before builder)
     #[cfg(not(target_os = "android"))]
