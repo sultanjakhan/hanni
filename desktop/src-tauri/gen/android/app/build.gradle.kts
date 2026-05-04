@@ -13,6 +13,23 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing — read from keystore.properties (local) or env vars (CI).
+// File-based config is gitignored; env config is used by .github/workflows/release-android.yml.
+val keystoreProps = Properties().apply {
+    val f = file("../keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val ksFile: String? = keystoreProps.getProperty("storeFile")
+    ?: System.getenv("ANDROID_KEYSTORE_PATH")
+val ksPassword: String? = keystoreProps.getProperty("storePassword")
+    ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val ksKeyAlias: String? = keystoreProps.getProperty("keyAlias")
+    ?: System.getenv("ANDROID_KEY_ALIAS")
+val ksKeyPassword: String? = keystoreProps.getProperty("keyPassword")
+    ?: System.getenv("ANDROID_KEY_PASSWORD")
+val hasReleaseSigning = ksFile != null && ksPassword != null
+    && ksKeyAlias != null && ksKeyPassword != null
+
 android {
     compileSdk = 36
     namespace = "com.sultanjakhan.hanni"
@@ -23,6 +40,18 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                // Local keystore.properties: storeFile is relative to gen/android/ (one level
+                // above app/). CI: ANDROID_KEYSTORE_PATH is absolute.
+                storeFile = if (ksFile!!.startsWith("/")) file(ksFile!!) else file("../$ksFile")
+                storePassword = ksPassword
+                keyAlias = ksKeyAlias
+                keyPassword = ksKeyPassword
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -43,6 +72,9 @@ android {
                     .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
                     .toList().toTypedArray()
             )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     kotlinOptions {

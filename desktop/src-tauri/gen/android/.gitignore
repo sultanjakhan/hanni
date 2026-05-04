@@ -17,3 +17,8 @@ key.properties
 
 /.tauri
 /tauri.settings.gradle
+
+# Release signing — never commit
+keystore.properties
+*.jks
+*.keystore
