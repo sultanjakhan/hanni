@@ -51,6 +51,8 @@ mod sync_owner;
 mod sync_owner_auto;
 mod google_auth;
 mod firestore_admin;
+#[cfg(not(target_os = "android"))]
+mod window_state;
 
 // Re-export types used by run() for state setup
 use types::*;
@@ -796,6 +798,14 @@ pub fn run() {
                 app.manage(hanni_db);
             }
 
+            // Restore main-window logical position/size from disk before any
+            // UI work, so it lands at the saved spot before the user notices
+            // the default placement from tauri.conf.json.
+            #[cfg(not(target_os = "android"))]
+            {
+                window_state::restore_main(app.handle());
+            }
+
             // Auto-updater (desktop only) — downloads in background and emits
             // `update-ready`; the UI shows a "Restart" button instead of
             // auto-restarting (see commands_meta::auto_check_on_startup).
@@ -1383,13 +1393,22 @@ pub fn run() {
         .run(|_app_handle, _event| {
             // macOS cmd+Q does not emit per-window CloseRequested, so window-state plugin
             // never auto-persists. Force save on ExitRequested + WindowEvent::CloseRequested.
+            // Also persist on Focused-out so that reboots/auto-updates after the user
+            // alt-tabs away still capture the latest position.
             #[cfg(not(target_os = "android"))]
             {
                 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
-                if matches!(_event, tauri::RunEvent::ExitRequested { .. })
-                    || matches!(_event, tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. })
-                {
+                let exit_or_close = matches!(_event, tauri::RunEvent::ExitRequested { .. })
+                    || matches!(_event, tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. });
+                let lost_focus = matches!(
+                    _event,
+                    tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Focused(false), .. }
+                );
+                if exit_or_close {
                     let _ = _app_handle.save_window_state(StateFlags::all());
+                }
+                if exit_or_close || lost_focus {
+                    window_state::save_main(_app_handle);
                 }
             }
         });
