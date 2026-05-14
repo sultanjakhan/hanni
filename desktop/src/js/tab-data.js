@@ -6,6 +6,7 @@ import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, 
 import { renderTabBar, closeTab } from './tabs.js';
 import { DatabaseView } from './db-view/db-view.js';
 import { formatRecurrence } from './db-view/db-recurrence-editor.js';
+import { ICONS } from './icons.js';
 
 // Legacy helper: backward-compat wrapper (still used by Recipes, Products)
 function renderDatabaseView(el, tabId, recordTable, records, options) {
@@ -181,7 +182,7 @@ async function loadFood(subTab) {
     subtitle: 'Питание и продукты',
     icon: '🍔',
     toolbarActions: [{
-      icon: '🔗',
+      icon: ICONS.share,
       title: 'Общий доступ',
       onClick: async () => {
         const { openShareModal } = await import('./share-modal.js');
