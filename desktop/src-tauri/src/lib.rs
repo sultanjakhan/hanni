@@ -300,10 +300,11 @@ pub fn run() {
         .plugin(health_connect_plugin::init());
 
     // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
-    // POSITION/SIZE are handled in JS (window-state.js) using LogicalPosition,
-    // because the plugin uses PhysicalPosition which gets halved by tao on
-    // macOS multi-monitor setups (primary-monitor scale is applied to the
-    // target monitor's coordinates).
+    // POSITION/SIZE are handled in window_state.rs (sync atomic write to a
+    // separate file) using LogicalPosition, because the plugin uses
+    // PhysicalPosition which gets halved by tao on macOS multi-monitor
+    // setups (primary-monitor scale is applied to the target monitor's
+    // coordinates).
     // Separate filenames keep dev and prod from clobbering each other.
     #[cfg(not(target_os = "android"))]
     let builder = builder.plugin(
@@ -801,9 +802,23 @@ pub fn run() {
             // Restore main-window logical position/size from disk before any
             // UI work, so it lands at the saved spot before the user notices
             // the default placement from tauri.conf.json.
+            //
+            // We apply twice: synchronously now (fast path, usually enough),
+            // and again after a short delay on the main thread. Some macOS
+            // multi-monitor setups re-layout the NSWindow once on first show
+            // (after setup returns), which can override the synchronous
+            // set_position. The deferred re-apply pins the saved spot.
             #[cfg(not(target_os = "android"))]
             {
                 window_state::restore_main(app.handle());
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                    let h = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        window_state::restore_main(&h);
+                    });
+                });
             }
 
             // Auto-updater (desktop only) — downloads in background and emits
@@ -1393,21 +1408,27 @@ pub fn run() {
         .run(|_app_handle, _event| {
             // macOS cmd+Q does not emit per-window CloseRequested, so window-state plugin
             // never auto-persists. Force save on ExitRequested + WindowEvent::CloseRequested.
-            // Also persist on Focused-out so that reboots/auto-updates after the user
-            // alt-tabs away still capture the latest position.
+            // Also persist on Moved/Resized so the latest user-driven position survives
+            // reboots and auto-updates. We deliberately do NOT save on Focused(false):
+            // focus-out fires on every cmd+tab/Mission Control transition and on macOS
+            // can briefly return transitional outer_position values mid-animation,
+            // poisoning the saved state.
             #[cfg(not(target_os = "android"))]
             {
                 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
                 let exit_or_close = matches!(_event, tauri::RunEvent::ExitRequested { .. })
                     || matches!(_event, tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { .. }, .. });
-                let lost_focus = matches!(
+                let user_geom_change = matches!(
                     _event,
-                    tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Focused(false), .. }
+                    tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Moved(_), .. }
+                ) || matches!(
+                    _event,
+                    tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Resized(_), .. }
                 );
                 if exit_or_close {
                     let _ = _app_handle.save_window_state(StateFlags::all());
                 }
-                if exit_or_close || lost_focus {
+                if exit_or_close || user_geom_change {
                     window_state::save_main(_app_handle);
                 }
             }
