@@ -796,6 +796,18 @@
   background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px;
   font-family: ui-monospace, monospace; font-size: 11px;
 }
+.share-warn {
+  background: rgba(217,144,33,0.12);
+  color: #b07418;
+  padding: 8px 10px;
+  border-radius: var(--radius-1);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.share-warn code {
+  background: rgba(0,0,0,0.15); padding: 1px 4px; border-radius: 3px;
+  font-family: ui-monospace, monospace; font-size: 11px;
+}
 .share-qr {
   margin-top: 10px; padding: 10px; background: #fff;
   border-radius: var(--radius-1); display: inline-block;

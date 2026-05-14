@@ -235,12 +235,25 @@ async function submitCreate(overlay, tabId) {
 
   msg.innerHTML = '<div style="color:var(--text-muted);">Создаём ссылку, поднимаем туннель…</div>';
   try {
-    const link = await invoke('create_share_link', { tab: tabId, scope, permissions, label, lifetime, expiresAt: expires_at });
-    if (!link.url) {
-      msg.innerHTML = `<div class="share-err">Ссылка создана, но туннель не поднялся. Установите cloudflared: <code>brew install cloudflared</code> и нажмите «Обновить».</div>`;
-    }
+    await invoke('create_share_link', { tab: tabId, scope, permissions, label, lifetime, expiresAt: expires_at });
+    // Backend always returns a static cloud URL (Firebase Hosting), so a
+    // missing link.url cannot signal a failed tunnel. Ask the tunnel state
+    // directly: if it didn't come up, writes from the guest will fail —
+    // show a non-fatal warning so the host knows.
+    const status = await invoke('tunnel_status').catch(() => null);
+    const tunnelUp = !!(status && status.running && status.url);
     resetFooter(overlay, tabId);
-    refreshList(overlay, tabId);
+    await refreshList(overlay, tabId);
+    if (!tunnelUp) {
+      const errLine = status && status.error ? `<br><span style="opacity:.7">${escapeHtml(status.error)}</span>` : '';
+      const body = overlay.querySelector('#share-body');
+      if (body) {
+        const warn = document.createElement('div');
+        warn.className = 'share-warn';
+        warn.innerHTML = `Ссылка создана, но cloudflared tunnel не поднят — гости смогут <b>читать</b> через Firebase, но <b>записывать</b> не получится. Поставь: <code>brew install cloudflared</code>${errLine}`;
+        body.prepend(warn);
+      }
+    }
   } catch (err) {
     msg.innerHTML = `<div class="share-err">Ошибка: ${escapeHtml(String(err))}</div>`;
   }

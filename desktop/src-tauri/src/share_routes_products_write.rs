@@ -16,8 +16,12 @@ use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
 
 fn check_food_products_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
-    if ctx.tab != "food" || !ctx.has_scope("products") {
-        return Err((StatusCode::FORBIDDEN, "Scope does not include products".into()));
+    // POST/PATCH/DELETE /products operate on the `products` table (fridge inventory).
+    // Either scope qualifies: `products` (legacy/catalog umbrella) or `fridge`
+    // (the read scope for the same table). The guest UI for fridge sends writes
+    // here too — see desktop/src-tauri/src/share_assets/guest_fridge.js.
+    if ctx.tab != "food" || !(ctx.has_scope("products") || ctx.has_scope("fridge")) {
+        return Err((StatusCode::FORBIDDEN, "Scope does not include products or fridge".into()));
     }
     Ok(())
 }

@@ -16,7 +16,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::share_auth::{html_escape, load_link, rate_limit_check};
 use crate::share_routes_comments::{create_comment, list_comments};
-use crate::share_routes_food_meta::{create_catalog_item, create_cuisine, list_blacklist, list_cuisines, list_fridge};
+use crate::share_routes_food_meta::{create_blacklist_item, create_catalog_item, create_cuisine, delete_blacklist_item, list_blacklist, list_cuisines, list_fridge};
 use crate::share_routes_meal_plan::{create_meal_plan, delete_meal_plan, list_meal_plan};
 use crate::share_routes_products_read::list_products;
 use crate::share_routes_products_write::{create_product, delete_product, update_product};
@@ -58,7 +58,8 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/meal-plan/{id}", delete(delete_meal_plan))
         .route("/s/{token}/cuisines", get(list_cuisines).post(create_cuisine))
         .route("/s/{token}/catalog", axum::routing::post(create_catalog_item))
-        .route("/s/{token}/blacklist", get(list_blacklist))
+        .route("/s/{token}/blacklist", get(list_blacklist).post(create_blacklist_item))
+        .route("/s/{token}/blacklist/{id}", delete(delete_blacklist_item))
         .route("/s/{token}/fridge", get(list_fridge))
         .route("/s/{token}/assets/guest.css", get(asset_css))
         .route("/s/{token}/assets/guest.js", get(asset_js))

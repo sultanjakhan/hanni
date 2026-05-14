@@ -73,18 +73,104 @@ pub async fn list_blacklist(
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "view")?;
     check_food_memory_scope(&ctx)?;
+    // Include id so a guest with delete-perm can reference rows.
     let mut stmt = conn.prepare(
-        "SELECT type, value, created_at FROM food_blacklist ORDER BY type, value"
+        "SELECT id, type, value, catalog_id, created_at FROM food_blacklist ORDER BY type, value"
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
         Ok(serde_json::json!({
-            "type": r.get::<_, String>(0)?,
-            "value": r.get::<_, String>(1)?,
-            "created_at": r.get::<_, String>(2)?,
+            "id": r.get::<_, i64>(0)?,
+            "type": r.get::<_, String>(1)?,
+            "value": r.get::<_, String>(2)?,
+            "catalog_id": r.get::<_, Option<i64>>(3).unwrap_or(None),
+            "created_at": r.get::<_, String>(4)?,
         }))
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
       .filter_map(|r| r.ok()).collect();
     Ok(Json(serde_json::json!({ "blacklist": rows, "label": ctx.label })))
+}
+
+#[derive(Deserialize)]
+struct AddBlacklistReq {
+    #[serde(rename = "type")]
+    entry_type: String,
+    value: String,
+    catalog_id: Option<i64>,
+}
+
+pub async fn create_blacklist_item(
+    Path(token): Path<String>,
+    AxumState(state): AxumState<ShareServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    rate_limit_check(&state, &token)?;
+    if body.len() > BODY_LIMIT_BYTES {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "Body too large".into()));
+    }
+    let req: AddBlacklistReq = serde_json::from_slice(&body)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
+    if !["tag", "product", "category", "keyword"].contains(&req.entry_type.as_str()) {
+        return Err((StatusCode::BAD_REQUEST, "type must be tag|product|category|keyword".into()));
+    }
+    let value = req.value.trim().to_lowercase();
+    if value.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "value is required".into()));
+    }
+    let (ua, ip) = ua_ip(&headers, &addr);
+
+    let db = state.app.state::<HanniDb>();
+    let conn = db.conn();
+    let ctx = load_link(&conn, &token)?;
+    require_perm(&ctx, "add")?;
+    check_food_memory_scope(&ctx)?;
+
+    // Mirror Hanni's add_food_blacklist: auto-resolve catalog_id for type=product.
+    let cat_id: Option<i64> = match req.catalog_id {
+        Some(id) => Some(id),
+        None if req.entry_type == "product" => crate::db::resolve_catalog_id_by_name(&conn, &value),
+        None => None,
+    };
+    conn.execute(
+        "INSERT OR IGNORE INTO food_blacklist (type, value, catalog_id) VALUES (?1, ?2, ?3)",
+        rusqlite::params![req.entry_type, value, cat_id],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let id: i64 = conn.query_row(
+        "SELECT id FROM food_blacklist WHERE type=?1 AND value=?2",
+        rusqlite::params![req.entry_type, value], |r| r.get(0),
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    log_activity(&conn, ctx.id, "add_blacklist",
+        &serde_json::json!({ "id": id, "type": req.entry_type, "value": value }).to_string(),
+        &ip, &ua);
+    crate::sync_share::mark_dirty(&conn, "food_blacklist");
+    Ok(Json(serde_json::json!({ "id": id, "status": "ok" })))
+}
+
+pub async fn delete_blacklist_item(
+    Path((token, id)): Path<(String, i64)>,
+    AxumState(state): AxumState<ShareServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    rate_limit_check(&state, &token)?;
+    let (ua, ip) = ua_ip(&headers, &addr);
+    let db = state.app.state::<HanniDb>();
+    let conn = db.conn();
+    let ctx = load_link(&conn, &token)?;
+    require_perm(&ctx, "delete")?;
+    check_food_memory_scope(&ctx)?;
+    let affected = conn.execute(
+        "DELETE FROM food_blacklist WHERE id=?1",
+        rusqlite::params![id],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if affected == 0 {
+        return Err((StatusCode::NOT_FOUND, "Blacklist entry not found".into()));
+    }
+    log_activity(&conn, ctx.id, "delete_blacklist",
+        &serde_json::json!({ "id": id }).to_string(), &ip, &ua);
+    crate::sync_share::mark_dirty(&conn, "food_blacklist");
+    Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
 pub async fn list_cuisines(
@@ -175,7 +261,12 @@ pub async fn create_catalog_item(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "add")?;
-    check_food_recipes_scope(&ctx)?;
+    // Either scope qualifies: recipes (auto-add ingredient when authoring a
+    // recipe) or products (UI label is "Продукты (каталог)" — extending the
+    // catalog is a natural fit for this scope).
+    if ctx.tab != "food" || !(ctx.has_scope("recipes") || ctx.has_scope("products")) {
+        return Err((StatusCode::FORBIDDEN, "Scope does not include recipes or products".into()));
+    }
     let cat = req.category.unwrap_or_else(|| "other".into());
     let trimmed = req.name.trim();
     conn.execute(
