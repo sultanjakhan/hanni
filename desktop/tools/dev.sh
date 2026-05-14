@@ -46,14 +46,6 @@ acquire_lock() {
   trap 'rm -f "$LOCKFILE"; exit' EXIT INT TERM
 }
 
-kill_production() {
-  if pgrep -if "Hanni.app" >/dev/null 2>&1; then
-    echo "[dev] Production Hanni running — quitting..."
-    osascript -e 'tell application "Hanni" to quit' 2>/dev/null
-    sleep 2
-  fi
-}
-
 run_dev() {
   echo "[dev] Starting cargo tauri dev (PID $$)..."
   UPDATER_GITHUB_TOKEN=dummy cargo tauri dev 2>&1
@@ -63,7 +55,10 @@ run_dev() {
 }
 
 # ── Main ──
-kill_production
+# Prod and dev don't conflict — prod on 8235/8239, dev on 8236/8240.
+if pgrep -if "Hanni.app" >/dev/null 2>&1; then
+  echo "[dev] Note: production Hanni is running (separate ports — no conflict)."
+fi
 acquire_lock
 
 if $LOOP; then
