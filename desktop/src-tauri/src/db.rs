@@ -1125,6 +1125,9 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE schedules ADD COLUMN track_overdue INTEGER NOT NULL DEFAULT 0", []).ok();
     // v0.74: target_minutes — daily target duration for the schedule (NULL = no target, single completion)
     conn.execute("ALTER TABLE schedules ADD COLUMN target_minutes INTEGER", []).ok();
+    // v0.79: tracking_mode — how the user interacts with this schedule from the "+" popup.
+    // 'track' (default) starts a timeline_block timer; 'check' instantly marks it done.
+    conn.execute("ALTER TABLE schedules ADD COLUMN tracking_mode TEXT NOT NULL DEFAULT 'track'", []).ok();
     // v0.74: reflection fields
     // notes.estimate_minutes — planned duration set by user
     conn.execute("ALTER TABLE notes ADD COLUMN estimate_minutes INTEGER", []).ok();

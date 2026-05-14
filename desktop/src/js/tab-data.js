@@ -1621,7 +1621,7 @@ function renderHealth(el, today, habits) {
     recordTable: 'habits',
     records: habits,
     fixedColumns: [
-      { key: 'done', label: '', render: r => `<div class="habit-check${r.completed ? ' checked' : ''}" style="cursor:pointer;" data-hid="${r.id}">${r.completed ? '&#10003;' : ''}</div>` },
+      { key: 'done', label: '', dataType: 'checkbox', render: r => `<div class="habit-check${r.completed ? ' checked' : ''}" style="cursor:pointer;" data-hid="${r.id}">${r.completed ? '&#10003;' : ''}</div>` },
       { key: 'name', label: 'Привычка', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.name)}</span>` },
       { key: 'frequency', label: 'Частота', editable: true, editType: 'select', editOptions: [
         { value: 'daily', label: 'Ежедневно', color: 'blue' }, { value: 'weekly', label: 'Еженедельно', color: 'green' },
@@ -2060,7 +2060,7 @@ async function loadSchedule(subTab) {
         onFreeze: async (id) => { await invoke('update_schedule', { id, isActive: false }); },
         availableViews: ['table', 'list'],
         fixedColumns: [
-          { key: 'done', label: '✓', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
+          { key: 'done', label: '✓', dataType: 'checkbox', render: r => `<div class="habit-check${completedIds.has(r.id) ? ' checked' : ''}" data-schid="${r.id}" style="cursor:pointer;">${completedIds.has(r.id) ? '&#10003;' : ''}</div>` },
           { key: 'title', label: 'Название', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.title)}</span>` },
           { key: 'category', label: 'Категория', editable: true, editType: 'select', editOptions: Object.entries(SCHEDULE_CATEGORIES).map(([k, v]) => ({ value: k, label: v, color: SCH_CAT_COLORS[k] || 'gray' })), render: r => {
             if (!r.category) return '';
@@ -2084,7 +2084,12 @@ async function loadSchedule(subTab) {
           { key: 'target_minutes', label: 'Цель', editable: true, editType: 'minutes', rawValue: r => r.target_minutes ?? '', render: r => {
             return r.target_minutes ? `<span class="cell-minutes">${r.target_minutes} мин</span>` : '<span class="text-faint">—</span>';
           }},
-          { key: 'track_overdue', label: '⚠️', render: r => `<div class="habit-check${r.track_overdue ? ' checked' : ''}" data-overdue-id="${r.id}" style="cursor:pointer;" title="${r.track_overdue ? 'Пропуск = просрочка' : 'Пропуск игнорируется'}">${r.track_overdue ? '&#10003;' : ''}</div>` },
+          { key: 'track_overdue', label: '⚠️', dataType: 'checkbox', render: r => `<div class="habit-check${r.track_overdue ? ' checked' : ''}" data-overdue-id="${r.id}" style="cursor:pointer;" title="${r.track_overdue ? 'Пропуск = просрочка' : 'Пропуск игнорируется'}">${r.track_overdue ? '&#10003;' : ''}</div>` },
+          { key: 'tracking_mode', label: '⏱', dataType: 'checkbox', render: r => {
+            const isTrack = (r.tracking_mode || 'track') === 'track';
+            const title = isTrack ? 'Трекинг времени: клик в "+" стартует таймер' : 'Простая отметка: клик в "+" сразу отмечает как сделано';
+            return `<div class="habit-check${isTrack ? ' checked' : ''}" data-trackmode-id="${r.id}" style="cursor:pointer;" title="${title}">${isTrack ? '&#10003;' : ''}</div>`;
+          }},
         ],
         idField: 'id',
         addButton: '+ Расписание',
@@ -2161,6 +2166,15 @@ async function loadSchedule(subTab) {
           ov.innerHTML = wasOn ? '' : '&#10003;';
           return;
         }
+        const tm = e.target.closest('[data-trackmode-id]');
+        if (tm) {
+          const id = parseInt(tm.dataset.trackmodeId);
+          const wasOn = tm.classList.contains('checked');
+          await invoke('update_schedule', { id, trackingMode: wasOn ? 'check' : 'track' });
+          tm.classList.toggle('checked', !wasOn);
+          tm.innerHTML = wasOn ? '' : '&#10003;';
+          return;
+        }
         const tog = e.target.closest('[data-toggle-id]');
         if (tog) {
           const id = parseInt(tog.dataset.toggleId);
@@ -2192,6 +2206,11 @@ function showScheduleModal() {
     </div>
     <div class="form-group"><label class="form-label">Время</label><input class="form-input" id="sch-time" type="time"></div>
     <div class="form-group"><label class="form-label">Детали</label><input class="form-input" id="sch-details" placeholder="Дозировка, длительность..."></div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+      <label class="form-label" style="margin:0;flex:1;">Трекинг времени</label>
+      <label class="toggle"><input type="checkbox" id="sch-tracking" checked><span class="toggle-track"></span></label>
+      <span style="font-size:11px;color:var(--text-muted);">off = простая отметка</span>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
       <button class="btn-primary" id="sch-save">Сохранить</button>
@@ -2206,6 +2225,7 @@ function showScheduleModal() {
     const title = document.getElementById('sch-title')?.value?.trim();
     if (!title) return;
     const freqDays = [...overlay.querySelectorAll('.sch-day-cb:checked')].map(cb => cb.value).join(',') || null;
+    const trackingOn = document.getElementById('sch-tracking')?.checked !== false;
     try {
       await invoke('create_schedule', {
         title,
@@ -2214,6 +2234,7 @@ function showScheduleModal() {
         frequencyDays: freqDays,
         timeOfDay: document.getElementById('sch-time')?.value || null,
         details: document.getElementById('sch-details')?.value || null,
+        trackingMode: trackingOn ? 'track' : 'check',
       });
       overlay.remove();
       loadSchedule();

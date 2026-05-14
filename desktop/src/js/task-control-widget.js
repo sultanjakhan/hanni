@@ -26,9 +26,20 @@ function escapeHtml(s) {
   ));
 }
 
-function sourceIcon(t) {
-  return t === 'event' ? '📅' : t === 'schedule' ? '🔁' : t === 'note' ? '📝' : '•';
+// Mirrors SCH_CAT_ICONS in tab-calendar.js / calendar-task-list.js. Keep in sync.
+const SCH_CAT_ICONS = {
+  health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡',
+  practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽'
+};
+
+function taskIcon(p) {
+  if (p.source_type === 'schedule') return SCH_CAT_ICONS[p.category] || SCH_CAT_ICONS.other;
+  if (p.source_type === 'event') return '📅';
+  if (p.source_type === 'note') return '📝';
+  return '•';
 }
+
+const GROUP_TITLES = { event: 'События', schedule: 'Расписание', note: 'Заметки' };
 
 async function refreshState() {
   const blocks = await invoke('get_timeline_blocks', { date: localDate() }).catch(() => []);
@@ -61,29 +72,50 @@ async function openStartDropdown() {
   const planned = await invoke('get_today_planned', { date: localDate() }).catch(() => []);
   const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done');
 
+  const groups = {
+    event:    startable.filter(p => p.source_type === 'event'),
+    schedule: startable.filter(p => p.source_type === 'schedule')
+                       .sort((a, b) => (a.category || '').localeCompare(b.category || '')),
+    note:     startable.filter(p => p.source_type === 'note'),
+  };
+  const nonEmpty = Object.entries(groups).filter(([, items]) => items.length > 0);
+  const showHeaders = nonEmpty.length > 1;
+  const orderedItems = nonEmpty.flatMap(([, items]) => items);
+
   panel = document.createElement('div');
   panel.className = 'tw-panel';
   panel.innerHTML = `
     <div class="tw-panel-header">Запустить таск</div>
     <div class="tw-panel-body">
-      ${startable.length === 0
+      ${orderedItems.length === 0
         ? '<div class="tw-empty">Нет задач на сегодня</div>'
-        : startable.map((p, i) => `
-            <button class="tw-item" data-idx="${i}">
-              <span class="tw-item-icon">${sourceIcon(p.source_type)}</span>
-              <span class="tw-item-title">${escapeHtml(p.title)}</span>
-              ${p.planned_time ? `<span class="tw-item-time">${escapeHtml(p.planned_time)}</span>` : ''}
-            </button>`).join('')}
+        : nonEmpty.map(([key, items]) => `
+            ${showHeaders ? `<div class="tw-group-header">${GROUP_TITLES[key]}</div>` : ''}
+            ${items.map(p => {
+              const idx = orderedItems.indexOf(p);
+              const mode = p.tracking_mode === 'check' ? 'check' : 'track';
+              return `
+                <button class="tw-item" data-idx="${idx}">
+                  <span class="tw-item-icon">${taskIcon(p)}</span>
+                  <span class="tw-item-title">${escapeHtml(p.title)}</span>
+                  <span class="tw-item-mode tw-mode-${mode}">${mode}</span>
+                </button>`;
+            }).join('')}
+          `).join('')}
     </div>`;
   widget.appendChild(panel);
 
   panel.querySelectorAll('.tw-item').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const p = startable[parseInt(btn.dataset.idx)];
-      await invoke('start_task_block', {
-        sourceType: p.source_type,
-        sourceId: p.source_id,
-      }).catch(err => console.error('tw start:', err));
+      const p = orderedItems[parseInt(btn.dataset.idx)];
+      const isCheck = p.tracking_mode === 'check';
+      try {
+        if (isCheck && p.source_type === 'schedule') {
+          await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: localDate() });
+        } else {
+          await invoke('start_task_block', { sourceType: p.source_type, sourceId: p.source_id });
+        }
+      } catch (err) { console.error('tw item click:', err); }
       closeDropdown();
       window.dispatchEvent(new Event('task-state-changed'));
       await refreshState();
