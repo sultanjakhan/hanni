@@ -1,6 +1,27 @@
 // ── js/state.js — Shared state, Tauri bindings, constants, tab registry ──
 
-export const { invoke } = window.__TAURI__.core;
+import { requestPush } from './sync-trigger.js';
+
+const _rawInvoke = window.__TAURI__.core.invoke;
+
+// Prefixes for commands that mutate sync-eligible SQLite tables. Matches drop
+// outbound latency from the auto-sync interval to ~1s by triggering a
+// debounced cloud_owner_push. False positives are harmless (push is a no-op
+// when no rows changed). start_/stop_/complete_ are deliberately excluded —
+// the polling loop covers them, and those names overlap with non-DB commands
+// like start_recording / stop_speaking.
+const _SYNC_WRITE_PREFIXES = [
+  'add_', 'create_', 'delete_', 'update_', 'save_', 'toggle_', 'archive_',
+];
+
+export function invoke(cmd, args) {
+  const promise = _rawInvoke(cmd, args);
+  if (typeof cmd === 'string' && _SYNC_WRITE_PREFIXES.some(p => cmd.startsWith(p))) {
+    promise.then(() => requestPush(), () => {});
+  }
+  return promise;
+}
+
 export const { listen, emit } = window.__TAURI__.event;
 
 // ── Platform detection ──

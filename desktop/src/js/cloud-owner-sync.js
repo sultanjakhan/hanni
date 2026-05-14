@@ -71,7 +71,7 @@ export function attachOwnerSync(overlay, autoCfg) {
 
   async function saveAuto() {
     const enabled = !!autoEnabled.checked;
-    const intervalSecs = Math.max(30, Math.min(600, Number(autoSecs.value) || 60));
+    const intervalSecs = Math.max(3, Math.min(600, Number(autoSecs.value) || 3));
     autoSecs.value = intervalSecs;
     try {
       await invoke('cloud_owner_set_auto', { enabled, intervalSecs });

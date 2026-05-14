@@ -30,8 +30,8 @@ export async function openCloudShareModal() {
           Включена
         </label>
         <span style="color:var(--text-muted);font-size:12px">каждые</span>
-        <input type="number" id="cs-auto-secs" min="30" max="600" step="10"
-               value="${Number(auto.interval_secs) || 60}"
+        <input type="number" id="cs-auto-secs" min="3" max="600" step="1"
+               value="${Number(auto.interval_secs) || 3}"
                style="width:72px;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px">
         <span style="color:var(--text-muted);font-size:12px">сек</span>
       </div>

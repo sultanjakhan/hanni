@@ -17,11 +17,13 @@ use crate::sync_owner::{pull_inner, push_inner};
 use crate::types::HanniDb;
 
 // Stage D snapshot-based owner sync. Pull is one collection query per tick
-// (Firestore counts that as 1 read), push grows with row writes. At 10 s
-// idle pull ≈ 8.6K reads/day per device — well inside Spark's 50K read
-// quota. Push hits the 20K write/day cap if you go aggressive and reset
-// cursors repeatedly; hence default 10 s and a long backoff on 429.
-const DEFAULT_INTERVAL_SECS: u64 = 10;
+// (Firestore counts that as 1 read), push grows with row writes. At 3 s
+// idle pull ≈ 28.8K reads/day per device — still inside Spark's 50K read
+// quota. JS-side requestPush() debounces local writes into immediate pushes
+// so this loop only has to cover inbound. Push hits the 20K write/day cap
+// if you go aggressive and reset cursors repeatedly; hence the long backoff
+// on 429.
+const DEFAULT_INTERVAL_SECS: u64 = 3;
 const MIN_INTERVAL_SECS: u64 = 3;
 const MAX_INTERVAL_SECS: u64 = 600;
 const BACKOFF_CAP_SECS: u64 = 1800;  // 30 min — quota errors take time to clear
