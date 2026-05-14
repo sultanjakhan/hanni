@@ -137,7 +137,7 @@ function wireFixedColumnMenus(el, tabId, reloadFn, onSort) {
     th.addEventListener('click', (e) => {
       if (e.target.closest('.col-resize-handle')) return;
       e.stopPropagation();
-      showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reloadFn, onSort);
+      showFixedColumnMenu(th.dataset.fixedKey, th.dataset.fixedLabel || th.dataset.fixedKey, th.getBoundingClientRect(), tabId, reloadFn, onSort, null, th.dataset.editType, th.dataset.dataType || null);
     });
   });
 }

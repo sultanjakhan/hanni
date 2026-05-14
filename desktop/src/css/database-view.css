@@ -737,6 +737,9 @@
   color: var(--text-primary);
   cursor: pointer;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .uni-header-action:hover { background: var(--bg-hover); }
 

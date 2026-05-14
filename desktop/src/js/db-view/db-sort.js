@@ -11,9 +11,36 @@ export function getSortRules(tabId) {
   return S._dbvSortRules[tabId] || [];
 }
 
+function timeToMinutes(s) {
+  const m = /^(\d{2}):(\d{2})$/.exec(String(s || ''));
+  return m ? (+m[1]) * 60 + (+m[2]) : -1;
+}
+
+function compareByType(va, vb, dt) {
+  if (dt === 'number' || dt === 'minutes' || dt === 'progress' || dt === 'rating') {
+    const na = parseFloat(va), nb = parseFloat(vb);
+    const an = isNaN(na), bn = isNaN(nb);
+    if (an && bn) return 0;
+    if (an) return 1;
+    if (bn) return -1;
+    return na - nb;
+  }
+  if (dt === 'date' || dt === 'created_time' || dt === 'last_edited') {
+    return (Date.parse(va) || 0) - (Date.parse(vb) || 0);
+  }
+  if (dt === 'time') {
+    return timeToMinutes(va) - timeToMinutes(vb);
+  }
+  if (dt === 'checkbox') {
+    return (va ? 1 : 0) - (vb ? 1 : 0);
+  }
+  return String(va ?? '').localeCompare(String(vb ?? ''));
+}
+
 /** Apply multi-level sort to records */
-export function applySortRules(records, rules, idField, valuesMap) {
+export function applySortRules(records, rules, idField, valuesMap, getDataType) {
   if (!rules || rules.length === 0) return;
+  const resolveType = getDataType || (() => 'text');
   records.sort((a, b) => {
     for (const { key, dir } of rules) {
       const isProp = key.startsWith('prop_');
@@ -31,8 +58,8 @@ export function applySortRules(records, rules, idField, valuesMap) {
         if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
         continue;
       }
-      const na = parseFloat(va), nb = parseFloat(vb);
-      const cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : String(va).localeCompare(String(vb));
+      const dt = resolveType(key);
+      const cmp = compareByType(va, vb, dt);
       if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
     }
     return 0;

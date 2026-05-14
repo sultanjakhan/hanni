@@ -4,6 +4,7 @@ import { invoke, PROPERTY_TYPE_DEFS, getTypeIcon, getTypeName } from '../state.j
 import { escapeHtml, confirmModal } from '../utils.js';
 import { getHiddenFixedCols, setHiddenFixedCols, getDeletedFixedCols, addDeletedFixedCol, getFixedColName, setFixedColName, clearColumnHighlight, isColumnWrapped, toggleWrap } from './db-col-state.js';
 import { showAddPropertyPopover } from './db-add-property.js';
+import { EDITTYPE_TO_DATATYPE } from './db-type-registry.js';
 
 export { showAddPropertyPopover } from './db-add-property.js';
 export { getHiddenFixedCols, getDeletedFixedCols, addDeletedFixedCol, getFixedColName, getColumnOrder, setColumnOrder, isColumnWrapped, highlightColumn, clearColumnHighlight, buildUnifiedColumns } from './db-col-state.js';
@@ -36,11 +37,10 @@ export function showColumnMenu(propDef, anchorRect, tabId, reloadFn, sortCallbac
 }
 
 /** Show column menu for a fixed column */
-export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadFn, sortCallback, filterCallback, editType) {
+export function showFixedColumnMenu(colKey, colLabel, anchorRect, tabId, reloadFn, sortCallback, filterCallback, editType, dataType) {
   const displayName = getFixedColName(tabId, colKey, colLabel || colKey);
   const wrapped = isColumnWrapped(tabId, colKey);
-  const typeMap = { select: 'select', multi_select: 'select', number: 'number', date: 'date', phone: 'phone', text: 'text' };
-  const fixedType = typeMap[editType] || 'text';
+  const fixedType = dataType || EDITTYPE_TO_DATATYPE[editType] || 'text';
   const menu = openMenu(anchorRect, buildMenuHTML({
     name: displayName, typeIcon: getTypeIcon(fixedType), typeName: getTypeName(fixedType),
     canChangeType: false, wrapped, canHide: true, canInsert: false, canDelete: true,

@@ -34,6 +34,22 @@ export const TYPE_REGISTRY = {
 
 const TYPE_ALIASES = { multi_select: 'select' };
 
+// Maps DatabaseView fixed-column `editType` to a `dataType` from TYPE_REGISTRY.
+// Used as a fallback when a column does not declare `dataType` explicitly.
+export const EDITTYPE_TO_DATATYPE = {
+  text: 'text', number: 'number', minutes: 'minutes',
+  date: 'date', time: 'time', phone: 'phone',
+  select: 'select', multi_select: 'select',
+  recurrence: 'recurrence',
+};
+
+/** Resolve a column's effective dataType: explicit dataType wins, else editType lookup, else 'text'. */
+export function resolveDataType(column) {
+  if (!column) return 'text';
+  if (column.dataType) return column.dataType;
+  return EDITTYPE_TO_DATATYPE[column.editType] || 'text';
+}
+
 /** Get type definition by id */
 export function getType(typeId) {
   const resolved = TYPE_ALIASES[typeId] || typeId;

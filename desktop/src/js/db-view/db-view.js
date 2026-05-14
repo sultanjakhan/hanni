@@ -10,6 +10,7 @@ import { renderTimelineView } from './db-timeline.js';
 import { renderCalendarView } from './db-calendar.js';
 import { showFilterDropdown, renderFilterBar } from './db-filters.js';
 import { showSortDropdown, getSortRules, applySortRules } from './db-sort.js';
+import { resolveDataType } from './db-type-registry.js';
 import { exportToCsv } from './db-export.js';
 import { importCsv } from './db-import.js';
 import { getHiddenFixedCols, setHiddenFixedCols, getDeletedFixedCols } from './db-col-state.js';
@@ -103,7 +104,7 @@ export class DatabaseView {
   }
   _buildFields() {
     const s = this.schema;
-    return [...(s.fixedColumns || []).map(c => ({ filterKey: c.key, label: c.label, type: c.editType || 'text', options: c.editOptions || [] })),
+    return [...(s.fixedColumns || []).map(c => ({ filterKey: c.key, label: c.label, type: resolveDataType(c), options: c.editOptions || [] })),
       ...this._customProps.filter(p => p.visible !== false).map(p => {
         let opts = []; try { opts = JSON.parse(p.options || '[]'); } catch {} return { filterKey: `prop_${p.id}`, label: p.name, type: p.type, options: opts };
       })];
@@ -125,8 +126,17 @@ export class DatabaseView {
       S._dbvSortRules[tabId] = rules;
     }
     const r = getSortRules(tabId);
-    applySortRules(this._records, r, this.schema.idField, this._valuesMap);
+    applySortRules(this._records, r, this.schema.idField, this._valuesMap, (key) => this._getDataType(key));
     this.render();
+  }
+  _getDataType(key) {
+    if (key && key.startsWith('prop_')) {
+      const pid = parseInt(key.substring(5));
+      const p = this._customProps.find(x => x.id === pid);
+      return p ? p.type : 'text';
+    }
+    const col = (this.schema.fixedColumns || []).find(c => c.key === key);
+    return resolveDataType(col);
   }
   _getHiddenColumns() {
     const s = this.schema, result = [], hiddenFixed = getHiddenFixedCols(s.tabId), deletedFixed = getDeletedFixedCols(s.tabId);
