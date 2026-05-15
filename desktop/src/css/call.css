@@ -660,19 +660,6 @@ body.qw-popover-open #task-control-widget {
   border-top: 1px solid var(--border-default);
   padding-top: 10px;
 }
-.tw-item-mode {
-  flex-shrink: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--bg-hover);
-}
-.tw-mode-check { color: #16a34a; }
-.tw-mode-track { color: var(--text-muted); }
 .tw-action {
   display: flex; align-items: center; gap: 10px;
   width: 100%; padding: 8px 10px; border: none;

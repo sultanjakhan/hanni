@@ -93,12 +93,10 @@ async function openStartDropdown() {
             ${showHeaders ? `<div class="tw-group-header">${GROUP_TITLES[key]}</div>` : ''}
             ${items.map(p => {
               const idx = orderedItems.indexOf(p);
-              const mode = p.tracking_mode === 'check' ? 'check' : 'track';
               return `
                 <button class="tw-item" data-idx="${idx}">
                   <span class="tw-item-icon">${taskIcon(p)}</span>
                   <span class="tw-item-title">${escapeHtml(p.title)}</span>
-                  <span class="tw-item-mode tw-mode-${mode}">${mode}</span>
                 </button>`;
             }).join('')}
           `).join('')}
