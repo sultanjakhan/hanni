@@ -2085,12 +2085,17 @@ async function loadSchedule(subTab) {
           { key: 'target_minutes', label: 'Цель', editable: true, editType: 'minutes', rawValue: r => r.target_minutes ?? '', render: r => {
             return r.target_minutes ? `<span class="cell-minutes">${r.target_minutes} мин</span>` : '<span class="text-faint">—</span>';
           }},
-          { key: 'track_overdue', label: '⚠️', dataType: 'checkbox', render: r => `<div class="habit-check${r.track_overdue ? ' checked' : ''}" data-overdue-id="${r.id}" style="cursor:pointer;" title="${r.track_overdue ? 'Пропуск = просрочка' : 'Пропуск игнорируется'}">${r.track_overdue ? '&#10003;' : ''}</div>` },
-          { key: 'tracking_mode', label: '⏱', dataType: 'checkbox', render: r => {
-            const isTrack = (r.tracking_mode || 'track') === 'track';
-            const title = isTrack ? 'Трекинг времени: клик в "+" стартует таймер' : 'Простая отметка: клик в "+" сразу отмечает как сделано';
-            return `<div class="habit-check${isTrack ? ' checked' : ''}" data-trackmode-id="${r.id}" style="cursor:pointer;" title="${title}">${isTrack ? '&#10003;' : ''}</div>`;
-          }},
+          { key: 'track_overdue', label: 'Просрочка', dataType: 'checkbox',
+            headerTooltip: 'Если включено и таск пропущен в свой день — считается просроченным. Выключено = пропуск молча игнорируется.',
+            render: r => `<div class="habit-check${r.track_overdue ? ' checked' : ''}" data-overdue-id="${r.id}" style="cursor:pointer;" title="${r.track_overdue ? 'Пропуск = просрочка' : 'Пропуск игнорируется'}">${r.track_overdue ? '&#10003;' : ''}</div>` },
+          { key: 'tracking_mode', label: 'Трекинг', dataType: 'checkbox',
+            headerTooltip: 'Вкл = клик в кнопке «+» стартует таймер (timeline-блок). Выкл = клик в «+» сразу отмечает как сделано, без таймера.',
+            render: r => {
+              const isTrack = (r.tracking_mode || 'track') === 'track';
+              const title = isTrack ? 'Трекинг времени: клик в «+» стартует таймер' : 'Простая отметка: клик в «+» сразу отмечает как сделано';
+              return `<div class="habit-check${isTrack ? ' checked' : ''}" data-trackmode-id="${r.id}" style="cursor:pointer;" title="${title}">${isTrack ? '&#10003;' : ''}</div>`;
+            }
+          },
         ],
         idField: 'id',
         addButton: '+ Расписание',

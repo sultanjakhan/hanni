@@ -48,8 +48,9 @@ export async function renderTableView(el, ctx) {
       const w = W[c.key] || 140;
       const displayName = getFixedColName(tabId, c.key, c.label);
       const dt = c.dataType || '';
-      if (!displayName) return `<th class="sortable-header fixed-header draggable-col" data-sort="${c.key}" data-fixed-key="${c.key}" data-col-id="${c.key}" data-edit-type="${c.editType || 'text'}" data-data-type="${dt}" style="width:${w}px"></th>`;
-      return `<th class="sortable-header fixed-header draggable-col" data-sort="${c.key}" data-fixed-key="${c.key}" data-fixed-label="${escapeHtml(c.label)}" data-col-id="${c.key}" data-edit-type="${c.editType || 'text'}" data-data-type="${dt}" style="width:${w}px"><div class="th-content">${escapeHtml(displayName)}</div></th>`;
+      const tipAttr = c.headerTooltip ? ` title="${escapeHtml(c.headerTooltip)}"` : '';
+      if (!displayName) return `<th class="sortable-header fixed-header draggable-col" data-sort="${c.key}" data-fixed-key="${c.key}" data-col-id="${c.key}" data-edit-type="${c.editType || 'text'}" data-data-type="${dt}"${tipAttr} style="width:${w}px"></th>`;
+      return `<th class="sortable-header fixed-header draggable-col" data-sort="${c.key}" data-fixed-key="${c.key}" data-fixed-label="${escapeHtml(c.label)}" data-col-id="${c.key}" data-edit-type="${c.editType || 'text'}" data-data-type="${dt}"${tipAttr} style="width:${w}px"><div class="th-content">${escapeHtml(displayName)}</div></th>`;
     } else {
       const p = col.def;
       return `<th class="sortable-header prop-header draggable-col" data-sort="prop_${p.id}" data-prop-id="${p.id}" data-col-id="prop_${p.id}" style="width:180px"><div class="th-content">${escapeHtml(p.name)}</div></th>`;
