@@ -1367,6 +1367,11 @@
   background: var(--bg-page); color: var(--text-primary); font-size: 13px; outline: none;
 }
 .recipe-search:focus { border-color: var(--border-focus); }
+.rf-search {
+  flex: none; width: 180px; padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default);
+  background: var(--bg-page); color: var(--text-primary); font-size: 13px; outline: none;
+}
+.rf-search:focus { border-color: var(--border-focus); }
 .recipe-add-btn { white-space: nowrap; }
 .recipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .recipe-card {

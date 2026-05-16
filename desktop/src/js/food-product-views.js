@@ -94,6 +94,21 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   const orphans = tops.filter(p => !childrenByParent.has(p.id));
 
+  // Fold orphans whose subgroup matches a parent's subgroup into that parent,
+  // so we don't render a duplicate tile (e.g. parent "говядина" + bucket "говядина").
+  const parentBySubgroup = new Map();
+  for (const par of parents) {
+    const sg = (par.subgroup || '').trim();
+    if (sg && !parentBySubgroup.has(sg)) parentBySubgroup.set(sg, par.id);
+  }
+  const foldedCount = new Map();
+  const looseOrphans = [];
+  for (const p of orphans) {
+    const hostId = parentBySubgroup.get((p.subgroup || '').trim());
+    if (hostId) foldedCount.set(hostId, (foldedCount.get(hostId) || 0) + 1);
+    else looseOrphans.push(p);
+  }
+
   const blockedTagSet = new Set(blacklist.filter(e => e.type === 'tag').map(e => e.value.toLowerCase()));
 
   el.innerHTML = '';
@@ -103,7 +118,7 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
 
   for (const par of parents) {
     const kids = childrenByParent.get(par.id) || [];
-    const count = kids.length + 1;
+    const count = kids.length + (foldedCount.get(par.id) || 0) + 1;
     const blocked = isIngredientBlocked(par.name, blacklist)
       || (par.subgroup && blockedTagSet.has(par.subgroup.toLowerCase()));
     const tile = document.createElement('div');
@@ -114,9 +129,9 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
     frag.appendChild(tile);
   }
 
-  if (orphans.length) {
+  if (looseOrphans.length) {
     const groups = new Map();
-    for (const p of orphans) {
+    for (const p of looseOrphans) {
       const sg = p.subgroup || '';
       if (!groups.has(sg)) groups.set(sg, []);
       groups.get(sg).push(p);
@@ -147,7 +162,12 @@ export function renderChildrenGrid(el, catalog, parent, blacklist, onOpen) {
   } else {
     const root = catalog.find(c => c.id === parent.id);
     const kids = catalog.filter(c => c.parent_id === parent.id);
-    items = root ? [root, ...kids] : kids;
+    // Include orphans folded into this parent by matching subgroup (see renderParentGrid).
+    const sg = ((root && root.subgroup) || '').trim();
+    const hasChildren = new Set(catalog.filter(c => c.parent_id).map(c => c.parent_id));
+    const folded = sg ? catalog.filter(c => !c.parent_id && c.id !== parent.id
+      && !hasChildren.has(c.id) && (c.subgroup || '').trim() === sg) : [];
+    items = root ? [root, ...kids, ...folded] : [...kids, ...folded];
   }
   items.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   el.innerHTML = '';

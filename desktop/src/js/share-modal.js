@@ -111,6 +111,13 @@ async function refreshList(overlay, tabId) {
   }
 }
 
+function pluralOpens(n) {
+  const m = n % 10, h = n % 100;
+  if (m === 1 && h !== 11) return 'открытие';
+  if (m >= 2 && m <= 4 && (h < 10 || h > 20)) return 'открытия';
+  return 'открытий';
+}
+
 function renderList(links, tabId) {
   if (!links.length) return '<div style="color:var(--text-muted);padding:12px 0;">Пока нет активных ссылок</div>';
   const scopeMap = SCOPE_LABELS[tabId] || {};
@@ -123,7 +130,7 @@ function renderList(links, tabId) {
     return `<div class="share-row ${isActive ? '' : 'share-row-revoked'}">
       <div class="share-row-top">
         <div class="share-row-label">${escapeHtml(l.label || 'Без подписи')} · <span style="color:var(--text-muted);font-weight:400">${escapeHtml(scopeLabel)}</span></div>
-        <div class="share-row-status">${escapeHtml(statusTxt)} · ${l.used_count} открытий</div>
+        <div class="share-row-status">${escapeHtml(statusTxt)} · ${l.used_count} ${pluralOpens(l.used_count)}</div>
       </div>
       <div class="share-row-perms">${perms}</div>
       ${url ? `<div class="share-row-url">
