@@ -13,6 +13,7 @@ mod voice;
 mod proactive;
 mod macos;
 mod calendar;
+mod event_categories;
 mod notes;
 mod commands_data;
 mod commands_meta;
@@ -188,6 +189,7 @@ fn init_database() -> HanniDb {
     db::migrate_catalog_links(&conn);
     db::migrate_share_links(&conn);
     db::migrate_priority(&conn);
+    db::migrate_event_categories(&conn);
     db::migrate_drop_mindset(&conn);
     db::migrate_sync_meta(&conn);
     db::enable_crr_tables(&conn);
@@ -442,6 +444,11 @@ pub fn run() {
             // Calendar Sync
             calendar::sync_apple_calendar,
             calendar::sync_google_ics,
+            // Event categories CRUD
+            event_categories::list_event_categories,
+            event_categories::create_event_category,
+            event_categories::update_event_category,
+            event_categories::delete_event_category,
             // Job Search CRM (Work)
             commands_data::get_job_sources,
             commands_data::add_job_source,

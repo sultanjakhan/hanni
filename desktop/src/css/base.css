@@ -66,6 +66,8 @@
   /* Semantic colors */
   --color-green: #448361;
   --color-green-bg: #dbeddb;
+  --color-lime: #84a83a;
+  --color-lime-bg: #e8efcf;
   --color-blue: #2383e2;
   --color-blue-bg: #d3e5ef;
   --color-red: #d44c47;
@@ -155,6 +157,8 @@
   /* Semantic colors */
   --color-green: #4F9768;
   --color-green-bg: #2B3733;
+  --color-lime: #8AAA46;
+  --color-lime-bg: #2F3826;
   --color-blue: #447ACB;
   --color-blue-bg: #2B3340;
   --color-red: #BE524B;

@@ -77,7 +77,7 @@ pub fn update_event(id: i64, title: Option<String>, description: Option<String>,
 pub fn get_all_events(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT id, title, description, date, time, duration_minutes, category, color, completed, source
+        "SELECT id, title, description, date, time, duration_minutes, category, color, completed, source, COALESCE(priority,0)
          FROM events ORDER BY date DESC, time DESC"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |row| {
@@ -92,6 +92,7 @@ pub fn get_all_events(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::V
             "color": row.get::<_, String>(7)?,
             "completed": row.get::<_, i64>(8)?,
             "source": row.get::<_, Option<String>>(9)?,
+            "priority": row.get::<_, i32>(10)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)

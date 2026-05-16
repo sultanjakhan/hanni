@@ -2024,9 +2024,45 @@ pub fn table_columns_in(conn: &rusqlite::Connection, table: &str) -> Result<Vec<
 
 pub fn migrate_priority(conn: &rusqlite::Connection) {
     // Importance/priority for tasks (notes with status='task') and calendar events.
-    // 0 = normal, 1 = important, 2 = critical.
+    // 0 = none, 1..5 from green to red (low → critical).
     conn.execute("ALTER TABLE notes ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
     conn.execute("ALTER TABLE events ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
+}
+
+pub fn migrate_event_categories(conn: &rusqlite::Connection) {
+    // User-managed list of calendar event categories. Seeded once with sensible
+    // defaults; users can rename/recolor/delete from the UI.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS event_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT NOT NULL DEFAULT '#9B9B9B',
+            icon TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT ''
+        );"
+    ).ok();
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM event_categories", [], |r| r.get(0)
+    ).unwrap_or(0);
+    if count == 0 {
+        let now = chrono::Local::now().to_rfc3339();
+        let seed: &[(&str, &str, &str, i64)] = &[
+            ("general",  "#9B9B9B", "",   0),
+            ("Работа",   "#2383e2", "💼", 1),
+            ("Личное",   "#9065b0", "🏠", 2),
+            ("Здоровье", "#448361", "💚", 3),
+            ("Спорт",    "#d9730d", "🏋", 4),
+            ("Еда",      "#cb8a05", "🍽", 5),
+            ("Учёба",    "#c14c8a", "📚", 6),
+        ];
+        for (name, color, icon, ord) in seed {
+            conn.execute(
+                "INSERT OR IGNORE INTO event_categories (name, color, icon, sort_order, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![name, color, icon, ord, now],
+            ).ok();
+        }
+    }
 }
 
 /// Stage D — schema prep for snapshot-based owner sync.

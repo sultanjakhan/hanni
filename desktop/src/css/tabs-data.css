@@ -472,6 +472,56 @@
 .day-event-time { font-size: 11px; color: var(--accent-blue); min-width: 90px; }
 .day-event-title { font-size: 14px; color: var(--text-primary); flex: 1; }
 .day-event-dur { font-size: 11px; color: var(--text-muted); }
+.day-event[data-event-id]:hover { background: var(--bg-hover); }
+.day-event-pri {
+  display: inline-block; width: 4px; height: 22px; border-radius: 2px;
+  margin-right: 6px; flex-shrink: 0;
+}
+
+/* Event modal — category picker, priority pills */
+.evm-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.evm-cat-row { display: flex; gap: var(--space-2); align-items: center; }
+.evm-cat-row .form-select { flex: 1; }
+.evm-priority { display: flex; gap: 6px; flex-wrap: wrap; }
+.evm-pri-pill {
+  width: 36px; height: 32px; border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.08s ease;
+}
+.evm-pri-pill:hover { transform: translateY(-1px); }
+.evm-pri-pill.active {
+  background: var(--pri-bg); color: var(--pri-fg);
+  border-color: var(--pri-bg); box-shadow: 0 0 0 2px var(--bg-page), 0 0 0 3px var(--pri-bg);
+}
+.evm-cat-list { display: flex; flex-direction: column; gap: var(--space-2); max-height: 320px; overflow-y: auto; }
+.evm-cat-item { display: flex; gap: var(--space-2); align-items: center; }
+.evm-cat-name { flex: 1; }
+.evm-del { color: var(--color-red); }
+
+/* Icon-only button — category +, manage, emoji, delete */
+.btn-icon {
+  width: 32px; height: 32px; flex-shrink: 0; padding: 0;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  background: var(--bg-card); color: var(--text-secondary);
+  cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.08s ease;
+}
+.btn-icon:hover { background: var(--bg-hover); }
+.btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Color swatch — round button (palette picker + manager rows) */
+.evm-cat-swatch {
+  width: 22px; height: 22px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
+  border: 1px solid var(--border-default); padding: 0;
+}
+.evm-cat-swatch.active { box-shadow: 0 0 0 2px var(--bg-page), 0 0 0 3px var(--text-secondary); }
+.evm-cat-color-input { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+.evm-palette { display: flex; gap: 6px; flex-wrap: wrap; }
+.evm-cat-form-row { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.evm-cat-form-row .evm-label { min-width: 60px; margin-top: 0; }
 .day-allday {
   display: flex; padding: 8px 0; border-bottom: 1px solid var(--border-default);
   margin-bottom: var(--space-2);

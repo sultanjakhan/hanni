@@ -2,6 +2,7 @@
 
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
+import { showEventModal, priorityHex } from './calendar-event-modal.js';
 
 // Helper: check if a schedule should appear on a given date
 function scheduleMatchesDate(sch, dateStr) {
@@ -24,11 +25,15 @@ function scheduleMatchesDate(sch, dateStr) {
 const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
 let calDayScrolled = false;
 
+// Modal triggers refresh through window event so we don't need to inject the
+// callback into the imported module.
+window.addEventListener('hanni:calendar-refresh', () => { refreshCalendarInner().catch(() => {}); });
+
 // ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
-  if (!tabLoaders.openCalendarAddEvent) tabLoaders.openCalendarAddEvent = showAddEventModal;
+  if (!tabLoaders.openCalendarAddEvent) tabLoaders.openCalendarAddEvent = showEventModal;
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'calendar', {
@@ -420,7 +425,7 @@ async function renderCalendar(el, events, tasks) {
     S.selectedCalendarDate = todayStr;
     refreshCalendarInner();
   });
-  document.getElementById('cal-add-event')?.addEventListener('click', () => showAddEventModal());
+  document.getElementById('cal-add-event')?.addEventListener('click', () => showEventModal());
 
   // Day click
   el.querySelectorAll('.cal-day:not(.other)').forEach(day => {
@@ -586,7 +591,7 @@ async function renderWeekCalendar(el, events) {
   document.getElementById('week-prev')?.addEventListener('click', () => { S.calWeekOffset = (S.calWeekOffset || 0) - 1; refreshCalendarInner(); });
   document.getElementById('week-next')?.addEventListener('click', () => { S.calWeekOffset = (S.calWeekOffset || 0) + 1; refreshCalendarInner(); });
   document.getElementById('week-today')?.addEventListener('click', () => { S.calWeekOffset = 0; refreshCalendarInner(); });
-  document.getElementById('week-add-event')?.addEventListener('click', () => showAddEventModal());
+  document.getElementById('week-add-event')?.addEventListener('click', () => showEventModal());
 
   // Click cell → open day view
   el.querySelectorAll('.wk-cell').forEach(cell => {
@@ -598,50 +603,6 @@ async function renderWeekCalendar(el, events) {
       document.querySelectorAll('[data-calview]').forEach(b => b.classList.toggle('active', b.dataset.calview === 'day'));
       refreshCalendarInner();
     });
-  });
-}
-
-function showAddEventModal() {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal modal-compact">
-    <div class="modal-title">Новое событие</div>
-    <div class="form-row"><input class="form-input" id="event-title" placeholder="Название"></div>
-    <div class="form-row">
-      <input class="form-input" id="event-date" type="date" value="${S.selectedCalendarDate || new Date().toISOString().split('T')[0]}">
-      <input class="form-input" id="event-time" type="time" style="max-width:120px;">
-      <select class="form-select" id="event-priority" style="max-width:140px;">
-        <option value="0">Обычное</option>
-        <option value="1">Важное</option>
-        <option value="2">Критическое</option>
-      </select>
-    </div>
-    <textarea class="form-textarea" id="event-desc" placeholder="Описание (необязательно)" rows="2"></textarea>
-    <div class="modal-actions">
-      <button class="btn-secondary" id="event-cancel">Отмена</button>
-      <button class="btn-primary" id="event-save">Сохранить</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById('event-cancel')?.addEventListener('click', () => overlay.remove());
-  document.getElementById('event-save')?.addEventListener('click', async () => {
-    const title = document.getElementById('event-title')?.value?.trim();
-    if (!title) return;
-    try {
-      await invoke('create_event', {
-        title,
-        description: document.getElementById('event-desc')?.value || '',
-        date: document.getElementById('event-date')?.value || '',
-        time: document.getElementById('event-time')?.value || '',
-        durationMinutes: 60,
-        category: 'general',
-        color: '#9B9B9B',
-        priority: parseInt(document.getElementById('event-priority')?.value || '0', 10),
-      });
-      overlay.remove();
-      refreshCalendarInner();
-    } catch (err) { alert('Ошибка: ' + err); }
   });
 }
 
@@ -689,8 +650,12 @@ async function renderDayCalendar(el, events) {
     const evtHtml = hourEvents.map(e => {
       const srcBadge = e.source && e.source !== 'manual' ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
       const endMin = (() => { const [hh,mm] = (e.time||'00:00').split(':').map(Number); const t = hh*60+mm+(e.duration_minutes||60); return `${String(Math.floor(t/60)%24).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; })();
-      return `<div class="day-event" style="border-left:3px solid ${e.color || 'var(--text-secondary)'};">
-        <span class="day-event-time">${e.time} – ${endMin}</span>
+      const pri = Number(e.priority || 0);
+      const priBar = pri > 0 ? `<span class="day-event-pri" style="background:${priorityHex(pri)}" title="Важность ${pri}/5"></span>` : '';
+      const isManual = !e.source || e.source === 'manual';
+      const editAttr = isManual ? `data-event-id="${e.id}" style="cursor:pointer;border-left:3px solid ${e.color || 'var(--text-secondary)'};"` : `style="border-left:3px solid ${e.color || 'var(--text-secondary)'};"`;
+      return `<div class="day-event" ${editAttr}>
+        ${priBar}<span class="day-event-time">${e.time} – ${endMin}</span>
         <span class="day-event-title">${escapeHtml(e.title)}</span>${srcBadge}
         <span class="day-event-dur">${e.duration_minutes || 60} мин</span>
       </div>`;
@@ -790,15 +755,21 @@ async function renderDayCalendar(el, events) {
   });
   document.getElementById('day-add-event')?.addEventListener('click', () => {
     S.selectedCalendarDate = S.calDayDate;
-    showAddEventModal();
+    showEventModal();
   });
   el.querySelectorAll('.day-hour-content').forEach(cell => {
     cell.addEventListener('click', (e) => {
+      const evCard = e.target.closest('.day-event[data-event-id]');
+      if (evCard) {
+        e.stopPropagation();
+        showEventModal(Number(evCard.dataset.eventId));
+        return;
+      }
       if (e.target.closest('.day-event')) return;
       S.selectedCalendarDate = cell.dataset.date;
-      showAddEventModal();
+      showEventModal();
       setTimeout(() => {
-        const ti = document.getElementById('event-time');
+        const ti = document.getElementById('evm-time');
         if (ti) ti.value = `${String(cell.dataset.hour).padStart(2,'0')}:00`;
       }, 50);
     });
