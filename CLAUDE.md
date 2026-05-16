@@ -13,7 +13,7 @@
 3. **Plan** — read affected files, then present a short plan (which files change, what changes)
 4. **Confirm** — wait for OK before coding
 5. **Implement** — write code, following all rules below
-6. **Verify** — `UPDATER_GITHUB_TOKEN=dummy cargo check` for Rust changes
+6. **Verify** — run stack-specific checks (see the CLAUDE.md in the folder you edited)
 
 Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 
@@ -58,26 +58,21 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 
 ### Size Limits
 - **No file/component longer than 230 lines.** If it exceeds — split automatically
-- **Rust: one `pub fn` = one task**, max 80 lines
 - **UI separated from logic** — always
 
 ### Style
 - **Only change what was requested.** No drive-by refactors, no "improvements" to adjacent code
 - **No unnecessary abstractions** — 3 similar lines > premature helper
 - **Comments in English**, user communication in Russian
-- **CSS: always use variables from `base.css`** — never hardcode colors, spacing, radii, shadows
-- **JS state: only persistent data in `S` object** — no temp vars
-- **Settings UI: `settings-row` / `settings-label` / toggle layout** — never raw dropdowns
 - **No hardcoded data lists** — product categories, ingredient lists, cuisines etc. must come from DB, never from JS/Rust constants
 
+Stack-specific style rules (CSS variables, `S` state, Settings UI layout, Rust function size) live in the folder CLAUDE.md files.
+
 ### Pre-commit Checklist
-- [ ] `UPDATER_GITHUB_TOKEN=dummy cargo check` passes
-- [ ] **`node --check` on every modified JS file** — catch SyntaxError before runtime
-- [ ] No hardcoded colors/sizes (use CSS vars)
-- [ ] New Tauri commands registered in `invoke_handler`
-- [ ] No `console.log` / `dbg!()` left behind
+- [ ] No `console.log` / `dbg!()` / `print()` left behind
 - [ ] No files over 230 lines introduced
-- [ ] No duplicate `const`/`let` declarations in the same scope
+
+Stack-specific pre-commit checks (`cargo check`, `node --check`, command registration) live in the folder CLAUDE.md files.
 
 ## Tools Strategy
 
