@@ -55,9 +55,10 @@ function savePaneState(tabId, pane) {
 export async function renderUnifiedLayout(el, tabId, config) {
   if (!S._unifiedPane) S._unifiedPane = {};
   if (!S._unifiedPane[tabId]) S._unifiedPane[tabId] = loadPaneState()[tabId] || 'dash';
-  const activePane = S._unifiedPane[tabId];
+  let activePane = S._unifiedPane[tabId];
 
   const panes = [...SUB_PANES];
+  if (config.hideMemory) panes.splice(panes.findIndex(p => p.id === 'store'), 1);
   if (config.renderBody) panes.splice(1, 0, { id: 'body', icon: '🦴', label: 'Тело' });
   if (config.renderSleep) panes.splice(config.renderBody ? 2 : 1, 0, { id: 'sleep', icon: '🌙', label: 'Сон' });
   if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
@@ -68,6 +69,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderFridge) panes.splice((panes.findIndex(p => p.id === 'products') + 1) || (panes.findIndex(p => p.id === 'recipes') + 1) || 2, 0, { id: 'fridge', icon: '🥶', label: 'Холодильник' });
   if (config.renderCatalog) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'catalog', icon: '📚', label: 'Каталог' });
   if (config.renderTemplates) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'templates', icon: '📋', label: 'Шаблоны' });
+
+  // Fall back if the persisted pane was removed (e.g. memory hidden for this tab).
+  if (!panes.some(p => p.id === activePane)) { activePane = panes[0].id; S._unifiedPane[tabId] = activePane; }
 
   // Tab title header — merge defaults with user overrides
   const defaults = TAB_LABELS[tabId] || { name: config.title || tabId, icon: config.icon || '', desc: config.subtitle || '' };

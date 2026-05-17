@@ -181,12 +181,20 @@ async function loadFood(subTab) {
     title: 'Food',
     subtitle: 'Питание и продукты',
     icon: '🍔',
+    hideMemory: true,
     toolbarActions: [{
       icon: ICONS.share,
       title: 'Общий доступ',
       onClick: async () => {
         const { openShareModal } = await import('./share-modal.js');
         openShareModal('food');
+      },
+    }, {
+      icon: ICONS.ban,
+      title: 'Блэклист еды',
+      onClick: async () => {
+        const { showBlacklistModal } = await import('./food-blacklist-modal.js');
+        showBlacklistModal(() => loadFood());
       },
     }],
     renderTable: async (paneEl) => {

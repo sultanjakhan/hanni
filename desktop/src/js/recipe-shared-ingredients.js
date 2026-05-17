@@ -13,7 +13,7 @@
 
   // ── Blacklist helpers (no-op when blacklist is empty / missing) ──
   const isIngrBlocked = (name, bl) => (bl || []).some(e =>
-    e.type === 'ingredient' && (e.value || '').toLowerCase() === name.toLowerCase());
+    e.type === 'product' && (e.value || '').toLowerCase() === name.toLowerCase());
   const isTagBlocked = (tag, bl) => tag && (bl || []).some(e =>
     e.type === 'tag' && (e.value || '').toLowerCase() === tag.toLowerCase());
   const isCatBlocked = (cat, bl) => (bl || []).some(e =>
@@ -21,6 +21,7 @@
   const keywordBlocked = (typed, bl) => (bl || []).some(e =>
     e.type === 'keyword' && typed.toLowerCase().includes((e.value || '').toLowerCase()));
   const productBlocked = (c, bl) => isIngrBlocked(c.name, bl)
+    || keywordBlocked(c.name, bl)
     || isCatBlocked(c.category, bl)
     || (c.tags || '').split(',').some(t => isTagBlocked(t.trim(), bl));
 
@@ -90,7 +91,6 @@
     closeAC(row);
     const q = input.value.trim().toLowerCase();
     const visible = catalog
-      .filter(c => !productBlocked(c, blacklist))
       .filter(c => !q || c.name.toLowerCase().includes(q));
     const dd = document.createElement('div');
     dd.className = 'ingr-autocomplete';
@@ -112,15 +112,22 @@
       dd.appendChild(head);
       for (const item of items) {
         if (shown >= limit) break;
+        const blk = productBlocked(item, blacklist);
         const opt = document.createElement('div');
         opt.className = `ingr-autocomplete-item ingr-product-row`;
         const ns = document.createElement('span');
-        ns.textContent = item.name;
+        ns.textContent = blk ? `🚫 ${item.name}` : item.name;
         const cl = document.createElement('span');
         cl.className = `ingr-cat-label ingr-cat-${cat}`;
         cl.textContent = CAT_LABELS[cat] || cat;
         opt.append(ns, cl);
-        opt.onmousedown = (e) => { e.preventDefault(); selectItem(input, item.name, row, item.id); };
+        if (blk) {
+          opt.style.opacity = '0.5';
+          opt.style.cursor = 'not-allowed';
+          opt.title = 'В блэклисте';
+        } else {
+          opt.onmousedown = (e) => { e.preventDefault(); selectItem(input, item.name, row, item.id); };
+        }
         dd.appendChild(opt);
         shown += 1;
       }

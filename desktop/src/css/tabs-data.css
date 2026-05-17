@@ -1515,7 +1515,7 @@
 .cat-tile-emoji { font-size: 32px; margin-bottom: 6px; }
 .cat-tile-name, .sg-tile-name { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px; }
 .cat-tile-count, .sg-tile-count { font-size: 12px; color: var(--text-muted); }
-.cat-tile--blocked, .sg-tile--blocked { opacity: 0.55; border-color: var(--color-red, #e03e3e); }
+.cat-tile--blocked, .sg-tile--blocked { opacity: 0.7; border-color: var(--color-red, #e03e3e); background: var(--color-red-bg, rgba(224,62,62,0.08)); }
 .pp-breadcrumb { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pp-crumb { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
 .pp-crumb:hover { background: var(--bg-hover); color: var(--text-primary); }
