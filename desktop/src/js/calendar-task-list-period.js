@@ -24,7 +24,10 @@ async function loadPeriodItems(start, end) {
     const [y, m] = k.split('-').map(Number);
     return invoke('get_events', { month: m, year: y }).catch(() => []);
   }));
-  const events = eventsArrs.flat().filter(e => e.date >= start && e.date <= end);
+  // Exclude auto_health events (sleep) — they belong on the calendar grid,
+  // not in the task list, and must not be completable.
+  const events = eventsArrs.flat()
+    .filter(e => e.date >= start && e.date <= end && e.source !== 'auto_health');
   const tasks = (await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []))
     .filter(t => t.due_date && t.due_date >= start && t.due_date <= end);
   return { events, tasks };

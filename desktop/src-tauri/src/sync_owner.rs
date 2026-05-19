@@ -320,6 +320,11 @@ fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, V
     let remote_ts = fields.get("_updated_at").and_then(|v| v.as_str())
         .unwrap_or("");
 
+    // event_categories has no stable cross-device id — resolve it by name.
+    if table == "event_categories" {
+        return upsert_event_category(conn, fields, remote_ts);
+    }
+
     // Tolerate missing tables — devices may diverge if one shipped earlier
     // schema. We still advance the pull cursor so we don't loop forever.
     let cols = match table_columns(conn, table) {
@@ -359,6 +364,55 @@ fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, V
     if let Err(e) = conn.execute(&sql, refs.as_slice()) {
         // Don't fail the whole pull on one bad row — log and move on.
         eprintln!("[sync_owner] upsert {} #{}: {}", table, id, e);
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// event_categories uses an AUTOINCREMENT `id` that diverges across devices,
+/// but `name` is UNIQUE and is what `events.category` references. Sync by name:
+/// ignore the remote id (local AUTOINCREMENT owns it), conflict-resolve on name.
+fn upsert_event_category(conn: &Connection, fields: &serde_json::Map<String, Value>,
+                         remote_ts: &str) -> Result<bool, String>
+{
+    let name = match fields.get("name").and_then(|v| v.as_str()) {
+        Some(n) if !n.is_empty() => n,
+        _ => return Ok(false),
+    };
+
+    // LWW by name: skip if local is newer-or-equal.
+    let local_ts: Option<String> = conn.query_row(
+        "SELECT updated_at FROM event_categories WHERE name = ?1",
+        rusqlite::params![name], |r| r.get(0),
+    ).ok();
+    if let Some(local) = &local_ts {
+        if local.as_str() >= remote_ts { return Ok(false); }
+    }
+
+    let table_cols = match table_columns(conn, "event_categories") {
+        Ok(c) => c,
+        Err(_) => return Ok(false),
+    };
+    // Drop `id` — the local AUTOINCREMENT owns it.
+    let cols: Vec<&str> = table_cols.iter().map(|s| s.as_str())
+        .filter(|c| *c != "id" && fields.contains_key(*c)).collect();
+    if cols.is_empty() { return Ok(false); }
+
+    let placeholders = (1..=cols.len()).map(|i| format!("?{}", i)).collect::<Vec<_>>().join(",");
+    let updates = cols.iter().filter(|c| **c != "name")
+        .map(|c| format!("{0} = excluded.{0}", c)).collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "INSERT INTO event_categories ({}) VALUES ({}) \
+         ON CONFLICT(name) DO UPDATE SET {}",
+        cols.join(","), placeholders, updates
+    );
+
+    let params: Vec<rusqlite::types::Value> = cols.iter().map(|c| {
+        json_to_sqlite(fields.get(*c).unwrap_or(&Value::Null))
+    }).collect();
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    if let Err(e) = conn.execute(&sql, refs.as_slice()) {
+        eprintln!("[sync_owner] upsert event_categories '{}': {}", name, e);
         return Ok(false);
     }
     Ok(true)

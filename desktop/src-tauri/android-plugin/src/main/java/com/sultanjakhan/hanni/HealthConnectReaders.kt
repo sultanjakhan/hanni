@@ -29,6 +29,10 @@ suspend fun readSleepSessions(client: HealthConnectClient, start: Instant, end: 
         session.put("start_time", record.startTime.atZone(zone).format(timeFmt))
         session.put("end_time", record.endTime.atZone(zone).format(timeFmt))
         session.put("duration_minutes", Duration.between(record.startTime, record.endTime).toMinutes())
+        // Full instants — the Rust importer needs these to merge segments of a
+        // night that Samsung Health writes as separate SleepSessionRecords.
+        session.put("start_iso", record.startTime.toString())
+        session.put("end_iso", record.endTime.toString())
         session.put("source", "health_connect")
         val stages = JSONArray()
         for (stage in record.stages) {

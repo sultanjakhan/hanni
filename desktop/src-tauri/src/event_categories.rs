@@ -28,8 +28,10 @@ pub fn create_event_category(name: String, color: String, icon: String, db: taur
     let next_order: i64 = conn.query_row(
         "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM event_categories", [], |r| r.get(0)
     ).unwrap_or(1);
+    // Set updated_at explicitly in RFC3339 — owner-sync compares it as a string
+    // against an RFC3339 cursor, so the trigger's datetime('now') format won't do.
     conn.execute(
-        "INSERT INTO event_categories (name, color, icon, sort_order, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO event_categories (name, color, icon, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
         rusqlite::params![name, color, icon, next_order, now],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
@@ -56,6 +58,9 @@ pub fn update_event_category(id: i64, name: Option<String>, color: Option<String
     if let Some(v) = color { updates.push(format!("color=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = icon { updates.push(format!("icon=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if updates.is_empty() { return Ok(()); }
+    // Bump updated_at in RFC3339 for owner-sync (see create_event_category).
+    updates.push(format!("updated_at=?{}", idx));
+    params.push(Box::new(chrono::Local::now().to_rfc3339())); idx += 1;
     params.push(Box::new(id));
     let sql = format!("UPDATE event_categories SET {} WHERE id=?{}", updates.join(","), idx);
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();

@@ -69,7 +69,7 @@ async function loadDayItems(date) {
     const bi = blockInfo('schedule', s.id);
     groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done: completedIds.has(s.id), priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null });
   }
-  for (const e of (events || []).filter(e => e.date === date)) {
+  for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
     groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done: !!e.completed, priority: e.priority || 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
   }

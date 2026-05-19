@@ -2095,7 +2095,7 @@ pub const SYNC_TABLES: &[&str] = &[
     "body_records", "job_sources", "job_roles", "job_vacancies",
     "job_search_log", "dashboard_widgets", "timeline_activity_types",
     "timeline_blocks", "timeline_goals", "sleep_sessions", "sleep_stages",
-    "heart_rate_samples",
+    "heart_rate_samples", "event_categories",
 ];
 
 pub fn migrate_sync_meta(conn: &rusqlite::Connection) {

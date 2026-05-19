@@ -54,22 +54,72 @@ pub async fn import_health_connect_all<R: Runtime>(
     }
 }
 
+// Samsung Health writes one night of sleep to Health Connect as several
+// separate SleepSessionRecords (split by wake-ups, plus naps). Segments less
+// than this many minutes apart are treated as one sleep.
+#[cfg(target_os = "android")]
+const SLEEP_MERGE_GAP_MINUTES: i64 = 180;
+
+/// One sleep, possibly assembled from several Health Connect segments.
+#[cfg(target_os = "android")]
+struct SleepNight {
+    date: String,
+    start_time: String,
+    end_time: String,
+    start: chrono::DateTime<chrono::FixedOffset>,
+    end: chrono::DateTime<chrono::FixedOffset>,
+    stages: Vec<serde_json::Value>,
+}
+
+/// Sort raw HC sleep segments by start instant and merge adjacent ones whose
+/// gap is below the threshold (or that overlap) into single nights.
+#[cfg(target_os = "android")]
+fn merge_sleep_segments(sessions: &[serde_json::Value]) -> Vec<SleepNight> {
+    let mut segs: Vec<SleepNight> = sessions.iter().filter_map(|s| {
+        let start = chrono::DateTime::parse_from_rfc3339(s["start_iso"].as_str()?).ok()?;
+        let end = chrono::DateTime::parse_from_rfc3339(s["end_iso"].as_str()?).ok()?;
+        Some(SleepNight {
+            date: s["date"].as_str().unwrap_or_default().to_string(),
+            start_time: s["start_time"].as_str().unwrap_or_default().to_string(),
+            end_time: s["end_time"].as_str().unwrap_or_default().to_string(),
+            start, end,
+            stages: s["stages"].as_array().cloned().unwrap_or_default(),
+        })
+    }).collect();
+    segs.sort_by_key(|s| s.start);
+
+    let mut nights: Vec<SleepNight> = Vec::new();
+    for seg in segs {
+        if let Some(last) = nights.last_mut() {
+            let gap = (seg.start - last.end).num_minutes();
+            if gap < SLEEP_MERGE_GAP_MINUTES {
+                if seg.end > last.end {
+                    last.end = seg.end;
+                    last.end_time = seg.end_time;
+                }
+                last.stages.extend(seg.stages);
+                continue;
+            }
+        }
+        nights.push(seg);
+    }
+    nights
+}
+
 #[cfg(target_os = "android")]
 fn import_sleep_sessions(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
     let conn = db.conn();
     let mut count = 0;
-    for s in sessions {
-        let date = s["date"].as_str().unwrap_or_default();
-        let start = s["start_time"].as_str().unwrap_or_default();
-        let end = s["end_time"].as_str().unwrap_or_default();
-        let dur = s["duration_minutes"].as_i64().unwrap_or(0);
+    for night in merge_sleep_segments(sessions) {
+        // Wall-clock span so a fragmented night shows as one continuous block.
+        let dur = (night.end - night.start).num_minutes().max(0);
 
         // Idempotency: skip if a session with same (date, start_time, source)
         // already exists. There's no UNIQUE constraint on sleep_sessions, so
         // re-importing would otherwise create duplicates every visibilitychange.
         let existing: Option<i64> = conn.query_row(
             "SELECT id FROM sleep_sessions WHERE date=?1 AND start_time=?2 AND source='health_connect'",
-            rusqlite::params![date, start], |r| r.get(0),
+            rusqlite::params![night.date, night.start_time], |r| r.get(0),
         ).ok();
 
         let sid = if let Some(id) = existing {
@@ -77,26 +127,24 @@ fn import_sleep_sessions(db: &HanniDb, sessions: &[serde_json::Value]) -> usize 
             let _ = conn.execute("DELETE FROM sleep_stages WHERE session_id=?1", rusqlite::params![id]);
             let _ = conn.execute(
                 "UPDATE sleep_sessions SET end_time=?1, duration_minutes=?2 WHERE id=?3",
-                rusqlite::params![end, dur, id],
+                rusqlite::params![night.end_time, dur, id],
             );
             id
         } else {
             if conn.execute(
                 "INSERT INTO sleep_sessions (date, start_time, end_time, duration_minutes, source) VALUES (?1,?2,?3,?4,'health_connect')",
-                rusqlite::params![date, start, end, dur],
+                rusqlite::params![night.date, night.start_time, night.end_time, dur],
             ).is_err() { continue; }
             count += 1;
             conn.last_insert_rowid()
         };
 
         if sid > 0 {
-            if let Some(stages) = s["stages"].as_array() {
-                for st in stages {
-                    let _ = conn.execute(
-                        "INSERT INTO sleep_stages (session_id, start_time, end_time, stage) VALUES (?1,?2,?3,?4)",
-                        rusqlite::params![sid, st["start_time"].as_str().unwrap_or(""), st["end_time"].as_str().unwrap_or(""), st["stage"].as_str().unwrap_or("")],
-                    );
-                }
+            for st in &night.stages {
+                let _ = conn.execute(
+                    "INSERT INTO sleep_stages (session_id, start_time, end_time, stage) VALUES (?1,?2,?3,?4)",
+                    rusqlite::params![sid, st["start_time"].as_str().unwrap_or(""), st["end_time"].as_str().unwrap_or(""), st["stage"].as_str().unwrap_or("")],
+                );
             }
         }
     }
