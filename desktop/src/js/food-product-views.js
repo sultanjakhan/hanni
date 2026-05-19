@@ -2,7 +2,7 @@
 import { CAT_LABELS, CAT_ORDER, ingredientBlockLevel, tagBlockLevel, categoryBlockLevel } from './food-recipe-filters.js';
 import { renderProductCard } from './food-product-card.js';
 
-const CAT_EMOJI = { meat:'🥩', fish:'🐟', veg:'🥬', fruit:'🍎', grain:'🌾', dairy:'🧀',
+export const CAT_EMOJI = { meat:'🥩', fish:'🐟', veg:'🥬', fruit:'🍎', grain:'🌾', dairy:'🧀',
   legumes:'🫘', nuts:'🌰', spice:'🌶️', oil:'🫒', bakery:'🥖', drinks:'🥤', other:'📦' };
 
 // Categories that show parent → children hierarchy instead of flat subgroups.

@@ -189,16 +189,13 @@ async function loadFood(subTab) {
         const { openShareModal } = await import('./share-modal.js');
         openShareModal('food');
       },
-    }, {
-      icon: ICONS.ban,
-      title: 'Блэклист еды',
-      onClick: async () => {
-        const { showBlacklistModal } = await import('./food-blacklist-modal.js');
-        showBlacklistModal(() => loadFood());
-      },
     }],
     renderTable: async (paneEl) => {
       await loadFoodLog(paneEl);
+    },
+    renderBlacklist: async (paneEl) => {
+      const { renderBlacklistPane } = await import('./food-blacklist-view.js');
+      await renderBlacklistPane(paneEl);
     },
     renderRecipes: async (paneEl) => {
       const { renderRecipesPane } = await import('./tab-food-recipes.js');
