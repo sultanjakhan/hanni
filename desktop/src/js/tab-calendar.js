@@ -647,38 +647,53 @@ async function renderDayCalendar(el, events) {
   const hours = Array.from({length: 24}, (_, i) => i);
   const isViewingToday = S.calDayDate === `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   const curHour = today.getHours(), curMin = today.getMinutes();
-  let timelineHtml = hours.map(h => {
-    const timeStr = `${String(h).padStart(2,'0')}:`;
-    const hourEvents = dayEvents.filter(e => e.time && e.time.startsWith(timeStr.slice(0,2)));
-    const hourScheds = dayScheds.filter(s => s.time_of_day && s.time_of_day.startsWith(timeStr.slice(0,2)));
-    const evtHtml = hourEvents.map(e => {
-      const srcBadge = e.source && e.source !== 'manual' ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
-      const endMin = (() => { const [hh,mm] = (e.time||'00:00').split(':').map(Number); const t = hh*60+mm+(e.duration_minutes||60); return `${String(Math.floor(t/60)%24).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`; })();
-      const pri = Number(e.priority || 0);
-      const priBar = pri > 0 ? `<span class="day-event-pri" style="background:${priorityHex(pri)}" title="Важность ${pri}/5"></span>` : '';
-      const isManual = !e.source || e.source === 'manual';
-      const editAttr = isManual ? `data-event-id="${e.id}" style="cursor:pointer;border-left:3px solid ${e.color || 'var(--text-secondary)'};"` : `style="border-left:3px solid ${e.color || 'var(--text-secondary)'};"`;
-      return `<div class="day-event" ${editAttr}>
-        ${priBar}<span class="day-event-time">${e.time} – ${endMin}</span>
-        <span class="day-event-title">${escapeHtml(e.title)}</span>${srcBadge}
-        <span class="day-event-dur">${e.duration_minutes || 60} мин</span>
-      </div>`;
-    }).join('');
-    const schHtml = hourScheds.map(s => {
-      const done = s.marks_previous_day ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
-      const icon = SCH_CAT_ICONS[s.category] || '◽';
-      return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
-        <span class="day-event-time">${s.time_of_day} ${icon}</span>
-        <span class="day-event-title" style="${done ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
-        <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
-      </div>`;
-    }).join('');
+  const pxPerHour = getDayZoom();
+  const pxPerMin = pxPerHour / 60;
+
+  // Grid: one row per hour — labels, lines, click-to-add target, now-line.
+  const timelineHtml = hours.map(h => {
     const nowLine = (isViewingToday && h === curHour) ? `<div class="wk-now-line" style="top:${(curMin/60)*100}%"><div class="wk-now-dot"></div></div>` : '';
     return `<div class="day-hour-row">
       <div class="day-hour-label">${String(h).padStart(2,'0')}:00</div>
-      <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}">${nowLine}${evtHtml}${schHtml}</div>
+      <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}">${nowLine}</div>
     </div>`;
   }).join('');
+
+  // Timed events as proportional blocks: top by start time, height by duration.
+  // An event crossing midnight is clipped at 24:00 and continued on the next day.
+  const hhmmLabel = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
+  const eventBlock = (e, top, height, label, continued) => {
+    const isManual = !e.source || e.source === 'manual';
+    const pri = Number(e.priority || 0);
+    const priBar = pri > 0 ? `<span class="day-event-pri" style="background:${priorityHex(pri)}" title="Важность ${pri}/5"></span>` : '';
+    const srcBadge = !isManual ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
+    const idAttr = isManual ? `data-event-id="${e.id}"` : '';
+    return `<div class="day-event day-event-block" ${idAttr}
+      style="top:${Math.round(top)}px;height:${Math.max(Math.round(height), 22)}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};${isManual ? 'cursor:pointer;' : ''}">
+      <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}</div>
+      <span class="day-event-title">${escapeHtml(e.title)}</span>
+      <span class="day-event-dur">${continued ? '↳ ' : ''}${e.duration_minutes || 60} мин</span>
+    </div>`;
+  };
+  const blocks = [];
+  for (const e of dayEvents) {
+    if (!e.time) continue;
+    const [hh, mm] = e.time.split(':').map(Number);
+    const startMin = hh * 60 + mm;
+    const endMin = startMin + (e.duration_minutes || 60);
+    const visEnd = Math.min(endMin, 1440);
+    blocks.push(eventBlock(e, startMin * pxPerMin, (visEnd - startMin) * pxPerMin,
+      `${e.time} – ${hhmmLabel(endMin % 1440)}`, false));
+  }
+  // Continuation of events that started the day before and cross into today.
+  for (const e of events.filter(e => e.date === prevDate && e.time)) {
+    const [hh, mm] = e.time.split(':').map(Number);
+    const endMin = hh * 60 + mm + (e.duration_minutes || 60);
+    if (endMin <= 1440) continue;
+    const leftover = endMin - 1440;
+    blocks.push(eventBlock(e, 0, leftover * pxPerMin, `00:00 – ${hhmmLabel(leftover)}`, true));
+  }
+  const eventLayerHtml = `<div class="day-event-layer">${blocks.join('')}</div>`;
 
   // Schedules without time → show in "all day" section
   const noTimeScheds = dayScheds.filter(s => !s.time_of_day);
@@ -720,7 +735,7 @@ async function renderDayCalendar(el, events) {
     ${renderViewModeToggle('day', dayMode)}
     ${mealPlanHtml}
     ${allDayHtml}
-    <div class="day-timeline" style="--day-hour-px:${getDayZoom()}px">${timelineHtml}</div>`;
+    <div class="day-timeline" style="--day-hour-px:${pxPerHour}px">${timelineHtml}${eventLayerHtml}</div>`;
 
   // Overlay actual timeline blocks (real durations) on top of planned slots
   import('./calendar-day-grid-overlay.js').then(m => m.injectTimelineOverlay(el.querySelector('.day-timeline'), S.calDayDate, dayEvents, getDayZoom())).catch(err => console.error('overlay:', err));
@@ -776,6 +791,13 @@ async function renderDayCalendar(el, events) {
         const ti = document.getElementById('evm-time');
         if (ti) ti.value = `${String(cell.dataset.hour).padStart(2,'0')}:00`;
       }, 50);
+    });
+  });
+  // Proportional event blocks live in their own layer, not inside hour cells.
+  el.querySelectorAll('.day-event-block[data-event-id]').forEach(blk => {
+    blk.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showEventModal(Number(blk.dataset.eventId));
     });
   });
   // Schedule completion toggles in day view

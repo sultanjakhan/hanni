@@ -477,6 +477,18 @@
   display: inline-block; width: 4px; height: 22px; border-radius: 2px;
   margin-right: 6px; flex-shrink: 0;
 }
+/* Day-view: proportional event blocks — top by start, height by duration */
+.day-event-layer {
+  position: absolute; top: 0; left: 56px; right: 0; height: 100%;
+  pointer-events: none; z-index: 3;
+}
+.day-event-block {
+  position: absolute; left: 8px; right: 8px;
+  flex-direction: column; align-items: flex-start; justify-content: flex-start;
+  gap: 1px; padding: 4px 8px; overflow: hidden; pointer-events: auto;
+}
+.day-event-block-head { display: flex; align-items: center; gap: 4px; }
+.day-event-block .day-event-title { font-size: 13px; line-height: 1.2; flex: none; }
 
 /* Event modal — category picker, priority pills */
 .evm-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
