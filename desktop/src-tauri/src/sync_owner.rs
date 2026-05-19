@@ -66,14 +66,14 @@ pub struct OwnerSyncStatus {
 
 // ── Settings helpers ─────────────────────────────────────────────────────
 
-fn get_setting(conn: &Connection, key: &str) -> Option<String> {
+pub(crate) fn get_setting(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row(
         "SELECT value FROM app_settings WHERE key=?1",
         rusqlite::params![key], |r| r.get(0),
     ).ok()
 }
 
-fn set_setting(conn: &Connection, key: &str, value: &str) {
+pub(crate) fn set_setting(conn: &Connection, key: &str, value: &str) {
     let _ = conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
          ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -100,7 +100,7 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>, String> 
     Ok(out)
 }
 
-fn row_to_json(conn: &Connection, table: &str, id: i64) -> Result<Option<Value>, String> {
+pub(crate) fn row_to_json(conn: &Connection, table: &str, id: i64) -> Result<Option<Value>, String> {
     let cols = table_columns(conn, table)?;
     let select = cols.join(", ");
     let sql = format!("SELECT {} FROM {} WHERE id = ?1", select, table);
@@ -319,7 +319,7 @@ async fn push_tombstones(db: &HanniDb, client: &reqwest::Client,
 
 // ── Per-table pull ───────────────────────────────────────────────────────
 
-fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, Value>)
+pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, Value>)
               -> Result<bool, String>
 {
     let id = fields.get("id").and_then(|v| v.as_i64())

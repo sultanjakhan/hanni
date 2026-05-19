@@ -53,6 +53,7 @@ mod sync_share;
 mod sync_share_auto;
 mod sync_owner;
 mod sync_owner_auto;
+mod lan_sync;
 mod google_auth;
 mod firestore_admin;
 #[cfg(not(target_os = "android"))]
@@ -793,6 +794,10 @@ pub fn run() {
             sync_share::cloud_owner_get_uid,
             sync_owner_auto::cloud_owner_set_auto,
             sync_owner_auto::cloud_owner_get_auto,
+            // LAN sync (direct device↔device over Wi-Fi, no cloud)
+            lan_sync::lan_sync_now,
+            lan_sync::lan_sync_get_config,
+            lan_sync::lan_sync_set_config,
             // Sign in with Google → Firebase Auth (Stage C.1)
             google_auth::google_auth_status,
             google_auth::google_auth_set_config,
@@ -872,6 +877,13 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 spawn_api_server(api_handle).await;
             });
+
+            // LAN sync — direct device↔device server (0.0.0.0:8244) + auto loop
+            let lan_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                lan_sync::spawn_lan_sync_server(lan_handle).await;
+            });
+            lan_sync::start_lan_sync_loop(app.handle().clone());
 
             // Share-links public HTTP server (guest-facing, tunneled via cloudflared later)
             let share_handle = app.handle().clone();
