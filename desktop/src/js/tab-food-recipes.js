@@ -4,7 +4,7 @@ import { escapeHtml } from './utils.js';
 import { renderCard } from './food-recipe-card.js';
 import {
   MEALS, DIFFS, CAT_LABELS, CAT_ORDER, getCuisineChips, loadCatalog,
-  getBlacklist, matchBL, matchMeal, matchCuisine, matchDiff,
+  getBlacklist, matchBL, recipeBlockLevel, matchMeal, matchCuisine, matchDiff,
   matchSearch, matchIngr, sortRecipes, collectIngredients,
 } from './food-recipe-filters.js';
 
@@ -37,7 +37,11 @@ export async function renderRecipesPane(el) {
       && matchCuisine(r, F.cuisine) && matchDiff(r, F.diff)
       && matchSearch(r, F.q) && (!F.fav || r.favorite === 1)
       && matchIngr(r, selIngr));
-    return sortRecipes(list, 'name');
+    const sorted = sortRecipes(list, 'name');
+    // soft-blocked recipes ("не люблю") sink to the bottom of the list.
+    const soft = [], normal = [];
+    for (const r of sorted) (recipeBlockLevel(r, blacklist) === 'soft' ? soft : normal).push(r);
+    return [...normal, ...soft];
   }
 
   function buildShell() {
@@ -130,6 +134,7 @@ export async function renderRecipesPane(el) {
         const { showRecipeDetail } = await import('./food-recipe-modals.js');
         showRecipeDetail(parseInt(card.dataset.id), fullReload);
       };
+      if (recipeBlockLevel(r, blacklist) === 'soft') card.classList.add('recipe-card--soft');
       grid.appendChild(card);
     }
   }

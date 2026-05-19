@@ -2420,6 +2420,48 @@ th.col-range-selected { background: rgba(59,130,246,0.08) !important; }
 .dev-theory-content code { background: var(--bg-hover); padding: 1px 5px; border-radius: var(--radius-sm); font-size: 12px; }
 .dev-add-case-btn { margin-top: var(--space-2); }
 
+/* ── PM wiki: главная статья ── */
+.dev-wiki-pane { position: relative; }
+.dev-wiki-content { font-size: 14px; line-height: 1.65; color: var(--text-secondary); }
+.dev-wiki-content h1 { font-size: 20px; font-weight: 700; color: var(--text-primary); margin: 0 0 var(--space-3); }
+.dev-wiki-content h2 { font-size: 16px; font-weight: 600; color: var(--text-primary); margin: var(--space-4) 0 var(--space-2); }
+.dev-wiki-content h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); margin: var(--space-3) 0 var(--space-1); }
+.dev-wiki-content p { margin: var(--space-2) 0; }
+.dev-wiki-content ul, .dev-wiki-content ol { padding-left: 22px; margin: var(--space-2) 0; }
+.dev-wiki-content li { margin-bottom: 4px; }
+.dev-wiki-content strong { color: var(--text-primary); }
+.dev-wiki-content code { background: var(--bg-hover); padding: 1px 5px; border-radius: var(--radius-sm); font-size: 12px; }
+.dev-wiki-content blockquote {
+  margin: var(--space-3) 0; padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--accent-blue); background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+}
+.dev-wiki-content blockquote p { margin: 0; }
+.dev-wiki-empty { color: var(--text-faint); text-align: center; padding: var(--space-8) 0; }
+
+/* [[wiki-ссылки]] — внутренняя навигация между темами */
+.wiki-link {
+  color: var(--accent-blue); cursor: pointer; text-decoration: none;
+  border-bottom: 1px dashed var(--accent-blue);
+}
+.wiki-link:hover { background: var(--bg-hover); }
+.wiki-link-red { color: var(--text-faint); border-bottom-color: var(--text-faint); }
+
+/* Кнопка редактирования (статья / теория скилла) */
+.dev-wiki-edit, .dev-theory-edit {
+  background: none; border: none; cursor: pointer; color: var(--text-faint);
+  font-size: 13px; padding: 2px 6px; border-radius: var(--radius-sm);
+}
+.dev-wiki-edit { position: absolute; top: 0; right: 0; }
+.dev-wiki-edit:hover, .dev-theory-edit:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+/* Широкая модалка для редактирования markdown */
+.modal.modal-wide { max-width: 760px; width: 90vw; }
+.modal-wide .form-textarea {
+  min-height: 380px; font-size: 13px; line-height: 1.5;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+
 /* Cases list */
 .dev-cases-list { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
 .dev-case-row {

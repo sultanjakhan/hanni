@@ -1529,6 +1529,56 @@
 .rf-chip--blocked { opacity: 0.6; border-color: var(--color-red, #e03e3e); color: var(--color-red, #e03e3e); }
 .rf-chip--blocked.active { background: var(--color-red-bg, rgba(224,62,62,0.15)); }
 .pp-bl-tag-btn { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
+
+/* ── Two-level blacklist: hard = red fill (above), soft = dimmed + dashed ── */
+.cat-tile--soft, .sg-tile--soft { opacity: 0.7; border-style: dashed; }
+.product-card--soft { opacity: 0.6; border-style: dashed; }
+.product-card--soft:hover { opacity: 0.85; }
+.recipe-card--soft { opacity: 0.65; }
+.recipe-card--soft:hover { opacity: 0.95; }
+
+/* ⊘ quick-blacklist button — hidden until tile/card hover */
+.cat-tile, .product-card { position: relative; }
+.bl-quick {
+  position: absolute; top: 4px; right: 4px; width: 20px; height: 20px;
+  display: none; align-items: center; justify-content: center; padding: 0;
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-muted); cursor: pointer; font-size: 12px;
+}
+.cat-tile:hover .bl-quick, .product-card:hover .bl-quick { display: flex; }
+.bl-quick:hover { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
+
+/* Blacklist context menu (extends .inline-dropdown) */
+.blacklist-menu-head {
+  padding: 6px 10px; font-size: 12px; font-weight: 600; color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Blacklist modal — two level sections + chip picker */
+.bl-section { margin-bottom: 12px; }
+.bl-section-head { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.bl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bl-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
+  border-radius: var(--radius-pill); font-size: 13px; border: 1px solid var(--border-default);
+}
+.bl-chip small { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+.bl-chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0 2px; }
+.bl-chip--hard { background: var(--color-red-bg, rgba(224,62,62,0.12)); color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
+.bl-chip--soft { background: var(--bg-hover); color: var(--text-secondary); border-style: dashed; }
+.bl-add { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.bl-add-picks { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.bl-pick { display: flex; gap: 6px; flex-wrap: wrap; }
+.bl-tab {
+  padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
+  border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary);
+}
+.bl-tab.active { border-color: var(--accent-fill); color: var(--accent-fill); }
+.bl-adv { margin-bottom: 8px; }
+.bl-adv summary { font-size: 12px; color: var(--text-muted); cursor: pointer; }
+.bl-add-row { display: flex; gap: 8px; align-items: center; }
+.bl-add-row .bl-value { flex: 1; }
 .add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .rf-chip-add { border-style: dashed; opacity: 0.7; }
 .rf-chip-add:hover { opacity: 1; }

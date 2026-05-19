@@ -46,7 +46,7 @@ async function saveTabMeta(tabId, meta) {
 function loadPaneState() {
   try { return JSON.parse(localStorage.getItem('hanni_panes') || '{}'); } catch { return {}; }
 }
-function savePaneState(tabId, pane) {
+export function savePaneState(tabId, pane) {
   const state = loadPaneState();
   state[tabId] = pane;
   localStorage.setItem('hanni_panes', JSON.stringify(state));
@@ -58,10 +58,15 @@ export async function renderUnifiedLayout(el, tabId, config) {
   let activePane = S._unifiedPane[tabId];
 
   const panes = [...SUB_PANES];
+  if (config.dashLabel) {
+    const di = panes.findIndex(p => p.id === 'dash');
+    if (di >= 0) panes[di] = { ...panes[di], label: config.dashLabel, icon: config.dashIcon || panes[di].icon };
+  }
   if (config.hideMemory) panes.splice(panes.findIndex(p => p.id === 'store'), 1);
   if (config.renderBody) panes.splice(1, 0, { id: 'body', icon: '🦴', label: 'Тело' });
   if (config.renderSleep) panes.splice(config.renderBody ? 2 : 1, 0, { id: 'sleep', icon: '🌙', label: 'Сон' });
   if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
+  if (config.renderRoutine) panes.splice(panes.findIndex(p => p.id === 'table') + 1, 0, { id: 'routine', icon: '🔀', label: 'Рутина' });
   if (config.renderSkills) panes.splice(1, 0, { id: 'skills', icon: '💡', label: 'Навыки' });
   if (config.renderCases) panes.splice(panes.findIndex(p => p.id === 'goals'), 0, { id: 'cases', icon: '📝', label: 'Кейсы' });
   if (config.renderRecipes) panes.splice(1, 0, { id: 'recipes', icon: '📖', label: 'Рецепты' });
@@ -151,6 +156,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
     case 'tracking':
       if (config.renderTracking) await config.renderTracking(paneEl);
       else paneEl.innerHTML = renderEmptyState('Трекинг', 'Скоро здесь появится трекинг');
+      break;
+    case 'routine':
+      if (config.renderRoutine) await config.renderRoutine(paneEl);
       break;
     case 'skills':
       if (config.renderSkills) await config.renderSkills(paneEl);

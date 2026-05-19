@@ -1137,6 +1137,135 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE timeline_blocks ADD COLUMN mood TEXT", []).ok();
 }
 
+/// Next-action engine — graph model: a chain is a canvas, a node is a task
+/// (referencing a schedule/note/event, or a start trigger), an edge is an arrow
+/// with a transition trigger. routine_node_status tracks a node's state inside
+/// one routine_run (a daily pass of the chain).
+pub fn migrate_routine_engine(conn: &rusqlite::Connection) {
+    // v1 of this engine used stage-based tables; drop the unused stage table.
+    conn.execute("DROP TABLE IF EXISTS routine_stages", []).ok();
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS routine_chains (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            trigger_type TEXT NOT NULL DEFAULT 'manual',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS routine_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_id INTEGER NOT NULL REFERENCES routine_chains(id) ON DELETE CASCADE,
+            source_type TEXT NOT NULL DEFAULT 'schedule',
+            source_id INTEGER,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'other',
+            icon TEXT,
+            pos_x INTEGER NOT NULL DEFAULT 0,
+            pos_y INTEGER NOT NULL DEFAULT 0,
+            priority INTEGER NOT NULL DEFAULT 0,
+            requirement TEXT NOT NULL DEFAULT 'required',
+            is_start INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS routine_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_id INTEGER NOT NULL REFERENCES routine_chains(id) ON DELETE CASCADE,
+            from_node_id INTEGER NOT NULL REFERENCES routine_nodes(id) ON DELETE CASCADE,
+            to_node_id INTEGER NOT NULL REFERENCES routine_nodes(id) ON DELETE CASCADE,
+            trigger_type TEXT NOT NULL DEFAULT 'after_completion',
+            trigger_value INTEGER,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS routine_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_id INTEGER NOT NULL REFERENCES routine_chains(id) ON DELETE CASCADE,
+            date TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'active',
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT,
+            UNIQUE(chain_id, date)
+        );
+        CREATE TABLE IF NOT EXISTS routine_node_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL REFERENCES routine_runs(id) ON DELETE CASCADE,
+            node_id INTEGER NOT NULL REFERENCES routine_nodes(id) ON DELETE CASCADE,
+            state TEXT NOT NULL DEFAULT 'done',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(run_id, node_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_routine_nodes_chain ON routine_nodes(chain_id);
+        CREATE INDEX IF NOT EXISTS idx_routine_edges_chain ON routine_edges(chain_id);
+        CREATE INDEX IF NOT EXISTS idx_routine_runs_date ON routine_runs(date);
+        CREATE INDEX IF NOT EXISTS idx_routine_node_status_run ON routine_node_status(run_id);"
+    ).ok();
+    cleanup_v1_routine_chains(conn);
+    seed_morning_routine(conn);
+}
+
+/// One-time cleanup: v1 seeded an empty stage-based "Утро" chain (no nodes).
+/// Remove any chain that has no nodes. Runs once via _migrations.
+fn cleanup_v1_routine_chains(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_v1_cleanup'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    conn.execute(
+        "DELETE FROM routine_chains WHERE id NOT IN (SELECT DISTINCT chain_id FROM routine_nodes)",
+        [],
+    ).ok();
+    conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_v1_cleanup')", []).ok();
+}
+
+/// Seed the "Morning" graph: a start node + task nodes + edges. Idempotent via _migrations.
+/// Task nodes are autonomous (source_id NULL) — the user attaches them to real
+/// schedules/notes/events later in the constructor.
+fn seed_morning_routine(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_morning_seed_v2'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    if conn.execute(
+        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Утро', 'sleep_end', 0)",
+        [],
+    ).is_ok() {
+        let chain_id = conn.last_insert_rowid();
+        // (key, title, category, pri, req, x, y, is_start)
+        let nodes = [
+            ("start", "Проснулся",         "other",   0, "required", 30,  210, 1),
+            ("up",    "Встал",             "home",    5, "required", 200, 200, 0),
+            ("bed",   "Заправил кровать",  "home",    3, "required", 200, 340, 0),
+            ("toil",  "Туалет",            "hygiene", 4, "required", 445, 30,  0),
+            ("wash",  "Умылся",            "hygiene", 4, "required", 445, 200, 0),
+            ("teeth", "Зубы",              "hygiene", 5, "required", 445, 370, 0),
+            ("vit",   "Витамины",          "health",  4, "required", 710, 120, 0),
+            ("exer",  "Зарядка 10 мин",    "sport",   2, "optional", 710, 300, 0),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (key, title, cat, pri, req, x, y, is_start) in nodes {
+            let stype = if is_start == 1 { "start" } else { "schedule" };
+            conn.execute(
+                "INSERT INTO routine_nodes
+                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+            ).ok();
+            ids.insert(key, conn.last_insert_rowid());
+        }
+        let edges = [
+            ("start","up"), ("up","bed"), ("bed","toil"), ("bed","wash"),
+            ("bed","teeth"), ("toil","vit"), ("wash","vit"), ("teeth","vit"), ("vit","exer"),
+        ];
+        for (from, to) in edges {
+            conn.execute(
+                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![chain_id, ids[from], ids[to]],
+            ).ok();
+        }
+    }
+    conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_morning_seed_v2')", []).ok();
+}
+
 /// v0.70: Remove Mindset tab data (journal_entries, mood_log, principles)
 pub fn migrate_drop_mindset(conn: &rusqlite::Connection) {
     let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
@@ -1365,6 +1494,7 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             icon TEXT NOT NULL DEFAULT '📁',
+            overview TEXT NOT NULL DEFAULT '',
             sort_order INTEGER DEFAULT 0,
             created_at TEXT NOT NULL
         );
@@ -1406,38 +1536,20 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
         CREATE INDEX IF NOT EXISTS idx_hr_samples_date ON heart_rate_samples(date);"
     ).ok();
 
+    // v0.81.0: per-project wiki overview column (idempotent for existing installs)
+    conn.execute("ALTER TABLE dev_projects ADD COLUMN overview TEXT NOT NULL DEFAULT ''", []).ok();
+
     // Seed PM project with skills if not exists
     seed_pm_project(conn);
+    seed_pm_wiki(conn);
 }
 
 fn seed_pm_project(conn: &rusqlite::Connection) {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM dev_projects", [], |r| r.get(0)).unwrap_or(0);
     if count > 0 {
-        // Add theory column if missing (migration from earlier version)
+        // Add theory column if missing (migration from earlier version).
+        // Skill content is owned by seed_pm_wiki (guarded one-time migration).
         conn.execute_batch("ALTER TABLE dev_skills ADD COLUMN theory TEXT NOT NULL DEFAULT ''").ok();
-        // Add new skills + update existing ones with missing theory/description
-        let pid: i64 = conn.query_row("SELECT id FROM dev_projects WHERE name='PM'", [], |r| r.get(0)).unwrap_or(0);
-        if pid > 0 {
-            let now = chrono::Local::now().to_rfc3339();
-            for (i, (name, desc, theory)) in pm_skills().iter().enumerate() {
-                let exists: bool = conn.query_row(
-                    "SELECT COUNT(*)>0 FROM dev_skills WHERE project_id=?1 AND name=?2",
-                    rusqlite::params![pid, name], |r| r.get(0)
-                ).unwrap_or(false);
-                if exists {
-                    // Update empty description/theory on existing skills
-                    conn.execute(
-                        "UPDATE dev_skills SET description=?1, theory=?2, sort_order=?3 WHERE project_id=?4 AND name=?5 AND (description='' OR theory='')",
-                        rusqlite::params![desc, theory, i as i32, pid, name],
-                    ).ok();
-                } else {
-                    conn.execute(
-                        "INSERT INTO dev_skills (project_id, name, description, theory, score, sort_order, created_at, updated_at) VALUES (?1,?2,?3,?4,0,?5,?6,?6)",
-                        rusqlite::params![pid, name, desc, theory, i as i32, now],
-                    ).ok();
-                }
-            }
-        }
         return;
     }
     let now = chrono::Local::now().to_rfc3339();
@@ -1451,60 +1563,118 @@ fn seed_pm_project(conn: &rusqlite::Connection) {
     }
 }
 
+/// One-time migration: turn the PM project into a wiki.
+/// Sets the main article (overview), renames legacy English skill names to
+/// Russian, rewrites theory with [[wiki-links]], and seeds practice cases.
+/// Guarded by ui_state['pm_wiki_seed_v1'] so it runs exactly once.
+fn seed_pm_wiki(conn: &rusqlite::Connection) {
+    let done: String = conn.query_row(
+        "SELECT value FROM ui_state WHERE key='pm_wiki_seed_v1'", [], |r| r.get(0),
+    ).unwrap_or_default();
+    if done == "done" { return; }
+
+    let pid: i64 = conn.query_row(
+        "SELECT id FROM dev_projects WHERE name='PM'", [], |r| r.get(0),
+    ).unwrap_or(0);
+    if pid == 0 { return; }
+
+    let now = chrono::Local::now().to_rfc3339();
+
+    conn.execute(
+        "UPDATE dev_projects SET overview=?1 WHERE id=?2",
+        rusqlite::params![crate::pm_wiki::overview(), pid],
+    ).ok();
+
+    for (en, ru, theory) in crate::pm_wiki::skill_pages() {
+        // Rename legacy English-named skills (no-op on fresh installs).
+        conn.execute(
+            "UPDATE dev_skills SET name=?1 WHERE project_id=?2 AND name=?3",
+            rusqlite::params![ru, pid, en],
+        ).ok();
+        conn.execute(
+            "UPDATE dev_skills SET theory=?1, updated_at=?2 WHERE project_id=?3 AND name=?4",
+            rusqlite::params![theory, now, pid, ru],
+        ).ok();
+    }
+
+    for (skill_ru, title, description) in crate::pm_wiki::seed_cases() {
+        let sid: i64 = conn.query_row(
+            "SELECT id FROM dev_skills WHERE project_id=?1 AND name=?2",
+            rusqlite::params![pid, skill_ru], |r| r.get(0),
+        ).unwrap_or(0);
+        if sid == 0 { continue; }
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*)>0 FROM dev_cases WHERE skill_id=?1 AND title=?2",
+            rusqlite::params![sid, title], |r| r.get(0),
+        ).unwrap_or(false);
+        if !exists {
+            conn.execute(
+                "INSERT INTO dev_cases (skill_id, title, url, description, score, notes, created_at) \
+                 VALUES (?1,?2,'',?3,0,'',?4)",
+                rusqlite::params![sid, title, description, now],
+            ).ok();
+        }
+    }
+
+    conn.execute(
+        "INSERT OR REPLACE INTO ui_state (key, value) VALUES ('pm_wiki_seed_v1','done')", [],
+    ).ok();
+}
+
 fn pm_skills() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
-        ("Discovery & User Research",
+        ("Discovery и исследования",
          "Выявление проблем пользователей, проведение интервью, анализ потребностей",
          "## Что это\nПроцесс поиска и валидации проблем пользователей до начала разработки.\n\n## Ключевые методы\n- **CustDev-интервью** — глубинные интервью с пользователями\n- **Jobs To Be Done (JTBD)** — какую «работу» нанимает пользователь\n- **Персоны** — архетипы целевых пользователей\n- **Customer Journey Map (CJM)** — карта пути пользователя\n- **Surveys & Questionnaires** — количественная валидация\n\n## Ключевые вопросы\n- Какую проблему решаем?\n- Для кого?\n- Как пользователь решает это сейчас?\n- Готов ли платить?"),
-        ("Prioritization",
+        ("Приоритизация",
          "Фреймворки приоритизации: RICE, ICE, MoSCoW, Kano",
          "## Что это\nУмение выбирать, что делать первым при ограниченных ресурсах.\n\n## Фреймворки\n- **RICE** — Reach × Impact × Confidence / Effort\n- **ICE** — Impact × Confidence × Ease\n- **MoSCoW** — Must / Should / Could / Won't\n- **Kano Model** — Basic / Performance / Excitement фичи\n- **Value vs Effort Matrix** — 2×2 матрица\n\n## Когда применять\n- Планирование спринта / квартала\n- Backlog grooming\n- Защита roadmap перед стейкхолдерами"),
-        ("Metrics & Analytics",
+        ("Метрики и аналитика",
          "Продуктовые метрики, AARRR, North Star, юнит-экономика",
          "## Что это\nИзмерение успеха продукта через данные.\n\n## Фреймворки\n- **AARRR (Pirate Metrics)** — Acquisition, Activation, Retention, Revenue, Referral\n- **North Star Metric** — одна метрика, отражающая ценность для пользователя\n- **HEART** (Google) — Happiness, Engagement, Adoption, Retention, Task Success\n\n## Юнит-экономика\n- **LTV** (Lifetime Value) — сколько приносит один пользователь за всё время\n- **CAC** (Customer Acquisition Cost) — стоимость привлечения\n- **LTV/CAC > 3** — здоровый бизнес\n- **Payback Period** — время окупаемости CAC\n- **ARPU** — средний доход на пользователя\n- **Churn Rate** — процент оттока"),
-        ("Roadmapping",
+        ("Роадмап",
          "Составление и защита продуктового роадмапа",
          "## Что это\nСтратегический план развития продукта, привязанный ко времени и целям.\n\n## Типы роадмапов\n- **Now / Next / Later** — гибкий, без точных дат\n- **Timeline-based** — привязан к кварталам/спринтам\n- **Outcome-based** — привязан к метрикам, а не фичам\n\n## Как защищать\n- Привязывать к бизнес-целям\n- Показывать trade-off (что НЕ делаем и почему)\n- Использовать данные, а не мнения"),
-        ("Stakeholder Management",
+        ("Управление стейкхолдерами",
          "Работа с заинтересованными сторонами: CEO, разработка, маркетинг, поддержка",
          "## Что это\nУмение управлять ожиданиями и коммуникацией с разными сторонами.\n\n## Ключевые навыки\n- **Stakeholder Mapping** — кто влияет, кто заинтересован\n- **Управление ожиданиями** — прозрачность, регулярные апдейты\n- **Negotiation** — умение говорить «нет» с обоснованием\n- **Alignment** — синхронизация целей между командами\n\n## Типичные стейкхолдеры\nCEO/Founder, CTO, Marketing, Sales, Support, Design, Engineering"),
-        ("User Stories & Requirements",
+        ("Требования и user stories",
          "Написание требований, user stories, acceptance criteria",
          "## Что это\nПеревод бизнес-потребностей в понятные задачи для разработки.\n\n## Форматы\n- **User Story** — As a [user], I want [action] so that [benefit]\n- **Job Story** — When [situation], I want to [motivation], so I can [outcome]\n- **Acceptance Criteria** — Given/When/Then (Gherkin)\n\n## Что включать в PRD\n- Проблема и контекст\n- Целевая аудитория\n- User stories + acceptance criteria\n- Wireframes / mockups\n- Метрики успеха\n- Edge cases"),
-        ("A/B Testing & Experimentation",
+        ("A/B-тесты и эксперименты",
          "Дизайн экспериментов, статзначимость, анализ результатов",
          "## Что это\nПроверка гипотез через контролируемые эксперименты.\n\n## Процесс\n1. Сформулировать гипотезу (If… Then… Because…)\n2. Определить метрику и размер выборки\n3. Запустить тест (контроль vs вариант)\n4. Дождаться статзначимости (p < 0.05)\n5. Принять решение\n\n## Ключевые понятия\n- **Статзначимость** — p-value < 0.05\n- **MDE** (Minimum Detectable Effect)\n- **Sample Size** — калькулятор Эвана Миллера\n- **Ошибки Type I / Type II**"),
         ("Go-to-Market",
          "Запуск продукта/фичи, позиционирование, каналы",
          "## Что это\nСтратегия вывода продукта или фичи на рынок.\n\n## Компоненты GTM\n- **Positioning** — для кого, чем отличаемся\n- **Messaging** — как объясняем ценность\n- **Channels** — где достигаем пользователей\n- **Pricing** — модель монетизации\n- **Launch Plan** — этапы запуска\n\n## Чеклист запуска\n- [ ] Документация готова\n- [ ] Support обучен\n- [ ] Метрики настроены\n- [ ] Rollback plan есть"),
-        ("Technical Understanding",
+        ("Техническая грамотность",
          "Понимание архитектуры, API, баз данных, инфраструктуры",
          "## Что это\nДостаточное техническое понимание для продуктивной работы с разработкой.\n\n## Минимум для PM\n- **API** — REST, endpoints, request/response\n- **Базы данных** — SQL basics, реляционные vs NoSQL\n- **Frontend vs Backend** — где что происходит\n- **CI/CD** — деплой, staging, production\n- **Архитектура** — микросервисы, монолит, serverless\n\n## Зачем\n- Оценивать сложность задач\n- Говорить с разработчиками на одном языке\n- Понимать технические ограничения"),
-        ("Communication & Presentation",
+        ("Коммуникация и презентации",
          "Питчи, презентации, документация, storytelling",
          "## Что это\nУмение ясно доносить идеи устно и письменно.\n\n## Навыки\n- **Storytelling** — проблема → решение → результат\n- **Executive Summary** — суть на 1 странице\n- **Презентации** — структура, визуал, delivery\n- **Written Communication** — PRD, RFC, emails\n- **Active Listening** — задавать правильные вопросы\n\n## Форматы\n- **Elevator Pitch** — 30 секунд\n- **Product Review** — 15 мин для стейкхолдеров\n- **All-Hands** — широкая аудитория"),
-        ("Competitive Analysis",
+        ("Конкурентный анализ",
          "Анализ рынка, конкурентов, позиционирование",
          "## Что это\nСистемный анализ конкурентной среды для принятия продуктовых решений.\n\n## Методы\n- **Feature Matrix** — сравнение фич с конкурентами\n- **SWOT** — Strengths, Weaknesses, Opportunities, Threats\n- **Porter's Five Forces** — анализ отрасли\n- **Blue Ocean Strategy** — новые рыночные пространства\n\n## Что отслеживать\n- Фичи и pricing конкурентов\n- Отзывы их пользователей\n- Их positioning и messaging\n- Тренды рынка"),
-        ("Strategy & Vision",
+        ("Стратегия и видение",
          "Продуктовое видение, стратегия, OKR",
          "## Что это\nДолгосрочное видение продукта и стратегия его достижения.\n\n## Компоненты\n- **Vision** — куда идём через 3-5 лет\n- **Mission** — зачем существуем\n- **Strategy** — как достигнем vision\n- **OKR** — Objectives and Key Results (квартальные цели)\n- **KPI** — ключевые метрики\n\n## Фреймворки\n- **Product Vision Board** (Roman Pichler)\n- **Lean Canvas** — бизнес-модель на 1 странице\n- **Strategy Canvas** — визуализация конкурентной позиции"),
-        ("SQL & Data Analysis",
+        ("SQL и анализ данных",
          "SQL-запросы, работа с данными, дашборды, Excel/Sheets",
          "## Что это\nПрактический навык извлечения и анализа данных для принятия решений.\n\n## SQL основы\n- **SELECT, WHERE, GROUP BY, HAVING, ORDER BY**\n- **JOIN** — INNER, LEFT, RIGHT\n- **Агрегации** — COUNT, SUM, AVG, MIN, MAX\n- **Подзапросы и CTE** (WITH)\n- **Window Functions** — ROW_NUMBER, LAG, LEAD\n\n## Инструменты\n- SQL (PostgreSQL, MySQL, BigQuery)\n- Excel / Google Sheets (pivot tables, VLOOKUP)\n- BI-инструменты (Metabase, Looker, Tableau, Power BI)\n\n## Применение\n- Построение дашбордов\n- Ad-hoc анализ для product decisions\n- Когортный анализ"),
-        ("Agile & Scrum",
+        ("Agile и Scrum",
          "Agile-методологии, Scrum, Kanban, спринты, ретроспективы",
          "## Что это\nИтеративный подход к разработке продукта.\n\n## Scrum\n- **Sprint** — 1-2 недели\n- **Ceremonies** — Planning, Daily, Review, Retro\n- **Roles** — PO, Scrum Master, Dev Team\n- **Artifacts** — Backlog, Sprint Backlog, Increment\n\n## Kanban\n- Визуализация потока (To Do → In Progress → Done)\n- WIP-лимиты\n- Continuous delivery\n\n## PM в Agile\n- Grooming backlog\n- Приоритизация задач\n- Принятие решений по scope"),
-        ("UX/UI Fundamentals",
+        ("Основы UX/UI",
          "Основы дизайна, wireframes, user flows, юзабилити",
          "## Что это\nПонимание принципов дизайна для эффективной работы с дизайнерами.\n\n## UX основы\n- **Information Architecture** — структура контента\n- **User Flow** — путь пользователя по продукту\n- **Wireframes** — скелетная структура экранов\n- **Prototyping** — интерактивные прототипы (Figma)\n- **Usability Testing** — тестирование с реальными пользователями\n\n## UI основы\n- Типографика, цвет, spacing\n- Design System / Component Library\n- Responsive design\n- Accessibility (a11y)"),
         ("Customer Development",
          "CustDev-интервью, проблемные и решенческие интервью, Product-Market Fit",
          "## Что это\nМетодология валидации бизнес-гипотез через общение с клиентами.\n\n## Типы интервью\n- **Проблемное** — есть ли проблема? Как решают сейчас?\n- **Решенческое** — подходит ли наше решение?\n- **Экспертное** — мнение специалистов рынка\n\n## Product-Market Fit\n- **Sean Ellis Test** — >40% ответили «very disappointed» без продукта\n- **Retention Curve** — выходит на плато\n- **Organic Growth** — пользователи приходят сами\n\n## The Mom Test (Rob Fitzpatrick)\n- Не спрашивай «нравится ли тебе идея»\n- Спрашивай про реальный опыт и поведение\n- Ищи факты, а не комплименты"),
-        ("Pricing & Monetization",
+        ("Монетизация и ценообразование",
          "Модели монетизации, ценообразование, unit economics",
          "## Что это\nОпределение того, как продукт зарабатывает деньги.\n\n## Модели монетизации\n- **Freemium** — бесплатный базовый + платный premium\n- **Subscription** — ежемесячная/годовая подписка\n- **Transaction Fee** — комиссия с каждой транзакции\n- **Advertising** — рекламная модель\n- **Marketplace** — комиссия с обеих сторон\n\n## Ценообразование\n- **Value-based** — цена = воспринимаемая ценность\n- **Cost-plus** — себестоимость + маржа\n- **Competitive** — относительно конкурентов\n\n## Метрики\n- MRR/ARR, ARPU, Conversion Rate, Churn"),
-        ("Growth & Retention",
+        ("Рост и удержание",
          "Воронки роста, retention, activation, виральность",
          "## Что это\nСтратегии привлечения, активации и удержания пользователей.\n\n## Воронка\n- **Acquisition** — откуда приходят пользователи\n- **Activation** — первый «aha moment»\n- **Retention** — возвращаются ли?\n- **Revenue** — платят ли?\n- **Referral** — рекомендуют ли?\n\n## Retention\n- **Day 1 / Day 7 / Day 30 Retention**\n- **Cohort Analysis** — сравнение когорт по времени\n- **Retention Curve** — цель: выход на плато\n\n## Growth Loops\n- Viral loop (invite friends)\n- Content loop (user-generated content → SEO)\n- Paid loop (revenue → ads → users)"),
     ]
@@ -1556,10 +1726,21 @@ pub fn migrate_food_blacklist(conn: &rusqlite::Connection) {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             type TEXT NOT NULL CHECK(type IN ('tag','product','category','keyword')),
             value TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'hard' CHECK(level IN ('hard','soft')),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(type, value)
         );"
     ).ok();
+
+    // Two-level blacklist: hard ("не ем") hides everywhere; soft ("не люблю")
+    // deprioritises. Existing rows default to hard. ALTER can't add CHECK — the
+    // constraint lives in CREATE TABLE above (fresh installs) + Rust validation.
+    if conn.prepare("SELECT level FROM food_blacklist LIMIT 1").is_err() {
+        conn.execute(
+            "ALTER TABLE food_blacklist ADD COLUMN level TEXT NOT NULL DEFAULT 'hard'",
+            [],
+        ).ok();
+    }
 
     // One-shot: migrate legacy blacklist from facts (category='food', key contains 'лэклист')
     let already: i64 = conn.query_row("SELECT COUNT(*) FROM food_blacklist", [], |r| r.get(0)).unwrap_or(0);

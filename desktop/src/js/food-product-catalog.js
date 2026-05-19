@@ -1,7 +1,8 @@
 // ── food-product-catalog.js — Drill-down product wiki: category → [parent|subgroup] → product ──
 import { CAT_LABELS, invalidateCatalogCache, loadCatalog, getBlacklist,
-  isIngredientBlocked, isCategoryBlocked } from './food-recipe-filters.js';
+  ingredientBlockLevel, categoryBlockLevel } from './food-recipe-filters.js';
 import { showProductModal } from './food-product-modal.js';
+import { showBlacklistContextMenu } from './food-blacklist-menu.js';
 import { renderProductCard } from './food-product-card.js';
 import { renderCategoryGrid, renderSubgroupGrid, renderProductsGrid,
   renderParentGrid, renderChildrenGrid, renderBreadcrumb, HIERARCHICAL_CATS } from './food-product-views.js';
@@ -34,6 +35,24 @@ function buildShell(el) {
   el.querySelector('.rf-add').onclick = () => showProductModal(fullReload, null, {
     category: nav.category || 'other', subgroup: nav.subgroup || '',
   });
+  // Quick blacklist: right-click or the ⊘ hover-button on a product/category tile.
+  const dc = el.querySelector('.drill-content');
+  const openBlMenu = (e) => {
+    const card = e.target.closest('.product-card');
+    const tile = e.target.closest('.cat-tile');
+    let target = null;
+    if (card) {
+      const p = allProducts.find(x => String(x.id) === card.dataset.id);
+      if (p) target = { type: 'product', value: p.name, catalogId: p.id };
+    } else if (tile && tile.dataset.cat) {
+      target = { type: 'category', value: tile.dataset.cat };
+    }
+    if (!target) return;
+    e.preventDefault();
+    showBlacklistContextMenu(e.clientX, e.clientY, target, fullReload);
+  };
+  dc.addEventListener('contextmenu', openBlMenu);
+  dc.addEventListener('click', (e) => { if (e.target.closest('.bl-quick')) openBlMenu(e); });
 }
 
 function goBack() {
@@ -54,11 +73,11 @@ function renderFlatList(el, items) {
   const blockedTags = new Set(blacklist.filter(e => e.type === 'tag').map(e => e.value.toLowerCase()));
   for (const p of items.slice(0, 200)) {
     const card = renderProductCard(p, {
-      productBlocked: isIngredientBlocked(p.name, blacklist),
+      productLevel: ingredientBlockLevel(p.name, blacklist),
       blockedTags,
-      blockedCategory: isCategoryBlocked(p.category, blacklist),
+      blockedCategory: !!categoryBlockLevel(p.category, blacklist),
     });
-    card.onclick = () => openProduct(p);
+    card.onclick = (e) => { if (!e.target.closest('.bl-quick')) openProduct(p); };
     el.appendChild(card);
   }
 }

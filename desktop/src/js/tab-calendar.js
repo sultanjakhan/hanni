@@ -91,6 +91,10 @@ async function loadCalendar(subTab) {
       await autoSyncCalendar(activeView);
       await refreshCalendarInner();
     },
+    renderRoutine: async (paneEl) => {
+      const { renderCalendarRoutine } = await import('./calendar-routine.js');
+      await renderCalendarRoutine(paneEl);
+    },
   });
 }
 

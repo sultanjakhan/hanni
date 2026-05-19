@@ -12,18 +12,24 @@
     'nuts', 'spice', 'oil', 'bakery', 'drinks', 'other'];
 
   // ── Blacklist helpers (no-op when blacklist is empty / missing) ──
-  const isIngrBlocked = (name, bl) => (bl || []).some(e =>
-    e.type === 'product' && (e.value || '').toLowerCase() === name.toLowerCase());
-  const isTagBlocked = (tag, bl) => tag && (bl || []).some(e =>
-    e.type === 'tag' && (e.value || '').toLowerCase() === tag.toLowerCase());
-  const isCatBlocked = (cat, bl) => (bl || []).some(e =>
-    e.type === 'category' && e.value === cat);
-  const keywordBlocked = (typed, bl) => (bl || []).some(e =>
-    e.type === 'keyword' && typed.toLowerCase().includes((e.value || '').toLowerCase()));
-  const productBlocked = (c, bl) => isIngrBlocked(c.name, bl)
-    || keywordBlocked(c.name, bl)
-    || isCatBlocked(c.category, bl)
-    || (c.tags || '').split(',').some(t => isTagBlocked(t.trim(), bl));
+  const blMax = (a, b) => (a === 'hard' || b === 'hard') ? 'hard' : (a || b || '');
+  // Blacklist level of a product / typed name: '' | 'soft' ("не люблю") | 'hard' ("не ем").
+  function productBlockLevel(c, bl) {
+    const nm = (c.name || '').toLowerCase();
+    const tags = (c.tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+    let lvl = '';
+    for (const e of (bl || [])) {
+      const v = (e.value || '').toLowerCase();
+      if (!v) continue;
+      let hit = false;
+      if (e.type === 'product') hit = nm === v;
+      else if (e.type === 'keyword') hit = nm.includes(v);
+      else if (e.type === 'category') hit = c.category === e.value;
+      else if (e.type === 'tag') hit = tags.includes(v);
+      if (hit) { lvl = blMax(lvl, e.level || 'hard'); if (lvl === 'hard') return 'hard'; }
+    }
+    return lvl;
+  }
 
   // ── Ingredient rows ──
   function renderIngredientRows(ct, catalog, blacklist, backend) {
@@ -112,20 +118,21 @@
       dd.appendChild(head);
       for (const item of items) {
         if (shown >= limit) break;
-        const blk = productBlocked(item, blacklist);
+        const lvl = productBlockLevel(item, blacklist);
         const opt = document.createElement('div');
         opt.className = `ingr-autocomplete-item ingr-product-row`;
         const ns = document.createElement('span');
-        ns.textContent = blk ? `🚫 ${item.name}` : item.name;
+        ns.textContent = lvl === 'hard' ? `🚫 ${item.name}` : lvl === 'soft' ? `👎 ${item.name}` : item.name;
         const cl = document.createElement('span');
         cl.className = `ingr-cat-label ingr-cat-${cat}`;
         cl.textContent = CAT_LABELS[cat] || cat;
         opt.append(ns, cl);
-        if (blk) {
+        if (lvl === 'hard') {
           opt.style.opacity = '0.5';
           opt.style.cursor = 'not-allowed';
-          opt.title = 'В блэклисте';
+          opt.title = 'Не ем';
         } else {
+          if (lvl === 'soft') { opt.style.opacity = '0.65'; opt.title = 'Не люблю'; }
           opt.onmousedown = (e) => { e.preventDefault(); selectItem(input, item.name, row, item.id); };
         }
         dd.appendChild(opt);
@@ -136,7 +143,7 @@
     // Offer "+ Создать" when typed value has no exact match.
     if (q && !visible.some(i => i.name.toLowerCase() === q)) {
       const typed = input.value.trim();
-      const blocked = isIngrBlocked(typed, blacklist) || keywordBlocked(typed, blacklist);
+      const blocked = productBlockLevel({ name: typed, tags: '', category: '' }, blacklist) === 'hard';
       const create = document.createElement('div');
       create.className = 'ingr-autocomplete-item ingr-autocomplete-create';
       create.textContent = blocked ? `🚫 «${typed}» в блэклисте` : `+ Создать «${typed}»`;

@@ -17,6 +17,9 @@ mod event_categories;
 mod notes;
 mod commands_data;
 mod commands_meta;
+mod pm_wiki;
+mod routine;
+mod routine_engine;
 mod mcp;
 mod agent;
 mod vacancy;
@@ -174,6 +177,7 @@ fn init_database() -> HanniDb {
     migrate_content_blocks(&conn);
     migrate_activity_tracking(&conn);
     migrate_schedules(&conn);
+    migrate_routine_engine(&conn);
     migrate_custom_projects(&conn);
     migrate_body_records(&conn);
     migrate_job_search(&conn);
@@ -476,6 +480,7 @@ pub fn run() {
             commands_data::get_dev_projects,
             commands_data::create_dev_project,
             commands_data::delete_dev_project,
+            commands_data::update_dev_project,
             commands_data::get_dev_skills,
             commands_data::create_dev_skill,
             commands_data::update_dev_skill,
@@ -515,6 +520,16 @@ pub fn run() {
             commands_data::toggle_schedule_completion,
             commands_data::get_schedule_completions,
             commands_data::get_schedule_stats,
+            routine::get_routine_chains,
+            routine::create_routine_node,
+            routine::update_routine_node,
+            routine::delete_routine_node,
+            routine::create_routine_edge,
+            routine::update_routine_edge,
+            routine::delete_routine_edge,
+            routine_engine::start_routine_run,
+            routine_engine::set_routine_node_status,
+            routine_engine::get_routine_now,
             // Dan Koe Protocol
             commands_data::get_dan_koe_entry,
             commands_data::save_dan_koe_entry,

@@ -549,11 +549,12 @@ pub fn delete_learning_item(id: i64, db: tauri::State<'_, HanniDb>) -> Result<()
 #[tauri::command]
 pub fn get_dev_projects(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
-    let mut stmt = conn.prepare("SELECT id, name, icon, sort_order FROM dev_projects ORDER BY sort_order")
+    let mut stmt = conn.prepare("SELECT id, name, icon, sort_order, overview FROM dev_projects ORDER BY sort_order")
         .map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |row| Ok(serde_json::json!({
         "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
         "icon": row.get::<_, String>(2)?, "sort_order": row.get::<_, i32>(3)?,
+        "overview": row.get::<_, String>(4)?,
     }))).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
@@ -571,6 +572,23 @@ pub fn create_dev_project(name: String, icon: String, db: tauri::State<'_, Hanni
 pub fn delete_dev_project(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     db.conn().execute("DELETE FROM dev_projects WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_dev_project(id: i64, name: Option<String>, icon: Option<String>, overview: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    let mut updates: Vec<String> = vec![];
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = icon { updates.push(format!("icon=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = overview { updates.push(format!("overview=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if updates.is_empty() { return Ok(()); }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE dev_projects SET {} WHERE id=?{}", updates.join(","), idx);
+    let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
@@ -2484,7 +2502,7 @@ fn recipes_matching_keywords(conn: &rusqlite::Connection, kws: &[String]) -> Vec
 pub fn list_food_blacklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT b.id, b.type, b.value, b.catalog_id, COALESCE(c.name,'') \
+        "SELECT b.id, b.type, b.value, b.catalog_id, COALESCE(c.name,''), b.level \
          FROM food_blacklist b \
          LEFT JOIN ingredient_catalog c ON c.id = b.catalog_id \
          ORDER BY b.type, b.value"
@@ -2496,6 +2514,7 @@ pub fn list_food_blacklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_js
             "value": row.get::<_, String>(2)?,
             "catalog_id": row.get::<_, Option<i64>>(3).unwrap_or(None),
             "catalog_name": row.get::<_, String>(4).unwrap_or_default(),
+            "level": row.get::<_, String>(5)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
@@ -2504,11 +2523,16 @@ pub fn list_food_blacklist(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_js
 #[tauri::command]
 pub fn add_food_blacklist(
     entry_type: String, value: String,
+    level: Option<String>,
     catalog_id: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     if !["tag","product","category","keyword"].contains(&entry_type.as_str()) {
         return Err("invalid type".into());
+    }
+    let lvl = level.unwrap_or_else(|| "hard".into());
+    if !["hard","soft"].contains(&lvl.as_str()) {
+        return Err("invalid level".into());
     }
     let conn = db.conn();
     let v = value.trim().to_lowercase();
@@ -2519,9 +2543,11 @@ pub fn add_food_blacklist(
         None if entry_type == "product" => crate::db::resolve_catalog_id_by_name(&conn, &v),
         None => None,
     };
+    // Upsert: re-adding an existing entry switches its level (hard ↔ soft).
     conn.execute(
-        "INSERT OR IGNORE INTO food_blacklist (type, value, catalog_id) VALUES (?1, ?2, ?3)",
-        rusqlite::params![entry_type, v, cat_id],
+        "INSERT INTO food_blacklist (type, value, level, catalog_id) VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(type, value) DO UPDATE SET level=excluded.level",
+        rusqlite::params![entry_type, v, lvl, cat_id],
     ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM food_blacklist WHERE type=?1 AND value=?2",
         rusqlite::params![entry_type, v], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;

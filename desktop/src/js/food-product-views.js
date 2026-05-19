@@ -1,5 +1,5 @@
 // ── food-product-views.js — drill-down views: category → [parent|subgroup] → product ──
-import { CAT_LABELS, CAT_ORDER, isIngredientBlocked, isTagBlocked, isCategoryBlocked } from './food-recipe-filters.js';
+import { CAT_LABELS, CAT_ORDER, ingredientBlockLevel, tagBlockLevel, categoryBlockLevel } from './food-recipe-filters.js';
 import { renderProductCard } from './food-product-card.js';
 
 const CAT_EMOJI = { meat:'🥩', fish:'🐟', veg:'🥬', fruit:'🍎', grain:'🌾', dairy:'🧀',
@@ -8,18 +8,42 @@ const CAT_EMOJI = { meat:'🥩', fish:'🐟', veg:'🥬', fruit:'🍎', grain:'�
 // Categories that show parent → children hierarchy instead of flat subgroups.
 export const HIERARCHICAL_CATS = new Set(['meat', 'fish']);
 
+// Blacklist level → tile modifier class / icon. hard hides nothing here — the
+// catalog is a wiki, so blocked items stay visible (hard red, soft dimmed).
+const blkCls = (lvl, base) => lvl === 'hard' ? ` ${base}--blocked` : lvl === 'soft' ? ` ${base}--soft` : '';
+const blkIcon = (lvl) => lvl === 'hard' ? ' 🚫' : lvl === 'soft' ? ' 👎' : '';
+
+// Render product cards by blacklist level — soft ("не люблю") sinks to the bottom.
+function appendProductCards(el, items, blacklist, onOpen) {
+  const blockedTagSet = new Set(blacklist.filter(e => e.type === 'tag').map(e => (e.value || '').toLowerCase()));
+  const withLvl = items.map(p => ({ p, lvl: ingredientBlockLevel(p.name, blacklist) }));
+  withLvl.sort((a, b) =>
+    (a.lvl === 'soft' ? 1 : 0) - (b.lvl === 'soft' ? 1 : 0)
+    || a.p.name.localeCompare(b.p.name, 'ru'));
+  for (const { p, lvl } of withLvl) {
+    const card = renderProductCard(p, {
+      productLevel: lvl, blockedTags: blockedTagSet,
+      blockedCategory: !!categoryBlockLevel(p.category, blacklist),
+    });
+    card.onclick = (e) => { if (!e.target.closest('.bl-quick')) onOpen(p); };
+    el.appendChild(card);
+  }
+}
+
 export function renderCategoryGrid(el, catalog, blacklist, onPick) {
   const frag = document.createDocumentFragment();
   for (const cat of CAT_ORDER) {
     const items = catalog.filter(p => p.category === cat);
     if (!items.length) continue;
-    const blocked = isCategoryBlocked(cat, blacklist);
+    const lvl = categoryBlockLevel(cat, blacklist);
     const tile = document.createElement('div');
-    tile.className = 'cat-tile' + (blocked ? ' cat-tile--blocked' : '');
+    tile.className = 'cat-tile' + blkCls(lvl, 'cat-tile');
+    tile.dataset.cat = cat;
     tile.innerHTML = `<div class="cat-tile-emoji">${CAT_EMOJI[cat] || '📦'}</div>
-      <div class="cat-tile-name">${CAT_LABELS[cat] || cat}${blocked ? ' 🚫' : ''}</div>
-      <div class="cat-tile-count">${items.length}</div>`;
-    tile.onclick = () => onPick(cat);
+      <div class="cat-tile-name">${CAT_LABELS[cat] || cat}${blkIcon(lvl)}</div>
+      <div class="cat-tile-count">${items.length}</div>
+      <button class="bl-quick" title="В блэклист">⊘</button>`;
+    tile.onclick = (e) => { if (!e.target.closest('.bl-quick')) onPick(cat); };
     frag.appendChild(tile);
   }
   el.innerHTML = '';
@@ -43,10 +67,10 @@ export function renderSubgroupGrid(el, catalog, category, blacklist, onPick) {
   const frag = document.createDocumentFragment();
   for (const [sg, list] of sorted) {
     const label = sg || 'Без подгруппы';
-    const blocked = sg && isTagBlocked(sg, blacklist);
+    const lvl = sg ? tagBlockLevel(sg, blacklist) : '';
     const tile = document.createElement('div');
-    tile.className = 'sg-tile' + (blocked ? ' sg-tile--blocked' : '');
-    tile.innerHTML = `<div class="sg-tile-name">${label}${blocked ? ' 🚫' : ''}</div>
+    tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
+    tile.innerHTML = `<div class="sg-tile-name">${label}${blkIcon(lvl)}</div>
       <div class="sg-tile-count">${list.length}</div>`;
     tile.onclick = () => onPick(sg);
     frag.appendChild(tile);
@@ -59,20 +83,12 @@ export function renderSubgroupGrid(el, catalog, category, blacklist, onPick) {
 
 export function renderProductsGrid(el, catalog, category, subgroup, blacklist, onOpen) {
   const items = catalog
-    .filter(p => p.category === category && (p.subgroup || '') === (subgroup || ''))
-    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    .filter(p => p.category === category && (p.subgroup || '') === (subgroup || ''));
   el.innerHTML = '';
   el.classList.remove('cat-grid', 'sg-grid');
   el.classList.add('recipe-grid');
   if (!items.length) { el.innerHTML = '<div class="empty-state">Нет продуктов</div>'; return; }
-  const blockedTagSet = new Set(blacklist.filter(e => e.type === 'tag').map(e => e.value.toLowerCase()));
-  for (const p of items) {
-    const productBlocked = isIngredientBlocked(p.name, blacklist);
-    const blockedCategory = isCategoryBlocked(p.category, blacklist);
-    const card = renderProductCard(p, { productBlocked, blockedTags: blockedTagSet, blockedCategory });
-    card.onclick = () => onOpen(p);
-    el.appendChild(card);
-  }
+  appendProductCards(el, items, blacklist, onOpen);
 }
 
 // Parent-level view for hierarchical categories.
@@ -109,8 +125,6 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
     else looseOrphans.push(p);
   }
 
-  const blockedTagSet = new Set(blacklist.filter(e => e.type === 'tag').map(e => e.value.toLowerCase()));
-
   el.innerHTML = '';
   el.classList.remove('cat-grid', 'recipe-grid');
   el.classList.add('sg-grid');
@@ -119,11 +133,10 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
   for (const par of parents) {
     const kids = childrenByParent.get(par.id) || [];
     const count = kids.length + (foldedCount.get(par.id) || 0) + 1;
-    const blocked = isIngredientBlocked(par.name, blacklist)
-      || (par.subgroup && blockedTagSet.has(par.subgroup.toLowerCase()));
+    const lvl = ingredientBlockLevel(par.name, blacklist);
     const tile = document.createElement('div');
-    tile.className = 'sg-tile' + (blocked ? ' sg-tile--blocked' : '');
-    tile.innerHTML = `<div class="sg-tile-name">${esc(par.name)}${blocked ? ' 🚫' : ''}</div>
+    tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
+    tile.innerHTML = `<div class="sg-tile-name">${esc(par.name)}${blkIcon(lvl)}</div>
       <div class="sg-tile-count">${count}</div>`;
     tile.onclick = () => onPick({ id: par.id, name: par.name });
     frag.appendChild(tile);
@@ -142,10 +155,10 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
     });
     for (const [sg, list] of sorted) {
       const label = sg || 'Без подгруппы';
-      const blocked = sg && isTagBlocked(sg, blacklist);
+      const lvl = sg ? tagBlockLevel(sg, blacklist) : '';
       const tile = document.createElement('div');
-      tile.className = 'sg-tile' + (blocked ? ' sg-tile--blocked' : '');
-      tile.innerHTML = `<div class="sg-tile-name">${label}${blocked ? ' 🚫' : ''}</div>
+      tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
+      tile.innerHTML = `<div class="sg-tile-name">${label}${blkIcon(lvl)}</div>
         <div class="sg-tile-count">${list.length}</div>`;
       tile.onclick = () => onPick({ orphanSubgroup: sg, name: label });
       frag.appendChild(tile);
@@ -169,21 +182,11 @@ export function renderChildrenGrid(el, catalog, parent, blacklist, onOpen) {
       && !hasChildren.has(c.id) && (c.subgroup || '').trim() === sg) : [];
     items = root ? [root, ...kids, ...folded] : [...kids, ...folded];
   }
-  items.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
   el.innerHTML = '';
   el.classList.remove('cat-grid', 'sg-grid');
   el.classList.add('recipe-grid');
   if (!items.length) { el.innerHTML = '<div class="empty-state">Нет продуктов</div>'; return; }
-  const blockedTagSet = new Set(blacklist.filter(e => e.type === 'tag').map(e => e.value.toLowerCase()));
-  for (const p of items) {
-    const card = renderProductCard(p, {
-      productBlocked: isIngredientBlocked(p.name, blacklist),
-      blockedTags: blockedTagSet,
-      blockedCategory: isCategoryBlocked(p.category, blacklist),
-    });
-    card.onclick = () => onOpen(p);
-    el.appendChild(card);
-  }
+  appendProductCards(el, items, blacklist, onOpen);
 }
 
 function esc(s) { return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }

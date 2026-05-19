@@ -65,56 +65,80 @@ function catalogNamesForTag(tag) {
     .map(c => c.name.toLowerCase());
 }
 
-export function isIngredientBlocked(name, bl) {
-  if (!bl || !bl.length || !name) return false;
+// Blacklist level: '' (none) < 'soft' ("не люблю") < 'hard' ("не ем"). hard wins.
+function blMax(a, b) { return (a === 'hard' || b === 'hard') ? 'hard' : (a || b || ''); }
+
+export function ingredientBlockLevel(name, bl) {
+  if (!bl || !bl.length || !name) return '';
   const lc = name.toLowerCase();
   const cat = catalogByName(name);
   const catTags = cat ? (cat.tags || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean) : [];
   const catCategory = cat ? cat.category : null;
   const catSubgroup = cat ? (cat.subgroup || '').toLowerCase() : '';
+  let lvl = '';
   for (const e of bl) {
     const v = (e.value || '').toLowerCase();
     if (!v) continue;
-    if (e.type === 'keyword' && (lc.includes(v) || catSubgroup.includes(v) || catTags.some(t => t.includes(v)))) return true;
-    if (e.type === 'product' && lc === v) return true;
-    if (e.type === 'tag' && (catTags.includes(v) || catSubgroup === v)) return true;
-    if (e.type === 'category' && catCategory === v) return true;
+    let hit = false;
+    if (e.type === 'keyword') hit = lc.includes(v) || catSubgroup.includes(v) || catTags.some(t => t.includes(v));
+    else if (e.type === 'product') hit = lc === v;
+    else if (e.type === 'tag') hit = catTags.includes(v) || catSubgroup === v;
+    else if (e.type === 'category') hit = catCategory === v;
+    if (hit) { lvl = blMax(lvl, e.level || 'hard'); if (lvl === 'hard') return 'hard'; }
   }
-  return false;
+  return lvl;
 }
+export const isIngredientBlocked = (name, bl) => !!ingredientBlockLevel(name, bl);
 
-export function isTagBlocked(tag, bl) {
-  if (!bl || !bl.length || !tag) return false;
+export function tagBlockLevel(tag, bl) {
+  if (!bl || !bl.length || !tag) return '';
   const lc = tag.toLowerCase();
-  return bl.some(e => {
+  let lvl = '';
+  for (const e of bl) {
     const v = (e.value || '').toLowerCase();
-    return v && ((e.type === 'tag' && v === lc) || (e.type === 'keyword' && lc.includes(v)));
-  });
+    if (v && ((e.type === 'tag' && v === lc) || (e.type === 'keyword' && lc.includes(v)))) {
+      lvl = blMax(lvl, e.level || 'hard'); if (lvl === 'hard') return 'hard';
+    }
+  }
+  return lvl;
 }
+export const isTagBlocked = (tag, bl) => !!tagBlockLevel(tag, bl);
 
-export function isCategoryBlocked(cat, bl) {
-  if (!bl || !bl.length || !cat) return false;
+export function categoryBlockLevel(cat, bl) {
+  if (!bl || !bl.length || !cat) return '';
   const lc = cat.toLowerCase();
-  return bl.some(e => e.type === 'category' && (e.value || '').toLowerCase() === lc);
+  let lvl = '';
+  for (const e of bl) {
+    if (e.type === 'category' && (e.value || '').toLowerCase() === lc) {
+      lvl = blMax(lvl, e.level || 'hard'); if (lvl === 'hard') return 'hard';
+    }
+  }
+  return lvl;
 }
+export const isCategoryBlocked = (cat, bl) => !!categoryBlockLevel(cat, bl);
 
-export function matchBL(r, bl) {
-  if (!bl || !bl.length) return false;
+export function recipeBlockLevel(r, bl) {
+  if (!bl || !bl.length) return '';
   const hay = `${r.name} ${r.ingredients || ''}`.toLowerCase();
   const names = getIngrNames(r);
+  let lvl = '';
   for (const e of bl) {
     const v = (e.value || '').toLowerCase();
     if (!v) continue;
-    if (e.type === 'keyword' && hay.includes(v)) return true;
-    if (e.type === 'product' && names.some(n => n.toLowerCase() === v)) return true;
-    if (e.type === 'tag') {
+    let hit = false;
+    if (e.type === 'keyword') hit = hay.includes(v);
+    else if (e.type === 'product') hit = names.some(n => n.toLowerCase() === v);
+    else if (e.type === 'tag') {
       const blocked = catalogNamesForTag(v);
-      if (blocked.some(bn => names.some(n => n.toLowerCase() === bn))) return true;
+      hit = blocked.some(bn => names.some(n => n.toLowerCase() === bn));
     }
-    if (e.type === 'category' && names.some(n => (catalogByName(n)?.category || '') === v)) return true;
+    else if (e.type === 'category') hit = names.some(n => (catalogByName(n)?.category || '') === v);
+    if (hit) { lvl = blMax(lvl, e.level || 'hard'); if (lvl === 'hard') return 'hard'; }
   }
-  return false;
+  return lvl;
 }
+// matchBL = "should this recipe be hidden" — only hard hides; soft stays (deprioritised).
+export const matchBL = (r, bl) => recipeBlockLevel(r, bl) === 'hard';
 export const matchMeal = (r, f) => f === 'all' || (r.tags || '').split(',').map(t => t.trim()).includes(f);
 export const matchCuisine = (r, f) => f === 'all' || (r.cuisine || 'other') === f;
 export const matchDiff = (r, f) => f === 'all' || (r.difficulty || 'easy') === f;

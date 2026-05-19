@@ -1,128 +1,124 @@
-// ── food-blacklist-modal.js — Manage food blacklist (tags / products / categories / keywords) ──
+// ── food-blacklist-modal.js — Manage the two-level food blacklist ──
 import { invoke } from './state.js';
-import { escapeHtml, confirmModal } from './utils.js';
+import { escapeHtml } from './utils.js';
 import { CAT_LABELS, CAT_ORDER, loadCatalog, invalidateBlacklistCache } from './food-recipe-filters.js';
+import { applyBlacklist, BL_LEVELS } from './food-blacklist-menu.js';
 
-const TYPE_LABELS = { tag: 'Тег', product: 'Продукт', category: 'Категория', keyword: 'Ключевое слово' };
-
-function groupEntries(entries) {
-  const groups = { tag: [], product: [], category: [], keyword: [] };
-  for (const e of entries) (groups[e.type] ||= []).push(e);
-  return groups;
-}
+const TYPE_LABELS = { product: 'Продукт', category: 'Категория', tag: 'Тег', keyword: 'Ключевое слово' };
+const BASIC_TYPES = ['product', 'category'];
+const ADV_TYPES = ['tag', 'keyword'];
 
 export async function showBlacklistModal(onChange) {
-  const [entries, catalog] = await Promise.all([
-    invoke('list_food_blacklist').catch(() => []),
-    loadCatalog(),
-  ]);
+  let entries = await invoke('list_food_blacklist').catch(() => []);
+  const catalog = await loadCatalog();
+  let addType = 'product';
+  let addLevel = 'hard';
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal" style="max-width:520px">
+  overlay.innerHTML = `<div class="modal" style="max-width:540px">
     <div class="modal-title">🚫 Блэклист еды</div>
-    <p style="color:var(--text-secondary);font-size:13px;margin:0 0 12px;">Заблокированные элементы не показываются в рецептах и автокомплите. При добавлении существующие рецепты удаляются.</p>
-    <div class="bl-list"></div>
-    <div class="bl-add" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)">
-      <div class="settings-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <select class="form-input bl-type" style="width:140px">
-          ${Object.entries(TYPE_LABELS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
-        </select>
-        <input class="form-input bl-value" placeholder="Значение..." style="flex:1" autocomplete="off">
-        <datalist id="bl-prod-list">${catalog.map(c => `<option value="${escapeHtml(c.name)}">`).join('')}</datalist>
-        <button class="btn-primary bl-add-btn" style="font-size:13px;padding:6px 14px">Добавить</button>
+    <p style="color:var(--text-secondary);font-size:13px;margin:0 0 14px;">
+      «Не ем» — скрывается из рецептов и каталога. «Не люблю» — остаётся, но тусклее и ниже в списках.</p>
+    <div class="bl-sections"></div>
+    <div class="bl-add">
+      <div class="bl-add-picks">
+        <div class="bl-pick bl-pick-level"></div>
+        <div class="bl-pick bl-pick-type"></div>
       </div>
-      <div class="bl-hint" style="color:var(--text-muted);font-size:12px"></div>
+      <details class="bl-adv"><summary>⚙ Продвинутое (тег, ключевое слово)</summary>
+        <div class="bl-pick bl-pick-type-adv" style="margin-top:8px"></div>
+      </details>
+      <div class="bl-add-row">
+        <input class="form-input bl-value" placeholder="Значение…" autocomplete="off" list="bl-prod-list">
+        <datalist id="bl-prod-list">${catalog.map(c => `<option value="${escapeHtml(c.name)}">`).join('')}</datalist>
+        <datalist id="bl-cat-list">${CAT_ORDER.map(c => `<option value="${escapeHtml(CAT_LABELS[c])}">`).join('')}</datalist>
+        <button class="btn-primary bl-add-btn">Добавить</button>
+      </div>
+      <div class="bl-hint" style="color:var(--text-muted);font-size:12px;margin-top:6px"></div>
     </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" data-close>Закрыть</button>
-    </div>
+    <div class="modal-actions"><button class="btn-secondary" data-close>Закрыть</button></div>
   </div>`;
 
-  const listEl = overlay.querySelector('.bl-list');
-  const typeSel = overlay.querySelector('.bl-type');
-  const valueInp = overlay.querySelector('.bl-value');
-  const hintEl = overlay.querySelector('.bl-hint');
+  const q = (s) => overlay.querySelector(s);
+  const valueInp = q('.bl-value');
+  const hintEl = q('.bl-hint');
 
-  function renderList() {
-    const groups = groupEntries(entries);
-    if (!entries.length) { listEl.innerHTML = '<div class="empty-state" style="padding:16px">Блэклист пуст</div>'; return; }
-    listEl.innerHTML = Object.entries(groups).filter(([_, arr]) => arr.length).map(([type, arr]) =>
-      `<div class="bl-group" style="margin-bottom:10px">
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${TYPE_LABELS[type]}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${arr.map(e => `<span class="rf-chip active" style="display:inline-flex;align-items:center;gap:6px">
-            ${escapeHtml(e.value)}
-            <button data-del="${e.id}" style="background:none;border:none;color:inherit;cursor:pointer;padding:0 2px;font-size:14px">×</button>
-          </span>`).join('')}
-        </div>
-      </div>`
-    ).join('');
-    listEl.querySelectorAll('[data-del]').forEach(btn => btn.onclick = () => removeEntry(parseInt(btn.dataset.del)));
+  const chip = (group, val, label, active) =>
+    `<button class="bl-tab${active ? ' active' : ''}" data-${group}="${val}">${label}</button>`;
+
+  function renderPicks() {
+    q('.bl-pick-level').innerHTML = BL_LEVELS.map(l =>
+      chip('lvl', l.level, `${l.icon} ${l.label}`, l.level === addLevel)).join('');
+    q('.bl-pick-type').innerHTML = BASIC_TYPES.map(t =>
+      chip('type', t, TYPE_LABELS[t], t === addType)).join('');
+    q('.bl-pick-type-adv').innerHTML = ADV_TYPES.map(t =>
+      chip('type', t, TYPE_LABELS[t], t === addType)).join('');
+    overlay.querySelectorAll('[data-lvl]').forEach(b => b.onclick = () => { addLevel = b.dataset.lvl; renderPicks(); });
+    overlay.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { addType = b.dataset.type; renderPicks(); renderHint(); });
+  }
+
+  function renderSections() {
+    q('.bl-sections').innerHTML = BL_LEVELS.map(l => {
+      const items = entries.filter(e => (e.level || 'hard') === l.level);
+      const chips = items.length ? items.map(e => {
+        const disp = e.type === 'category' ? (CAT_LABELS[e.value] || e.value) : e.value;
+        return `<span class="bl-chip bl-chip--${l.level}">${escapeHtml(disp)}
+          <small>${TYPE_LABELS[e.type] || e.type}</small>
+          <button data-del="${e.id}" title="Убрать">×</button></span>`;
+      }).join('') : '<span style="color:var(--text-muted);font-size:12px">пусто</span>';
+      return `<div class="bl-section">
+        <div class="bl-section-head">${l.icon} ${l.label}</div>
+        <div class="bl-chips">${chips}</div></div>`;
+    }).join('');
+    overlay.querySelectorAll('[data-del]').forEach(b =>
+      b.onclick = () => removeEntry(parseInt(b.dataset.del)));
   }
 
   function renderHint() {
-    const type = typeSel.value;
-    // datalist autocomplete only for type=product (catalog names)
-    if (type === 'product') valueInp.setAttribute('list', 'bl-prod-list');
-    else valueInp.removeAttribute('list');
-    if (type === 'tag') {
-      const tags = [...new Set(catalog.flatMap(c => (c.tags || '').split(',').map(t => t.trim()).filter(Boolean)))].sort();
-      hintEl.textContent = `Теги из каталога: ${tags.slice(0, 12).join(', ')}${tags.length > 12 ? '...' : ''}`;
-    } else if (type === 'category') {
-      hintEl.textContent = 'Категории: ' + CAT_ORDER.map(c => `${c} (${CAT_LABELS[c]})`).join(', ');
-    } else if (type === 'product') {
-      hintEl.textContent = 'Начните вводить — подскажу из каталога.';
-    } else {
-      hintEl.textContent = 'Любая подстрока (например: «свин» — заблокирует «свинина», «фарш свиной», «бекон»).';
-    }
+    valueInp.setAttribute('list', addType === 'product' ? 'bl-prod-list'
+      : addType === 'category' ? 'bl-cat-list' : '');
+    if (addType === 'product') hintEl.textContent = 'Начните вводить — подскажу из каталога.';
+    else if (addType === 'category') hintEl.textContent = 'Выберите категорию из списка.';
+    else if (addType === 'tag') hintEl.textContent = 'Тег из каталога продукта (например: субпродукты).';
+    else hintEl.textContent = 'Подстрока: «свин» заблокирует свинину, фарш свиной, бекон.';
+  }
+
+  async function refresh() {
+    entries = await invoke('list_food_blacklist').catch(() => []);
+    renderSections();
   }
 
   async function removeEntry(id) {
-    if (!await confirmModal('Убрать из блэклиста?', 'Убрать')) return;
-    await invoke('remove_food_blacklist', { id });
-    const idx = entries.findIndex(e => e.id === id);
-    if (idx >= 0) entries.splice(idx, 1);
+    await invoke('remove_food_blacklist', { id }).catch(() => {});
     invalidateBlacklistCache();
-    renderList();
+    await refresh();
     if (onChange) onChange();
-  }
-
-  function lookupCatalogId(name) {
-    const norm = String(name || '').trim().toLowerCase();
-    if (!norm) return null;
-    const hit = catalog.find(c => String(c.name).trim().toLowerCase() === norm);
-    return hit ? hit.id : null;
   }
 
   async function addEntry() {
-    const value = valueInp.value.trim();
+    let value = valueInp.value.trim();
     if (!value) return;
-    const type = typeSel.value;
-    const hits = await invoke('find_recipes_matching_blacklist', { entryType: type, value }).catch(() => []);
-    const preview = hits.length ? `\n\nБудет удалено ${hits.length} рецептов:\n• ${hits.slice(0, 8).map(h => h.name).join('\n• ')}${hits.length > 8 ? '\n• ...' : ''}` : '';
-    if (!await confirmModal(`Заблокировать «${value}»?${preview}`, 'Заблокировать')) return;
-    const args = { entryType: type, value };
-    if (type === 'product') {
-      const cid = lookupCatalogId(value);
-      if (cid) args.catalogId = cid;
+    if (addType === 'category') {
+      const code = CAT_ORDER.find(c =>
+        CAT_LABELS[c].toLowerCase() === value.toLowerCase() || c === value.toLowerCase());
+      if (!code) { hintEl.textContent = 'Неизвестная категория — выберите из списка.'; return; }
+      value = code;
     }
-    const id = await invoke('add_food_blacklist', args);
-    if (hits.length) await invoke('delete_recipes_matching_blacklist', { entryType: type, value });
-    entries.push({ id, type, value: value.toLowerCase(), catalog_id: args.catalogId || null });
-    valueInp.value = '';
-    invalidateBlacklistCache();
-    renderList();
-    if (onChange) onChange();
+    const ok = await applyBlacklist(addType, value, addLevel, null, async () => {
+      await refresh();
+      if (onChange) onChange();
+    });
+    if (ok) { valueInp.value = ''; valueInp.focus(); }
   }
 
-  overlay.querySelector('.bl-add-btn').onclick = addEntry;
+  q('.bl-add-btn').onclick = addEntry;
   valueInp.onkeydown = (e) => { if (e.key === 'Enter') addEntry(); };
-  typeSel.onchange = renderHint;
-  overlay.querySelector('[data-close]').onclick = () => overlay.remove();
+  q('[data-close]').onclick = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-  renderList();
+  renderPicks();
+  renderSections();
   renderHint();
   document.body.appendChild(overlay);
   valueInp.focus();

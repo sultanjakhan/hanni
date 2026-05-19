@@ -584,12 +584,13 @@ fn build_snapshot(db: &HanniDb, share_id: i64) -> Result<Snapshot, String> {
     drop(stmt);
 
     let mut stmt = conn.prepare(
-        "SELECT id, type, value, catalog_id FROM food_blacklist"
+        "SELECT id, type, value, catalog_id, level FROM food_blacklist"
     ).map_err(|e| e.to_string())?;
     s.food_blacklist = stmt.query_map([], |r| Ok(serde_json::json!({
         "id": r.get::<_, i64>(0)?, "type": r.get::<_, String>(1)?,
         "value": r.get::<_, String>(2)?,
         "catalog_id": r.get::<_, Option<i64>>(3).unwrap_or(None),
+        "level": r.get::<_, String>(4)?,
     }))).map_err(|e| e.to_string())?.filter_map(|x| x.ok()).collect();
     drop(stmt);
 

@@ -1040,6 +1040,7 @@ async function loadDevelopment() {
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   const { renderSkillsPane } = await import('./tab-dev-skills.js');
   const { renderCasesPane } = await import('./tab-dev-cases.js');
+  const { renderWikiPane } = await import('./tab-dev-wiki.js');
   const pid = S.devProject;
   const reload = () => loadDevelopment();
 
@@ -1052,6 +1053,9 @@ async function loadDevelopment() {
     subtitle: 'Проекты и навыки',
     icon: '🚀',
     headerExtra: projHtml,
+    dashLabel: 'Вики',
+    dashIcon: '📖',
+    renderDash: pid ? (paneEl) => renderWikiPane(paneEl, pid, reload) : null,
     renderSkills: pid ? (paneEl) => renderSkillsPane(paneEl, pid, reload) : null,
     renderCases: pid ? (paneEl) => renderCasesPane(paneEl, pid, reload) : null,
     renderTable: async (paneEl) => {

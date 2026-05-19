@@ -1,7 +1,9 @@
 // ── tab-dev-skill-page.js — Individual skill page view ──
 
 import { S, invoke } from './state.js';
-import { escapeHtml, renderMarkdown } from './utils.js';
+import { escapeHtml } from './utils.js';
+import { renderWikiMarkdown, buildSkillIndex } from './wiki-markdown.js';
+import { wireWikiLinks } from './tab-dev-wiki.js';
 
 function scoreColor(score) {
   if (score >= 4) return 'var(--green)';
@@ -27,7 +29,10 @@ export async function renderSkillPage(el, skillId, projectId, reloadFn) {
   if (!skill) { S._devOpenSkill = null; reloadFn(); return; }
 
   const cases = await invoke('get_dev_cases', { skillId, projectId: null }).catch(() => []);
-  const theoryHtml = skill.theory ? renderMarkdown(skill.theory) : '<span class="text-faint">Нет теории</span>';
+  const skillIndex = buildSkillIndex(skills);
+  const theoryHtml = skill.theory
+    ? renderWikiMarkdown(skill.theory, skillIndex)
+    : '<span class="text-faint">Нет теории</span>';
 
   const casesHtml = cases.length ? cases.map(c => `
     <div class="dev-case-row" data-id="${c.id}">
@@ -54,7 +59,7 @@ export async function renderSkillPage(el, skillId, projectId, reloadFn) {
     </div>
     <div class="dev-page-sections">
       <details class="dev-section" open>
-        <summary class="dev-section-title">Теория</summary>
+        <summary class="dev-section-title">Теория <button class="dev-theory-edit" title="Редактировать теорию">✏️</button></summary>
         <div class="dev-section-body dev-theory-content">${theoryHtml}</div>
       </details>
       <details class="dev-section" open>
@@ -66,14 +71,25 @@ export async function renderSkillPage(el, skillId, projectId, reloadFn) {
       </details>
     </div>`;
 
-  wireSkillPageEvents(el, skillId, skill.name, reloadFn);
+  wireSkillPageEvents(el, skill, reloadFn);
 }
 
-function wireSkillPageEvents(el, skillId, skillName, reloadFn) {
+function wireSkillPageEvents(el, skill, reloadFn) {
+  const skillId = skill.id;
+  const skillName = skill.name;
+
   el.querySelector('.dev-back-btn')?.addEventListener('click', () => {
     S._devOpenSkill = null;
     reloadFn();
   });
+
+  el.querySelector('.dev-theory-edit')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showTheoryEditor(skill, reloadFn);
+  });
+
+  wireWikiLinks(el, reloadFn);
 
   el.querySelectorAll('.dev-star.interactive').forEach(star => {
     star.addEventListener('click', async () => {
@@ -122,6 +138,33 @@ function showAddCaseForSkill(skillId, skillName, reloadFn) {
     const description = document.getElementById('dev-case-desc')?.value || '';
     await invoke('create_dev_case', { skillId, title, url, description });
     overlay.remove();
+    reloadFn();
+  });
+}
+
+function showTheoryEditor(skill, reloadFn) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal modal-wide">
+    <div class="modal-title">Теория: ${escapeHtml(skill.name)}</div>
+    <div class="form-group">
+      <label class="form-label">Markdown — термины пиши как [[Название страницы]]</label>
+      <textarea class="form-textarea" id="dev-theory-text"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" data-cancel>Отмена</button>
+      <button class="btn-primary" data-save>Сохранить</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#dev-theory-text').value = skill.theory || '';
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-cancel]').addEventListener('click', close);
+  overlay.querySelector('[data-save]').addEventListener('click', async () => {
+    const theory = overlay.querySelector('#dev-theory-text').value;
+    await invoke('update_dev_skill', { id: skill.id, name: null, description: null, theory, score: null });
+    close();
     reloadFn();
   });
 }
