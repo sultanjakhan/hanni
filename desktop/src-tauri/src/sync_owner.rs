@@ -139,6 +139,13 @@ fn encode_doc(row: &Value, device_id: &str, updated_at: &str, table: &str) -> Va
     };
     obj.insert("_device_id".into(), Value::String(device_id.into()));
     obj.insert("_updated_at".into(), Value::String(updated_at.into()));
+    // _synced_at is the push moment (UTC). The pull cursor tracks _synced_at
+    // instead of _updated_at: a row's _updated_at is its modification time,
+    // which can be older than rows pushed alongside it (or stale after an
+    // offline spell), so a cursor by _updated_at silently skips late-pushed
+    // rows. _synced_at is monotonic with push order — distinct per doc since
+    // encode_doc runs sequentially right before each patch_doc.
+    obj.insert("_synced_at".into(), Value::String(chrono::Utc::now().to_rfc3339()));
     // _table is what makes the collectionGroup query routable on pull —
     // without it we can't tell which table a row should be applied to.
     obj.insert("_table".into(), Value::String(table.into()));
@@ -201,11 +208,11 @@ async fn run_query(client: &reqwest::Client, token: &str, project_id: &str,
                 "allDescendants": all_descendants,
             }],
             "where": {"fieldFilter": {
-                "field": {"fieldPath": "_updated_at"},
+                "field": {"fieldPath": "_synced_at"},
                 "op": "GREATER_THAN",
                 "value": {"stringValue": since_ts}
             }},
-            "orderBy": [{"field": {"fieldPath": "_updated_at"}, "direction": "ASCENDING"}],
+            "orderBy": [{"field": {"fieldPath": "_synced_at"}, "direction": "ASCENDING"}],
             "limit": PULL_LIMIT
         }
     });
@@ -443,7 +450,12 @@ async fn pull_all(db: &HanniDb, client: &reqwest::Client,
 {
     let (since, dev_id) = {
         let conn = db.conn();
-        let s = get_setting(&conn, "cloud_owner_v2_pull_global")
+        // New cursor key (separate from the old _updated_at-based pull_global).
+        // Starts at EPOCH: the first pull picks up every _synced_at-bearing doc
+        // — i.e. everything pushed by a fixed (v0.80.2+) build. Re-applying is
+        // LWW-idempotent. Pre-fix docs lack _synced_at and are re-synced when
+        // their owner next pushes them.
+        let s = get_setting(&conn, "cloud_owner_v2_pull_synced")
             .unwrap_or_else(|| EPOCH_TS.into());
         (s, device_id(&conn))
     };
@@ -460,7 +472,7 @@ async fn pull_all(db: &HanniDb, client: &reqwest::Client,
     for row_doc in &docs {
         let Some(doc) = row_doc.get("document") else { continue };
         let fields = decode_doc(doc);
-        if let Some(ts) = fields.get("_updated_at").and_then(|v| v.as_str()) {
+        if let Some(ts) = fields.get("_synced_at").and_then(|v| v.as_str()) {
             if ts > max_ts.as_str() { max_ts = ts.into(); }
         }
         if fields.get("_device_id").and_then(|v| v.as_str()) == Some(dev_id.as_str()) {
@@ -487,7 +499,7 @@ async fn pull_all(db: &HanniDb, client: &reqwest::Client,
         }
     }
     if max_ts != since {
-        set_setting(&conn, "cloud_owner_v2_pull_global", &max_ts);
+        set_setting(&conn, "cloud_owner_v2_pull_synced", &max_ts);
     }
     Ok(totals)
 }
