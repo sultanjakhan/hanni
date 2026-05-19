@@ -1538,14 +1538,14 @@
 .recipe-card--soft:hover { opacity: 0.95; }
 
 /* ⊘ quick-blacklist button — hidden until tile/card hover */
-.cat-tile, .product-card { position: relative; }
+.cat-tile, .sg-tile, .product-card { position: relative; }
 .bl-quick {
   position: absolute; top: 4px; right: 4px; width: 20px; height: 20px;
   display: none; align-items: center; justify-content: center; padding: 0;
   border: 1px solid var(--border-default); border-radius: var(--radius-sm);
   background: var(--bg-card); color: var(--text-muted); cursor: pointer; font-size: 12px;
 }
-.cat-tile:hover .bl-quick, .product-card:hover .bl-quick { display: flex; }
+.cat-tile:hover .bl-quick, .sg-tile:hover .bl-quick, .product-card:hover .bl-quick { display: flex; }
 .bl-quick:hover { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
 
 /* Blacklist context menu (extends .inline-dropdown) */
@@ -1579,6 +1579,20 @@
 .bl-adv summary { font-size: 12px; color: var(--text-muted); cursor: pointer; }
 .bl-add-row { display: flex; gap: 8px; align-items: center; }
 .bl-add-row .bl-value { flex: 1; }
+.bl-search { position: relative; }
+.bl-search .bl-value { width: 100%; }
+.bl-ac {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 20; margin-top: 2px;
+  max-height: 240px; overflow-y: auto; background: var(--bg-card);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0,0,0,0.15));
+}
+.bl-ac-row {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  font-size: 13px; cursor: pointer; color: var(--text-primary);
+}
+.bl-ac-row:hover { background: var(--bg-hover); }
+.bl-ac-row small { margin-left: auto; font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
 .add-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .rf-chip-add { border-style: dashed; opacity: 0.7; }
 .rf-chip-add:hover { opacity: 1; }

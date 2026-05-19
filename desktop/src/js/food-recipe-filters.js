@@ -60,8 +60,10 @@ function catalogByName(name) {
 function catalogNamesForTag(tag) {
   if (!_catalogCache) return [];
   const lc = tag.toLowerCase();
+  // 'tag' blacklist entries name a catalog subgroup (or, legacy, a tag).
   return _catalogCache
-    .filter(c => (c.tags || '').split(',').map(t => t.trim().toLowerCase()).includes(lc))
+    .filter(c => (c.subgroup || '').toLowerCase() === lc
+      || (c.tags || '').split(',').map(t => t.trim().toLowerCase()).includes(lc))
     .map(c => c.name.toLowerCase());
 }
 

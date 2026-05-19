@@ -38,16 +38,10 @@ function buildShell(el) {
   // Quick blacklist: right-click or the ⊘ hover-button on a product/category tile.
   const dc = el.querySelector('.drill-content');
   const openBlMenu = (e) => {
-    const card = e.target.closest('.product-card');
-    const tile = e.target.closest('.cat-tile');
-    let target = null;
-    if (card) {
-      const p = allProducts.find(x => String(x.id) === card.dataset.id);
-      if (p) target = { type: 'product', value: p.name, catalogId: p.id };
-    } else if (tile && tile.dataset.cat) {
-      target = { type: 'category', value: tile.dataset.cat };
-    }
-    if (!target) return;
+    const node = e.target.closest('[data-bl-type]');
+    if (!node) return;
+    const target = { type: node.dataset.blType, value: node.dataset.blValue };
+    if (node.dataset.blId) target.catalogId = parseInt(node.dataset.blId);
     e.preventDefault();
     showBlacklistContextMenu(e.clientX, e.clientY, target, fullReload);
   };

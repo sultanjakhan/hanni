@@ -12,6 +12,7 @@ export const HIERARCHICAL_CATS = new Set(['meat', 'fish']);
 // catalog is a wiki, so blocked items stay visible (hard red, soft dimmed).
 const blkCls = (lvl, base) => lvl === 'hard' ? ` ${base}--blocked` : lvl === 'soft' ? ` ${base}--soft` : '';
 const blkIcon = (lvl) => lvl === 'hard' ? ' 🚫' : lvl === 'soft' ? ' 👎' : '';
+const BL_BTN = '<button class="bl-quick" title="В блэклист">⊘</button>';
 
 // Render product cards by blacklist level — soft ("не люблю") sinks to the bottom.
 function appendProductCards(el, items, blacklist, onOpen) {
@@ -38,7 +39,8 @@ export function renderCategoryGrid(el, catalog, blacklist, onPick) {
     const lvl = categoryBlockLevel(cat, blacklist);
     const tile = document.createElement('div');
     tile.className = 'cat-tile' + blkCls(lvl, 'cat-tile');
-    tile.dataset.cat = cat;
+    tile.dataset.blType = 'category';
+    tile.dataset.blValue = cat;
     tile.innerHTML = `<div class="cat-tile-emoji">${CAT_EMOJI[cat] || '📦'}</div>
       <div class="cat-tile-name">${CAT_LABELS[cat] || cat}${blkIcon(lvl)}</div>
       <div class="cat-tile-count">${items.length}</div>
@@ -71,8 +73,9 @@ export function renderSubgroupGrid(el, catalog, category, blacklist, onPick) {
     const tile = document.createElement('div');
     tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
     tile.innerHTML = `<div class="sg-tile-name">${label}${blkIcon(lvl)}</div>
-      <div class="sg-tile-count">${list.length}</div>`;
-    tile.onclick = () => onPick(sg);
+      <div class="sg-tile-count">${list.length}</div>${sg ? BL_BTN : ''}`;
+    if (sg) { tile.dataset.blType = 'tag'; tile.dataset.blValue = sg; }
+    tile.onclick = (e) => { if (!e.target.closest('.bl-quick')) onPick(sg); };
     frag.appendChild(tile);
   }
   el.innerHTML = '';
@@ -137,8 +140,9 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
     const tile = document.createElement('div');
     tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
     tile.innerHTML = `<div class="sg-tile-name">${esc(par.name)}${blkIcon(lvl)}</div>
-      <div class="sg-tile-count">${count}</div>`;
-    tile.onclick = () => onPick({ id: par.id, name: par.name });
+      <div class="sg-tile-count">${count}</div>${BL_BTN}`;
+    tile.dataset.blType = 'product'; tile.dataset.blValue = par.name; tile.dataset.blId = par.id;
+    tile.onclick = (e) => { if (!e.target.closest('.bl-quick')) onPick({ id: par.id, name: par.name }); };
     frag.appendChild(tile);
   }
 
@@ -159,8 +163,9 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
       const tile = document.createElement('div');
       tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
       tile.innerHTML = `<div class="sg-tile-name">${label}${blkIcon(lvl)}</div>
-        <div class="sg-tile-count">${list.length}</div>`;
-      tile.onclick = () => onPick({ orphanSubgroup: sg, name: label });
+        <div class="sg-tile-count">${list.length}</div>${sg ? BL_BTN : ''}`;
+      if (sg) { tile.dataset.blType = 'tag'; tile.dataset.blValue = sg; }
+      tile.onclick = (e) => { if (!e.target.closest('.bl-quick')) onPick({ orphanSubgroup: sg, name: label }); };
       frag.appendChild(tile);
     }
   }

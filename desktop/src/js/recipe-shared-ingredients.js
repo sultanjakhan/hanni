@@ -25,7 +25,7 @@
       if (e.type === 'product') hit = nm === v;
       else if (e.type === 'keyword') hit = nm.includes(v);
       else if (e.type === 'category') hit = c.category === e.value;
-      else if (e.type === 'tag') hit = tags.includes(v);
+      else if (e.type === 'tag') hit = tags.includes(v) || (c.subgroup || '').toLowerCase() === v;
       if (hit) { lvl = blMax(lvl, e.level || 'hard'); if (lvl === 'hard') return 'hard'; }
     }
     return lvl;

@@ -1742,6 +1742,17 @@ pub fn migrate_food_blacklist(conn: &rusqlite::Connection) {
         ).ok();
     }
 
+    // Blacklist references the product catalog hierarchy (category / subgroup /
+    // product) — the free-text "keyword" type is dropped. Convert keyword entries
+    // that name a real catalog subgroup into subgroup-blocks (stored as type='tag',
+    // which the detector matches by subgroup); drop keyword entries with no match.
+    conn.execute(
+        "UPDATE OR IGNORE food_blacklist SET type='tag' WHERE type='keyword' \
+         AND lower(value) IN (SELECT DISTINCT lower(subgroup) FROM ingredient_catalog WHERE subgroup<>'')",
+        [],
+    ).ok();
+    conn.execute("DELETE FROM food_blacklist WHERE type='keyword'", []).ok();
+
     // One-shot: migrate legacy blacklist from facts (category='food', key contains 'лэклист')
     let already: i64 = conn.query_row("SELECT COUNT(*) FROM food_blacklist", [], |r| r.get(0)).unwrap_or(0);
     if already > 0 { return; }

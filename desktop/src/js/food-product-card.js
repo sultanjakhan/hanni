@@ -13,6 +13,9 @@ export function renderProductCard(product, opts = {}) {
   div.className = 'product-card'
     + (productLevel === 'hard' ? ' product-card--blocked' : productLevel === 'soft' ? ' product-card--soft' : '');
   div.dataset.id = product.id;
+  div.dataset.blType = 'product';
+  div.dataset.blValue = product.name;
+  div.dataset.blId = product.id;
   const color = CAT_COLORS[product.category] || 'gray';
   const label = CAT_LABELS[product.category] || product.category;
   const catCls = blockedCategory ? ' product-card-tag--blocked' : '';

@@ -1755,7 +1755,7 @@ dependencies = [
 
 [[package]]
 name = "hanni"
-version = "0.81.0"
+version = "0.81.1"
 dependencies = [
  "axum",
  "chrono",
