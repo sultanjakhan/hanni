@@ -2160,16 +2160,25 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
         conn.execute(&sql, []).ok();
     }
 
+    // updated_at / deleted_at must string-compare against the owner-sync
+    // cursor, which holds chrono RFC3339 values. SQLite datetime('now') yields
+    // a space-separated UTC form ("2026-05-19 01:02:03") that sorts *below*
+    // RFC3339 ("...T...") — push silently skipped every trigger-stamped row.
+    // Use a 'T'-separated local form so both paths order consistently.
+    let ts_expr = "strftime('%Y-%m-%dT%H:%M:%f','now','localtime')";
+
     // 3. AFTER INSERT triggers — set updated_at for fresh rows when the
     // INSERT didn't supply one. Avoids NULL/'' rows breaking LWW.
+    // DROP first: CREATE ... IF NOT EXISTS won't refresh an old-format trigger.
     for table in SYNC_TABLES {
         let trig = format!(
-            "CREATE TRIGGER IF NOT EXISTS {table}_set_updated_at_on_insert \
+            "DROP TRIGGER IF EXISTS {table}_set_updated_at_on_insert; \
+             CREATE TRIGGER {table}_set_updated_at_on_insert \
              AFTER INSERT ON {table} \
              FOR EACH ROW \
              WHEN NEW.updated_at IS NULL OR NEW.updated_at = '' \
              BEGIN \
-                 UPDATE {table} SET updated_at = datetime('now') WHERE rowid = NEW.rowid; \
+                 UPDATE {table} SET updated_at = {ts_expr} WHERE rowid = NEW.rowid; \
              END"
         );
         conn.execute_batch(&trig).ok();
@@ -2180,12 +2189,13 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
     // sync_owner pulling remote rows with a remote timestamp).
     for table in SYNC_TABLES {
         let trig = format!(
-            "CREATE TRIGGER IF NOT EXISTS {table}_bump_updated_at \
+            "DROP TRIGGER IF EXISTS {table}_bump_updated_at; \
+             CREATE TRIGGER {table}_bump_updated_at \
              AFTER UPDATE ON {table} \
              FOR EACH ROW \
              WHEN NEW.updated_at = OLD.updated_at \
              BEGIN \
-                 UPDATE {table} SET updated_at = datetime('now') WHERE rowid = NEW.rowid; \
+                 UPDATE {table} SET updated_at = {ts_expr} WHERE rowid = NEW.rowid; \
              END"
         );
         conn.execute_batch(&trig).ok();
@@ -2205,12 +2215,13 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
     ).ok();
     for table in SYNC_TABLES {
         let trig = format!(
-            "CREATE TRIGGER IF NOT EXISTS {table}_tombstone \
+            "DROP TRIGGER IF EXISTS {table}_tombstone; \
+             CREATE TRIGGER {table}_tombstone \
              AFTER DELETE ON {table} \
              FOR EACH ROW \
              BEGIN \
                  INSERT OR REPLACE INTO sync_tombstones (table_name, row_id, deleted_at) \
-                 VALUES ('{table}', OLD.id, datetime('now')); \
+                 VALUES ('{table}', OLD.id, {ts_expr}); \
              END"
         );
         conn.execute_batch(&trig).ok();
