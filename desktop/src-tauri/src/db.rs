@@ -2432,3 +2432,25 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
         );
     }
 }
+
+/// One-time cleanup: an earlier import_exercise inserted a fresh health_log row
+/// on every Health Connect sync, so identical exercises piled up — and
+/// sync_health_to_timeline then turned each into its own timeline_block.
+/// Collapse both tables to one row per distinct entry. Idempotent: a second run
+/// finds no duplicates and deletes nothing.
+pub fn migrate_dedup_health_exercise(conn: &rusqlite::Connection) {
+    conn.execute(
+        "DELETE FROM health_log WHERE type='exercise' AND id NOT IN (
+            SELECT MIN(id) FROM health_log WHERE type='exercise'
+            GROUP BY date, type, value, notes
+        )",
+        [],
+    ).ok();
+    conn.execute(
+        "DELETE FROM timeline_blocks WHERE source='auto_health' AND id NOT IN (
+            SELECT MIN(id) FROM timeline_blocks WHERE source='auto_health'
+            GROUP BY date, start_time, end_time, type_id, source
+        )",
+        [],
+    ).ok();
+}

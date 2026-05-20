@@ -58,7 +58,7 @@ function blockHtml(block, label, conflict) {
   </div>`;
 }
 
-function gapHtml(startMin, endMin) {
+function gapHtml(startMin, endMin, minToPx) {
   const dur = endMin - startMin;
   return `<div class="day-tl-gap" style="top:${minToPx(startMin)}px; height:${minToPx(dur)}px;">
     <span class="day-tl-gap-label">${fmtDur(dur)} свободно</span>
@@ -91,10 +91,15 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   layer.className = 'day-tl-layer';
   layer.style.height = `${24 * hourPx}px`;
 
+  // A tracked block that exactly matches a planned event (same start + end) is
+  // the same activity drawn twice — keep the planned event, drop the overlay.
+  const plannedKeys = new Set(eventIntervals.map(iv => `${iv.startMin}:${iv.endMin}`));
+
   // Decorate with parsed minutes + sort by start_time for cluster building
   const positioned = completed
     .map(b => ({ block: b, startMin: parseHM(b.start_time), endMin: parseHM(b.end_time) }))
     .filter(x => x.startMin != null && x.endMin != null && x.endMin > x.startMin)
+    .filter(x => !plannedKeys.has(`${x.startMin}:${x.endMin}`))
     .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
 
   // Group into overlap clusters: a new cluster starts when current block's start
@@ -132,10 +137,13 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     const wrap = document.createElement('div');
     wrap.className = 'day-tl-block-wrap';
     if (p.totalCols > 1) {
-      // Split available width into N columns. CSS handles the math via custom props.
+      // Split available width into N columns. CSS handles the math via custom
+      // props. Cap at 4 columns so a pathological pile-up stays readable
+      // instead of collapsing into hairline stripes.
+      const cols = Math.min(p.totalCols, 4);
       wrap.style.cssText = `top:${top}px; height:${height}px;`;
-      wrap.style.setProperty('--tl-cols', p.totalCols);
-      wrap.style.setProperty('--tl-col', p.col);
+      wrap.style.setProperty('--tl-cols', cols);
+      wrap.style.setProperty('--tl-col', Math.min(p.col, cols - 1));
       wrap.classList.add('day-tl-block-wrap-multi');
     } else {
       wrap.style.cssText = `top:${top}px; height:${height}px;`;
@@ -150,7 +158,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     const gapStart = sortedEvts[i].endMin;
     const gapEnd = sortedEvts[i + 1].startMin;
     if (gapEnd - gapStart >= 60) {
-      layer.insertAdjacentHTML('beforeend', gapHtml(gapStart, gapEnd));
+      layer.insertAdjacentHTML('beforeend', gapHtml(gapStart, gapEnd, minToPx));
     }
   }
 

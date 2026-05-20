@@ -197,6 +197,7 @@ fn init_database() -> HanniDb {
     db::migrate_event_categories(&conn);
     db::migrate_drop_mindset(&conn);
     db::migrate_sync_meta(&conn);
+    db::migrate_dedup_health_exercise(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag

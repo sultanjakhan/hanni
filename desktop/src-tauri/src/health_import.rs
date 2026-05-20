@@ -194,8 +194,19 @@ fn import_heart_rate(db: &HanniDb, samples: &[serde_json::Value]) -> usize {
 #[cfg(target_os = "android")]
 fn import_exercise(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
     let conn = db.conn();
-    let mut count = 0;
     let now = chrono::Local::now().to_rfc3339();
+    // Idempotency: Health Connect returns every session in the window, so clear
+    // this batch's dates first — re-importing then can't pile up duplicates.
+    let mut dates: Vec<&str> = sessions.iter().filter_map(|s| s["date"].as_str()).collect();
+    dates.sort_unstable();
+    dates.dedup();
+    for &date in &dates {
+        let _ = conn.execute(
+            "DELETE FROM health_log WHERE type='exercise' AND date=?1",
+            rusqlite::params![date],
+        );
+    }
+    let mut count = 0;
     for s in sessions {
         let date = s["date"].as_str().unwrap_or_default();
         let dur = s["duration_minutes"].as_f64().unwrap_or(0.0);
