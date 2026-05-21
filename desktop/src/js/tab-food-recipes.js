@@ -1,18 +1,12 @@
 // ── tab-food-recipes.js — Recipe book pane for Food tab ──
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, chips } from './utils.js';
 import { renderCard } from './food-recipe-card.js';
 import {
   MEALS, DIFFS, CAT_LABELS, CAT_ORDER, getCuisineChips, loadCatalog,
   getBlacklist, matchBL, recipeBlockLevel, matchMeal, matchCuisine, matchDiff,
   matchSearch, matchIngr, sortRecipes, collectIngredients,
 } from './food-recipe-filters.js';
-
-function chips(items, cur, group) {
-  return items.map(o =>
-    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
-  ).join('');
-}
 
 function accordionRow(title, group, content, activeCount) {
   const badge = activeCount ? `<span class="rf-acc-badge">${activeCount}</span>` : '';

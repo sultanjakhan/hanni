@@ -1,14 +1,9 @@
 // ── sport-templates.js — Workout templates pane for Sports tab ──
 import { invoke } from './state.js';
+import { chips } from './utils.js';
 import { renderTemplateCard } from './sport-template-card.js';
 import { WORKOUT_TYPES, DIFFS, matchType, matchDiff, matchSearch, matchMuscle, collectMuscleGroups } from './sport-template-filters.js';
 import { MUSCLE_GROUPS } from './sport-catalog-filters.js';
-
-function chips(items, cur, group) {
-  return items.map(o =>
-    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
-  ).join('');
-}
 
 export async function renderTemplatesPane(el) {
   const F = { type: 'all', diff: 'all', muscle: 'all', fav: false, q: '' };

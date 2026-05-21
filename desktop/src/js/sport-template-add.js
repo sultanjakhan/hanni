@@ -1,15 +1,10 @@
 // ── sport-template-add.js — Add/edit workout template modal ──
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, chips } from './utils.js';
 import { WORKOUT_TYPES, DIFFS } from './sport-template-filters.js';
 import { MUSCLE_GROUPS } from './sport-catalog-filters.js';
 import { createExerciseRows, collectExerciseItems, invalidateAcCache } from './sport-template-exercises.js';
 
-function chips(items, cur, group) {
-  return items.filter(o => o.id !== 'all').map(o =>
-    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
-  ).join('');
-}
 function multiChips(items, selected, group) {
   return items.filter(o => o.id !== 'all').map(o =>
     `<button class="rf-chip${selected.has(o.id) ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
@@ -28,9 +23,9 @@ export function showAddTemplateModal(onSaved, editData) {
     <div class="modal-title">${isEdit ? 'Редактировать' : 'Новый'} шаблон тренировки</div>
     <input class="form-input" id="tmpl-name" placeholder="Название" value="${escapeHtml(editData?.name || '')}">
     <div class="form-label" style="margin-top:8px">Тип</div>
-    <div class="rf-chip-row" id="tmpl-type">${chips(WORKOUT_TYPES, selType, 'wtype')}</div>
+    <div class="rf-chip-row" id="tmpl-type">${chips(WORKOUT_TYPES, selType, 'wtype', true)}</div>
     <div class="form-label" style="margin-top:8px">Сложность</div>
-    <div class="rf-chip-row" id="tmpl-diff">${chips(DIFFS, selDiff, 'diff')}</div>
+    <div class="rf-chip-row" id="tmpl-diff">${chips(DIFFS, selDiff, 'diff', true)}</div>
     <div class="form-label" style="margin-top:8px">Целевые мышцы</div>
     <div class="rf-chip-row" id="tmpl-muscles">${multiChips(MUSCLE_GROUPS, selMuscles, 'muscles')}</div>
     <div class="form-label" style="margin-top:12px">Упражнения</div>

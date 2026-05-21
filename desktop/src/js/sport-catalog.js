@@ -1,13 +1,8 @@
 // ── sport-catalog.js — Exercise catalog pane for Sports tab ──
 import { invoke } from './state.js';
+import { chips } from './utils.js';
 import { renderExerciseCard } from './sport-catalog-card.js';
 import { MUSCLE_GROUPS, EXERCISE_TYPES, matchMuscle, matchType, matchSearch } from './sport-catalog-filters.js';
-
-function chips(items, cur, group) {
-  return items.map(o =>
-    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
-  ).join('');
-}
 
 export async function renderCatalogPane(el) {
   const F = { muscle: 'all', type: 'all', q: '' };

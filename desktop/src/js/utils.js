@@ -46,6 +46,14 @@ export function localDate(offsetDays = 0) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Filter-chip buttons (.rf-chip). filterAll drops the synthetic "all" option.
+export function chips(items, cur, group, filterAll = false) {
+  const list = filterAll ? items.filter(o => o.id !== 'all') : items;
+  return list.map(o =>
+    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
+  ).join('');
+}
+
 // ── Skeleton loaders ──
 
 export function skeletonSettings(rows = 3) {

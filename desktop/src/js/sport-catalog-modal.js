@@ -1,13 +1,7 @@
 // ── sport-catalog-modal.js — Add/edit exercise modal ──
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, chips } from './utils.js';
 import { MUSCLE_GROUPS, EXERCISE_TYPES, invalidateCatalogCache } from './sport-catalog-filters.js';
-
-function chips(items, cur, group) {
-  return items.filter(o => o.id !== 'all').map(o =>
-    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
-  ).join('');
-}
 
 export function showExerciseModal(onSaved, editData) {
   const isEdit = !!editData;
@@ -19,9 +13,9 @@ export function showExerciseModal(onSaved, editData) {
     <div class="modal-title">${isEdit ? 'Редактировать' : 'Новое'} упражнение</div>
     <input class="form-input" id="ex-name" placeholder="Название" value="${escapeHtml(editData?.name || '')}">
     <div class="form-label" style="margin-top:8px">Группа мышц</div>
-    <div class="rf-chip-row" id="ex-muscle">${chips(MUSCLE_GROUPS, mg, 'muscle')}</div>
+    <div class="rf-chip-row" id="ex-muscle">${chips(MUSCLE_GROUPS, mg, 'muscle', true)}</div>
     <div class="form-label" style="margin-top:8px">Тип</div>
-    <div class="rf-chip-row" id="ex-type">${chips(EXERCISE_TYPES, et, 'type')}</div>
+    <div class="rf-chip-row" id="ex-type">${chips(EXERCISE_TYPES, et, 'type', true)}</div>
     <input class="form-input" id="ex-equip" placeholder="Оборудование" value="${escapeHtml(editData?.equipment || '')}" style="margin-top:8px">
     <textarea class="form-textarea" id="ex-desc" placeholder="Описание (необязательно)" rows="2" style="margin-top:8px">${escapeHtml(editData?.description || '')}</textarea>
     <div class="modal-actions">
