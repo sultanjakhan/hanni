@@ -151,3 +151,24 @@ pub fn delete_routine_edge(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(),
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
+
+/// Create a new chain seeded with a single start node, ready for the constructor.
+/// Defaults to a 'manual' trigger (started by hand from the task widget).
+#[tauri::command]
+pub fn create_routine_chain(title: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    let conn = db.conn();
+    let sort: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM routine_chains", [], |r| r.get(0),
+    ).unwrap_or(0);
+    conn.execute(
+        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES (?1, 'manual', ?2)",
+        rusqlite::params![title, sort],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let chain_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO routine_nodes (chain_id, source_type, title, category, pos_x, pos_y, is_start)
+         VALUES (?1, 'start', 'Старт', 'other', 30, 200, 1)",
+        rusqlite::params![chain_id],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    Ok(chain_id)
+}

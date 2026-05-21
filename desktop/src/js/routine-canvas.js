@@ -3,42 +3,57 @@
 // `refresh` is an async callback that reloads data and redraws after edits.
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
+import { openNodeModal } from './routine-node-modal.js';
+import { openEdgeMenu } from './routine-edge-menu.js';
 
 const CAT_ICONS = {
   health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡',
   practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽',
 };
 
+const TRIGGER_SUB = {
+  sleep_end: 'срабатывает по концу сна — данные с часов',
+  time: 'срабатывает в заданное время',
+  manual: 'запускается вручную',
+};
+
 export function renderCanvas(canvas, chain, refresh) {
   canvas.querySelectorAll('.rt-node, .rt-edge-menu').forEach(n => n.remove());
-  for (const n of chain.nodes) canvas.appendChild(buildNode(n));
+  for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain.trigger_type));
   wireNodes(canvas, chain, refresh);
   renderEdges(canvas, chain, refresh, null);
 }
 
-function buildNode(n) {
+function buildNode(n, triggerType) {
   const d = document.createElement('div');
   d.className = 'rt-node' + (n.is_start ? ' rt-start' : '');
   d.style.left = n.pos_x + 'px';
   d.style.top = n.pos_y + 'px';
   d.dataset.id = n.id;
   if (n.is_start) {
+    const sub = TRIGGER_SUB[triggerType] || 'триггер запуска';
     d.innerHTML = `<span class="rt-node-icon">⏰</span>
-      <span class="rt-node-title">${escapeHtml(n.title)}</span>
+      <div class="rt-start-text">
+        <span class="rt-node-title">${escapeHtml(n.title)}</span>
+        <span class="rt-start-sub">${sub}</span>
+      </div>
       <div class="rt-port out" data-port="${n.id}"></div>`;
   } else {
     const dots = [0, 1, 2, 3, 4]
       .map(i => `<span class="rt-dot${i < n.priority ? ' on' : ''}"></span>`).join('');
     const reqL = n.requirement === 'optional' ? 'опционально' : 'обязательно';
+    const reqTip = n.requirement === 'optional'
+      ? 'Опциональная: можно пропустить, переход по графу не блокирует'
+      : 'Обязательная: пока не выполнена, следующие узлы графа не откроются';
     d.innerHTML = `
-      <div class="rt-node-del" data-del="${n.id}">✕</div>
+      <div class="rt-node-del" data-del="${n.id}" title="Удалить узел">✕</div>
       <div class="rt-node-top">
         <span class="rt-node-icon">${CAT_ICONS[n.category] || CAT_ICONS.other}</span>
         <span class="rt-node-title">${escapeHtml(n.title)}</span>
       </div>
       <div class="rt-node-meta">
-        <span class="rt-dots" data-pri="${n.id}" title="клик — важность">${dots}</span>
-        <span class="rt-badge ${n.requirement}" data-req="${n.id}" title="клик — обязательно/опционально">${reqL}</span>
+        <span class="rt-dots" data-pri="${n.id}" title="Важность ${n.priority}/5 · клик — изменить">${dots}</span>
+        <span class="rt-badge ${n.requirement}" data-req="${n.id}" title="${reqTip} · клик — переключить">${reqL}</span>
       </div>
       <div class="rt-port in"></div>
       <div class="rt-port out" data-port="${n.id}"></div>`;
@@ -83,10 +98,12 @@ function wireNodes(canvas, chain, refresh) {
     }));
 }
 
-// ── drag a node, persist position on drop ──
+// ── drag a node (persist on drop) or, if it didn't move, open its detail modal ──
 function startDrag(canvas, chain, refresh, el, n, e) {
   const sx = e.clientX, sy = e.clientY, ox = n.pos_x, oy = n.pos_y;
+  let moved = false;
   const move = (ev) => {
+    if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) moved = true;
     n.pos_x = Math.max(0, ox + ev.clientX - sx);
     n.pos_y = Math.max(0, oy + ev.clientY - sy);
     el.style.left = n.pos_x + 'px';
@@ -96,6 +113,10 @@ function startDrag(canvas, chain, refresh, el, n, e) {
   const up = async () => {
     document.removeEventListener('mousemove', move);
     document.removeEventListener('mouseup', up);
+    if (!moved) {                                  // a click, not a drag
+      openNodeModal(n, chain, refresh);
+      return;
+    }
     await invoke('update_routine_node', { id: n.id, posX: n.pos_x, posY: n.pos_y }).catch(() => {});
   };
   document.addEventListener('mousemove', move);
@@ -187,37 +208,4 @@ function renderEdges(canvas, chain, refresh, draft) {
       svg.append(ln);
     }
   }
-}
-
-// ── edge context menu: change trigger / delete ──
-function openEdgeMenu(canvas, chain, refresh, edge, ev) {
-  canvas.querySelectorAll('.rt-edge-menu').forEach(m => m.remove());
-  const m = document.createElement('div');
-  m.className = 'rt-edge-menu';
-  m.style.left = (ev.clientX - canvas.getBoundingClientRect().left) + 'px';
-  m.style.top = (ev.clientY - canvas.getBoundingClientRect().top) + 'px';
-  m.innerHTML = `
-    <div data-t="after_completion">→ после завершения</div>
-    <div data-t="after_duration">⏱ через N минут…</div>
-    <div data-t="manual">○ вручную</div>
-    <div class="rt-em-sep"></div>
-    <div class="rt-em-del" data-t="del">✕ удалить связь</div>`;
-  m.querySelectorAll('[data-t]').forEach(it => it.addEventListener('click', async () => {
-    const t = it.dataset.t;
-    if (t === 'del') {
-      await invoke('delete_routine_edge', { id: edge.id }).catch(() => {});
-    } else if (t === 'after_duration') {
-      const v = parseInt(prompt('Через сколько минут?', edge.trigger_value || 55));
-      if (v > 0) await invoke('update_routine_edge', {
-        id: edge.id, triggerType: 'after_duration', triggerValue: v,
-      }).catch(() => {});
-    } else {
-      await invoke('update_routine_edge', { id: edge.id, triggerType: t, triggerValue: null }).catch(() => {});
-    }
-    refresh();
-  }));
-  canvas.appendChild(m);
-  setTimeout(() => document.addEventListener('mousedown', function close(e) {
-    if (!e.target.closest('.rt-edge-menu')) { m.remove(); document.removeEventListener('mousedown', close); }
-  }), 0);
 }

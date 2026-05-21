@@ -25,6 +25,16 @@ pub fn start_routine_run(chain_id: i64, date: String, db: tauri::State<'_, Hanni
     ).map_err(|e| format!("DB error: {}", e))
 }
 
+/// Cancel a run: drop it and its node statuses (the chain returns to "not started").
+#[tauri::command]
+pub fn delete_routine_run(run_id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    conn.execute("DELETE FROM routine_node_status WHERE run_id=?1", rusqlite::params![run_id]).ok();
+    conn.execute("DELETE FROM routine_runs WHERE id=?1", rusqlite::params![run_id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(())
+}
+
 /// Set a node's state inside a run. state 'pending' (or empty) clears the record.
 #[tauri::command]
 pub fn set_routine_node_status(
@@ -75,6 +85,21 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
             })
             .collect();
 
+        // Nodes gated only by a manual edge whose source is already done: the
+        // user can open them by hand. Excludes already-unlocked (those are in avail).
+        let unlocked = |id: i64| matches!(status.get(&id).map(|s| s.0.as_str()), Some("unlocked"));
+        let locked: Vec<&RNode> = nodes.values()
+            .filter(|n| !n.is_start && !closed(n.id) && !unlocked(n.id))
+            .filter(|n| {
+                let inc: Vec<&REdge> = edges.iter().filter(|e| e.to == n.id).collect();
+                let ready_manual = inc.iter().any(|e| e.trigger == "manual"
+                    && (nodes.get(&e.from).map(|s| s.is_start).unwrap_or(false) || closed(e.from)));
+                let others_ok = inc.iter().filter(|e| e.trigger != "manual")
+                    .all(|e| edge_satisfied(e, &nodes, &status, &closed));
+                ready_manual && others_ok
+            })
+            .collect();
+
         let all_required_closed = nodes.values()
             .filter(|n| !n.is_start && n.requirement == "required")
             .all(|n| closed(n.id));
@@ -82,12 +107,15 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
             conn.execute("UPDATE routine_runs SET state='completed', completed_at=?1 WHERE id=?2",
                 rusqlite::params![chrono::Local::now().to_rfc3339(), run_id]).ok();
         }
-        let tasks: Vec<serde_json::Value> = avail.iter().map(|n| serde_json::json!({
+        let to_json = |n: &&RNode| serde_json::json!({
             "id": n.id, "title": n.title, "category": n.category, "priority": n.priority,
             "requirement": n.requirement, "source_type": n.source_type, "source_id": n.source_id,
-        })).collect();
+        });
+        let tasks: Vec<serde_json::Value> = avail.iter().map(to_json).collect();
+        let locked_tasks: Vec<serde_json::Value> = locked.iter().map(to_json).collect();
         out.push(serde_json::json!({
-            "run_id": run_id, "chain_id": chain_id, "chain_title": chain_title, "tasks": tasks,
+            "run_id": run_id, "chain_id": chain_id, "chain_title": chain_title,
+            "tasks": tasks, "locked": locked_tasks,
         }));
     }
     Ok(out)
@@ -100,7 +128,8 @@ fn edge_satisfied(
 ) -> bool {
     if nodes.get(&e.from).map(|n| n.is_start).unwrap_or(false) { return true; }
     match e.trigger.as_str() {
-        "manual" => false,
+        // Opened by hand: the target node carries an 'unlocked' mark.
+        "manual" => matches!(status.get(&e.to).map(|s| s.0.as_str()), Some("unlocked")),
         "after_duration" => {
             if status.get(&e.from).map(|s| s.0.as_str()) != Some("done") { return false; }
             let mins = e.value.unwrap_or(0);

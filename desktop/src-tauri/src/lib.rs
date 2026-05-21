@@ -150,6 +150,7 @@ fn init_database() -> HanniDb {
     }
 
     let db_path = hanni_db_path();
+    eprintln!("[hanni] init_database: opening {:?}", db_path);
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -221,6 +222,7 @@ fn init_database() -> HanniDb {
         if val == "true" { CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed); }
     }
 
+    eprintln!("[hanni] init_database: migrations complete");
     HanniDb(std::sync::Mutex::new(conn))
 }
 
@@ -524,6 +526,7 @@ pub fn run() {
             commands_data::get_schedule_completions,
             commands_data::get_schedule_stats,
             routine::get_routine_chains,
+            routine::create_routine_chain,
             routine::create_routine_node,
             routine::update_routine_node,
             routine::delete_routine_node,
@@ -533,6 +536,7 @@ pub fn run() {
             routine_engine::start_routine_run,
             routine_engine::set_routine_node_status,
             routine_engine::get_routine_now,
+            routine_engine::delete_routine_run,
             // Dan Koe Protocol
             commands_data::get_dan_koe_entry,
             commands_data::save_dan_koe_entry,
@@ -824,8 +828,11 @@ pub fn run() {
                 eprintln!("[hanni] android data_dir = {:?}", data_dir);
                 let _ = std::fs::create_dir_all(&data_dir);
                 types::set_data_dir(data_dir);
+                let t0 = std::time::Instant::now();
+                eprintln!("[hanni] init_database START");
                 let hanni_db = init_database();
                 app.manage(hanni_db);
+                eprintln!("[hanni] init_database DONE + managed in {:?}", t0.elapsed());
             }
 
             // Restore main-window logical position/size from disk before any

@@ -2,6 +2,7 @@
 // Idle: + opens dropdown with planned tasks → click = start
 // Active: ■ pulsing red → click = stop
 import { invoke } from './state.js';
+import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
 
 let widget = null;
 let panel = null;
@@ -81,16 +82,18 @@ async function openStartDropdown() {
   const nonEmpty = Object.entries(groups).filter(([, items]) => items.length > 0);
   const showHeaders = nonEmpty.length > 1;
   const orderedItems = nonEmpty.flatMap(([, items]) => items);
+  const routineHtml = await renderRoutineSection();
 
   panel = document.createElement('div');
   panel.className = 'tw-panel';
   panel.innerHTML = `
     <div class="tw-panel-header">Запустить таск</div>
     <div class="tw-panel-body">
-      ${orderedItems.length === 0
+      ${routineHtml}
+      ${orderedItems.length === 0 && !routineHtml
         ? '<div class="tw-empty">Нет задач на сегодня</div>'
         : nonEmpty.map(([key, items]) => `
-            ${showHeaders ? `<div class="tw-group-header">${GROUP_TITLES[key]}</div>` : ''}
+            ${showHeaders || routineHtml ? `<div class="tw-group-header">${GROUP_TITLES[key]}</div>` : ''}
             ${items.map(p => {
               const idx = orderedItems.indexOf(p);
               return `
@@ -103,7 +106,9 @@ async function openStartDropdown() {
     </div>`;
   widget.appendChild(panel);
 
-  panel.querySelectorAll('.tw-item').forEach(btn => {
+  wireRoutineSection(panel, () => openStartDropdown());
+
+  panel.querySelectorAll('.tw-item[data-idx]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const p = orderedItems[parseInt(btn.dataset.idx)];
       const isCheck = p.tracking_mode === 'check';
