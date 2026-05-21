@@ -1,6 +1,6 @@
 // timeline-today.js — Today view: planned tasks (Calendar/Schedule/Notes) with start/stop tracking
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, localDate } from './utils.js';
 
 let liveTimer = null;
 let activeBlockStart = null;
@@ -121,9 +121,4 @@ function stopLiveTimer() {
 function parseTime(hm) {
   const [h, m] = (hm || '00:00').split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
-}
-
-function localDate() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }

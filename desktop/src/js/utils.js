@@ -39,6 +39,13 @@ export function escapeHtml(text) {
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Local YYYY-MM-DD, optionally offset by N days (negative = past).
+export function localDate(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // ── Skeleton loaders ──
 
 export function skeletonSettings(rows = 3) {

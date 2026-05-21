@@ -1,6 +1,6 @@
 // tab-timeline.js — Timeline tab loader
 import { S, invoke, tabLoaders } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, localDate } from './utils.js';
 
 async function loadTimeline(subTab) {
   const el = document.getElementById('timeline-content');
@@ -102,11 +102,6 @@ async function renderBlocksTable(paneEl) {
       await renderBlocksTable(paneEl);
     });
   });
-}
-
-function localDate() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
 // Register tab loader

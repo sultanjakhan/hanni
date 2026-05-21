@@ -3,17 +3,12 @@
 // same data via CR-SQLite + Firestore CRDT, no extra work needed.
 
 import { invoke, IS_MOBILE } from './state.js';
+import { localDate } from './utils.js';
 
 const LS_KEY = 'hc_last_sync';
 const MIN_INTERVAL_MS = 5 * 60 * 1000; // throttle: at most once per 5 min
 
 let inflight = null;
-
-function localDate(offsetDays = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 /**
  * Pull from Health Connect (no-op on non-Android), then fan out the latest
