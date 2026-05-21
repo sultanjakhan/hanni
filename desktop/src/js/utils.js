@@ -46,6 +46,11 @@ export function localDate(offsetDays = 0) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Minimal escape for HTML attribute values (quotes + opening tag).
+export function escAttr(s) {
+  return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
 // Filter-chip buttons (.rf-chip). filterAll drops the synthetic "all" option.
 export function chips(items, cur, group, filterAll = false) {
   const list = filterAll ? items.filter(o => o.id !== 'all') : items;

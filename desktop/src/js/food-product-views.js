@@ -1,6 +1,7 @@
 // ── food-product-views.js — drill-down views: category → [parent|subgroup] → product ──
 import { CAT_LABELS, CAT_ORDER, ingredientBlockLevel, tagBlockLevel, categoryBlockLevel } from './food-recipe-filters.js';
 import { renderProductCard } from './food-product-card.js';
+import { escAttr as esc } from './utils.js';
 
 export const CAT_EMOJI = { meat:'🥩', fish:'🐟', veg:'🥬', fruit:'🍎', grain:'🌾', dairy:'🧀',
   legumes:'🫘', nuts:'🌰', spice:'🌶️', oil:'🫒', bakery:'🥖', drinks:'🥤', other:'📦' };
@@ -193,8 +194,6 @@ export function renderChildrenGrid(el, catalog, parent, blacklist, onOpen) {
   if (!items.length) { el.innerHTML = '<div class="empty-state">Нет продуктов</div>'; return; }
   appendProductCards(el, items, blacklist, onOpen);
 }
-
-function esc(s) { return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 
 export function renderBreadcrumb(el, parts, onNavigate) {
   el.innerHTML = '';

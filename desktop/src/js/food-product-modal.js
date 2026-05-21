@@ -1,5 +1,6 @@
 // ── food-product-modal.js — Create/edit product modal ──
 import { invoke } from './state.js';
+import { escAttr as esc } from './utils.js';
 import { CAT_LABELS, CAT_ORDER, invalidateCatalogCache, loadCatalog } from './food-recipe-filters.js';
 import { HIERARCHICAL_CATS } from './food-product-views.js';
 
@@ -125,5 +126,3 @@ export function showProductModal(reloadFn, product, defaults = {}) {
     };
   }
 }
-
-function esc(s) { return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
