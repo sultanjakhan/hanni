@@ -2490,6 +2490,21 @@ a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
   color: var(--text-faint); font-size: 14px; font-weight: 500; border-style: dashed;
 }
 
+/* ── Матрица: тулбар (поиск + чипы + развернуть) ── */
+.dev-mx-toolbar { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); flex-wrap: wrap; }
+.dev-mx-search {
+  flex: 1; min-width: 180px; padding: var(--space-1) var(--space-2); font-size: 13px;
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  background: var(--bg-card); color: var(--text-primary);
+}
+.dev-mx-search:focus { outline: none; border-color: var(--accent-blue); }
+.dev-mx-chips { display: flex; gap: 2px; }
+.dev-mx-chip { font-size: 12px; }
+.dev-mx-chip.active { box-shadow: inset 0 0 0 1px var(--accent-blue); color: var(--accent-blue); }
+.dev-mx-expand { background: none; border: none; cursor: pointer; color: var(--text-faint); font-size: 12px; white-space: nowrap; }
+.dev-mx-expand:hover { color: var(--accent-blue); }
+.dev-mx-count { font-size: 11px; font-weight: 600; color: var(--text-faint); min-width: 18px; text-align: right; }
+
 /* ── Матрица компетенций ── */
 .dev-matrix { display: flex; flex-direction: column; gap: var(--space-1); }
 .dev-mx-area { border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; }

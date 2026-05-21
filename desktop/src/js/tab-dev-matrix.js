@@ -3,6 +3,7 @@
 import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { scoreTier, levelBarHtml, levelBadgeHtml } from './dev-level.js';
+import { matrixToolbarHtml, wireMatrixToolbar } from './dev-matrix-search.js';
 
 function avg(nums) {
   const vals = nums.filter(n => n != null);
@@ -25,20 +26,22 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
   const children = (id) => byParent.get(id || 0) || [];
   const compAvg = (cid) => avg(children(cid).filter(s => s.score > 0).map(s => s.score));
 
-  let html = '<div class="dev-matrix">';
+  let html = matrixToolbarHtml() + '<div class="dev-matrix">';
   for (const area of children(0).filter(n => n.kind === 'area')) {
     const comps = children(area.id).filter(n => n.kind === 'competency');
     const aAvg = avg(comps.map(c => compAvg(c.id)));
-    html += `<details class="dev-mx-area" open>
+    html += `<details class="dev-mx-area">
       <summary class="dev-mx-row dev-mx-area-head">
         <span class="dev-mx-name">${escapeHtml(area.name)}</span>
+        <span class="dev-mx-count">${comps.length}</span>
         ${levelBadgeHtml(aAvg)}
         <button class="dev-mx-act dev-mx-ren" data-id="${area.id}" data-name="${escapeHtml(area.name)}" title="Переименовать">✎</button>
         <button class="dev-mx-act dev-mx-del" data-id="${area.id}" title="Удалить">×</button>
       </summary>`;
     for (const comp of comps) {
       const cAvg = compAvg(comp.id);
-      html += `<details class="dev-mx-comp">
+      const empty = (comp.theory || '').trim() ? '0' : '1';
+      html += `<details class="dev-mx-comp" data-empty="${empty}">
         <summary class="dev-mx-row dev-mx-comp-head">
           <span class="dev-mx-name dev-mx-open" data-id="${comp.id}" title="Открыть страницу">${escapeHtml(comp.name)}</span>
           ${levelBadgeHtml(cAvg)}
@@ -65,6 +68,7 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
   html += `<button class="dev-mx-add dev-mx-add-area" data-kind="area">+ область знаний</button></div>`;
   el.innerHTML = html;
   wireMatrix(el, projectId, reloadFn);
+  wireMatrixToolbar(el);
 }
 
 function wireMatrix(el, projectId, reloadFn) {
