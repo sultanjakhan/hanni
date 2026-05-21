@@ -31,18 +31,39 @@ export async function renderWikiPane(el, projectId, reloadFn) {
   </div>`;
   el.querySelector('.dev-wiki-edit')
     ?.addEventListener('click', () => showOverviewEditor(projectId, overview, reloadFn));
-  wireWikiLinks(el, reloadFn);
+  wireWikiLinks(el, reloadFn, projectId);
 }
 
-/** Make resolved [[wiki-links]] open the matching competency page. */
-export function wireWikiLinks(el, reloadFn) {
+const GLOSSARY_AREA = 'Фреймворки и термины';
+
+/** Create a stub competency for an unresolved [[term]] under the glossary area. */
+async function createTermStub(projectId, name) {
+  const nodes = await invoke('get_dev_nodes', { projectId }).catch(() => []);
+  let areaId = nodes.find(n => n.kind === 'area' && n.name === GLOSSARY_AREA)?.id;
+  if (areaId == null) {
+    areaId = await invoke('create_dev_node', { projectId, parentId: null, kind: 'area', name: GLOSSARY_AREA });
+  }
+  return invoke('create_dev_node', { projectId, parentId: areaId, kind: 'competency', name });
+}
+
+function openNode(id, reloadFn) {
+  S._devOpenNode = id;
+  S._unifiedPane.development = 'skills';
+  savePaneState('development', 'skills');
+  reloadFn();
+}
+
+/** Wire [[wiki-links]]: resolved ones open the page, unresolved create a stub. */
+export function wireWikiLinks(el, reloadFn, projectId) {
   el.querySelectorAll('.wiki-link[data-node-id]').forEach(a => {
-    a.addEventListener('click', (e) => {
+    a.addEventListener('click', (e) => { e.preventDefault(); openNode(parseInt(a.dataset.nodeId), reloadFn); });
+  });
+  el.querySelectorAll('.wiki-link-red[data-node-name]').forEach(a => {
+    a.addEventListener('click', async (e) => {
       e.preventDefault();
-      S._devOpenNode = parseInt(a.dataset.nodeId);
-      S._unifiedPane.development = 'skills';
-      savePaneState('development', 'skills');
-      reloadFn();
+      if (projectId == null) return;
+      const id = await createTermStub(projectId, a.dataset.nodeName);
+      if (id != null) openNode(id, reloadFn);
     });
   });
 }

@@ -35,6 +35,6 @@ export function renderWikiMarkdown(text, nodeIndex) {
       return `<a class="wiki-link" data-node-id="${id}">${escapeHtml(display)}</a>`;
     }
     return `<a class="wiki-link wiki-link-red" data-node-name="${escapeHtml(target)}"`
-      + ` title="Компетенции «${escapeHtml(target)}» ещё нет">${escapeHtml(display)}</a>`;
+      + ` title="Нажмите, чтобы создать страницу «${escapeHtml(target)}»">${escapeHtml(display)}</a>`;
   });
 }

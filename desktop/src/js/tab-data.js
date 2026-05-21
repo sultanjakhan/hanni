@@ -7,6 +7,7 @@ import { renderTabBar, closeTab } from './tabs.js';
 import { DatabaseView } from './db-view/db-view.js';
 import { formatRecurrence } from './db-view/db-recurrence-editor.js';
 import { ICONS } from './icons.js';
+import { scoreTier } from './dev-level.js';
 
 // Legacy helper: backward-compat wrapper (still used by Recipes, Products)
 function renderDatabaseView(el, tabId, recordTable, records, options) {
@@ -1033,7 +1034,7 @@ async function loadDevelopment() {
   const projects = await invoke('get_dev_projects').catch(() => []);
 
   // No project selected → show the projects list screen.
-  if (!S.devProject) { S._devOpenNode = null; renderDevProjectsList(el, projects); return; }
+  if (!S.devProject) { S._devOpenNode = null; await renderDevProjectsList(el, projects); return; }
   const project = projects.find(p => p.id === S.devProject);
   if (!project) { S.devProject = null; return loadDevelopment(); }
 
@@ -1067,12 +1068,28 @@ async function loadDevelopment() {
   el.querySelector('.dev-back-projects')?.addEventListener('click', () => { S.devProject = null; reload(); });
 }
 
-function renderDevProjectsList(el, projects) {
-  const cards = projects.map(p => `
+async function renderDevProjectsList(el, projects) {
+  const stats = await Promise.all(projects.map(async p => {
+    const nodes = await invoke('get_dev_nodes', { projectId: p.id }).catch(() => []);
+    const areas = nodes.filter(n => n.kind === 'area').length;
+    const skills = nodes.filter(n => n.kind === 'skill');
+    const scored = skills.map(s => s.score).filter(s => s > 0);
+    const avgScore = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
+    return { areas, skillCount: skills.length, avgScore };
+  }));
+  const cards = projects.map((p, i) => {
+    const { areas, skillCount, avgScore } = stats[i];
+    const pct = avgScore == null ? 0 : Math.max(0, Math.min(100, avgScore * 10));
+    return `
     <div class="dev-project-card" data-pid="${p.id}">
-      <div class="dev-project-card-icon">${p.icon || '📁'}</div>
-      <div class="dev-project-card-name">${escapeHtml(p.name)}</div>
-    </div>`).join('');
+      <div class="dev-project-card-head">
+        <span class="dev-project-card-icon">${p.icon || '📁'}</span>
+        <span class="dev-project-card-name">${escapeHtml(p.name)}</span>
+      </div>
+      <div class="dev-project-card-meta">📂 ${areas} · 🎯 ${skillCount}</div>
+      <div class="dev-lvl dev-project-card-bar" data-tier="${scoreTier(avgScore)}"><div class="dev-lvl-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
   el.innerHTML = `<div class="dev-projects-screen">
     <h2 class="dev-projects-title">🚀 Проекты обучения</h2>
     <div class="dev-projects-grid">

@@ -2,16 +2,7 @@
 
 import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
-
-function scoreColor(v) {
-  if (v == null) return 'var(--text-faint)';
-  if (v >= 7) return 'var(--green)';
-  if (v >= 4) return 'var(--yellow)';
-  if (v >= 1) return 'var(--red)';
-  return 'var(--text-faint)';
-}
-
-function fmt(v) { return v == null ? '—' : String(Math.round(v * 10) / 10); }
+import { scoreTier, levelBarHtml, levelBadgeHtml } from './dev-level.js';
 
 function avg(nums) {
   const vals = nums.filter(n => n != null);
@@ -41,7 +32,7 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
     html += `<details class="dev-mx-area" open>
       <summary class="dev-mx-row dev-mx-area-head">
         <span class="dev-mx-name">${escapeHtml(area.name)}</span>
-        <span class="dev-mx-score" style="color:${scoreColor(aAvg)}">${fmt(aAvg)}</span>
+        ${levelBadgeHtml(aAvg)}
         <button class="dev-mx-act dev-mx-ren" data-id="${area.id}" data-name="${escapeHtml(area.name)}" title="Переименовать">✎</button>
         <button class="dev-mx-act dev-mx-del" data-id="${area.id}" title="Удалить">×</button>
       </summary>`;
@@ -49,9 +40,9 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
       const cAvg = compAvg(comp.id);
       html += `<details class="dev-mx-comp">
         <summary class="dev-mx-row dev-mx-comp-head">
-          <span class="dev-mx-name">${escapeHtml(comp.name)}</span>
-          <span class="dev-mx-score" style="color:${scoreColor(cAvg)}">${fmt(cAvg)}</span>
-          <button class="dev-mx-act dev-mx-open" data-id="${comp.id}" title="Открыть страницу">📖</button>
+          <span class="dev-mx-name dev-mx-open" data-id="${comp.id}" title="Открыть страницу">${escapeHtml(comp.name)}</span>
+          ${levelBadgeHtml(cAvg)}
+          <button class="dev-mx-act dev-mx-open dev-mx-open-btn" data-id="${comp.id}" title="Открыть страницу">📖</button>
           <button class="dev-mx-act dev-mx-del" data-id="${comp.id}" title="Удалить">×</button>
         </summary>
         <div class="dev-mx-skills">`;
@@ -60,7 +51,8 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
           <button class="dev-mx-prio${sk.priority ? ' on' : ''}" data-id="${sk.id}" title="Приоритет изучения">⚑</button>
           <span class="dev-mx-name dev-mx-ren" data-id="${sk.id}" data-name="${escapeHtml(sk.name)}">${escapeHtml(sk.name)}</span>
           ${sk.material ? `<a class="dev-mx-material" data-href="${escapeHtml(sk.material)}" title="Материал">🔗</a>` : ''}
-          <span class="dev-mx-skill-score" data-id="${sk.id}" style="color:${scoreColor(sk.score || null)}">${sk.score || 0}</span>
+          ${levelBarHtml(sk.score || null)}
+          <span class="dev-mx-skill-score" data-id="${sk.id}" data-tier="${scoreTier(sk.score || null)}">${sk.score || 0}</span>
           <button class="dev-mx-act dev-mx-del" data-id="${sk.id}" title="Удалить">×</button>
         </div>`;
       }

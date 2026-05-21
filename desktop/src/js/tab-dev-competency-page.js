@@ -4,13 +4,7 @@ import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { renderWikiMarkdown, buildNodeIndex } from './wiki-markdown.js';
 import { wireWikiLinks } from './tab-dev-wiki.js';
-
-function scoreColor(v) {
-  if (v >= 7) return 'var(--green)';
-  if (v >= 4) return 'var(--yellow)';
-  if (v >= 1) return 'var(--red)';
-  return 'var(--text-faint)';
-}
+import { scoreTier } from './dev-level.js';
 
 export async function renderCompetencyPage(el, nodeId, projectId, reloadFn) {
   const nodes = await invoke('get_dev_nodes', { projectId }).catch(() => []);
@@ -28,7 +22,7 @@ export async function renderCompetencyPage(el, nodeId, projectId, reloadFn) {
     <div class="dev-cp-skill">
       ${s.priority ? '<span class="dev-cp-prio" title="Приоритет изучения">⚑</span>' : ''}
       <span class="dev-cp-skill-name">${escapeHtml(s.name)}</span>
-      <span class="dev-cp-skill-score" style="color:${scoreColor(s.score)}">${s.score || 0}/10</span>
+      <span class="dev-cp-skill-score" data-tier="${scoreTier(s.score)}">${s.score || 0}/10</span>
     </div>`).join('') : '<div class="text-faint" style="padding:6px 0">Нет навыков</div>';
 
   const casesHtml = cases.length ? cases.map(c => `
@@ -77,7 +71,7 @@ export async function renderCompetencyPage(el, nodeId, projectId, reloadFn) {
     reloadFn();
   }));
   el.querySelector('.dev-add-case-btn')?.addEventListener('click', () => showAddCase(nodeId, comp.name, reloadFn));
-  wireWikiLinks(el, reloadFn);
+  wireWikiLinks(el, reloadFn, projectId);
 }
 
 function showTheoryEditor(comp, reloadFn) {

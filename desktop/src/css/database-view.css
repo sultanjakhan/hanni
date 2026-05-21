@@ -2451,22 +2451,44 @@ a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
 .dev-case-row:hover .dev-case-del { opacity: 1; }
 .dev-case-del:hover { color: var(--red); }
 
+/* ── Шкала уровня (score 0–10), общая для матрицы и страницы компетенции ── */
+.dev-lvl { width: 64px; height: 5px; background: var(--bg-hover); border-radius: var(--radius-xs); overflow: hidden; flex-shrink: 0; }
+.dev-lvl-fill { height: 100%; border-radius: var(--radius-xs); transition: width 0.3s ease; }
+.dev-lvl[data-tier="high"] .dev-lvl-fill { background: var(--color-green); }
+.dev-lvl[data-tier="mid"]  .dev-lvl-fill { background: var(--color-yellow); }
+.dev-lvl[data-tier="low"]  .dev-lvl-fill { background: var(--color-red); }
+.dev-lvl[data-tier="none"] .dev-lvl-fill { background: var(--text-faint); }
+.dev-lvl-badge {
+  font-size: 11px; font-weight: 700; min-width: 30px; text-align: center;
+  padding: 1px var(--space-2); border-radius: var(--radius-pill); flex-shrink: 0;
+}
+.dev-lvl-badge[data-tier="high"] { color: var(--color-green);  background: var(--color-green-bg); }
+.dev-lvl-badge[data-tier="mid"]  { color: var(--color-yellow); background: var(--color-yellow-bg); }
+.dev-lvl-badge[data-tier="low"]  { color: var(--color-red);    background: var(--color-red-bg); }
+.dev-lvl-badge[data-tier="none"] { color: var(--text-faint);   background: var(--bg-hover); }
+
 /* ── Экран списка учебных проектов ── */
 .dev-projects-screen { padding: var(--space-4); }
 .dev-projects-title { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0 0 var(--space-4); }
 .dev-projects-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-3);
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-3);
 }
 .dev-project-card {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: var(--space-2); padding: var(--space-5) var(--space-3); min-height: 110px;
+  display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2);
+  padding: var(--space-4); min-height: 96px;
   background: var(--bg-card); border: 1px solid var(--border-default);
   border-radius: var(--radius-md); cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
 }
 .dev-project-card:hover { box-shadow: var(--shadow-md); border-color: var(--border-hover); }
-.dev-project-card-icon { font-size: 32px; }
-.dev-project-card-name { font-size: 14px; font-weight: 600; color: var(--text-primary); text-align: center; }
-.dev-project-add { color: var(--text-faint); font-size: 14px; font-weight: 500; border-style: dashed; }
+.dev-project-card-head { display: flex; align-items: center; gap: var(--space-2); }
+.dev-project-card-icon { font-size: 26px; flex-shrink: 0; }
+.dev-project-card-name { font-size: 14px; font-weight: 600; color: var(--text-primary); min-width: 0; }
+.dev-project-card-meta { font-size: 11px; color: var(--text-muted); }
+.dev-project-card-bar { width: 100%; margin-top: auto; }
+.dev-project-add {
+  align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 14px; font-weight: 500; border-style: dashed;
+}
 
 /* ── Матрица компетенций ── */
 .dev-matrix { display: flex; flex-direction: column; gap: var(--space-1); }
@@ -2481,21 +2503,26 @@ a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
 .dev-mx-comp[open] > .dev-mx-comp-head::before { transform: rotate(90deg); }
 .dev-mx-area-head {
   padding: var(--space-2) var(--space-3); background: var(--bg-card);
+  border-left: 3px solid var(--color-blue);
   font-weight: 600; font-size: 14px;
 }
 .dev-mx-comp-head {
   padding: var(--space-2) var(--space-3) var(--space-2) var(--space-5);
-  font-size: 13px; border-top: 1px solid var(--border-default);
+  border-left: 2px solid var(--border-hover);
+  font-size: 13px; font-weight: 500; border-top: 1px solid var(--border-subtle);
 }
 .dev-mx-name { flex: 1; color: var(--text-primary); min-width: 0; }
-.dev-mx-score { font-size: 12px; font-weight: 700; min-width: 28px; text-align: right; }
 .dev-mx-act {
   background: none; border: none; cursor: pointer; font-size: 12px;
   color: var(--text-faint); padding: 2px 4px; border-radius: var(--radius-sm); opacity: 0;
 }
 .dev-mx-row:hover .dev-mx-act { opacity: 1; }
 .dev-mx-act:hover { background: var(--bg-hover); color: var(--text-primary); }
-.dev-mx-del:hover { color: var(--red); }
+.dev-mx-del:hover { color: var(--color-red); }
+.dev-mx-comp-head .dev-mx-name { cursor: pointer; }
+.dev-mx-comp-head .dev-mx-name:hover { color: var(--accent-blue); }
+.dev-mx-open-btn { opacity: 0.4; }
+.dev-mx-row:hover .dev-mx-open-btn { opacity: 1; }
 .dev-mx-skills { padding: var(--space-1) var(--space-3) var(--space-2) var(--space-6); }
 .dev-mx-skill { display: flex; align-items: center; gap: var(--space-2); padding: 3px 4px; font-size: 13px; border-radius: var(--radius-sm); }
 .dev-mx-skill:hover { background: var(--bg-hover); }
@@ -2503,13 +2530,17 @@ a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
   background: none; border: none; cursor: pointer; font-size: 11px;
   color: var(--text-faint); opacity: 0.35; padding: 0;
 }
-.dev-mx-prio.on { color: var(--red); opacity: 1; }
+.dev-mx-prio.on { color: var(--color-red); opacity: 1; }
 .dev-mx-skill .dev-mx-name { flex: 1; color: var(--text-secondary); cursor: pointer; }
 .dev-mx-skill .dev-mx-name:hover { color: var(--text-primary); }
 .dev-mx-material { text-decoration: none; font-size: 11px; cursor: pointer; }
 .dev-mx-skill-score {
-  font-size: 12px; font-weight: 700; min-width: 20px; text-align: right; cursor: pointer;
+  font-size: 12px; font-weight: 700; min-width: 18px; text-align: right; cursor: pointer;
 }
+.dev-mx-skill-score[data-tier="high"] { color: var(--color-green); }
+.dev-mx-skill-score[data-tier="mid"]  { color: var(--color-yellow); }
+.dev-mx-skill-score[data-tier="low"]  { color: var(--color-red); }
+.dev-mx-skill-score[data-tier="none"] { color: var(--text-faint); }
 .dev-mx-skill .dev-mx-del { opacity: 0; }
 .dev-mx-skill:hover .dev-mx-del { opacity: 1; }
 .dev-mx-score-input {
@@ -2528,6 +2559,10 @@ a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
 /* ── Страница компетенции: список навыков ── */
 .dev-cp-skills { display: flex; flex-direction: column; gap: 2px; }
 .dev-cp-skill { display: flex; align-items: center; gap: var(--space-2); padding: 3px 0; font-size: 13px; }
-.dev-cp-prio { color: var(--red); font-size: 11px; }
+.dev-cp-prio { color: var(--color-red); font-size: 11px; }
 .dev-cp-skill-name { flex: 1; color: var(--text-secondary); }
 .dev-cp-skill-score { font-size: 12px; font-weight: 700; }
+.dev-cp-skill-score[data-tier="high"] { color: var(--color-green); }
+.dev-cp-skill-score[data-tier="mid"]  { color: var(--color-yellow); }
+.dev-cp-skill-score[data-tier="low"]  { color: var(--color-red); }
+.dev-cp-skill-score[data-tier="none"] { color: var(--text-faint); }
