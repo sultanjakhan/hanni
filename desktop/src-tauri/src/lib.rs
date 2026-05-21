@@ -17,7 +17,7 @@ mod event_categories;
 mod notes;
 mod commands_data;
 mod commands_meta;
-mod pm_wiki;
+mod pm_matrix;
 mod routine;
 mod routine_engine;
 mod mcp;
@@ -196,6 +196,7 @@ fn init_database() -> HanniDb {
     db::migrate_priority(&conn);
     db::migrate_event_categories(&conn);
     db::migrate_drop_mindset(&conn);
+    db::migrate_dev_matrix(&conn);
     db::migrate_sync_meta(&conn);
     db::migrate_dedup_health_exercise(&conn);
     db::enable_crr_tables(&conn);
@@ -483,10 +484,10 @@ pub fn run() {
             commands_data::create_dev_project,
             commands_data::delete_dev_project,
             commands_data::update_dev_project,
-            commands_data::get_dev_skills,
-            commands_data::create_dev_skill,
-            commands_data::update_dev_skill,
-            commands_data::delete_dev_skill,
+            commands_data::get_dev_nodes,
+            commands_data::create_dev_node,
+            commands_data::update_dev_node,
+            commands_data::delete_dev_node,
             commands_data::get_dev_cases,
             commands_data::create_dev_case,
             commands_data::update_dev_case,

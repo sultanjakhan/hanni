@@ -1030,31 +1030,30 @@ async function loadDevelopment() {
   const el = document.getElementById('development-content');
   if (!el) return;
 
-  // Load projects for selector
   const projects = await invoke('get_dev_projects').catch(() => []);
-  if (!S.devProject && projects.length) S.devProject = projects[0].id;
+
+  // No project selected → show the projects list screen.
+  if (!S.devProject) { S._devOpenNode = null; renderDevProjectsList(el, projects); return; }
+  const project = projects.find(p => p.id === S.devProject);
+  if (!project) { S.devProject = null; return loadDevelopment(); }
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
-  const { renderSkillsPane } = await import('./tab-dev-skills.js');
-  const { renderCasesPane } = await import('./tab-dev-cases.js');
+  const { renderMatrixPane } = await import('./tab-dev-matrix.js');
   const { renderWikiPane } = await import('./tab-dev-wiki.js');
   const pid = S.devProject;
   const reload = () => loadDevelopment();
 
-  const projHtml = projects.length ? `<div class="dev-project-selector">${projects.map(p =>
-    `<button class="pill${p.id === pid ? ' active' : ''}" data-pid="${p.id}">${p.icon} ${escapeHtml(p.name)}</button>`
-  ).join('')}<button class="pill dev-add-project">+</button></div>` : '';
-
   await renderUnifiedLayout(el, 'development', {
     title: 'Развитие',
-    subtitle: 'Проекты и навыки',
+    subtitle: project.name,
     icon: '🚀',
-    headerExtra: projHtml,
+    headerExtra: '<button class="pill dev-back-projects">← Проекты</button>',
     dashLabel: 'Вики',
     dashIcon: '📖',
-    renderDash: pid ? (paneEl) => renderWikiPane(paneEl, pid, reload) : null,
-    renderSkills: pid ? (paneEl) => renderSkillsPane(paneEl, pid, reload) : null,
-    renderCases: pid ? (paneEl) => renderCasesPane(paneEl, pid, reload) : null,
+    skillsLabel: 'Матрица',
+    skillsIcon: '🧩',
+    renderDash: (paneEl) => renderWikiPane(paneEl, pid, reload),
+    renderSkills: (paneEl) => renderMatrixPane(paneEl, pid, reload),
     renderTable: async (paneEl) => {
       try {
         const items = await invoke('get_learning_items', { typeFilter: S.devFilter === 'all' ? null : S.devFilter }).catch(() => []);
@@ -1065,11 +1064,26 @@ async function loadDevelopment() {
     },
   });
 
-  // Wire project selector events
-  el.querySelectorAll('.dev-project-selector .pill[data-pid]').forEach(btn => {
-    btn.addEventListener('click', () => { S.devProject = parseInt(btn.dataset.pid); reload(); });
+  el.querySelector('.dev-back-projects')?.addEventListener('click', () => { S.devProject = null; reload(); });
+}
+
+function renderDevProjectsList(el, projects) {
+  const cards = projects.map(p => `
+    <div class="dev-project-card" data-pid="${p.id}">
+      <div class="dev-project-card-icon">${p.icon || '📁'}</div>
+      <div class="dev-project-card-name">${escapeHtml(p.name)}</div>
+    </div>`).join('');
+  el.innerHTML = `<div class="dev-projects-screen">
+    <h2 class="dev-projects-title">🚀 Проекты обучения</h2>
+    <div class="dev-projects-grid">
+      ${cards}
+      <div class="dev-project-card dev-project-add">+ Новый проект</div>
+    </div>
+  </div>`;
+  el.querySelectorAll('.dev-project-card[data-pid]').forEach(c => {
+    c.addEventListener('click', () => { S.devProject = parseInt(c.dataset.pid); loadDevelopment(); });
   });
-  el.querySelector('.dev-add-project')?.addEventListener('click', () => showAddProjectModal(reload));
+  el.querySelector('.dev-project-add')?.addEventListener('click', () => showAddProjectModal(() => loadDevelopment()));
 }
 
 function showAddProjectModal(reloadFn) {

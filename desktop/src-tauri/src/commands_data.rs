@@ -593,91 +593,112 @@ pub fn update_dev_project(id: i64, name: Option<String>, icon: Option<String>, o
 }
 
 #[tauri::command]
-pub fn get_dev_skills(project_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_dev_nodes(project_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.name, s.description, s.theory, s.score, s.sort_order,
-                (SELECT COUNT(*) FROM dev_cases WHERE skill_id=s.id) as case_count,
-                (SELECT COUNT(*) FROM dev_cases WHERE skill_id=s.id AND solved_at IS NOT NULL) as solved_count
-         FROM dev_skills s WHERE s.project_id=?1 ORDER BY s.sort_order"
+        "SELECT n.id, n.parent_id, n.kind, n.name, n.score, n.theory, n.material, n.priority, n.sort_order,
+                (SELECT COUNT(*) FROM dev_cases WHERE node_id=n.id) as case_count
+         FROM dev_nodes n WHERE n.project_id=?1 ORDER BY n.sort_order"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![project_id], |row| Ok(serde_json::json!({
-        "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
-        "description": row.get::<_, String>(2)?, "theory": row.get::<_, String>(3)?,
-        "score": row.get::<_, i32>(4)?, "sort_order": row.get::<_, i32>(5)?,
-        "case_count": row.get::<_, i32>(6)?, "solved_count": row.get::<_, i32>(7)?,
+        "id": row.get::<_, i64>(0)?, "parent_id": row.get::<_, Option<i64>>(1)?,
+        "kind": row.get::<_, String>(2)?, "name": row.get::<_, String>(3)?,
+        "score": row.get::<_, i32>(4)?, "theory": row.get::<_, String>(5)?,
+        "material": row.get::<_, String>(6)?, "priority": row.get::<_, i32>(7)?,
+        "sort_order": row.get::<_, i32>(8)?, "case_count": row.get::<_, i32>(9)?,
     }))).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn create_dev_skill(project_id: i64, name: String, description: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn create_dev_node(project_id: i64, parent_id: Option<i64>, kind: String, name: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    conn.execute("INSERT INTO dev_skills (project_id, name, description, created_at, updated_at) VALUES (?1,?2,?3,?4,?4)",
-        rusqlite::params![project_id, name, description, now]).map_err(|e| format!("DB error: {}", e))?;
+    let sort: i32 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order)+1,0) FROM dev_nodes WHERE project_id=?1 AND IFNULL(parent_id,0)=IFNULL(?2,0)",
+        rusqlite::params![project_id, parent_id], |r| r.get(0),
+    ).unwrap_or(0);
+    conn.execute(
+        "INSERT INTO dev_nodes (project_id, parent_id, kind, name, sort_order, created_at, updated_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?6)",
+        rusqlite::params![project_id, parent_id, kind, name, sort, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-pub fn update_dev_skill(id: i64, name: Option<String>, description: Option<String>, theory: Option<String>, score: Option<i32>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_dev_node(id: i64, name: Option<String>, score: Option<i32>, theory: Option<String>, material: Option<String>, priority: Option<i32>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     let mut updates = vec!["updated_at=?1".to_string()];
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
     let mut idx = 2;
     if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
-    if let Some(v) = description { updates.push(format!("description=?{}", idx)); params.push(Box::new(v)); idx += 1; }
-    if let Some(v) = theory { updates.push(format!("theory=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = score { updates.push(format!("score=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = theory { updates.push(format!("theory=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = material { updates.push(format!("material=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = priority { updates.push(format!("priority=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     params.push(Box::new(id));
-    let sql = format!("UPDATE dev_skills SET {} WHERE id=?{}", updates.join(","), idx);
+    let sql = format!("UPDATE dev_nodes SET {} WHERE id=?{}", updates.join(","), idx);
     let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     conn.execute(&sql, refs.as_slice()).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn delete_dev_skill(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
-    db.conn().execute("DELETE FROM dev_skills WHERE id=?1", rusqlite::params![id])
-        .map_err(|e| format!("DB error: {}", e))?;
+pub fn delete_dev_node(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+    let conn = db.conn();
+    // Collect the subtree (node + descendants), then delete it with its cases.
+    let mut ids = vec![id];
+    let mut frontier = vec![id];
+    while let Some(p) = frontier.pop() {
+        let mut stmt = conn.prepare("SELECT id FROM dev_nodes WHERE parent_id=?1")
+            .map_err(|e| format!("DB error: {}", e))?;
+        let children: Vec<i64> = stmt.query_map([p], |r| r.get(0))
+            .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+        for c in children { ids.push(c); frontier.push(c); }
+    }
+    for nid in ids {
+        conn.execute("DELETE FROM dev_cases WHERE node_id=?1", [nid]).ok();
+        conn.execute("DELETE FROM dev_nodes WHERE id=?1", [nid]).ok();
+    }
     Ok(())
 }
 
 #[tauri::command]
-pub fn get_dev_cases(skill_id: Option<i64>, project_id: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_dev_cases(node_id: Option<i64>, project_id: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
-    let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(sid) = skill_id {
-        ("SELECT c.id, c.skill_id, c.title, c.url, c.description, c.score, c.notes, c.solved_at, c.created_at, s.name as skill_name \
-          FROM dev_cases c JOIN dev_skills s ON s.id=c.skill_id WHERE c.skill_id=?1 ORDER BY c.created_at DESC".into(),
-         vec![Box::new(sid)])
+    let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(nid) = node_id {
+        ("SELECT c.id, c.node_id, c.title, c.url, c.description, c.score, c.notes, c.solved_at, c.created_at, n.name \
+          FROM dev_cases c JOIN dev_nodes n ON n.id=c.node_id WHERE c.node_id=?1 ORDER BY c.created_at DESC".into(),
+         vec![Box::new(nid)])
     } else if let Some(pid) = project_id {
-        ("SELECT c.id, c.skill_id, c.title, c.url, c.description, c.score, c.notes, c.solved_at, c.created_at, s.name as skill_name \
-          FROM dev_cases c JOIN dev_skills s ON s.id=c.skill_id WHERE s.project_id=?1 ORDER BY c.created_at DESC".into(),
+        ("SELECT c.id, c.node_id, c.title, c.url, c.description, c.score, c.notes, c.solved_at, c.created_at, n.name \
+          FROM dev_cases c JOIN dev_nodes n ON n.id=c.node_id WHERE n.project_id=?1 ORDER BY c.created_at DESC".into(),
          vec![Box::new(pid)])
     } else {
-        ("SELECT c.id, c.skill_id, c.title, c.url, c.description, c.score, c.notes, c.solved_at, c.created_at, s.name as skill_name \
-          FROM dev_cases c JOIN dev_skills s ON s.id=c.skill_id ORDER BY c.created_at DESC".into(),
+        ("SELECT c.id, c.node_id, c.title, c.url, c.description, c.score, c.notes, c.solved_at, c.created_at, n.name \
+          FROM dev_cases c JOIN dev_nodes n ON n.id=c.node_id ORDER BY c.created_at DESC".into(),
          vec![])
     };
     let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| format!("DB error: {}", e))?;
     let rows: Vec<serde_json::Value> = stmt.query_map(refs.as_slice(), |row| Ok(serde_json::json!({
-        "id": row.get::<_, i64>(0)?, "skill_id": row.get::<_, i64>(1)?,
+        "id": row.get::<_, i64>(0)?, "node_id": row.get::<_, i64>(1)?,
         "title": row.get::<_, String>(2)?, "url": row.get::<_, String>(3)?,
         "description": row.get::<_, String>(4)?, "score": row.get::<_, i32>(5)?,
         "notes": row.get::<_, String>(6)?, "solved_at": row.get::<_, Option<String>>(7)?,
-        "created_at": row.get::<_, String>(8)?, "skill_name": row.get::<_, String>(9)?,
+        "created_at": row.get::<_, String>(8)?, "node_name": row.get::<_, String>(9)?,
     }))).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn create_dev_case(skill_id: i64, title: String, url: String, description: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn create_dev_case(node_id: i64, title: String, url: String, description: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    conn.execute("INSERT INTO dev_cases (skill_id, title, url, description, created_at) VALUES (?1,?2,?3,?4,?5)",
-        rusqlite::params![skill_id, title, url, description, now]).map_err(|e| format!("DB error: {}", e))?;
+    conn.execute("INSERT INTO dev_cases (node_id, title, url, description, created_at) VALUES (?1,?2,?3,?4,?5)",
+        rusqlite::params![node_id, title, url, description, now]).map_err(|e| format!("DB error: {}", e))?;
     Ok(conn.last_insert_rowid())
 }
 

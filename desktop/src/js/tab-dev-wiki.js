@@ -1,17 +1,17 @@
 // ── tab-dev-wiki.js — "main article" wiki pane for dev projects ──
 
 import { S, invoke } from './state.js';
-import { renderWikiMarkdown, buildSkillIndex } from './wiki-markdown.js';
+import { renderWikiMarkdown, buildNodeIndex } from './wiki-markdown.js';
 import { savePaneState } from './db-view/unified-layout.js';
 
 export async function renderWikiPane(el, projectId, reloadFn) {
-  const [projects, skills] = await Promise.all([
+  const [projects, nodes] = await Promise.all([
     invoke('get_dev_projects').catch(() => []),
-    invoke('get_dev_skills', { projectId }).catch(() => []),
+    invoke('get_dev_nodes', { projectId }).catch(() => []),
   ]);
   const project = projects.find(p => p.id === projectId);
   const overview = project?.overview || '';
-  const skillIndex = buildSkillIndex(skills);
+  const nodeIndex = buildNodeIndex(nodes);
 
   if (!overview.trim()) {
     el.innerHTML = `<div class="dev-wiki-pane">
@@ -27,19 +27,19 @@ export async function renderWikiPane(el, projectId, reloadFn) {
 
   el.innerHTML = `<div class="dev-wiki-pane">
     <button class="dev-wiki-edit" title="Редактировать статью">✏️</button>
-    <div class="dev-wiki-content">${renderWikiMarkdown(overview, skillIndex)}</div>
+    <div class="dev-wiki-content">${renderWikiMarkdown(overview, nodeIndex)}</div>
   </div>`;
   el.querySelector('.dev-wiki-edit')
     ?.addEventListener('click', () => showOverviewEditor(projectId, overview, reloadFn));
   wireWikiLinks(el, reloadFn);
 }
 
-/** Make resolved [[wiki-links]] open the matching skill page. */
+/** Make resolved [[wiki-links]] open the matching competency page. */
 export function wireWikiLinks(el, reloadFn) {
-  el.querySelectorAll('.wiki-link[data-skill-id]').forEach(a => {
+  el.querySelectorAll('.wiki-link[data-node-id]').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      S._devOpenSkill = parseInt(a.dataset.skillId);
+      S._devOpenNode = parseInt(a.dataset.nodeId);
       S._unifiedPane.development = 'skills';
       savePaneState('development', 'skills');
       reloadFn();
@@ -53,7 +53,7 @@ function showOverviewEditor(projectId, currentText, reloadFn) {
   overlay.innerHTML = `<div class="modal modal-wide">
     <div class="modal-title">Главная статья вики</div>
     <div class="form-group">
-      <label class="form-label">Markdown — термины пиши как [[Название страницы]]</label>
+      <label class="form-label">Markdown — термины пиши как [[Название компетенции]]</label>
       <textarea class="form-textarea" id="dev-wiki-text"></textarea>
     </div>
     <div class="modal-actions">

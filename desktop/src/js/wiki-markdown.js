@@ -1,6 +1,6 @@
 // ── wiki-markdown.js — [[wiki-links]] rendering for the dev wiki ──
 // Wraps renderMarkdown: [[Имя]] / [[Имя|текст]] become internal links that
-// resolve to a dev skill (topic page) by name. Plain [текст](url) links are
+// resolve to a competency node by name. Plain [текст](url) links are
 // untouched and keep opening in the browser.
 
 import { renderMarkdown, escapeHtml } from './utils.js';
@@ -8,17 +8,19 @@ import { renderMarkdown, escapeHtml } from './utils.js';
 const WIKI_LINK_RE = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g;
 const TOKEN_RE = /\{\{\{WIKI(\d+)\}\}\}/g;
 
-/** Build a name→id lookup (case-insensitive) from a list of dev skills. */
-export function buildSkillIndex(skills) {
+/** Build a name→id lookup (case-insensitive) over competency nodes. */
+export function buildNodeIndex(nodes) {
   const idx = new Map();
-  for (const s of skills || []) {
-    idx.set(String(s.name || '').trim().toLowerCase(), s.id);
+  for (const n of nodes || []) {
+    if (n.kind === 'competency') {
+      idx.set(String(n.name || '').trim().toLowerCase(), n.id);
+    }
   }
   return idx;
 }
 
-/** Render markdown with [[wiki-links]] resolved against skillIndex. */
-export function renderWikiMarkdown(text, skillIndex) {
+/** Render markdown with [[wiki-links]] resolved against a competency index. */
+export function renderWikiMarkdown(text, nodeIndex) {
   if (!text) return '';
   const links = [];
   // Stash wiki-links as brace tokens so markdown parsing leaves them intact.
@@ -28,11 +30,11 @@ export function renderWikiMarkdown(text, skillIndex) {
   });
   return renderMarkdown(staged).replace(TOKEN_RE, (_, i) => {
     const { target, display } = links[Number(i)];
-    const id = skillIndex && skillIndex.get(target.toLowerCase());
+    const id = nodeIndex && nodeIndex.get(target.toLowerCase());
     if (id != null) {
-      return `<a class="wiki-link" data-skill-id="${id}">${escapeHtml(display)}</a>`;
+      return `<a class="wiki-link" data-node-id="${id}">${escapeHtml(display)}</a>`;
     }
-    return `<a class="wiki-link wiki-link-red" data-skill-name="${escapeHtml(target)}"`
-      + ` title="Страница «${escapeHtml(target)}» ещё не создана">${escapeHtml(display)}</a>`;
+    return `<a class="wiki-link wiki-link-red" data-node-name="${escapeHtml(target)}"`
+      + ` title="Компетенции «${escapeHtml(target)}» ещё нет">${escapeHtml(display)}</a>`;
   });
 }

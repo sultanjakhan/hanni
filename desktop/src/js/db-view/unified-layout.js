@@ -67,7 +67,7 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderSleep) panes.splice(config.renderBody ? 2 : 1, 0, { id: 'sleep', icon: '🌙', label: 'Сон' });
   if (config.renderTracking) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'tracking', icon: '📈', label: 'Трекинг' });
   if (config.renderRoutine) panes.splice(panes.findIndex(p => p.id === 'table') + 1, 0, { id: 'routine', icon: '🔀', label: 'Рутина' });
-  if (config.renderSkills) panes.splice(1, 0, { id: 'skills', icon: '💡', label: 'Навыки' });
+  if (config.renderSkills) panes.splice(1, 0, { id: 'skills', icon: config.skillsIcon || '💡', label: config.skillsLabel || 'Навыки' });
   if (config.renderCases) panes.splice(panes.findIndex(p => p.id === 'goals'), 0, { id: 'cases', icon: '📝', label: 'Кейсы' });
   if (config.renderRecipes) panes.splice(1, 0, { id: 'recipes', icon: '📖', label: 'Рецепты' });
   if (config.renderProducts) panes.splice(panes.findIndex(p => p.id === 'recipes') + 1 || 2, 0, { id: 'products', icon: '🥕', label: 'Продукты' });

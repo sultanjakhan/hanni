@@ -1498,20 +1498,24 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
             sort_order INTEGER DEFAULT 0,
             created_at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS dev_skills (
+        -- v0.82.0: competency matrix — single tree table (area/competency/skill)
+        CREATE TABLE IF NOT EXISTS dev_nodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL REFERENCES dev_projects(id) ON DELETE CASCADE,
+            parent_id INTEGER REFERENCES dev_nodes(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
             name TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            theory TEXT NOT NULL DEFAULT '',
             score INTEGER DEFAULT 0,
+            theory TEXT NOT NULL DEFAULT '',
+            material TEXT NOT NULL DEFAULT '',
+            priority INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS dev_cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            skill_id INTEGER NOT NULL REFERENCES dev_skills(id) ON DELETE CASCADE,
+            node_id INTEGER NOT NULL REFERENCES dev_nodes(id) ON DELETE CASCADE,
             title TEXT NOT NULL,
             url TEXT NOT NULL DEFAULT '',
             description TEXT NOT NULL DEFAULT '',
@@ -1520,8 +1524,9 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
             solved_at TEXT,
             created_at TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_dev_skills_project ON dev_skills(project_id);
-        CREATE INDEX IF NOT EXISTS idx_dev_cases_skill ON dev_cases(skill_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_nodes_project ON dev_nodes(project_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_nodes_parent ON dev_nodes(parent_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_cases_node ON dev_cases(node_id);
 
         -- v0.34.0: Heart rate samples for Health Connect integration
         CREATE TABLE IF NOT EXISTS heart_rate_samples (
@@ -1539,145 +1544,126 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
     // v0.81.0: per-project wiki overview column (idempotent for existing installs)
     conn.execute("ALTER TABLE dev_projects ADD COLUMN overview TEXT NOT NULL DEFAULT ''", []).ok();
 
-    // Seed PM project with skills if not exists
+    // PM project row; the competency matrix is seeded by migrate_dev_matrix().
     seed_pm_project(conn);
-    seed_pm_wiki(conn);
 }
 
 fn seed_pm_project(conn: &rusqlite::Connection) {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM dev_projects", [], |r| r.get(0)).unwrap_or(0);
-    if count > 0 {
-        // Add theory column if missing (migration from earlier version).
-        // Skill content is owned by seed_pm_wiki (guarded one-time migration).
-        conn.execute_batch("ALTER TABLE dev_skills ADD COLUMN theory TEXT NOT NULL DEFAULT ''").ok();
-        return;
-    }
+    if count > 0 { return; }
     let now = chrono::Local::now().to_rfc3339();
-    conn.execute("INSERT INTO dev_projects (name, icon, sort_order, created_at) VALUES ('PM', '📦', 0, ?1)", rusqlite::params![now]).ok();
-    let pid: i64 = conn.last_insert_rowid();
-    for (i, (name, desc, theory)) in pm_skills().iter().enumerate() {
-        conn.execute(
-            "INSERT INTO dev_skills (project_id, name, description, theory, score, sort_order, created_at, updated_at) VALUES (?1,?2,?3,?4,0,?5,?6,?6)",
-            rusqlite::params![pid, name, desc, theory, i as i32, now],
-        ).ok();
-    }
+    conn.execute(
+        "INSERT INTO dev_projects (name, icon, sort_order, created_at) VALUES ('PM', '📦', 0, ?1)",
+        rusqlite::params![now],
+    ).ok();
 }
 
-/// One-time migration: turn the PM project into a wiki.
-/// Sets the main article (overview), renames legacy English skill names to
-/// Russian, rewrites theory with [[wiki-links]], and seeds practice cases.
-/// Guarded by ui_state['pm_wiki_seed_v1'] so it runs exactly once.
-fn seed_pm_wiki(conn: &rusqlite::Connection) {
+/// Migrate the dev tab from flat skills to the 3-level competency matrix.
+/// Drops the superseded dev_skills table, rebuilds dev_cases with a node_id
+/// FK, and seeds the PM matrix. Idempotent — safe on fresh/repeat runs.
+pub fn migrate_dev_matrix(conn: &rusqlite::Connection) {
+    conn.execute("DROP TABLE IF EXISTS dev_skills", []).ok();
+
+    // dev_cases moved skill_id -> node_id; rebuild if still on the old schema.
+    let has_node_id: bool = conn.query_row(
+        "SELECT COUNT(*)>0 FROM pragma_table_info('dev_cases') WHERE name='node_id'",
+        [], |r| r.get(0),
+    ).unwrap_or(false);
+    if !has_node_id {
+        conn.execute("DROP TABLE IF EXISTS dev_cases", []).ok();
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS dev_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES dev_projects(id) ON DELETE CASCADE,
+            parent_id INTEGER REFERENCES dev_nodes(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            score INTEGER DEFAULT 0,
+            theory TEXT NOT NULL DEFAULT '',
+            material TEXT NOT NULL DEFAULT '',
+            priority INTEGER DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS dev_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id INTEGER NOT NULL REFERENCES dev_nodes(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            score INTEGER DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            solved_at TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_nodes_project ON dev_nodes(project_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_nodes_parent ON dev_nodes(parent_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_cases_node ON dev_cases(node_id);"
+    ).ok();
+
+    seed_pm_matrix(conn);
+}
+
+/// Seed the PM project with the competency matrix (areas → competencies →
+/// skills) plus practice cases. Guarded by ui_state['pm_matrix_seed_v3'] —
+/// bump the version to re-apply updated content (re-seed wipes PM nodes).
+fn seed_pm_matrix(conn: &rusqlite::Connection) {
     let done: String = conn.query_row(
-        "SELECT value FROM ui_state WHERE key='pm_wiki_seed_v1'", [], |r| r.get(0),
+        "SELECT value FROM ui_state WHERE key='pm_matrix_seed_v3'", [], |r| r.get(0),
     ).unwrap_or_default();
     if done == "done" { return; }
-
     let pid: i64 = conn.query_row(
         "SELECT id FROM dev_projects WHERE name='PM'", [], |r| r.get(0),
     ).unwrap_or(0);
     if pid == 0 { return; }
-
     let now = chrono::Local::now().to_rfc3339();
 
+    // Clean slate so a guarded re-seed (bumped version) stays consistent.
     conn.execute(
-        "UPDATE dev_projects SET overview=?1 WHERE id=?2",
-        rusqlite::params![crate::pm_wiki::overview(), pid],
+        "DELETE FROM dev_cases WHERE node_id IN (SELECT id FROM dev_nodes WHERE project_id=?1)",
+        rusqlite::params![pid],
     ).ok();
+    conn.execute("DELETE FROM dev_nodes WHERE project_id=?1", rusqlite::params![pid]).ok();
 
-    for (en, ru, theory) in crate::pm_wiki::skill_pages() {
-        // Rename legacy English-named skills (no-op on fresh installs).
-        conn.execute(
-            "UPDATE dev_skills SET name=?1 WHERE project_id=?2 AND name=?3",
-            rusqlite::params![ru, pid, en],
-        ).ok();
-        conn.execute(
-            "UPDATE dev_skills SET theory=?1, updated_at=?2 WHERE project_id=?3 AND name=?4",
-            rusqlite::params![theory, now, pid, ru],
-        ).ok();
-    }
+    conn.execute("UPDATE dev_projects SET overview=?1 WHERE id=?2",
+        rusqlite::params![crate::pm_matrix::overview(), pid]).ok();
 
-    for (skill_ru, title, description) in crate::pm_wiki::seed_cases() {
-        let sid: i64 = conn.query_row(
-            "SELECT id FROM dev_skills WHERE project_id=?1 AND name=?2",
-            rusqlite::params![pid, skill_ru], |r| r.get(0),
-        ).unwrap_or(0);
-        if sid == 0 { continue; }
-        let exists: bool = conn.query_row(
-            "SELECT COUNT(*)>0 FROM dev_cases WHERE skill_id=?1 AND title=?2",
-            rusqlite::params![sid, title], |r| r.get(0),
-        ).unwrap_or(false);
-        if !exists {
+    for (ai, area) in crate::pm_matrix::matrix().iter().enumerate() {
+        conn.execute(
+            "INSERT INTO dev_nodes (project_id, parent_id, kind, name, sort_order, created_at, updated_at) \
+             VALUES (?1, NULL, 'area', ?2, ?3, ?4, ?4)",
+            rusqlite::params![pid, area.name, ai as i32, now]).ok();
+        let area_id = conn.last_insert_rowid();
+        for (ci, comp) in area.competencies.iter().enumerate() {
             conn.execute(
-                "INSERT INTO dev_cases (skill_id, title, url, description, score, notes, created_at) \
-                 VALUES (?1,?2,'',?3,0,'',?4)",
-                rusqlite::params![sid, title, description, now],
-            ).ok();
+                "INSERT INTO dev_nodes (project_id, parent_id, kind, name, theory, sort_order, created_at, updated_at) \
+                 VALUES (?1, ?2, 'competency', ?3, ?4, ?5, ?6, ?6)",
+                rusqlite::params![pid, area_id, comp.name, comp.theory, ci as i32, now]).ok();
+            let comp_id = conn.last_insert_rowid();
+            for (si, sk) in comp.skills.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO dev_nodes (project_id, parent_id, kind, name, score, priority, sort_order, created_at, updated_at) \
+                     VALUES (?1, ?2, 'skill', ?3, ?4, ?5, ?6, ?7, ?7)",
+                    rusqlite::params![pid, comp_id, sk.name, sk.score, sk.priority as i32, si as i32, now]).ok();
+            }
         }
     }
 
-    conn.execute(
-        "INSERT OR REPLACE INTO ui_state (key, value) VALUES ('pm_wiki_seed_v1','done')", [],
-    ).ok();
-}
+    for (comp_name, title, description) in crate::pm_matrix::seed_cases() {
+        let cid: i64 = conn.query_row(
+            "SELECT id FROM dev_nodes WHERE project_id=?1 AND kind='competency' AND name=?2",
+            rusqlite::params![pid, comp_name], |r| r.get(0),
+        ).unwrap_or(0);
+        if cid == 0 { continue; }
+        conn.execute(
+            "INSERT INTO dev_cases (node_id, title, url, description, score, notes, created_at) \
+             VALUES (?1,?2,'',?3,0,'',?4)",
+            rusqlite::params![cid, title, description, now]).ok();
+    }
 
-fn pm_skills() -> Vec<(&'static str, &'static str, &'static str)> {
-    vec![
-        ("Discovery и исследования",
-         "Выявление проблем пользователей, проведение интервью, анализ потребностей",
-         "## Что это\nПроцесс поиска и валидации проблем пользователей до начала разработки.\n\n## Ключевые методы\n- **CustDev-интервью** — глубинные интервью с пользователями\n- **Jobs To Be Done (JTBD)** — какую «работу» нанимает пользователь\n- **Персоны** — архетипы целевых пользователей\n- **Customer Journey Map (CJM)** — карта пути пользователя\n- **Surveys & Questionnaires** — количественная валидация\n\n## Ключевые вопросы\n- Какую проблему решаем?\n- Для кого?\n- Как пользователь решает это сейчас?\n- Готов ли платить?"),
-        ("Приоритизация",
-         "Фреймворки приоритизации: RICE, ICE, MoSCoW, Kano",
-         "## Что это\nУмение выбирать, что делать первым при ограниченных ресурсах.\n\n## Фреймворки\n- **RICE** — Reach × Impact × Confidence / Effort\n- **ICE** — Impact × Confidence × Ease\n- **MoSCoW** — Must / Should / Could / Won't\n- **Kano Model** — Basic / Performance / Excitement фичи\n- **Value vs Effort Matrix** — 2×2 матрица\n\n## Когда применять\n- Планирование спринта / квартала\n- Backlog grooming\n- Защита roadmap перед стейкхолдерами"),
-        ("Метрики и аналитика",
-         "Продуктовые метрики, AARRR, North Star, юнит-экономика",
-         "## Что это\nИзмерение успеха продукта через данные.\n\n## Фреймворки\n- **AARRR (Pirate Metrics)** — Acquisition, Activation, Retention, Revenue, Referral\n- **North Star Metric** — одна метрика, отражающая ценность для пользователя\n- **HEART** (Google) — Happiness, Engagement, Adoption, Retention, Task Success\n\n## Юнит-экономика\n- **LTV** (Lifetime Value) — сколько приносит один пользователь за всё время\n- **CAC** (Customer Acquisition Cost) — стоимость привлечения\n- **LTV/CAC > 3** — здоровый бизнес\n- **Payback Period** — время окупаемости CAC\n- **ARPU** — средний доход на пользователя\n- **Churn Rate** — процент оттока"),
-        ("Роадмап",
-         "Составление и защита продуктового роадмапа",
-         "## Что это\nСтратегический план развития продукта, привязанный ко времени и целям.\n\n## Типы роадмапов\n- **Now / Next / Later** — гибкий, без точных дат\n- **Timeline-based** — привязан к кварталам/спринтам\n- **Outcome-based** — привязан к метрикам, а не фичам\n\n## Как защищать\n- Привязывать к бизнес-целям\n- Показывать trade-off (что НЕ делаем и почему)\n- Использовать данные, а не мнения"),
-        ("Управление стейкхолдерами",
-         "Работа с заинтересованными сторонами: CEO, разработка, маркетинг, поддержка",
-         "## Что это\nУмение управлять ожиданиями и коммуникацией с разными сторонами.\n\n## Ключевые навыки\n- **Stakeholder Mapping** — кто влияет, кто заинтересован\n- **Управление ожиданиями** — прозрачность, регулярные апдейты\n- **Negotiation** — умение говорить «нет» с обоснованием\n- **Alignment** — синхронизация целей между командами\n\n## Типичные стейкхолдеры\nCEO/Founder, CTO, Marketing, Sales, Support, Design, Engineering"),
-        ("Требования и user stories",
-         "Написание требований, user stories, acceptance criteria",
-         "## Что это\nПеревод бизнес-потребностей в понятные задачи для разработки.\n\n## Форматы\n- **User Story** — As a [user], I want [action] so that [benefit]\n- **Job Story** — When [situation], I want to [motivation], so I can [outcome]\n- **Acceptance Criteria** — Given/When/Then (Gherkin)\n\n## Что включать в PRD\n- Проблема и контекст\n- Целевая аудитория\n- User stories + acceptance criteria\n- Wireframes / mockups\n- Метрики успеха\n- Edge cases"),
-        ("A/B-тесты и эксперименты",
-         "Дизайн экспериментов, статзначимость, анализ результатов",
-         "## Что это\nПроверка гипотез через контролируемые эксперименты.\n\n## Процесс\n1. Сформулировать гипотезу (If… Then… Because…)\n2. Определить метрику и размер выборки\n3. Запустить тест (контроль vs вариант)\n4. Дождаться статзначимости (p < 0.05)\n5. Принять решение\n\n## Ключевые понятия\n- **Статзначимость** — p-value < 0.05\n- **MDE** (Minimum Detectable Effect)\n- **Sample Size** — калькулятор Эвана Миллера\n- **Ошибки Type I / Type II**"),
-        ("Go-to-Market",
-         "Запуск продукта/фичи, позиционирование, каналы",
-         "## Что это\nСтратегия вывода продукта или фичи на рынок.\n\n## Компоненты GTM\n- **Positioning** — для кого, чем отличаемся\n- **Messaging** — как объясняем ценность\n- **Channels** — где достигаем пользователей\n- **Pricing** — модель монетизации\n- **Launch Plan** — этапы запуска\n\n## Чеклист запуска\n- [ ] Документация готова\n- [ ] Support обучен\n- [ ] Метрики настроены\n- [ ] Rollback plan есть"),
-        ("Техническая грамотность",
-         "Понимание архитектуры, API, баз данных, инфраструктуры",
-         "## Что это\nДостаточное техническое понимание для продуктивной работы с разработкой.\n\n## Минимум для PM\n- **API** — REST, endpoints, request/response\n- **Базы данных** — SQL basics, реляционные vs NoSQL\n- **Frontend vs Backend** — где что происходит\n- **CI/CD** — деплой, staging, production\n- **Архитектура** — микросервисы, монолит, serverless\n\n## Зачем\n- Оценивать сложность задач\n- Говорить с разработчиками на одном языке\n- Понимать технические ограничения"),
-        ("Коммуникация и презентации",
-         "Питчи, презентации, документация, storytelling",
-         "## Что это\nУмение ясно доносить идеи устно и письменно.\n\n## Навыки\n- **Storytelling** — проблема → решение → результат\n- **Executive Summary** — суть на 1 странице\n- **Презентации** — структура, визуал, delivery\n- **Written Communication** — PRD, RFC, emails\n- **Active Listening** — задавать правильные вопросы\n\n## Форматы\n- **Elevator Pitch** — 30 секунд\n- **Product Review** — 15 мин для стейкхолдеров\n- **All-Hands** — широкая аудитория"),
-        ("Конкурентный анализ",
-         "Анализ рынка, конкурентов, позиционирование",
-         "## Что это\nСистемный анализ конкурентной среды для принятия продуктовых решений.\n\n## Методы\n- **Feature Matrix** — сравнение фич с конкурентами\n- **SWOT** — Strengths, Weaknesses, Opportunities, Threats\n- **Porter's Five Forces** — анализ отрасли\n- **Blue Ocean Strategy** — новые рыночные пространства\n\n## Что отслеживать\n- Фичи и pricing конкурентов\n- Отзывы их пользователей\n- Их positioning и messaging\n- Тренды рынка"),
-        ("Стратегия и видение",
-         "Продуктовое видение, стратегия, OKR",
-         "## Что это\nДолгосрочное видение продукта и стратегия его достижения.\n\n## Компоненты\n- **Vision** — куда идём через 3-5 лет\n- **Mission** — зачем существуем\n- **Strategy** — как достигнем vision\n- **OKR** — Objectives and Key Results (квартальные цели)\n- **KPI** — ключевые метрики\n\n## Фреймворки\n- **Product Vision Board** (Roman Pichler)\n- **Lean Canvas** — бизнес-модель на 1 странице\n- **Strategy Canvas** — визуализация конкурентной позиции"),
-        ("SQL и анализ данных",
-         "SQL-запросы, работа с данными, дашборды, Excel/Sheets",
-         "## Что это\nПрактический навык извлечения и анализа данных для принятия решений.\n\n## SQL основы\n- **SELECT, WHERE, GROUP BY, HAVING, ORDER BY**\n- **JOIN** — INNER, LEFT, RIGHT\n- **Агрегации** — COUNT, SUM, AVG, MIN, MAX\n- **Подзапросы и CTE** (WITH)\n- **Window Functions** — ROW_NUMBER, LAG, LEAD\n\n## Инструменты\n- SQL (PostgreSQL, MySQL, BigQuery)\n- Excel / Google Sheets (pivot tables, VLOOKUP)\n- BI-инструменты (Metabase, Looker, Tableau, Power BI)\n\n## Применение\n- Построение дашбордов\n- Ad-hoc анализ для product decisions\n- Когортный анализ"),
-        ("Agile и Scrum",
-         "Agile-методологии, Scrum, Kanban, спринты, ретроспективы",
-         "## Что это\nИтеративный подход к разработке продукта.\n\n## Scrum\n- **Sprint** — 1-2 недели\n- **Ceremonies** — Planning, Daily, Review, Retro\n- **Roles** — PO, Scrum Master, Dev Team\n- **Artifacts** — Backlog, Sprint Backlog, Increment\n\n## Kanban\n- Визуализация потока (To Do → In Progress → Done)\n- WIP-лимиты\n- Continuous delivery\n\n## PM в Agile\n- Grooming backlog\n- Приоритизация задач\n- Принятие решений по scope"),
-        ("Основы UX/UI",
-         "Основы дизайна, wireframes, user flows, юзабилити",
-         "## Что это\nПонимание принципов дизайна для эффективной работы с дизайнерами.\n\n## UX основы\n- **Information Architecture** — структура контента\n- **User Flow** — путь пользователя по продукту\n- **Wireframes** — скелетная структура экранов\n- **Prototyping** — интерактивные прототипы (Figma)\n- **Usability Testing** — тестирование с реальными пользователями\n\n## UI основы\n- Типографика, цвет, spacing\n- Design System / Component Library\n- Responsive design\n- Accessibility (a11y)"),
-        ("Customer Development",
-         "CustDev-интервью, проблемные и решенческие интервью, Product-Market Fit",
-         "## Что это\nМетодология валидации бизнес-гипотез через общение с клиентами.\n\n## Типы интервью\n- **Проблемное** — есть ли проблема? Как решают сейчас?\n- **Решенческое** — подходит ли наше решение?\n- **Экспертное** — мнение специалистов рынка\n\n## Product-Market Fit\n- **Sean Ellis Test** — >40% ответили «very disappointed» без продукта\n- **Retention Curve** — выходит на плато\n- **Organic Growth** — пользователи приходят сами\n\n## The Mom Test (Rob Fitzpatrick)\n- Не спрашивай «нравится ли тебе идея»\n- Спрашивай про реальный опыт и поведение\n- Ищи факты, а не комплименты"),
-        ("Монетизация и ценообразование",
-         "Модели монетизации, ценообразование, unit economics",
-         "## Что это\nОпределение того, как продукт зарабатывает деньги.\n\n## Модели монетизации\n- **Freemium** — бесплатный базовый + платный premium\n- **Subscription** — ежемесячная/годовая подписка\n- **Transaction Fee** — комиссия с каждой транзакции\n- **Advertising** — рекламная модель\n- **Marketplace** — комиссия с обеих сторон\n\n## Ценообразование\n- **Value-based** — цена = воспринимаемая ценность\n- **Cost-plus** — себестоимость + маржа\n- **Competitive** — относительно конкурентов\n\n## Метрики\n- MRR/ARR, ARPU, Conversion Rate, Churn"),
-        ("Рост и удержание",
-         "Воронки роста, retention, activation, виральность",
-         "## Что это\nСтратегии привлечения, активации и удержания пользователей.\n\n## Воронка\n- **Acquisition** — откуда приходят пользователи\n- **Activation** — первый «aha moment»\n- **Retention** — возвращаются ли?\n- **Revenue** — платят ли?\n- **Referral** — рекомендуют ли?\n\n## Retention\n- **Day 1 / Day 7 / Day 30 Retention**\n- **Cohort Analysis** — сравнение когорт по времени\n- **Retention Curve** — цель: выход на плато\n\n## Growth Loops\n- Viral loop (invite friends)\n- Content loop (user-generated content → SEO)\n- Paid loop (revenue → ads → users)"),
-    ]
+    conn.execute("INSERT OR REPLACE INTO ui_state (key, value) VALUES ('pm_matrix_seed_v3','done')", []).ok();
 }
 
 /// Convert regular tables to CRRs (conflict-free replicated relations) for sync.
