@@ -36,6 +36,7 @@ import {
 } from './js/tab-data.js';
 import './js/tab-timeline.js';
 import { autoImportHealth, startHealthPolling } from './js/health-auto-sync.js';
+import { checkAndroidUpdate } from './js/android-update.js';
 
 // ── One-time migration: work → jobs tab rename ──
 (() => {
@@ -246,23 +247,40 @@ document.addEventListener('keydown', (e) => {
 // ══════════════════════════════════════════════
 
 (async () => {
-  // Load custom pages into TAB_REGISTRY before rendering
-  try {
-    const customPages = await invoke('get_custom_pages');
-    for (const page of customPages) {
-      const tabId = `page_${page.id}`;
-      const isProject = page.page_type === 'project';
-      TAB_REGISTRY[tabId] = {
-        label: page.title,
-        icon: page.icon,
-        closable: true,
-        subTabs: JSON.parse(page.sub_tabs || '[]'),
-        custom: true,
-        pageId: page.id,
-        pageType: isProject ? 'project' : 'page',
-      };
+  // Load custom pages into TAB_REGISTRY before rendering.
+  // Android: the webview boots in parallel with the Rust setup() hook, where
+  // the DB is managed only after init_database() finishes. The first call can
+  // hit unmanaged state and fail, leaving only the forced 'chat' tab. Poll
+  // until the DB answers. On desktop the DB is managed before the window
+  // exists, so this succeeds on attempt #0 (zero delay, behaviour unchanged).
+  let customPages = [];
+  const deadline = Date.now() + 15000;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      customPages = await invoke('get_custom_pages');
+      if (attempt > 0) console.log('[hanni] DB ready after', attempt, 'attempts');
+      break;
+    } catch (e) {
+      if (Date.now() >= deadline) {
+        console.error('[hanni] DB not ready before deadline, chat-only fallback', e);
+        break;
+      }
+      await new Promise(r => setTimeout(r, attempt < 10 ? 100 : 300));
     }
-  } catch (_) {}
+  }
+  for (const page of customPages) {
+    const tabId = `page_${page.id}`;
+    const isProject = page.page_type === 'project';
+    TAB_REGISTRY[tabId] = {
+      label: page.title,
+      icon: page.icon,
+      closable: true,
+      subTabs: JSON.parse(page.sub_tabs || '[]'),
+      custom: true,
+      pageId: page.id,
+      pageType: isProject ? 'project' : 'page',
+    };
+  }
 
   // Re-filter openTabs now that custom pages are registered
   S.openTabs = S.openTabs.filter(id => TAB_REGISTRY[id]);
@@ -341,6 +359,7 @@ document.addEventListener('keydown', (e) => {
       if (document.visibilityState === 'visible') autoImportHealth();
     });
     startHealthPolling(); // 15-min poll while foregrounded
+    checkAndroidUpdate(); // GitHub Releases → APK update banner (no-op on desktop)
   }
 
   // Android back button: close overlays, then go to previous tab

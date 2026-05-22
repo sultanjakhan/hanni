@@ -1,0 +1,42 @@
+/* android-update.css — APK update banner (Android only) */
+.apk-update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Offset the status bar / notch so text doesn't sit under the system clock */
+  padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: var(--shadow-md);
+}
+
+.apk-update-text {
+  flex: 1;
+}
+
+.apk-update-btn {
+  background: #fff;
+  color: var(--accent-blue);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.apk-update-close {
+  background: transparent;
+  color: #fff;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}

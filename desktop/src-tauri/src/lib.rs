@@ -12,6 +12,7 @@ mod voice;
 mod voice;
 mod proactive;
 mod macos;
+mod android_update;
 mod calendar;
 mod event_categories;
 mod notes;
@@ -411,6 +412,8 @@ pub fn run() {
             // Actions
             macos::run_shell,
             macos::open_url,
+            android_update::check_apk_update,
+            android_update::open_apk_url,
             macos::send_notification,
             macos::set_volume,
             macos::open_app,
