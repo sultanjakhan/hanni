@@ -1,23 +1,22 @@
-// guest_memory.js — Memory view: shows host's food blacklist (what NOT to cook).
+// guest_memory.js — Memory view: host's food preferences split by level
+// (Не ем / Не люблю / Люблю) and by type (продукты / теги / категории).
 (function () {
   const u = (window.HanniGuest || {}).utils;
   if (!u) return;
   const { api, esc, can } = u;
 
-  const TYPE_LABELS = {
-    product: '🚫 Не есть продукты',
-    category: '🚫 Не есть категории',
-    tag: '🚫 Не есть теги',
-    keyword: '🚫 Не есть слова в названии',
+  const LEVEL_META = {
+    hard: { icon: '🚫', label: 'Не ем',     hint: 'Не подавать ни в каком виде.',       badge: 'badge-red' },
+    soft: { icon: '💔', label: 'Не люблю',  hint: 'Лучше избегать, если есть выбор.',   badge: 'badge-orange' },
+    love: { icon: '❤️', label: 'Люблю',     hint: 'Любимое — добавлять в приоритете.',  badge: 'badge-green' },
   };
-  const TYPE_DESC = {
-    product: 'Конкретные продукты, которые не подавать.',
-    category: 'Целые категории (мясо, молочное и т.п.).',
-    tag: 'Все рецепты или ингредиенты с этими тегами.',
-    keyword: 'Любой рецепт, в названии которого встречается слово.',
+  const TYPE_LABEL = {
+    product:  'Продукты',
+    tag:      'Теги',
+    category: 'Категории',
+    keyword:  'Слова в названии',
+    recipe:   'Рецепты',
   };
-
-  // Categories nice-print (mirror food-recipe-filters.js CAT_LABELS).
   const CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', fruit: 'Фрукты',
     grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи',
     spice: 'Специи', oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', other: 'Другое' };
@@ -59,36 +58,45 @@
     return value;
   }
 
+  function renderLevelGroup(level, items) {
+    const meta = LEVEL_META[level];
+    if (!meta) return '';
+    const byType = {};
+    for (const it of items) (byType[it.type] = byType[it.type] || []).push(it);
+    const typeSections = Object.entries(byType).map(([t, list]) => {
+      const chips = list.map(it =>
+        `<span class="badge ${meta.badge}" style="margin:2px 4px 2px 0;font-size:12px;padding:4px 10px">${esc(pretty(t, it.value))}</span>`
+      ).join('');
+      return `<div class="mem-type-row">
+        <div class="mem-type-label">${esc(TYPE_LABEL[t] || t)} · ${list.length}</div>
+        <div>${chips}</div>
+      </div>`;
+    }).join('');
+    return `<div class="recipe-detail-section mem-level mem-level-${level}">
+      <h4>${meta.icon} ${esc(meta.label)} <span class="muted" style="font-weight:400">· ${items.length}</span></h4>
+      <p class="muted" style="font-size:12px;margin-bottom:8px">${esc(meta.hint)}</p>
+      ${typeSections}
+    </div>`;
+  }
+
   function render() {
     if (!state.items.length) {
       state.mount.innerHTML = `
         <h2>Память</h2>
-        <p class="muted" style="margin:8px 0 16px">Что хозяин не ест — здесь будет список ограничений.</p>
-        <div class="empty">Пока ограничений нет — можно готовить что угодно.</div>`;
+        <p class="muted" style="margin:8px 0 16px">Хозяин ещё не отметил предпочтений — можно готовить что угодно.</p>`;
       return;
     }
-
-    const groups = {};
+    const byLevel = { hard: [], soft: [], love: [] };
     for (const it of state.items) {
-      (groups[it.type] = groups[it.type] || []).push(it);
+      const lvl = byLevel[it.level] ? it.level : 'hard';  // legacy rows w/o level
+      byLevel[lvl].push(it);
     }
-
-    const sections = ['product', 'category', 'tag', 'keyword']
-      .filter(t => groups[t]?.length)
-      .map(t => {
-        const items = groups[t].map(it =>
-          `<span class="badge badge-red" style="margin:2px 4px 2px 0;font-size:12px;padding:4px 10px">${esc(pretty(t, it.value))}</span>`
-        ).join('');
-        return `<div class="recipe-detail-section">
-          <h4>${TYPE_LABELS[t] || t}</h4>
-          <p class="muted" style="font-size:12px;margin-bottom:8px">${TYPE_DESC[t] || ''}</p>
-          <div>${items}</div>
-        </div>`;
-      }).join('');
-
+    const sections = ['hard', 'soft', 'love']
+      .filter(lvl => byLevel[lvl].length)
+      .map(lvl => renderLevelGroup(lvl, byLevel[lvl])).join('');
     state.mount.innerHTML = `
       <h2>Память (${state.items.length})</h2>
-      <p class="muted" style="margin:0 0 16px">Что хозяин <b>не ест</b> — учитывайте при добавлении рецептов и планировании.</p>
+      <p class="muted" style="margin:0 0 16px">Что хозяин ест, не ест и любит — используйте при выборе рецептов.</p>
       ${sections}`;
   }
 

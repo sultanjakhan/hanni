@@ -76,6 +76,20 @@
     const tunnelOverride = qp.get('t');
     let doc = loadCachedMeta(META_TTL);
     if (!doc && tunnelOverride) {
+      // Pre-flight: cloudflared trycloudflare URLs are EPHEMERAL (every
+      // Hanni restart = new URL), so a `?t=` from yesterday is usually
+      // dead. Probe /share/health and bail with a clear message before
+      // we waste the Firestore quota on a fallback that will 429 anyway.
+      let tunnelOk = false;
+      try {
+        const r = await fetch(tunnelOverride.replace(/\/+$/, '') + '/share/health',
+          { credentials: 'omit', mode: 'cors' });
+        tunnelOk = r.ok;
+      } catch {}
+      if (!tunnelOk) {
+        app.innerHTML = '<div class="err">Эта ссылка устарела или хозяин сейчас офлайн.<br><small>Перешли ему: «Hanni перезапустился, нужна новая ссылка». Cloudflare-туннель меняется при каждом старте.</small></div>';
+        return;
+      }
       // Synthesise a minimal Firestore-shaped doc so the unwrap code below
       // works unchanged. Real metadata will fill in on next successful fetch.
       doc = { fields: {

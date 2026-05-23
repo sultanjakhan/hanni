@@ -319,3 +319,13 @@ b { color: var(--text-primary); }
 .step-dd-opt:hover { background: var(--bg-hover); }
 .step-time-input { width: 60px; }
 .step-note-input { font-size: 14px; color: var(--text-secondary); }
+
+/* Memory view: level groups (hard / soft / love) + type sub-rows */
+.mem-level + .mem-level { margin-top: 16px; }
+.mem-level h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.mem-type-row { margin-bottom: 8px; }
+.mem-type-row:last-child { margin-bottom: 0; }
+.mem-type-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); margin-bottom: 4px;
+}

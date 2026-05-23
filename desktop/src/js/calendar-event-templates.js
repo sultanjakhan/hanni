@@ -13,15 +13,15 @@ import { itemsToDescription } from './shopping-list.js';
 // here (vs DB) is intentional — these are app-level UX shortcuts, not
 // user data; CRUD on them doesn't belong in the catalogue tables.
 const TEMPLATES = [
-  { id: 'cook',    icon: '🍳', label: 'Готовка',     title: 'Готовка',          dur: 30,  cat: 'Готовка',    handoff: 'cook' },
-  { id: 'shower',  icon: '🚿', label: 'Душ',         title: 'Душ',              dur: 15,  cat: 'Быт' },
-  { id: 'toilet',  icon: '🚽', label: 'Туалет',      title: 'Туалет',           dur: 5,   cat: 'Быт' },
-  { id: 'medit',   icon: '🧘', label: 'Медитация',   title: 'Медитация',        dur: 10,  cat: 'Спорт',      spec: 'medit' },
-  { id: 'book',    icon: '📚', label: 'Чтение',      title: 'Чтение',           dur: 30,  cat: 'Учёба' },
-  { id: 'meds',    icon: '💊', label: 'Лекарство',   title: 'Принять',          dur: 5,   cat: 'Быт',        spec: 'meds' },
-  { id: 'shop',    icon: '🛒', label: 'Закупка',     title: 'Закупка продуктов', dur: 60, cat: 'Быт',       handoff: 'shop' },
-  { id: 'laundry', icon: '🧺', label: 'Постирать',   title: 'Постирать',        dur: 10,  cat: 'Быт' },
-  { id: 'trash',   icon: '🗑', label: 'Мусор',       title: 'Вынести мусор',    dur: 5,   cat: 'Быт' },
+  { id: 'cook',    icon: '🍳', label: 'Готовка',     color: 'orange', title: 'Готовка',          dur: 30, cat: 'Готовка', handoff: 'cook' },
+  { id: 'shower',  icon: '🚿', label: 'Душ',         color: 'blue',   title: 'Душ',              dur: 15, cat: 'Быт' },
+  { id: 'toilet',  icon: '🚽', label: 'Туалет',      color: 'gray',   title: 'Туалет',           dur: 5,  cat: 'Быт' },
+  { id: 'medit',   icon: '🧘', label: 'Медитация',   color: 'purple', title: 'Медитация',        dur: 10, cat: 'Спорт',  spec: 'medit' },
+  { id: 'book',    icon: '📚', label: 'Чтение',      color: 'yellow', title: 'Чтение',           dur: 30, cat: 'Учёба' },
+  { id: 'meds',    icon: '💊', label: 'Лекарство',   color: 'red',    title: 'Принять',          dur: 5,  cat: 'Быт',    spec: 'meds' },
+  { id: 'shop',    icon: '🛒', label: 'Закупка',     color: 'green',  title: 'Закупка продуктов', dur: 60, cat: 'Быт',   handoff: 'shop' },
+  { id: 'laundry', icon: '🧺', label: 'Постирать',   color: 'lime',   title: 'Постирать',        dur: 10, cat: 'Быт' },
+  { id: 'trash',   icon: '🗑', label: 'Мусор',       color: 'pink',   title: 'Вынести мусор',    dur: 5,  cat: 'Быт' },
 ];
 
 const MEDIT_TECHNIQUES = [
@@ -32,12 +32,12 @@ const MEDIT_TECHNIQUES = [
 
 export function renderTemplatesAccordion() {
   const chips = TEMPLATES.map(t => `
-    <button type="button" class="evm-tpl-chip" data-tpl="${t.id}">
-      <span class="evm-tpl-ico">${t.icon}</span><span>${escapeHtml(t.label)}</span>
+    <button type="button" class="evm-tpl-chip" data-tpl="${t.id}" data-color="${t.color}">
+      <span class="evm-tpl-ico">${t.icon}</span><span class="evm-tpl-lbl">${escapeHtml(t.label)}</span>
     </button>`).join('');
   return `<details class="evm-templates" open>
-    <summary class="evm-templates-sum">⚡ Быстрые шаблоны</summary>
-    <div class="evm-tpl-row">${chips}</div>
+    <summary class="evm-templates-sum">⚡ Шаблоны</summary>
+    <div class="evm-tpl-grid">${chips}</div>
     <div class="evm-tpl-spec" id="evm-tpl-spec" hidden></div>
   </details>`;
 }

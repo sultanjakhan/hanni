@@ -1985,44 +1985,82 @@
 
 
 /* ─── Quick-templates accordion in calendar event modal ─── */
-.evm-templates {
-  margin-bottom: 8px; border: 1px solid var(--border-default);
-  border-radius: var(--radius-md); background: var(--bg-secondary);
-}
+.evm-templates { margin-bottom: 10px; }
 .evm-templates-sum {
-  cursor: pointer; padding: 8px 12px; font-weight: 600;
-  font-size: 13px; color: var(--text-secondary);
+  cursor: pointer; padding: 4px 2px 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--text-muted);
   user-select: none; list-style: none;
 }
 .evm-templates-sum::-webkit-details-marker { display: none; }
-.evm-templates[open] .evm-templates-sum { border-bottom: 1px solid var(--border-default); }
-.evm-tpl-row {
-  display: flex; flex-wrap: wrap; gap: 4px; padding: 8px;
+.evm-templates-sum::before {
+  content: '▸'; display: inline-block; margin-right: 4px;
+  font-size: 9px; transition: transform .15s;
 }
+.evm-templates[open] .evm-templates-sum::before { transform: rotate(90deg); }
+
+/* Grid 3×3 — equal-width tiles; collapses to 2 cols on narrow modals. */
+.evm-tpl-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+}
+@media (max-width: 380px) { .evm-tpl-grid { grid-template-columns: repeat(2, 1fr); } }
+
 .evm-tpl-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 9px; background: var(--bg-primary);
-  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
-  font-size: 12px; color: var(--text-primary); cursor: pointer;
-  transition: background-color .12s, border-color .12s;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: var(--bg-secondary);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-primary); cursor: pointer;
+  text-align: left; min-width: 0;
+  transition: background-color .12s, border-color .12s, transform .08s;
 }
-.evm-tpl-chip:hover { background: var(--bg-hover); border-color: var(--border-strong); }
-.evm-tpl-chip.active { background: var(--accent-fill); color: white; border-color: var(--accent-fill); }
-.evm-tpl-ico { font-size: 14px; }
-.evm-tpl-chip-hint {
-  font-size: 10px; color: var(--text-muted); margin-left: 4px;
+.evm-tpl-chip:hover { background: var(--bg-hover); }
+.evm-tpl-chip:active { transform: scale(0.97); }
+.evm-tpl-chip.active {
+  background: var(--bg-primary);
+  border-color: var(--accent-fill);
+  box-shadow: 0 0 0 1px var(--accent-fill);
 }
-.evm-tpl-chip.active .evm-tpl-chip-hint { color: rgba(255,255,255,0.75); }
+
+/* Coloured icon tile — semantic colour cue per template. */
+.evm-tpl-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex-shrink: 0;
+  background: var(--bg-hover); border-radius: var(--radius-sm);
+  font-size: 16px; line-height: 1;
+}
+.evm-tpl-chip[data-color="orange"] .evm-tpl-ico { background: var(--color-orange-bg); }
+.evm-tpl-chip[data-color="blue"]   .evm-tpl-ico { background: var(--color-blue-bg); }
+.evm-tpl-chip[data-color="purple"] .evm-tpl-ico { background: var(--color-purple-bg); }
+.evm-tpl-chip[data-color="yellow"] .evm-tpl-ico { background: var(--color-yellow-bg); }
+.evm-tpl-chip[data-color="red"]    .evm-tpl-ico { background: var(--color-red-bg); }
+.evm-tpl-chip[data-color="green"]  .evm-tpl-ico { background: var(--color-green-bg); }
+.evm-tpl-chip[data-color="lime"]   .evm-tpl-ico { background: var(--color-lime-bg); }
+.evm-tpl-chip[data-color="pink"]   .evm-tpl-ico { background: var(--color-pink-bg); }
+.evm-tpl-chip[data-color="gray"]   .evm-tpl-ico { background: var(--bg-hover); }
+
+.evm-tpl-lbl {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500;
+}
+
 .evm-tpl-spec {
-  padding: 8px 12px 10px; border-top: 1px dashed var(--border-default);
+  margin-top: 10px; padding: 10px; background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
 }
 .evm-tpl-spec-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-muted); margin-bottom: 6px;
 }
 .evm-tpl-spec-row {
-  display: flex; flex-wrap: wrap; gap: 4px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
 }
+.evm-tpl-spec-row .evm-tpl-chip {
+  flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px;
+}
+.evm-tpl-chip-hint {
+  font-size: 11px; color: var(--text-muted);
+}
+.evm-tpl-chip.active .evm-tpl-chip-hint { color: var(--accent-fill); }
 
 /* ─── Shopping list modal & picker ─── */
 .sl-add-row { display: flex; gap: 6px; margin-bottom: 10px; }

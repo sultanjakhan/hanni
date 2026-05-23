@@ -74,16 +74,18 @@ pub async fn list_blacklist(
     require_perm(&ctx, "view")?;
     check_food_memory_scope(&ctx)?;
     // Include id so a guest with delete-perm can reference rows.
+    // Include `level` so the guest can split Не ем (hard) / Не люблю (soft) / Люблю (love).
     let mut stmt = conn.prepare(
-        "SELECT id, type, value, catalog_id, created_at FROM food_blacklist ORDER BY type, value"
+        "SELECT id, type, value, level, catalog_id, created_at FROM food_blacklist ORDER BY level, type, value"
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows: Vec<serde_json::Value> = stmt.query_map([], |r| {
         Ok(serde_json::json!({
             "id": r.get::<_, i64>(0)?,
             "type": r.get::<_, String>(1)?,
             "value": r.get::<_, String>(2)?,
-            "catalog_id": r.get::<_, Option<i64>>(3).unwrap_or(None),
-            "created_at": r.get::<_, String>(4)?,
+            "level": r.get::<_, String>(3).unwrap_or_else(|_| "hard".into()),
+            "catalog_id": r.get::<_, Option<i64>>(4).unwrap_or(None),
+            "created_at": r.get::<_, String>(5)?,
         }))
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
       .filter_map(|r| r.ok()).collect();
