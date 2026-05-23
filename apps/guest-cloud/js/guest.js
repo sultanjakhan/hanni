@@ -24,6 +24,13 @@
     }
     const r = await fetch(base + path, { credentials: 'omit', ...opts });
     if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    // After a successful write, drop the matching Firestore cache so the next
+    // read fetches fresh data (writes go through axum; Firestore mirror lags).
+    const m = (opts.method || 'GET').toUpperCase();
+    if (m !== 'GET') {
+      const coll = (path.split('/')[1] || '').replace(/[?#].*/, '');
+      if (coll) window.HanniGuest?.firestore?.invalidate?.(coll);
+    }
     return r.json();
   }
 
@@ -104,6 +111,9 @@
 
   window.HanniGuest = window.HanniGuest || {};
   window.HanniGuest.utils = { ctx, base, api, esc, can, rememberAuthor, recallAuthor };
+  // Exposed so the Firebase landing (which appends view-modules dynamically
+  // AFTER DOMContentLoaded) can trigger the initial render at the right time.
+  window.HanniGuest.renderShell = renderShell;
 
   // Defer mount so view-modules (loaded via separate <script> tags below) are registered.
   if (document.readyState === 'loading') {

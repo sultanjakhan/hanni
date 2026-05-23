@@ -111,6 +111,9 @@
 
   window.HanniGuest = window.HanniGuest || {};
   window.HanniGuest.utils = { ctx, base, api, esc, can, rememberAuthor, recallAuthor };
+  // Exposed so the Firebase landing (which appends view-modules dynamically
+  // AFTER DOMContentLoaded) can trigger the initial render at the right time.
+  window.HanniGuest.renderShell = renderShell;
 
   // Defer mount so view-modules (loaded via separate <script> tags below) are registered.
   if (document.readyState === 'loading') {

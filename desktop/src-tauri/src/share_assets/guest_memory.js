@@ -24,20 +24,20 @@
 
   const state = { mount: null, items: [] };
 
-  // Stage C-1: pull blacklist from Firestore mirror so the guest stays alive
-  // when Hanni is offline.
+  // Tunnel-first read; Firestore only when host is offline.
   const fs = (window.HanniGuest || {}).firestore;
+  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
 
   async function fetchBlacklist() {
-    if (fs) {
-      try {
-        const items = await fs.list('food_blacklist');
-        return { blacklist: items || [] };
-      } catch (e) {
-        console.warn('[guest_memory] firestore failed, falling back:', e?.message || e);
+    if (haveTunnel) {
+      try { return await api('/blacklist'); }
+      catch (e) {
+        console.warn('[guest_memory] tunnel failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return await api('/blacklist');
+    if (!fs) throw new Error('Firestore не настроен');
+    const items = await fs.list('food_blacklist');
+    return { blacklist: items || [] };
   }
 
   async function load() {

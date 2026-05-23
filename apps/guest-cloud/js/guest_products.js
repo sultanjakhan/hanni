@@ -23,21 +23,21 @@
 
   const state = { mount: null, items: [], path: [] };
 
-  // Stage C-1: prefer Firestore mirror so the catalog stays browsable when
-  // the host is offline. The "products" view shows ingredient_catalog rows.
+  // Tunnel-first read; Firestore only when host is offline.
   const fs = (window.HanniGuest || {}).firestore;
+  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
 
   async function fetchCatalog() {
-    if (fs) {
-      try {
-        const items = await fs.list('ingredient_catalog');
-        return { products: (items || []).sort((a, b) =>
-          String(a.name || '').localeCompare(String(b.name || ''))) };
-      } catch (e) {
-        console.warn('[guest_products] firestore failed, falling back to axum:', e?.message || e);
+    if (haveTunnel) {
+      try { return await api('/products'); }
+      catch (e) {
+        console.warn('[guest_products] tunnel failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return await api('/products');
+    if (!fs) throw new Error('Firestore не настроен');
+    const items = await fs.list('ingredient_catalog');
+    return { products: (items || []).sort((a, b) =>
+      String(a.name || '').localeCompare(String(b.name || ''))) };
   }
 
   async function load() {

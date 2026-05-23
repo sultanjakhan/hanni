@@ -4,36 +4,36 @@
   if (!u) return;
   const { api, can, recallAuthor } = u;
 
-  // Stage C-1: read fridge inventory (products with location=fridge) and the
-  // ingredient catalog from Firestore mirror when configured, so the guest
-  // works while Hanni is offline. Writes still go via axum.
+  // Tunnel-first read; Firestore only when host is offline.
   const fs = (window.HanniGuest || {}).firestore;
+  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
 
   async function loadCatalog() {
-    if (fs) {
-      try {
-        const cat = await fs.list('ingredient_catalog');
-        return (cat || []).map(c => ({
-          name: c.name || '', category: c.category || 'other', tags: c.tags || '',
-        }));
-      } catch (e) {
-        console.warn('[guest_fridge] firestore catalog failed, falling back:', e?.message || e);
+    if (haveTunnel) {
+      try { return (await api('/recipes')).catalog || []; }
+      catch (e) {
+        console.warn('[guest_fridge] tunnel catalog failed, falling back to Firestore:', e?.message || e);
       }
     }
-    try { return (await api('/recipes')).catalog || []; }
-    catch { return []; }
+    if (!fs) return [];
+    try {
+      const cat = await fs.list('ingredient_catalog');
+      return (cat || []).map(c => ({
+        name: c.name || '', category: c.category || 'other', tags: c.tags || '',
+      }));
+    } catch { return []; }
   }
 
   async function loadFridgeItems() {
-    if (fs) {
-      try {
-        const all = await fs.list('products');
-        return (all || []).filter(p => (p.location || 'fridge') === 'fridge');
-      } catch (e) {
-        console.warn('[guest_fridge] firestore products failed, falling back:', e?.message || e);
+    if (haveTunnel) {
+      try { return (await api('/fridge')).items || []; }
+      catch (e) {
+        console.warn('[guest_fridge] tunnel fridge failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return (await api('/fridge')).items || [];
+    if (!fs) throw new Error('Firestore не настроен');
+    const all = await fs.list('products');
+    return (all || []).filter(p => (p.location || 'fridge') === 'fridge');
   }
 
   const backend = {

@@ -45,45 +45,51 @@
     return (r.tags || '').split(/[,\s]+/).map(t => t.trim()).filter(t => MEAL_LABELS[t]);
   }
 
-  // Stage C-1: Firestore is the source of truth for READ when the host
-  // mirror is configured, so the guest stays alive even when Hanni is closed.
-  // axum is used only as fallback (cloud not configured) and for WRITE.
+  // Read priority: tunnel-first (axum on the host) when reachable, Firestore
+  // only when host is offline. Cuts Firestore reads to zero whenever the Mac
+  // is on — keeps us under the 50k/day free quota.
   const fs = (window.HanniGuest || {}).firestore;
+  const tunnel = (window.__SHARE__ || {}).tunnel_url || '';
+  const haveTunnel = !!tunnel;
+
+  async function fetchFromFirestore() {
+    if (!fs) throw new Error('Firestore не настроен');
+    const [recipes, catalog] = await Promise.all([
+      fs.list('recipes'),
+      fs.list('ingredient_catalog'),
+    ]);
+    return {
+      recipes: (recipes || []).sort((a, b) =>
+        String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200),
+      catalog: (catalog || []).map(c => ({ name: c.name || '', category: c.category || 'other' })),
+    };
+  }
 
   async function fetchListAndCatalog() {
-    if (fs) {
-      try {
-        const [recipes, catalog] = await Promise.all([
-          fs.list('recipes'),
-          fs.list('ingredient_catalog'),
-        ]);
-        return {
-          recipes: (recipes || []).sort((a, b) =>
-            String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200),
-          catalog: (catalog || []).map(c => ({ name: c.name || '', category: c.category || 'other' })),
-        };
-      } catch (e) {
-        console.warn('[guest_recipes] firestore failed, falling back to axum:', e?.message || e);
+    if (haveTunnel) {
+      try { return await api('/recipes'); }
+      catch (e) {
+        console.warn('[guest_recipes] tunnel failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return await api('/recipes');
+    return await fetchFromFirestore();
   }
 
   async function fetchRecipe(id) {
-    if (fs) {
-      try {
-        const recipe = state.recipes.find(r => Number(r.id) === Number(id))
-                       || await fs.get('recipes', id);
-        if (!recipe) throw new Error('Recipe not found');
-        const allIngr = await fs.list('recipe_ingredients');
-        recipe.ingredient_items = (allIngr || [])
-          .filter(i => Number(i.recipe_id) === Number(id));
-        return recipe;
-      } catch (e) {
-        console.warn('[guest_recipes] firestore detail failed, falling back to axum:', e?.message || e);
+    if (haveTunnel) {
+      try { return await api(`/recipes/${id}`); }
+      catch (e) {
+        console.warn('[guest_recipes] tunnel detail failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return await api(`/recipes/${id}`);
+    if (!fs) throw new Error('Firestore не настроен');
+    const recipe = state.recipes.find(r => Number(r.id) === Number(id))
+                   || await fs.get('recipes', id);
+    if (!recipe) throw new Error('Recipe not found');
+    const allIngr = await fs.list('recipe_ingredients');
+    recipe.ingredient_items = (allIngr || [])
+      .filter(i => Number(i.recipe_id) === Number(id));
+    return recipe;
   }
 
   async function load() {

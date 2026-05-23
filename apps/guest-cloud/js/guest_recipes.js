@@ -9,6 +9,22 @@
   const DIFF_LABELS = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' };
   const CUISINES = { kz: '🇰🇿 Казахская', ru: '🇷🇺 Русская', it: '🇮🇹 Итальянская', jp: '🇯🇵 Японская', cn: '🇨🇳 Китайская', other: '🌍 Другое' };
 
+  // instructions = JSON array of {text,min,ingredients} (new) | legacy lines.
+  function parseSteps(raw) {
+    const s = (raw || '').trim();
+    if (s.startsWith('[')) {
+      try {
+        const arr = JSON.parse(s);
+        if (Array.isArray(arr)) return arr
+          .map(x => ({ text: String(x.text || ''), min: x.min || 0, ingredients: Array.isArray(x.ingredients) ? x.ingredients : [] }))
+          .filter(x => x.text);
+      } catch { /* legacy */ }
+    }
+    return s.split('\n').map(l => l.trim()).filter(Boolean)
+      .map(l => ({ text: l.replace(/^\d+\.\s*/, ''), min: 0, ingredients: [] }));
+  }
+  function stepsToText(raw) { return parseSteps(raw).map(st => st.text).join('\n'); }
+
   const state = {
     mount: null, view: 'list', recipes: [], catalog: {},
     current: null, comments: [],
@@ -29,45 +45,51 @@
     return (r.tags || '').split(/[,\s]+/).map(t => t.trim()).filter(t => MEAL_LABELS[t]);
   }
 
-  // Stage C-1: Firestore is the source of truth for READ when the host
-  // mirror is configured, so the guest stays alive even when Hanni is closed.
-  // axum is used only as fallback (cloud not configured) and for WRITE.
+  // Read priority: tunnel-first (axum on the host) when reachable, Firestore
+  // only when host is offline. Cuts Firestore reads to zero whenever the Mac
+  // is on — keeps us under the 50k/day free quota.
   const fs = (window.HanniGuest || {}).firestore;
+  const tunnel = (window.__SHARE__ || {}).tunnel_url || '';
+  const haveTunnel = !!tunnel;
+
+  async function fetchFromFirestore() {
+    if (!fs) throw new Error('Firestore не настроен');
+    const [recipes, catalog] = await Promise.all([
+      fs.list('recipes'),
+      fs.list('ingredient_catalog'),
+    ]);
+    return {
+      recipes: (recipes || []).sort((a, b) =>
+        String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200),
+      catalog: (catalog || []).map(c => ({ name: c.name || '', category: c.category || 'other' })),
+    };
+  }
 
   async function fetchListAndCatalog() {
-    if (fs) {
-      try {
-        const [recipes, catalog] = await Promise.all([
-          fs.list('recipes'),
-          fs.list('ingredient_catalog'),
-        ]);
-        return {
-          recipes: (recipes || []).sort((a, b) =>
-            String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200),
-          catalog: (catalog || []).map(c => ({ name: c.name || '', category: c.category || 'other' })),
-        };
-      } catch (e) {
-        console.warn('[guest_recipes] firestore failed, falling back to axum:', e?.message || e);
+    if (haveTunnel) {
+      try { return await api('/recipes'); }
+      catch (e) {
+        console.warn('[guest_recipes] tunnel failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return await api('/recipes');
+    return await fetchFromFirestore();
   }
 
   async function fetchRecipe(id) {
-    if (fs) {
-      try {
-        const recipe = state.recipes.find(r => Number(r.id) === Number(id))
-                       || await fs.get('recipes', id);
-        if (!recipe) throw new Error('Recipe not found');
-        const allIngr = await fs.list('recipe_ingredients');
-        recipe.ingredient_items = (allIngr || [])
-          .filter(i => Number(i.recipe_id) === Number(id));
-        return recipe;
-      } catch (e) {
-        console.warn('[guest_recipes] firestore detail failed, falling back to axum:', e?.message || e);
+    if (haveTunnel) {
+      try { return await api(`/recipes/${id}`); }
+      catch (e) {
+        console.warn('[guest_recipes] tunnel detail failed, falling back to Firestore:', e?.message || e);
       }
     }
-    return await api(`/recipes/${id}`);
+    if (!fs) throw new Error('Firestore не настроен');
+    const recipe = state.recipes.find(r => Number(r.id) === Number(id))
+                   || await fs.get('recipes', id);
+    if (!recipe) throw new Error('Recipe not found');
+    const allIngr = await fs.list('recipe_ingredients');
+    recipe.ingredient_items = (allIngr || [])
+      .filter(i => Number(i.recipe_id) === Number(id));
+    return recipe;
   }
 
   async function load() {
@@ -204,8 +226,12 @@
           const cat = catCat(n);
           return `<span class="ingr-tag${cat ? ' ingr-cat-' + cat : ''}">${esc(n)}</span>`;
         }).join(' ');
-    const steps = (r.instructions || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
-    const stepsHtml = steps.length ? `<ol class="recipe-instructions">${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : '<div class="muted">Нет инструкций.</div>';
+    const steps = parseSteps(r.instructions || '');
+    const stepsHtml = steps.length ? `<ol class="recipe-instructions">${steps.map(st => {
+      const time = st.min ? ` <span class="badge step-time-badge">⏱ ${st.min} мин</span>` : '';
+      const prods = st.ingredients.length ? `<div class="step-prod-list">${st.ingredients.map(n => `<span class="ingr-tag${catCat(n) ? ' ingr-cat-' + catCat(n) : ''}">${esc(n)}</span>`).join('')}</div>` : '';
+      return `<li>${esc(st.text)}${time}${prods}</li>`;
+    }).join('')}</ol>` : '<div class="muted">Нет инструкций.</div>';
     const cuisine = CUISINES[r.cuisine] || `🌍 ${r.cuisine || ''}`;
 
     const editBtn = can('edit') ? '<button class="btn-secondary" id="r-edit" style="font-size:13px;padding:4px 10px">Изменить</button>' : '';
@@ -270,7 +296,7 @@
       <div class="form-group"><label class="form-label">Описание</label>
         <textarea class="form-textarea" id="re-desc" rows="2">${esc(r.description || '')}</textarea></div>
       <div class="form-group"><label class="form-label">Приготовление</label>
-        <textarea class="form-textarea" id="re-instr" rows="4">${esc(r.instructions || '')}</textarea></div>
+        <textarea class="form-textarea" id="re-instr" rows="4">${esc(stepsToText(r.instructions || ''))}</textarea></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div class="form-group"><label class="form-label">Подготовка (мин)</label>
           <input class="form-input" id="re-prep" type="number" value="${r.prep_time || 0}"></div>

@@ -51,21 +51,60 @@
 
     // Fetch share_links/<token> directly via REST (same shape guest_firestore.js
     // would use, but we need the data BEFORE that script loads).
+    // CACHE: per-token meta in localStorage with 1h TTL — keeps repeat visits
+    // under the 50k/day Firestore free quota. On 429 we also fall through
+    // to a stale cached copy (better stale than broken).
+    const META_KEY = 'hg:meta:' + token;
+    const META_TTL = 60 * 60 * 1000;
+    function loadCachedMeta(maxAge) {
+      try {
+        const raw = localStorage.getItem(META_KEY);
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        if (maxAge !== Infinity && Date.now() - o.t > maxAge) return null;
+        return o.v;
+      } catch { return null; }
+    }
     const metaUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}`
       + `/databases/(default)/documents/share_links/${encodeURIComponent(token)}`
       + `?key=${encodeURIComponent(cfg.apiKey)}`;
-    let doc;
-    try {
-      const r = await fetch(metaUrl, { credentials: 'omit' });
-      if (r.status === 404) {
-        app.innerHTML = '<div class="err">Ссылка не найдена. Проверьте URL или перевыпустите ссылку из Hanni.</div>';
-        return;
+    // QUERY-PARAM OVERRIDE: `?t=<tunnel_url>` lets the host hand-deliver a
+    // working link even when Firestore reads are quota-blocked. Anything not
+    // in the URL falls back to Firestore (or cache); axum still enforces the
+    // real permission set on every write, so optimistic defaults are safe.
+    const qp = new URLSearchParams(location.search);
+    const tunnelOverride = qp.get('t');
+    let doc = loadCachedMeta(META_TTL);
+    if (!doc && tunnelOverride) {
+      // Synthesise a minimal Firestore-shaped doc so the unwrap code below
+      // works unchanged. Real metadata will fill in on next successful fetch.
+      doc = { fields: {
+        tab:         { stringValue: qp.get('tab')   || 'food' },
+        scope:       { stringValue: qp.get('s')     || 'all'  },
+        label:       { stringValue: qp.get('label') || 'Общий доступ' },
+        permissions: { stringValue: qp.get('p')     || '["view","add","edit","delete","comment"]' },
+        tunnel_url:  { stringValue: tunnelOverride },
+      } };
+    }
+    if (!doc) {
+      try {
+        const r = await fetch(metaUrl, { credentials: 'omit' });
+        if (r.status === 404) {
+          app.innerHTML = '<div class="err">Ссылка не найдена. Проверьте URL или перевыпустите ссылку из Hanni.</div>';
+          return;
+        }
+        if (!r.ok) throw new Error('Firestore ' + r.status);
+        doc = await r.json();
+        try { localStorage.setItem(META_KEY, JSON.stringify({ t: Date.now(), v: doc })); } catch {}
+      } catch (e) {
+        // 429 / network error → try stale cache; only then bail.
+        const stale = loadCachedMeta(Infinity);
+        if (stale) { doc = stale; }
+        else {
+          app.innerHTML = `<div class="err">Не удалось загрузить ссылку: ${e.message || e}<br><small>Подсказка: попроси хозяина ссылки сгенерировать новую — она будет содержать токен туннеля и заработает в обход квоты.</small></div>`;
+          return;
+        }
       }
-      if (!r.ok) throw new Error('Firestore ' + r.status);
-      doc = await r.json();
-    } catch (e) {
-      app.innerHTML = `<div class="err">Не удалось загрузить ссылку: ${e.message || e}</div>`;
-      return;
     }
 
     // Unwrap Firestore-typed fields → plain JS.
@@ -101,6 +140,8 @@
       '/js/guest_firestore.js',
       '/js/guest.js',
       '/js/recipe-shared-ingredients.js',  // BEFORE recipe-shared.js (registers HanniRecipe.ingredients)
+      '/js/recipe-shared-steps.js',        // BEFORE recipe-shared.js (registers HanniRecipe.steps)
+      '/js/recipe-shared-image.js',        // BEFORE recipe-shared.js (registers HanniRecipe.image)
       '/js/recipe-shared.js',
       '/js/guest_recipe_add.js',
       '/js/guest_recipes.js',
@@ -110,15 +151,22 @@
       '/js/fridge-shared.js',
       '/js/guest_fridge.js',
     ];
+    // Cache-bust: every deploy bumps this so the CDN's 5-min edge cache
+    // doesn't pin gust-* modules to an old build (which silently breaks
+    // the post-load render trigger below).
+    const V = '20260523c';
     for (const src of scripts) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');
-        tag.src = src;
+        tag.src = src + '?v=' + V;
         tag.onload = resolve;
         tag.onerror = () => reject(new Error('Failed to load ' + src));
         document.body.appendChild(tag);
       });
     }
+    // DOMContentLoaded fired long before view-modules registered (dynamic
+    // appendChild), so guest.js's auto-mount missed them. Trigger now.
+    window.HanniGuest?.renderShell?.();
   })();
   </script>
 </body>

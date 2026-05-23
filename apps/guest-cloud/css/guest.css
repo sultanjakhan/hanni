@@ -152,9 +152,13 @@ b { color: var(--text-primary); }
 .rf-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; margin-bottom: 12px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); background: var(--bg-card); }
 .rf-section { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rf-title { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 70px; text-transform: uppercase; letter-spacing: 0.5px; }
-.rf-chip { padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: all var(--transition-fast); font-family: inherit; }
+.rf-chip { padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; transition: all var(--transition-fast); font-family: inherit; }
 .rf-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
 .rf-chip.active { background: var(--accent-fill); color: var(--bg-card); border-color: var(--accent-fill); }
+/* Recipe-wizard step indicator (matches Hanni-side .rw-nav / .rw-step) */
+.recipe-wizard .rw-nav { display: flex; gap: 4px; margin-bottom: 14px; }
+.rw-step { flex: 1; text-align: center; padding: 6px 4px; font-size: 12px; color: var(--text-muted); border-bottom: 2px solid var(--border-default); cursor: pointer; white-space: nowrap; }
+.rw-step.active { color: var(--accent-fill); border-bottom-color: var(--accent-fill); font-weight: 500; }
 
 .recipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .recipe-card { padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); background: var(--bg-card); cursor: pointer; transition: all var(--transition-fast); }
