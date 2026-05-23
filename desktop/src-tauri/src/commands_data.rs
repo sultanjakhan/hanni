@@ -2289,6 +2289,47 @@ pub fn mark_recipe_cooked(id: i64, db: tauri::State<'_, HanniDb>) -> Result<Stri
     Ok(now)
 }
 
+// Log one cooking of a recipe (immutable history entry) + bump recipes.last_cooked.
+#[tauri::command]
+pub fn log_cooking(
+    recipe_id: i64, date: String, taste_rating: Option<i64>, cook_note: Option<String>,
+    event_id: Option<i64>, db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
+    let conn = db.conn();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO cooking_log (recipe_id, date, taste_rating, cook_note, event_id, created_at) VALUES (?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![recipe_id, date, taste_rating.unwrap_or(0), cook_note.unwrap_or_default(), event_id, now],
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let id = conn.last_insert_rowid();
+    // last_cooked = latest date in the log for this recipe.
+    conn.execute(
+        "UPDATE recipes SET last_cooked=(SELECT MAX(date) FROM cooking_log WHERE recipe_id=?1) WHERE id=?1",
+        rusqlite::params![recipe_id],
+    ).ok();
+    crate::sync_share::mark_dirty(&conn, "cooking_log");
+    crate::sync_share::mark_dirty(&conn, "recipes");
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn get_cooking_log(recipe_id: i64, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT id, date, taste_rating, cook_note, event_id FROM cooking_log WHERE recipe_id=?1 ORDER BY date DESC, id DESC"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![recipe_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "date": row.get::<_, String>(1)?,
+            "taste_rating": row.get::<_, i64>(2)?,
+            "cook_note": row.get::<_, String>(3)?,
+            "event_id": row.get::<_, Option<i64>>(4).unwrap_or(None),
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
 #[tauri::command]
 pub fn delete_recipe(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
