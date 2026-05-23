@@ -695,7 +695,10 @@ async function renderDayCalendar(el, events) {
     const isManual = !e.source || e.source === 'manual';
     const pri = Number(e.priority || 0);
     const priBar = pri > 0 ? `<span class="day-event-pri" style="background:${priorityHex(pri)}" title="Важность ${pri}/5"></span>` : '';
-    const srcBadge = !isManual ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
+    // auto_health events already carry their own emoji in the title
+    // (🚶/🏃/Сон…), so the generic 📅 badge would just be noise.
+    const srcBadge = (!isManual && e.source !== 'auto_health')
+      ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
     const idAttr = isManual ? `data-event-id="${e.id}"` : '';
     return `<div class="day-event day-event-block" ${idAttr}
       style="top:${Math.round(top)}px;height:${Math.max(Math.round(height), 22)}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};${isManual ? 'cursor:pointer;' : ''}">

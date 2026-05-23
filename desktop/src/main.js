@@ -247,16 +247,19 @@ document.addEventListener('keydown', (e) => {
 // ══════════════════════════════════════════════
 
 (async () => {
-  // Paint the tab drawer immediately from localStorage so it isn't visibly
-  // empty for the 1-5s the DB takes to come up. We deliberately DON'T call
-  // activateView() here — that would load the active tab's content with
-  // DB invokes still racing the Rust setup() hook, and the resulting empty
-  // Calendar/Day-view stays cached until something forces a refresh.
-  // The post-poll activateView() below paints content once invokes work.
+  // Paint the drawer + the active view container immediately from
+  // localStorage so the user doesn't see a blank screen for the 1-5s the
+  // DB takes to come up. activateView() also adds the `.active` class to
+  // the right view div — without it CSS hides them all and the app body
+  // is literally empty until the poll finishes. The data-fetches inside
+  // each tab's loader race the Rust setup() hook and may come back empty;
+  // the post-poll activateView() below + the visibilitychange handler
+  // both re-render so the user sees fresh content quickly.
   try {
     renderTabBar();
+    activateView();
     if (IS_MOBILE) updateMobileTitle();
-  } catch (e) { console.warn('[hanni] early tab-bar paint skipped', e); }
+  } catch (e) { console.warn('[hanni] early paint skipped', e); }
 
   // Load custom pages into TAB_REGISTRY before rendering.
   // Android: the webview boots in parallel with the Rust setup() hook, where
