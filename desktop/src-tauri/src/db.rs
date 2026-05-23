@@ -2582,10 +2582,13 @@ pub fn migrate_health_log_start_time(conn: &rusqlite::Connection) {
 /// to one row per (date, title, time, duration_minutes) on both phone and
 /// Mac. Idempotent.
 pub fn migrate_dedup_auto_health_events(conn: &rusqlite::Connection) {
+    // Same start_time with different duration_minutes is the same session
+    // re-imported with a corrected length — drop the older row (smaller id)
+    // and keep the latest reading. Idempotent.
     conn.execute(
         "DELETE FROM events WHERE source='auto_health' AND id NOT IN (
-            SELECT MIN(id) FROM events WHERE source='auto_health'
-            GROUP BY date, title, time, duration_minutes
+            SELECT MAX(id) FROM events WHERE source='auto_health'
+            GROUP BY date, title, time
         )",
         [],
     ).ok();

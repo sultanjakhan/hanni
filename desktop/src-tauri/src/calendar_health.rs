@@ -1,9 +1,12 @@
 // calendar_health.rs — Sync sleep_sessions + exercise → events (Calendar Day-view).
 
-/// Idempotent dedup for auto_health events: keeps MIN(id) per
-/// (date, title, time, duration_minutes). Mirrors the startup migration
-/// in db.rs so a long-running Mac dev instance can clean accumulated
-/// duplicates without a restart — JS calls this on Calendar refresh.
+/// Idempotent dedup for auto_health events: keeps MAX(id) per
+/// (date, title, time) — different durations at the same start_time mean
+/// the same sleep/walk was re-imported with a corrected length, and the
+/// newest row carries the latest reading. Mirrors the startup migration
+/// in db.rs so a long-running Mac dev instance can collapse accumulated
+/// duplicates without a restart; refreshCalendarInner() calls it on
+/// every Calendar refresh.
 #[tauri::command]
 pub fn dedup_auto_health_events(db: tauri::State<'_, crate::types::HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
@@ -12,8 +15,8 @@ pub fn dedup_auto_health_events(db: tauri::State<'_, crate::types::HanniDb>) -> 
     ).map_err(|e| format!("count: {e}"))?;
     conn.execute(
         "DELETE FROM events WHERE source='auto_health' AND id NOT IN (
-            SELECT MIN(id) FROM events WHERE source='auto_health'
-            GROUP BY date, title, time, duration_minutes
+            SELECT MAX(id) FROM events WHERE source='auto_health'
+            GROUP BY date, title, time
         )", [],
     ).map_err(|e| format!("delete: {e}"))?;
     let after: i64 = conn.query_row(
