@@ -262,7 +262,18 @@ document.addEventListener('keydown', (e) => {
       break;
     } catch (e) {
       if (Date.now() >= deadline) {
-        console.error('[hanni] DB not ready before deadline, chat-only fallback', e);
+        // Android cold-start race: webview can load before Rust state.manage(db)
+        // finishes, and subsequent invokes never recover in this session. A
+        // single reload picks up the now-managed state. Guarded by sessionStorage
+        // so we don't loop if the reload doesn't help.
+        const RELOAD_KEY = '_hanni_db_reload_attempted';
+        if (!sessionStorage.getItem(RELOAD_KEY)) {
+          sessionStorage.setItem(RELOAD_KEY, '1');
+          console.warn('[hanni] DB not ready in 15s — reloading once to recover');
+          location.reload();
+          return;
+        }
+        console.error('[hanni] DB not ready after reload retry, chat-only fallback', e);
         break;
       }
       await new Promise(r => setTimeout(r, attempt < 10 ? 100 : 300));
