@@ -6,8 +6,10 @@ import { SECTION_DEFS, renderItemRow, renderSection } from './calendar-task-list
 import { timeToMin } from './task-picker-sort.js';
 
 // A timed item counts as past-time today within the same 3h grace as the picker.
-function isPastTimeToday(timeStr, done, isToday) {
-  if (!isToday || done) return false;
+// `enabled` is the opt-in flag (track_overdue for schedules; true for events —
+// missed meeting is missed). Schedules without track_overdue are not flagged.
+function isPastTimeToday(timeStr, done, isToday, enabled = true) {
+  if (!isToday || done || !enabled) return false;
   const t = timeToMin(timeStr);
   if (t === null) return false;
   const now = new Date();
@@ -79,7 +81,7 @@ async function loadDayItems(date) {
   for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date))) {
     const bi = blockInfo('schedule', s.id);
     const done = completedIds.has(s.id);
-    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday) });
+    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday, !!s.track_overdue) });
   }
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);

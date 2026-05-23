@@ -552,6 +552,7 @@ pub fn run() {
             routine_engine::set_routine_node_status,
             routine_engine::get_routine_now,
             routine_engine::delete_routine_run,
+            routine_engine::get_completed_routine_chains,
             task_pins::toggle_task_pin,
             task_pins::get_task_pins,
             // Dan Koe Protocol

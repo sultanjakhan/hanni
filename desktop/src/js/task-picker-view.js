@@ -2,7 +2,7 @@
 // Pure HTML building (no event wiring); the widget owns state and wiring.
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
-import { rankTasks, nowMinutes, timeToMin } from './task-picker-sort.js';
+import { rankTasks, nowMinutes } from './task-picker-sort.js';
 
 // Mirrors SCH_CAT_ICONS in tab-calendar.js / calendar-task-list.js. Keep in sync.
 const SCH_CAT_ICONS = {
@@ -39,17 +39,20 @@ function priorityDots(p) {
   return `<span class="rt-dots tw-dots" title="Важность ${n}/5">${dots}</span>`;
 }
 
-// Right-side meta: how-overdue for late tasks, else average actual time (from
-// history), else planned duration, else planned time.
-function metaText(p, nowMin, avgDur) {
-  if (p._overdue) {
-    const t = timeToMin(p.planned_time);
-    return `<span class="tw-meta tw-meta--late" title="Просрочено на это время">−${fmtMins(Math.max(0, nowMin - t))}</span>`;
-  }
+// Right-side meta:
+// - Events (meetings): planned time HH:MM — duplicates the notification context.
+// - Schedules/notes: ⌀ average actual execution time from history; plain
+//   time-of-day on a schedule isn't a deadline so we don't show it. Overdue
+//   state is signalled by the orange row colour, no "−Nч" needed.
+function metaText(p, _nowMin, avgDur) {
   const avg = avgDur[`${p.source_type}:${p.source_id}`];
+  if (p.source_type === 'event' && p.planned_time) {
+    return `<span class="tw-meta" title="Время встречи">${String(p.planned_time).slice(0, 5)}</span>`;
+  }
   if (avg) return `<span class="tw-meta" title="Среднее по истории">⌀ ${fmtMins(avg)}</span>`;
-  if (p.duration_minutes) return `<span class="tw-meta">~${fmtMins(p.duration_minutes)}</span>`;
-  if (p.planned_time) return `<span class="tw-meta">${String(p.planned_time).slice(0, 5)}</span>`;
+  if (p.source_type === 'event' && p.duration_minutes) {
+    return `<span class="tw-meta">~${fmtMins(p.duration_minutes)}</span>`;
+  }
   return '';
 }
 

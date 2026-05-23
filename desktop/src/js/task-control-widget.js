@@ -67,11 +67,12 @@ async function openStartDropdown() {
   const avgDur = Object.fromEntries(avgRows.map(a => [`${a.source_type}:${a.source_id}`, a.avg_minutes]));
   const chains = await invoke('get_routine_chains').catch(() => []);
   const now = await invoke('get_routine_now', { date: localDate() }).catch(() => []);
+  const completedChainIds = await invoke('get_completed_routine_chains', { date: localDate() }).catch(() => []);
   // Recommendation precedence: active routine step → start an auto-trigger chain
-  // (wake first) → top regular task.
+  // (wake first; skip completed-today) → top regular task.
   const routineRecId = pickRecommendedTaskId(now);
-  const chainRecId = routineRecId == null ? pickStartChainId(chains, now) : null;
-  const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId);
+  const chainRecId = routineRecId == null ? pickStartChainId(chains, now, completedChainIds) : null;
+  const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId, completedChainIds);
   const { bodyHtml, orderedItems } = await buildPickerBody({
     startable, weights, pins, avgDur, routineHtml,
     routineHasRec: routineRecId != null || chainRecId != null,
@@ -130,9 +131,15 @@ async function openStartDropdown() {
           await invoke('start_task_block', { sourceType: p.source_type, sourceId: p.source_id });
         }
       } catch (err) { console.error('tw item click:', err); }
-      closeDropdown();
       window.dispatchEvent(new Event('task-state-changed'));
-      await refreshState();
+      // Check-mode is a quick toggle — keep the menu open so several can be
+      // marked in a row. Track-mode starts a timer; close so the timer UI shows.
+      if (isCheck && p.source_type === 'schedule') {
+        await openStartDropdown();
+      } else {
+        closeDropdown();
+        await refreshState();
+      }
     });
   });
 }

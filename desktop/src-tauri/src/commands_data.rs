@@ -1178,19 +1178,22 @@ pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::Sta
         "SELECT completed FROM schedule_completions WHERE schedule_id=?1 AND date=?2",
         rusqlite::params![schedule_id, date], |row| row.get(0),
     ).ok();
+    // Keep `status` in sync with `completed`. Otherwise a row marked done via the
+    // timer flow (status='done') and later untoggled would stay status='done' and
+    // get filtered out of the picker (which excludes status_extra='done').
     match existing {
         Some(1) => {
-            conn.execute("UPDATE schedule_completions SET completed=0, completed_at=NULL WHERE schedule_id=?1 AND date=?2",
+            conn.execute("UPDATE schedule_completions SET completed=0, completed_at=NULL, status='planned' WHERE schedule_id=?1 AND date=?2",
                 rusqlite::params![schedule_id, date]).ok();
             Ok(false)
         }
         Some(_) => {
-            conn.execute("UPDATE schedule_completions SET completed=1, completed_at=?3 WHERE schedule_id=?1 AND date=?2",
+            conn.execute("UPDATE schedule_completions SET completed=1, completed_at=?3, status='done' WHERE schedule_id=?1 AND date=?2",
                 rusqlite::params![schedule_id, date, chrono::Local::now().to_rfc3339()]).ok();
             Ok(true)
         }
         None => {
-            conn.execute("INSERT INTO schedule_completions (schedule_id, date, completed, completed_at) VALUES (?1, ?2, 1, ?3)",
+            conn.execute("INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, 1, ?3, 'done')",
                 rusqlite::params![schedule_id, date, chrono::Local::now().to_rfc3339()]).ok();
             Ok(true)
         }

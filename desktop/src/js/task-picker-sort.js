@@ -16,8 +16,12 @@ export function timeToMin(t) {
 const OVERDUE_GRACE_MIN = 180;
 
 // A task is overdue when its planned time is recently past and it isn't done.
+// Schedules must opt in via `track_overdue` (otherwise time_of_day is just a
+// preferred slot, not a deadline). Events are always overdue-eligible — a missed
+// meeting is a missed meeting.
 export function isOverdue(item, nowMin) {
   if (item.completed || item.status_extra === 'done') return false;
+  if (item.source_type === 'schedule' && !item.track_overdue) return false;
   const t = timeToMin(item.planned_time);
   return t !== null && t < nowMin && (nowMin - t) <= OVERDUE_GRACE_MIN;
 }
@@ -69,12 +73,15 @@ export function rankTasks(items, { nowMin, weights, pins = [] }) {
 }
 
 // The chain whose start should be recommended now: first unstarted auto-trigger
-// chain (sleep_end = wake, or time). Manual chains aren't auto-recommended.
-// Returns its chain id, or null. Use only when no active run owns the recommendation.
-export function pickStartChainId(chains, runs) {
-  const activeChainIds = new Set((runs || []).map(r => r.chain_id));
+// chain (sleep_end = wake, or time) that isn't already completed today. Manual
+// chains aren't auto-recommended. Returns its chain id, or null. Use only when
+// no active run owns the recommendation.
+export function pickStartChainId(chains, runs, completedChainIds = []) {
+  const activeIds = new Set((runs || []).map(r => r.chain_id));
+  const completedIds = new Set(completedChainIds);
   const c = (chains || []).find(
-    ch => (ch.trigger_type === 'sleep_end' || ch.trigger_type === 'time') && !activeChainIds.has(ch.id)
+    ch => (ch.trigger_type === 'sleep_end' || ch.trigger_type === 'time')
+       && !activeIds.has(ch.id) && !completedIds.has(ch.id)
   );
   return c ? c.id : null;
 }

@@ -9,14 +9,22 @@ const CAT_ICONS = {
   practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽',
 };
 
+// Used by wireRoutineSection to pass today's date to backend commands.
+function localDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /// HTML for the routine section; '' when there are no chains. `now` is the
 /// get_routine_now payload; `recommendedId` is the active task to highlight blue;
 /// `chainRecId` is the chain whose start button to highlight as "сейчас".
-export async function renderRoutineSection(chains = [], now = [], recommendedId = null, chainRecId = null) {
+export async function renderRoutineSection(chains = [], now = [], recommendedId = null, chainRecId = null, completedChainIds = []) {
   if (!chains.length) return '';
 
+  const completedSet = new Set(completedChainIds);
   let rows = '';
   for (const c of chains) {
+    if (completedSet.has(c.id) && !now.find(r => r.chain_id === c.id)) continue;
     const run = now.find(r => r.chain_id === c.id);
     if (run) {
       for (const t of run.tasks) {
@@ -47,6 +55,7 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
       </button>`;
     }
   }
+  if (!rows) return '';
   return `<div class="tw-group-header">Рутина</div>${rows}`;
 }
 

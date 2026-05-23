@@ -62,6 +62,19 @@ pub fn set_routine_node_status(
     Ok(())
 }
 
+/// Chain ids whose run for `date` is completed — the picker hides these so a
+/// finished chain doesn't keep showing "Я встал".
+#[tauri::command]
+pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<i64>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT chain_id FROM routine_runs WHERE date=?1 AND state='completed'"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![date], |r| r.get::<_, i64>(0))
+        .map_err(|e| format!("Query error: {}", e))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 /// Core of the engine: for every active run on `date`, return the available nodes
 /// (incoming edges satisfied, not yet closed). A run with all required nodes
 /// closed is auto-marked 'completed'.

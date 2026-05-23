@@ -50,7 +50,8 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
     let mut s_stmt = conn.prepare(
         "SELECT s.id, s.title, s.category, s.frequency, s.frequency_days, s.time_of_day, s.until_date,
                 COALESCE(sc.completed, 0), COALESCE(sc.status, 'planned'),
-                COALESCE(s.tracking_mode, 'track'), s.priority
+                COALESCE(s.tracking_mode, 'track'), s.priority,
+                COALESCE(s.track_overdue, 0)
          FROM schedules s
          LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
          WHERE s.is_active = 1"
@@ -68,11 +69,12 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             row.get::<_, String>(8)?,
             row.get::<_, String>(9)?,
             row.get::<_, i64>(10)?,
+            row.get::<_, i64>(11)?,
         ))
     }).map_err(|e| format!("Query error: {}", e))?;
 
     for tup in schedules_iter.flatten() {
-        let (id, title, category, frequency, frequency_days, time_of_day, until_date, completed, sc_status, tracking_mode, priority) = tup;
+        let (id, title, category, frequency, frequency_days, time_of_day, until_date, completed, sc_status, tracking_mode, priority, track_overdue) = tup;
         // until_date filter
         if let Some(ref ud) = until_date {
             if !ud.is_empty() && date.as_str() > ud.as_str() { continue; }
@@ -100,6 +102,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             "status_extra": sc_status,
             "tracking_mode": tracking_mode,
             "priority": priority,
+            "track_overdue": track_overdue == 1,
         }));
     }
 
