@@ -95,7 +95,7 @@ function showTheoryEditor(comp, reloadFn) {
   overlay.querySelector('[data-cancel]').addEventListener('click', close);
   overlay.querySelector('[data-save]').addEventListener('click', async () => {
     const theory = overlay.querySelector('#dev-theory-text').value;
-    await invoke('update_dev_node', { id: comp.id, name: null, score: null, theory, material: null, priority: null });
+    await invoke('update_dev_node', { id: comp.id, name: null, score: null, theory, material: null, priority: null, level: null });
     close();
     reloadFn();
   });

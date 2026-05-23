@@ -4,6 +4,7 @@ import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { scoreTier, levelBarHtml, levelBadgeHtml } from './dev-level.js';
 import { matrixToolbarHtml, wireMatrixToolbar } from './dev-matrix-search.js';
+import { cefrChipHtml, wireCefrChips } from './dev-cefr.js';
 
 function avg(nums) {
   const vals = nums.filter(n => n != null);
@@ -44,6 +45,7 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
       html += `<details class="dev-mx-comp" data-empty="${empty}">
         <summary class="dev-mx-row dev-mx-comp-head">
           <span class="dev-mx-name dev-mx-open" data-id="${comp.id}" title="Открыть страницу">${escapeHtml(comp.name)}</span>
+          ${cefrChipHtml(comp.level, comp.id)}
           ${levelBadgeHtml(cAvg)}
           <button class="dev-mx-act dev-mx-open dev-mx-open-btn" data-id="${comp.id}" title="Открыть страницу">📖</button>
           <button class="dev-mx-act dev-mx-del" data-id="${comp.id}" title="Удалить">×</button>
@@ -69,6 +71,7 @@ export async function renderMatrixPane(el, projectId, reloadFn) {
   el.innerHTML = html;
   wireMatrix(el, projectId, reloadFn);
   wireMatrixToolbar(el);
+  wireCefrChips(el, reloadFn);
 }
 
 function wireMatrix(el, projectId, reloadFn) {
@@ -82,7 +85,7 @@ function wireMatrix(el, projectId, reloadFn) {
     stop(e);
     await invoke('update_dev_node', {
       id: parseInt(b.dataset.id), name: null, score: null, theory: null,
-      material: null, priority: b.classList.contains('on') ? 0 : 1,
+      material: null, priority: b.classList.contains('on') ? 0 : 1, level: null,
     });
     reloadFn();
   }));
@@ -98,7 +101,7 @@ function wireMatrix(el, projectId, reloadFn) {
     stop(e);
     const id = parseInt(b.dataset.id);
     nodeNameModal('Переименовать', b.dataset.name, async (name) => {
-      await invoke('update_dev_node', { id, name, score: null, theory: null, material: null, priority: null });
+      await invoke('update_dev_node', { id, name, score: null, theory: null, material: null, priority: null, level: null });
       reloadFn();
     });
   }));
@@ -144,7 +147,7 @@ function editScore(span, reloadFn) {
     let v = parseInt(inp.value);
     if (isNaN(v)) v = 0;
     v = Math.max(0, Math.min(10, v));
-    await invoke('update_dev_node', { id, name: null, score: v, theory: null, material: null, priority: null });
+    await invoke('update_dev_node', { id, name: null, score: v, theory: null, material: null, priority: null, level: null });
     reloadFn();
   });
 }

@@ -1010,6 +1010,18 @@ pub fn migrate_recipe_media(conn: &rusqlite::Connection) {
     }
 }
 
+// Alternative ingredients per recipe row: comma-separated names that can be
+// substituted (e.g. баранина → говядина / курица). MatchIngr in JS reads the
+// flattened recipes.ingredients text so filter-by-ingredient picks them up.
+pub fn migrate_ingredient_alternatives(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT alternatives FROM recipe_ingredients LIMIT 1").is_err() {
+        let _ = conn.execute(
+            "ALTER TABLE recipe_ingredients ADD COLUMN alternatives TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+    }
+}
+
 // Per-cooking history: each cooking of a recipe is one immutable row with its
 // own date + taste rating + note, optionally linked to a calendar event.
 pub fn migrate_cooking_log(conn: &rusqlite::Connection) {
@@ -1615,6 +1627,7 @@ pub fn migrate_dev_matrix(conn: &rusqlite::Connection) {
             material TEXT NOT NULL DEFAULT '',
             priority INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0,
+            level TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -1633,6 +1646,9 @@ pub fn migrate_dev_matrix(conn: &rusqlite::Connection) {
         CREATE INDEX IF NOT EXISTS idx_dev_nodes_parent ON dev_nodes(parent_id);
         CREATE INDEX IF NOT EXISTS idx_dev_cases_node ON dev_cases(node_id);"
     ).ok();
+
+    // Add level column for pre-existing dev_nodes tables (CEFR / difficulty tag).
+    conn.execute("ALTER TABLE dev_nodes ADD COLUMN level TEXT NOT NULL DEFAULT ''", []).ok();
 
     seed_pm_matrix(conn);
 }
