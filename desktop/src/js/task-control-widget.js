@@ -56,7 +56,10 @@ function closeDropdown() {
   if (panel) { panel.remove(); panel = null; }
 }
 
-async function openStartDropdown() {
+async function openStartDropdown(preserveScroll = false) {
+  // Inline interactions (check toggle, pin, routine step) re-open the picker —
+  // preserve scroll position so users don't lose their place after each click.
+  const savedScroll = preserveScroll && panel ? panel.scrollTop : 0;
   closeDropdown();
   const planned = await invoke('get_today_planned', { date: localDate() }).catch(() => []);
   const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done');
@@ -90,6 +93,7 @@ async function openStartDropdown() {
       <input class="tw-add-input" type="text" placeholder="+ Новая задача на сегодня" maxlength="200">
     </div>`;
   widget.appendChild(panel);
+  if (savedScroll > 0) panel.scrollTop = savedScroll;
 
   panel.querySelector('.tw-gear').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -114,11 +118,11 @@ async function openStartDropdown() {
       e.stopPropagation();
       const p = orderedItems[parseInt(star.dataset.pinIdx)];
       await invoke('toggle_task_pin', { sourceType: p.source_type, sourceId: p.source_id }).catch(() => {});
-      await openStartDropdown();
+      await openStartDropdown(true);
     });
   });
 
-  wireRoutineSection(panel, () => openStartDropdown());
+  wireRoutineSection(panel, () => openStartDropdown(true));
 
   panel.querySelectorAll('.tw-item[data-idx]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -135,7 +139,7 @@ async function openStartDropdown() {
       // Check-mode is a quick toggle — keep the menu open so several can be
       // marked in a row. Track-mode starts a timer; close so the timer UI shows.
       if (isCheck && p.source_type === 'schedule') {
-        await openStartDropdown();
+        await openStartDropdown(true);
       } else {
         closeDropdown();
         await refreshState();
