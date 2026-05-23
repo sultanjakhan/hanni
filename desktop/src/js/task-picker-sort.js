@@ -64,6 +64,11 @@ export function rankTasks(items, { nowMin, weights, pins = [] }) {
       if (a._overdue && b._overdue) {
         return (timeToMin(a.planned_time) ?? 0) - (timeToMin(b.planned_time) ?? 0);
       }
+      // Real activities (timer-tracked) outrank yes/no review toggles —
+      // "СЕЙЧАС" should point at something to do, not at a checkbox.
+      const aCheck = a.tracking_mode === 'check';
+      const bCheck = b.tracking_mode === 'check';
+      if (aCheck !== bCheck) return aCheck ? 1 : -1;
       const sd = score(b, weights, nowMin) - score(a, weights, nowMin);
       if (sd !== 0) return sd;
       const ta = timeToMin(a.planned_time), tb = timeToMin(b.planned_time);
