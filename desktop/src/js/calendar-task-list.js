@@ -112,6 +112,7 @@ function renderToolbar(dayLabel, isToday) {
           <button class="ctl-add-menu-item" data-add-kind="event">📅 Событие</button>
           <button class="ctl-add-menu-item" data-add-kind="note">📝 Задача</button>
           <button class="ctl-add-menu-item" data-add-kind="cooking">🍳 Готовка</button>
+          <button class="ctl-add-menu-item" data-add-kind="shopping">🛒 Покупки</button>
         </div>
       </div>
     </div>
@@ -177,6 +178,10 @@ function wire(el) {
     const { showCookingLogModal } = await import('./food-cooking-log.js');
     showCookingLogModal(date(), () => renderCalendarTaskList(el));
   };
+  const openShopping = async () => {
+    const { showShoppingManager } = await import('./shopping-list-modal.js');
+    showShoppingManager();
+  };
   const openNewNote = async () => {
     try {
       const id = await invoke('create_note', { title: '', content: '', tags: '', status: 'task', tabName: null, dueDate: date(), reminderAt: null });
@@ -214,6 +219,7 @@ function wire(el) {
       if (btn.dataset.addKind === 'event') openEvent();
       else if (btn.dataset.addKind === 'note') openNewNote();
       else if (btn.dataset.addKind === 'cooking') openCooking();
+      else if (btn.dataset.addKind === 'shopping') openShopping();
     });
   });
   el.querySelector('#ctl-add-empty')?.addEventListener('click', openEvent);

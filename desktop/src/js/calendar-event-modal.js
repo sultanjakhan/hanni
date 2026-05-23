@@ -5,6 +5,8 @@ import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { loadCategories } from './calendar-categories.js';
 import { showCategoryManager, showAddCategory } from './calendar-category-manager.js';
+import { renderTemplatesAccordion, bindTemplates } from './calendar-event-templates.js';
+import { markBought } from './shopping-list.js';
 
 const PRIORITY_LEVELS = [
   { v: 0, label: 'Нет',          hex: 'var(--bg-hover)',     text: 'var(--text-secondary)' },
@@ -65,8 +67,12 @@ export async function showEventModal(eventId = null) {
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
+  // ctx carries side-effects opened by a template (e.g. shopping picker
+  // pre-selects items; on Save we mark them bought_at).
+  const ctx = { shoppingPickedIds: null };
   overlay.innerHTML = `<div class="modal modal-compact">
     <div class="modal-title">${isEdit ? 'Редактировать событие' : 'Новое событие'}</div>
+    ${isEdit ? '' : renderTemplatesAccordion()}
     <div class="form-row"><input class="form-input" id="evm-title" placeholder="Название" value="${escapeHtml(initTitle)}"></div>
     <div class="form-row">
       <input class="form-input" id="evm-date" type="date" value="${initDate}">
@@ -87,6 +93,8 @@ export async function showEventModal(eventId = null) {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#evm-cancel')?.addEventListener('click', () => overlay.remove());
+
+  if (!isEdit) bindTemplates(overlay, ctx);
 
   // Priority pill clicks
   overlay.querySelectorAll('.evm-pri-pill').forEach(p => {
@@ -148,6 +156,9 @@ export async function showEventModal(eventId = null) {
           title, description: desc, date, time,
           durationMinutes: dur, category: cat, color: catColor, priority: pri,
         });
+        if (ctx.shoppingPickedIds?.length) {
+          await markBought(ctx.shoppingPickedIds).catch(() => {});
+        }
       }
       overlay.remove();
       window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));

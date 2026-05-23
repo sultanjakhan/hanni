@@ -1742,7 +1742,7 @@ pub fn enable_crr_tables(conn: &rusqlite::Connection) {
         "job_sources", "job_roles", "job_vacancies", "job_search_log",
         "dashboard_widgets", "timeline_activity_types", "timeline_blocks",
         "timeline_goals", "sleep_sessions", "sleep_stages", "heart_rate_samples",
-        "cooking_log",
+        "cooking_log", "shopping_list",
     ];
 
     for table in &tables {
@@ -2577,4 +2577,24 @@ pub fn migrate_dedup_auto_health_events(conn: &rusqlite::Connection) {
         )",
         [],
     ).ok();
+}
+
+/// Shopping list — items the user adds from fridge / freely to buy next time.
+/// Used by the "🛒 Закупка" event template (multi-select picker fills the
+/// event description with selected items and marks them bought_at on save).
+pub fn migrate_shopping_list(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT id FROM shopping_list LIMIT 1").is_err() {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS shopping_list (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                qty TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                bought_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_shopping_list_open
+                ON shopping_list(bought_at) WHERE bought_at IS NULL;"
+        ).ok();
+    }
 }

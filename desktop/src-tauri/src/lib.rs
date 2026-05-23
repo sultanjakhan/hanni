@@ -51,6 +51,7 @@ mod share_routes_food_meta;
 mod share_static;
 mod share_tunnel;
 mod commands_share;
+mod commands_shopping;
 mod sync_share;
 mod sync_share_auto;
 mod sync_owner;
@@ -210,6 +211,7 @@ fn init_database() -> HanniDb {
     db::migrate_sync_meta(&conn);
     db::migrate_dedup_health_exercise(&conn);
     db::migrate_dedup_auto_health_events(&conn);
+    db::migrate_shopping_list(&conn);
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -627,6 +629,10 @@ pub fn run() {
             commands_data::mark_recipe_cooked,
             commands_data::log_cooking,
             commands_data::get_cooking_log,
+            commands_shopping::list_shopping_items,
+            commands_shopping::add_shopping_item,
+            commands_shopping::mark_shopping_bought,
+            commands_shopping::delete_shopping_item,
             commands_data::add_product,
             commands_data::get_products,
             commands_data::update_product,

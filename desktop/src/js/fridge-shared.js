@@ -123,6 +123,9 @@
       const unitChips = UNITS.map(un =>
         `<button type="button" class="rf-chip ${(p ? p.unit : 'шт') === un ? 'active' : ''}" data-unit="${un}">${esc(un)}</button>`).join('');
       const delBtn = isEdit && canDelete ? `<button class="btn-danger" id="fr-del">Удалить</button>` : '';
+      // Shopping-list shortcut — only in Hanni (Tauri invoke); guest UI
+      // has no SQLite access so the button is hidden there.
+      const shopBtn = isEdit && window.__TAURI__?.core?.invoke ? `<button class="btn-secondary" id="fr-shop" title="Добавить в список покупок">🛒 В магазин</button>` : '';
       const datalistHtml = hasCatalog
         ? `<datalist id="fr-name-list">${state.catalog.map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>`
         : '';
@@ -143,6 +146,7 @@
         <div id="fr-msg"></div>
         <div class="modal-actions">
           ${delBtn}
+          ${shopBtn}
           <button class="btn-secondary" id="fr-cancel">Отмена</button>
           <button class="btn-primary" id="fr-save">${isEdit ? 'Сохранить' : 'Добавить'}</button>
         </div></div>`;
@@ -202,6 +206,16 @@
         if (!confirm(`Удалить "${p.name}"?`)) return;
         try { await backend.remove(p.id); close(); load(); }
         catch (e) { alert('Ошибка: ' + (e.message || e)); }
+      };
+      const shop = overlay.querySelector('#fr-shop');
+      if (shop) shop.onclick = async () => {
+        try {
+          const { addShoppingItem } = await import('./shopping-list.js');
+          const qty = `${overlay.querySelector('#fr-qty')?.value || ''} ${overlay.querySelector('[data-group="unit"]')?.dataset.value || ''}`.trim();
+          await addShoppingItem(overlay.querySelector('#fr-name').value.trim(), qty, '');
+          shop.textContent = '✓ Добавлено';
+          shop.disabled = true;
+        } catch (e) { alert('Ошибка: ' + (e.message || e)); }
       };
     }
 
