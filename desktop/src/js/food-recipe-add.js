@@ -19,24 +19,29 @@ export async function duplicateRecipe(id, reloadFn) {
   return newId;
 }
 
-export async function showAddRecipeModal(reloadFn) {
-  if (!window.HanniRecipe) {
-    alert('Модуль recipe-shared.js не загружен'); return;
-  }
-  return window.HanniRecipe.showAddRecipeModal({
-    backend: {
-      getCatalog: () => invoke('get_ingredient_catalog').catch(() => []),
-      getCuisines: () => loadCuisines(),
-      getBlacklist: () => getBlacklist(),
-      addCatalogItem: async ({ name, category }) => {
-        const id = await invoke('add_ingredient_to_catalog', { name, category });
-        invalidateCatalogCache();
-        return id;
-      },
-      addCuisine: ({ code, name, emoji }) => invoke('add_cuisine', { code, name, emoji })
-        .then(() => invalidateCuisineCache()),
-      createRecipe: (payload) => invoke('create_recipe', toCamel(payload)),
+function makeBackend() {
+  return {
+    getCatalog: () => invoke('get_ingredient_catalog').catch(() => []),
+    getCuisines: () => loadCuisines(),
+    getBlacklist: () => getBlacklist(),
+    addCatalogItem: async ({ name, category }) => {
+      const id = await invoke('add_ingredient_to_catalog', { name, category });
+      invalidateCatalogCache();
+      return id;
     },
-    onSaved: reloadFn,
-  });
+    addCuisine: ({ code, name, emoji }) => invoke('add_cuisine', { code, name, emoji })
+      .then(() => invalidateCuisineCache()),
+    createRecipe: (payload) => invoke('create_recipe', toCamel(payload)),
+    updateRecipe: (id, payload) => invoke('update_recipe', { id, ...toCamel(payload) }),
+  };
+}
+
+export async function showAddRecipeModal(reloadFn) {
+  if (!window.HanniRecipe) { alert('Модуль recipe-shared.js не загружен'); return; }
+  return window.HanniRecipe.showAddRecipeModal({ backend: makeBackend(), onSaved: reloadFn });
+}
+
+export async function showEditRecipeModal(recipe, reloadFn) {
+  if (!window.HanniRecipe) { alert('Модуль recipe-shared.js не загружен'); return; }
+  return window.HanniRecipe.showAddRecipeModal({ backend: makeBackend(), onSaved: reloadFn, recipe });
 }

@@ -2,11 +2,15 @@
 import { invoke } from './state.js';
 import { escapeHtml, chips } from './utils.js';
 import { renderCard } from './food-recipe-card.js';
+import { showBlacklistContextMenu } from './food-blacklist-menu.js';
 import {
-  MEALS, DIFFS, CAT_LABELS, CAT_ORDER, getCuisineChips, loadCatalog,
+  MEALS, DIFFS, SORTS, CAT_LABELS, CAT_ORDER, getCuisineChips, loadCatalog,
   getBlacklist, matchBL, recipeBlockLevel, matchMeal, matchCuisine, matchDiff,
-  matchSearch, matchIngr, sortRecipes, collectIngredients,
+  matchSearch, matchIngr, matchRating, matchTime, sortRecipes, collectIngredients,
 } from './food-recipe-filters.js';
+
+const RATINGS = [{ id: 4, label: '★ 4+' }, { id: 5, label: '★ 5' }];
+const TIMES = [{ id: 15, label: '≤15 мин' }, { id: 30, label: '≤30 мин' }, { id: 60, label: '≤60 мин' }];
 
 function accordionRow(title, group, content, activeCount) {
   const badge = activeCount ? `<span class="rf-acc-badge">${activeCount}</span>` : '';
@@ -16,9 +20,9 @@ function accordionRow(title, group, content, activeCount) {
 }
 
 export async function renderRecipesPane(el) {
-  const F = { meal: 'all', cuisine: 'all', diff: 'all', fav: false, q: '' };
+  const F = { meal: 'all', cuisine: 'all', diff: 'all', fav: false, q: '', sort: 'name', minRating: 0, maxTime: 0 };
   const selIngr = new Set();
-  let allRecipes = [], blacklist = [], panelOpen = false, built = false;
+  let allRecipes = [], blacklist = [], cuisineChips = [], panelOpen = false, built = false;
 
   async function loadData() {
     [allRecipes, blacklist] = await Promise.all([
@@ -30,8 +34,8 @@ export async function renderRecipesPane(el) {
     let list = allRecipes.filter(r => !matchBL(r, blacklist) && matchMeal(r, F.meal)
       && matchCuisine(r, F.cuisine) && matchDiff(r, F.diff)
       && matchSearch(r, F.q) && (!F.fav || r.favorite === 1)
-      && matchIngr(r, selIngr));
-    const sorted = sortRecipes(list, 'name');
+      && matchIngr(r, selIngr) && matchRating(r, F.minRating) && matchTime(r, F.maxTime));
+    const sorted = sortRecipes(list, F.sort);
     // soft-blocked recipes ("не люблю") sink to the bottom of the list.
     const soft = [], normal = [];
     for (const r of sorted) (recipeBlockLevel(r, blacklist) === 'soft' ? soft : normal).push(r);
@@ -48,12 +52,14 @@ export async function renderRecipesPane(el) {
         <input class="recipe-search" type="text" placeholder="Поиск...">
         <button class="btn-primary recipe-add-btn">+ Рецепт</button>
       </div>
-      <div class="rf-panel" style="display:none"></div>
+      <div class="rf-popup-overlay" style="display:none"><div class="rf-panel"></div></div>
+      <div class="rf-active-bar"></div>
       <div class="recipe-grid"></div></div>`;
-    el.querySelector('.rf-toggle').onclick = () => {
-      panelOpen = !panelOpen;
-      el.querySelector('.rf-panel').style.display = panelOpen ? '' : 'none';
-    };
+    const popup = el.querySelector('.rf-popup-overlay');
+    const closePopup = () => { panelOpen = false; popup.style.display = 'none'; };
+    el.querySelector('.rf-toggle').onclick = () => { panelOpen = !panelOpen; popup.style.display = panelOpen ? 'flex' : 'none'; };
+    popup.onclick = (e) => { if (e.target === popup) closePopup(); };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && panelOpen) closePopup(); });
     el.querySelector('.recipe-search').oninput = (e) => {
       F.q = e.target.value.trim().toLowerCase(); updateGrid();
     };
@@ -65,7 +71,7 @@ export async function renderRecipesPane(el) {
 
   async function updatePanel() {
     const panel = el.querySelector('.rf-panel');
-    const cuisineChips = await getCuisineChips();
+    cuisineChips = await getCuisineChips();
     const grouped = collectIngredients(allRecipes.filter(r => !matchBL(r, blacklist)));
     const ingrContent = CAT_ORDER.filter(c => grouped[c]?.length).map(cat =>
       `<div class="rf-section"><span class="rf-title rf-title-${cat}">${CAT_LABELS[cat]}</span>${grouped[cat].map(i =>
@@ -76,12 +82,15 @@ export async function renderRecipesPane(el) {
     const diffActive = F.diff !== 'all' ? 1 : 0;
     const ingrActive = selIngr.size || 0;
     panel.innerHTML = `
+      <div class="rf-sort-row"><span class="rf-sort-label">Сортировка</span>${chips(SORTS, F.sort, 'sort')}</div>
       ${accordionRow('Приём пищи', 'meal', chips(MEALS, F.meal, 'meal'), mealActive)}
       ${accordionRow('Кухня', 'cuisine', chips(cuisineChips, F.cuisine, 'cuisine'), cuisineActive)}
       ${accordionRow('Сложность', 'diff', chips(DIFFS, F.diff, 'diff'), diffActive)}
       ${accordionRow('Ингредиенты', 'ingr', ingrContent, ingrActive)}
+      ${accordionRow('Оценка и время', 'extra', `${chips(RATINGS, F.minRating, 'rating')}${chips(TIMES, F.maxTime, 'time')}`, (F.minRating ? 1 : 0) + (F.maxTime ? 1 : 0))}
       <div class="rf-acc-fav">
         <button class="rf-chip${F.fav ? ' active' : ''}" data-group="fav" data-val="toggle">★ Избранное</button>
+        <button class="rf-reset" data-group="reset">Сбросить</button>
       </div>`;
     // Accordion toggle
     panel.querySelectorAll('.rf-acc-header').forEach(hdr => hdr.onclick = () => {
@@ -92,18 +101,44 @@ export async function renderRecipesPane(el) {
       acc.querySelector('.rf-acc-arrow').textContent = open ? '▸' : '▾';
     });
     // Chip clicks
-    panel.querySelectorAll('.rf-chip').forEach(btn => btn.onclick = async () => {
+    panel.querySelectorAll('.rf-chip, .rf-reset').forEach(btn => btn.onclick = async () => {
       const g = btn.dataset.group, v = btn.dataset.val;
       if (g === 'fav') F.fav = !F.fav;
       else if (g === 'ingr') { selIngr.has(v) ? selIngr.delete(v) : selIngr.add(v); }
+      else if (g === 'rating') F.minRating = (F.minRating === +v ? 0 : +v);
+      else if (g === 'time') F.maxTime = (F.maxTime === +v ? 0 : +v);
+      else if (g === 'sort') F.sort = v;
+      else if (g === 'reset') { F.meal = 'all'; F.cuisine = 'all'; F.diff = 'all'; F.fav = false; F.minRating = 0; F.maxTime = 0; F.sort = 'name'; selIngr.clear(); }
       else F[g] = v;
-      await updatePanel(); updateGrid(); updateBadge();
+      await updatePanel(); updateGrid(); updateBadge(); updateActive();
     });
     updateBadge();
   }
 
+  function updateActive() {
+    const bar = el.querySelector('.rf-active-bar');
+    if (!bar) return;
+    const items = [];
+    if (F.meal !== 'all') items.push(['meal', MEALS.find(m => m.id === F.meal)?.label || F.meal]);
+    if (F.cuisine !== 'all') items.push(['cuisine', cuisineChips.find(c => c.id === F.cuisine)?.label || F.cuisine]);
+    if (F.diff !== 'all') items.push(['diff', DIFFS.find(d => d.id === F.diff)?.label || F.diff]);
+    if (F.minRating) items.push(['rating', `★${F.minRating}+`]);
+    if (F.maxTime) items.push(['time', `≤${F.maxTime} мин`]);
+    if (F.fav) items.push(['fav', '★ Избранное']);
+    for (const ingr of selIngr) items.push([`ingr:${ingr}`, ingr]);
+    bar.innerHTML = items.map(([k, label]) => `<button class="rf-active-chip" data-k="${escapeHtml(k)}">${escapeHtml(label)} ×</button>`).join('');
+    bar.querySelectorAll('.rf-active-chip').forEach(c => c.onclick = async () => {
+      const k = c.dataset.k;
+      if (k.startsWith('ingr:')) selIngr.delete(k.slice(5));
+      else if (k === 'meal') F.meal = 'all'; else if (k === 'cuisine') F.cuisine = 'all';
+      else if (k === 'diff') F.diff = 'all'; else if (k === 'rating') F.minRating = 0;
+      else if (k === 'time') F.maxTime = 0; else if (k === 'fav') F.fav = false;
+      await updatePanel(); updateGrid(); updateBadge(); updateActive();
+    });
+  }
+
   function updateBadge() {
-    const ac = [F.meal !== 'all', F.cuisine !== 'all', F.diff !== 'all', F.fav, selIngr.size > 0].filter(Boolean).length;
+    const ac = [F.meal !== 'all', F.cuisine !== 'all', F.diff !== 'all', F.fav, selIngr.size > 0, F.minRating > 0, F.maxTime > 0].filter(Boolean).length;
     const badge = el.querySelector('.rf-badge'), toggle = el.querySelector('.rf-toggle');
     badge.textContent = ac; badge.style.display = ac ? '' : 'none';
     toggle.classList.toggle('rf-active', ac > 0);
@@ -128,7 +163,13 @@ export async function renderRecipesPane(el) {
         const { showRecipeDetail } = await import('./food-recipe-modals.js');
         showRecipeDetail(parseInt(card.dataset.id), fullReload);
       };
-      if (recipeBlockLevel(r, blacklist) === 'soft') card.classList.add('recipe-card--soft');
+      card.oncontextmenu = (e) => {
+        e.preventDefault();
+        showBlacklistContextMenu(e.clientX, e.clientY, { type: 'recipe', value: r.name }, fullReload);
+      };
+      const lvl = recipeBlockLevel(r, blacklist);
+      if (lvl === 'soft') card.classList.add('recipe-card--soft');
+      else if (lvl === 'love') card.classList.add('recipe-card--love');
       grid.appendChild(card);
     }
   }
@@ -136,7 +177,7 @@ export async function renderRecipesPane(el) {
   async function fullReload() {
     await loadData();
     if (!built) { buildShell(); built = true; }
-    await updatePanel(); updateGrid();
+    await updatePanel(); updateGrid(); updateActive();
   }
   await fullReload();
 }

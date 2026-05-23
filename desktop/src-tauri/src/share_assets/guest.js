@@ -24,6 +24,13 @@
     }
     const r = await fetch(base + path, { credentials: 'omit', ...opts });
     if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    // After a successful write, drop the matching Firestore cache so the next
+    // read fetches fresh data (writes go through axum; Firestore mirror lags).
+    const m = (opts.method || 'GET').toUpperCase();
+    if (m !== 'GET') {
+      const coll = (path.split('/')[1] || '').replace(/[?#].*/, '');
+      if (coll) window.HanniGuest?.firestore?.invalidate?.(coll);
+    }
     return r.json();
   }
 

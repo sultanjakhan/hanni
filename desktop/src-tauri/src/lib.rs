@@ -175,6 +175,7 @@ fn init_database() -> HanniDb {
     migrate_recipe_extra(&conn);
     migrate_recipe_extra2(&conn);
     migrate_recipe_media(&conn);
+    migrate_ingredient_alternatives(&conn);
     migrate_cooking_log(&conn);
     migrate_clear_seed_recipes(&conn);
     migrate_reseed_ingredient_catalog(&conn);
@@ -919,6 +920,26 @@ pub fn run() {
             let share_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 share_server::spawn_share_server(share_handle).await;
+            });
+
+            // Auto-start the Cloudflare tunnel at boot if any non-revoked share-link
+            // exists, so guests can write while Hanni is open without manual nudging.
+            let tunnel_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let need_tunnel: bool = {
+                    let st = tunnel_handle.state::<HanniDb>();
+                    let conn = st.conn();
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM share_links WHERE revoked_at IS NULL",
+                        [], |r| r.get::<_, i64>(0),
+                    ).unwrap_or(0) > 0
+                };
+                if !need_tunnel { return; }
+                // Give the axum server a moment to bind before cloudflared dials it.
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if let Err(e) = share_tunnel::ensure_running(tunnel_handle, share_server::share_port()).await {
+                    eprintln!("[share] tunnel auto-start failed: {}", e);
+                }
             });
 
             // MCP client manager — connect to configured MCP servers in background

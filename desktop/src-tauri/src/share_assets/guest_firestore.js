@@ -53,10 +53,34 @@
     return r.json();
   }
 
+  // localStorage cache to keep us under the 50k/day Firestore free quota.
+  // list TTL 60s (might change often), get TTL 5min. invalidate() drops keys
+  // when the guest writes, so the next read fetches fresh.
+  const CACHE_PFX = `hg:fs:${ctx.token}:`;
+  const TTL_LIST = 60 * 1000, TTL_GET = 5 * 60 * 1000;
+  function cacheGet(key, maxAge) {
+    try {
+      const raw = localStorage.getItem(CACHE_PFX + key);
+      if (!raw) return null;
+      const o = JSON.parse(raw);
+      if (Date.now() - o.t > maxAge) return null;
+      return o.v;
+    } catch { return null; }
+  }
+  function cacheSet(key, v) {
+    try { localStorage.setItem(CACHE_PFX + key, JSON.stringify({ t: Date.now(), v })); } catch {}
+  }
+  function invalidate(coll) {
+    const sub = CACHE_PFX + (coll || '');
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith(sub)) localStorage.removeItem(k); } catch {}
+  }
+
   // GET share_links/{token}/{coll} — paginated, walks every page so callers
   // get the full collection in one promise.
   async function list(coll, opts) {
     opts = opts || {};
+    const key = coll;
+    if (!opts.fresh) { const c = cacheGet(key, TTL_LIST); if (c) return c; }
     const pageSize = Math.min(opts.pageSize || 300, 300);
     let pageToken = '';
     const out = [];
@@ -73,15 +97,21 @@
       if (!j.nextPageToken) break;
       pageToken = j.nextPageToken;
     }
+    cacheSet(key, out);
     return out;
   }
 
   async function get(coll, docId) {
+    const key = `${coll}:${docId}`;
+    const c = cacheGet(key, TTL_GET);
+    if (c) return c;
     const url = `${base}/${tokenPath}/${encodeURIComponent(coll)}/${encodeURIComponent(String(docId))}`
       + `?key=${encodeURIComponent(fs.api_key)}`;
     try {
       const j = await fetchJson(url);
-      return parseDoc(j);
+      const v = parseDoc(j);
+      if (v) cacheSet(key, v);
+      return v;
     } catch (e) {
       if (e.status === 404) return null;
       throw e;
@@ -89,5 +119,5 @@
   }
 
   window.HanniGuest = window.HanniGuest || {};
-  window.HanniGuest.firestore = { list, get };
+  window.HanniGuest.firestore = { list, get, invalidate };
 })();

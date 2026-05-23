@@ -11,7 +11,9 @@ export function renderProductCard(product, opts = {}) {
   const { productLevel = '', blockedTags = new Set(), blockedCategory = false } = opts;
   const div = document.createElement('div');
   div.className = 'product-card'
-    + (productLevel === 'hard' ? ' product-card--blocked' : productLevel === 'soft' ? ' product-card--soft' : '');
+    + (productLevel === 'hard' ? ' product-card--blocked'
+      : productLevel === 'soft' ? ' product-card--soft'
+      : productLevel === 'love' ? ' product-card--love' : '');
   div.dataset.id = product.id;
   div.dataset.blType = 'product';
   div.dataset.blValue = product.name;
@@ -26,7 +28,8 @@ export function renderProductCard(product, opts = {}) {
       return `<span class="product-card-tag${cls}">${esc(tag)}</span>`;
     }).join('');
   const blockIcon = productLevel === 'hard' ? '<span class="product-card-blocked-icon" title="Не ем">🚫</span>'
-    : productLevel === 'soft' ? '<span class="product-card-blocked-icon" title="Не люблю">👎</span>' : '';
+    : productLevel === 'soft' ? '<span class="product-card-blocked-icon" title="Не люблю">👎</span>'
+    : productLevel === 'love' ? '<span class="product-card-blocked-icon" title="Люблю">💚</span>' : '';
   div.innerHTML = `
     <div class="product-card-name">${blockIcon}${esc(product.name)}</div>
     <div class="product-card-tags"><span class="product-card-cat product-cat-${color}${catCls}">${label}</span>${tagsHtml}</div>

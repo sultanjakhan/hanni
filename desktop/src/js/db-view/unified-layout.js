@@ -72,7 +72,7 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderRecipes) panes.splice(1, 0, { id: 'recipes', icon: '📖', label: 'Рецепты' });
   if (config.renderProducts) panes.splice(panes.findIndex(p => p.id === 'recipes') + 1 || 2, 0, { id: 'products', icon: '🥕', label: 'Продукты' });
   if (config.renderFridge) panes.splice((panes.findIndex(p => p.id === 'products') + 1) || (panes.findIndex(p => p.id === 'recipes') + 1) || 2, 0, { id: 'fridge', icon: '🥶', label: 'Холодильник' });
-  if (config.renderBlacklist) panes.splice((panes.findIndex(p => p.id === 'fridge') + 1) || (panes.findIndex(p => p.id === 'products') + 1) || 2, 0, { id: 'blacklist', icon: '🚫', label: 'Не ем' });
+  if (config.renderBlacklist) panes.splice((panes.findIndex(p => p.id === 'fridge') + 1) || (panes.findIndex(p => p.id === 'products') + 1) || 2, 0, { id: 'blacklist', icon: '😋', label: 'Предпочтения' });
   if (config.renderCatalog) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'catalog', icon: '📚', label: 'Каталог' });
   if (config.renderTemplates) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'templates', icon: '📋', label: 'Шаблоны' });
 

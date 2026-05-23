@@ -67,8 +67,10 @@ function catalogNamesForTag(tag) {
     .map(c => c.name.toLowerCase());
 }
 
-// Blacklist level: '' (none) < 'soft' ("не люблю") < 'hard' ("не ем"). hard wins.
-function blMax(a, b) { return (a === 'hard' || b === 'hard') ? 'hard' : (a || b || ''); }
+// Blacklist level rank: '' (none) < 'love' (positive marker) < 'soft' ("не люблю")
+// < 'hard' ("не ем"). Negatives win over the positive marker; hard wins overall.
+function blRank(l) { return { hard: 3, soft: 2, love: 1 }[l] || 0; }
+function blMax(a, b) { return blRank(a) >= blRank(b) ? a : b; }
 
 export function ingredientBlockLevel(name, bl) {
   if (!bl || !bl.length || !name) return '';
@@ -129,6 +131,7 @@ export function recipeBlockLevel(r, bl) {
     if (!v) continue;
     let hit = false;
     if (e.type === 'keyword') hit = hay.includes(v);
+    else if (e.type === 'recipe') hit = (r.name || '').toLowerCase() === v;
     else if (e.type === 'product') hit = names.some(n => n.toLowerCase() === v);
     else if (e.type === 'tag') {
       const blocked = catalogNamesForTag(v);
@@ -150,9 +153,25 @@ export function matchIngr(r, sel) {
   const names = getIngrNames(r);
   return [...sel].every(ingr => names.some(n => n.toLowerCase() === ingr));
 }
+export const matchRating = (r, min) => !min || (r.avg_rating || 0) >= min;
+export const matchTime = (r, max) => !max || ((r.prep_time || 0) + (r.cook_time || 0)) <= max;
+
+// Sort options for the recipe list (id → label shown as chips).
+export const SORTS = [
+  { id: 'name', label: 'А-Я' }, { id: 'calories', label: 'Калории' },
+  { id: 'health', label: 'Полезность' }, { id: 'rating', label: 'Оценка' },
+  { id: 'cooked', label: 'Давно не готовил' },
+];
 
 export function sortRecipes(arr, key) {
-  const cmp = { calories: (a, b) => (a.calories || 0) - (b.calories || 0), health: (a, b) => (b.health_score || 5) - (a.health_score || 5), price: (a, b) => (a.price_score || 5) - (b.price_score || 5), name: (a, b) => (a.name || '').localeCompare(b.name || '') };
+  const cmp = {
+    calories: (a, b) => (a.calories || 0) - (b.calories || 0),
+    health: (a, b) => (b.health_score || 5) - (a.health_score || 5),
+    price: (a, b) => (a.price_score || 5) - (b.price_score || 5),
+    name: (a, b) => (a.name || '').localeCompare(b.name || ''),
+    rating: (a, b) => (b.avg_rating || 0) - (a.avg_rating || 0),
+    cooked: (a, b) => (a.last_cooked || '') .localeCompare(b.last_cooked || ''),
+  };
   return cmp[key] ? [...arr].sort(cmp[key]) : arr;
 }
 

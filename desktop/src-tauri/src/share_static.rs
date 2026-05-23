@@ -57,3 +57,8 @@ pub async fn asset_js_recipe_shared() -> impl IntoResponse {
 pub async fn asset_js_recipe_shared_ingredients() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, JS)], include_str!("../../src/js/recipe-shared-ingredients.js"))
 }
+
+// Cooking-step builder; loaded BEFORE recipe-shared.js (registers HanniRecipe.steps).
+pub async fn asset_js_recipe_shared_steps() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, JS)], include_str!("../../src/js/recipe-shared-steps.js"))
+}

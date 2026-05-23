@@ -6,12 +6,15 @@ import { invalidateBlacklistCache } from './food-recipe-filters.js';
 export const BL_LEVELS = [
   { level: 'hard', icon: '🚫', label: 'Не ем' },
   { level: 'soft', icon: '👎', label: 'Не люблю' },
+  { level: 'love', icon: '💚', label: 'Люблю' },
 ];
 
 // Add/switch a blacklist entry. hard → confirm + delete matching recipes; soft → silent.
 // Returns true if applied. Re-adding an existing entry switches its level (upsert).
 export async function applyBlacklist(type, value, level, catalogId, onChange) {
-  if (level === 'hard') {
+  // hard-blocking an ingredient/category offers to delete matching recipes;
+  // a recipe entry only marks the dish itself, so it's always a silent add.
+  if (level === 'hard' && type !== 'recipe') {
     const hits = await invoke('find_recipes_matching_blacklist', { entryType: type, value }).catch(() => []);
     const preview = hits.length ? `\n\nБудет удалено ${hits.length} рецептов.` : '';
     if (!await confirmModal(`«${value}» — не ем?${preview}`, 'Заблокировать')) return false;

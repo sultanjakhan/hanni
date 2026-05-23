@@ -342,6 +342,17 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
         }
     };
 
+    // Don't resurrect locally-deleted rows: skip if a tombstone post-dates the
+    // remote write. Without this, a deletion gets clobbered by the next pull of
+    // the still-present remote row (LWW alone can't tell delete from absence).
+    let tomb_ts: Option<String> = conn.query_row(
+        "SELECT deleted_at FROM sync_tombstones WHERE table_name=?1 AND row_id=?2",
+        rusqlite::params![table, id], |r| r.get(0),
+    ).ok();
+    if let Some(tomb) = &tomb_ts {
+        if tomb.as_str() >= remote_ts { return Ok(false); }
+    }
+
     // LWW: skip if local is newer-or-equal.
     let local_ts: Option<String> = conn.query_row(
         &format!("SELECT updated_at FROM {} WHERE id = ?1", table),

@@ -1351,11 +1351,20 @@
 .rf-acc-arrow { margin-left: auto; font-size: 11px; color: var(--text-muted); }
 .rf-acc-badge { font-size: 10px; background: var(--accent-fill); color: #fff; border-radius: var(--radius-pill); padding: 0 5px; min-width: 16px; text-align: center; line-height: 16px; }
 .rf-acc-body { padding: 0 0 8px; display: flex; flex-wrap: wrap; gap: 6px; }
-.rf-acc-fav { padding: 8px 0; }
+.rf-acc-fav { padding: 8px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rf-popup-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.4); align-items: flex-start; justify-content: center; padding: 60px 20px; }
+.rf-popup-overlay .rf-panel { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 14px 16px; max-width: 520px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+.rf-sort-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 0 10px; border-bottom: 1px solid var(--border-subtle, var(--border-default)); margin-bottom: 4px; }
+.rf-sort-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px; }
+.rf-reset { margin-left: auto; padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.rf-reset:hover { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
+.rf-active-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.rf-active-chip { padding: 3px 9px; border-radius: var(--radius-sm); border: 1px solid var(--accent-fill); background: var(--accent-bg, var(--bg-hover)); color: var(--accent-fill); font-size: 12px; cursor: pointer; font-family: inherit; }
+.rf-active-chip:hover { background: var(--color-red-bg, rgba(224,62,62,0.12)); color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
 .rf-section { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rf-title { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 55px; text-transform: uppercase; letter-spacing: 0.5px; }
 .rf-chip {
-  padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--border-default);
+  padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default);
   background: transparent; color: var(--text-secondary); font-size: 12px;
   cursor: pointer; transition: all var(--transition-fast); font-family: inherit;
 }
@@ -1542,12 +1551,15 @@
 .rf-chip--blocked.active { background: var(--color-red-bg, rgba(224,62,62,0.15)); }
 .pp-bl-tag-btn { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
 
-/* ── Two-level blacklist: hard = red fill (above), soft = dimmed + dashed ── */
-.cat-tile--soft, .sg-tile--soft { opacity: 0.7; border-style: dashed; }
-.product-card--soft { opacity: 0.6; border-style: dashed; }
-.product-card--soft:hover { opacity: 0.85; }
+/* ── Three-level preferences: hard = red, soft = orange, love = green ── */
+.cat-tile--soft, .sg-tile--soft { border-color: var(--color-orange, #d9730d); background: var(--color-orange-bg, rgba(217,115,13,0.08)); }
+.product-card--soft { opacity: 0.85; border-color: var(--color-orange, #d9730d); background: var(--color-orange-bg, rgba(217,115,13,0.08)); }
+.product-card--soft:hover { opacity: 1; }
+.cat-tile--love, .sg-tile--love { border-color: var(--color-green, #0f7b6c); background: var(--color-green-bg, rgba(15,123,108,0.08)); }
+.product-card--love { border-color: var(--color-green, #0f7b6c); background: var(--color-green-bg, rgba(15,123,108,0.08)); }
 .recipe-card--soft { opacity: 0.65; }
 .recipe-card--soft:hover { opacity: 0.95; }
+.recipe-card--love { border-color: var(--color-green, #0f7b6c); background: var(--color-green-bg, rgba(15,123,108,0.06)); }
 
 /* ⊘ quick-blacklist button — hidden until tile/card hover */
 .cat-tile, .sg-tile, .product-card { position: relative; }
@@ -1567,32 +1579,20 @@
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* Blacklist modal — two level sections + chip picker */
-.bl-section { margin-bottom: 12px; }
-.bl-section-head { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
-.bl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.bl-chip {
-  display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
-  border-radius: var(--radius-pill); font-size: 13px; border: 1px solid var(--border-default);
-}
-.bl-chip small { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
-.bl-chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0 2px; }
-.bl-chip--hard { background: var(--color-red-bg, rgba(224,62,62,0.12)); color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
-.bl-chip--soft { background: var(--bg-hover); color: var(--text-secondary); border-style: dashed; }
-.bl-add { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
-.bl-add-picks { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
-.bl-pick { display: flex; gap: 6px; flex-wrap: wrap; }
-.bl-tab {
-  padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
-  border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary);
-}
-.bl-tab.active { border-color: var(--accent-fill); color: var(--accent-fill); }
-.bl-adv { margin-bottom: 8px; }
-.bl-adv summary { font-size: 12px; color: var(--text-muted); cursor: pointer; }
-.bl-add-row { display: flex; gap: 8px; align-items: center; }
-.bl-add-row .bl-value { flex: 1; }
-.bl-search { position: relative; }
-.bl-search .bl-value { width: 100%; }
+/* Food preferences — level sub-tabs + grouped entries */
+.bl-levelbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+.bl-levels { display: flex; gap: 6px; flex-wrap: wrap; }
+.bl-level-tab { padding: 5px 12px; border-radius: var(--radius-pill); border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; }
+.bl-level-tab:hover { border-color: var(--border-hover); }
+.bl-level-tab.active[data-lvl="hard"] { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); background: var(--color-red-bg, rgba(224,62,62,0.08)); }
+.bl-level-tab.active[data-lvl="soft"] { color: var(--color-orange, #d9730d); border-color: var(--color-orange, #d9730d); background: var(--color-orange-bg, rgba(217,115,13,0.08)); }
+.bl-level-tab.active[data-lvl="love"] { color: var(--color-green, #0f7b6c); border-color: var(--color-green, #0f7b6c); background: var(--color-green-bg, rgba(15,123,108,0.08)); }
+.bl-add-one { padding: 6px 12px; font-size: 13px; border-radius: var(--radius-sm); border: 1px solid var(--accent-fill); background: var(--accent-fill); color: #fff; cursor: pointer; white-space: nowrap; }
+.bl-add-one:hover { opacity: 0.9; }
+.bl-subhead { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.bl-add-pop { position: fixed; z-index: 1100; width: 240px; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-md); box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.18)); padding: 8px; }
+.bl-add-pop .bl-add-input { width: 100%; margin-bottom: 6px; }
+.bl-add-pop .bl-ac { position: static; max-height: 220px; overflow-y: auto; border: none; box-shadow: none; }
 .bl-ac {
   position: absolute; left: 0; right: 0; top: 100%; z-index: 20; margin-top: 2px;
   max-height: 240px; overflow-y: auto; background: var(--bg-card);
@@ -1620,19 +1620,87 @@
 .req { color: var(--color-red, #e03e3e); }
 .input-error { border-color: var(--color-red, #e03e3e) !important; }
 /* ── Step rows (structured instructions) ── */
-.step-row { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 8px; }
-.step-num { font-size: 13px; font-weight: 600; color: var(--text-muted); min-width: 20px; padding-top: 6px; }
-.step-fields { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.step-line { display: flex; gap: 6px; align-items: center; }
-.step-acc-wrap { position: relative; }
-.step-acc-btn { background: var(--bg-page); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-secondary); white-space: nowrap; font-family: inherit; }
-.step-acc-btn:hover { border-color: var(--border-focus); color: var(--text-primary); }
-.step-dropdown { position: absolute; top: 100%; left: 0; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); min-width: 140px; max-height: 180px; overflow-y: auto; }
-.step-dd-opt { padding: 8px 12px; font-size: 14px; cursor: pointer; color: var(--text-primary); }
-.step-dd-opt:hover { background: var(--bg-hover); }
-.step-time-input { width: 60px; }
-.step-note-input { font-size: 14px; color: var(--text-secondary); }
-.step-del { padding-top: 4px; }
+/* ── Cooking step cards (wizard step 3) ── */
+.step-card { display: flex; gap: 10px; align-items: flex-start; padding: 10px; margin-bottom: 8px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-card); }
+.step-num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-fill); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+.step-card-body { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.step-card-meta { display: flex; gap: 4px; align-items: center; }
+.step-time-input { width: 72px; flex: none; }
+.step-note-input { font-size: 14px; }
+.step-icon-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 5px; border-radius: var(--radius-sm); }
+.step-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.step-del:hover { color: var(--color-red, #e03e3e); background: var(--bg-hover); }
+.step-add-btn { font-size: 12px; padding: 4px 10px; margin-top: 2px; }
+
+/* Per-step product chips */
+.step-prods { display: flex; flex-wrap: wrap; gap: 4px; position: relative; }
+.step-prod-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; padding: 2px 6px; border-radius: var(--radius-pill); background: var(--bg-hover); color: var(--text-secondary); }
+.step-prod-x { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
+.step-prod-add { font-size: 12px; padding: 2px 8px; }
+
+/* Detail — meta header: primary stats + uniform tags */
+.rd-stats { display: flex; margin: 4px 0 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); overflow: hidden; }
+.rd-stat { flex: 1; text-align: center; padding: 10px 6px; border-left: 1px solid var(--border-default); }
+.rd-stat:first-child { border-left: none; }
+.rd-stat-val { font-size: 18px; font-weight: 600; color: var(--text-primary); line-height: 1.1; }
+.rd-stat-lbl { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-top: 3px; }
+.rd-serv { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.rd-serv .serv-btn { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-default); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+.rd-serv .serv-btn:hover { border-color: var(--accent-fill); color: var(--accent-fill); }
+.rd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.rd-tag { font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm); background: var(--bg-hover); color: var(--text-secondary); }
+.rd-tag--meal { background: var(--accent-bg, var(--bg-hover)); color: var(--accent-fill); }
+.rd-cooked { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
+.cook-log { display: flex; flex-direction: column; gap: 8px; }
+.cook-log-entry { border: 1px solid var(--border-subtle, var(--border-default)); border-radius: var(--radius-sm); padding: 6px 10px; }
+.cook-log-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cook-log-date { font-size: 13px; color: var(--text-primary); }
+.cook-log-stars .rd-star { font-size: 14px; cursor: default; }
+.cook-log-note { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.mp-recipe-option.selected { background: var(--accent-bg, var(--bg-hover)); border-radius: var(--radius-sm); }
+.rd-photo { width: 100%; max-height: 220px; object-fit: cover; border-radius: var(--radius-md); margin-bottom: 12px; display: block; }
+.rd-cooked-block { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px 12px; }
+.rd-stars { display: flex; gap: 4px; margin-bottom: 8px; }
+.rd-star { font-size: 22px; line-height: 1; color: var(--border-hover, #ccc); cursor: pointer; }
+.rd-star.on { color: var(--color-yellow, #e0a93e); }
+.rd-note { width: 100%; font-size: 13px; margin-bottom: 8px; }
+.rd-note-save { font-size: 12px; padding: 4px 10px; }
+/* Wizard photo field */
+.rw-photo { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rw-photo-img { max-height: 160px; max-width: 100%; object-fit: cover; border-radius: var(--radius-md); }
+.rw-photo-btn { font-size: 13px; padding: 5px 12px; cursor: pointer; }
+.rd-title-actions { display: flex; align-items: center; gap: 6px; }
+.rd-edit-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted); padding: 2px 6px; border-radius: var(--radius-sm); }
+.rd-edit-btn:hover { background: var(--bg-hover); color: var(--accent-fill); }
+.recipe-detail-modal .modal-actions { flex-wrap: wrap; }
+
+/* Detail — step cards + grouped ingredient list */
+.recipe-steps { display: flex; flex-direction: column; gap: 10px; }
+.step-view { display: flex; gap: 10px; align-items: flex-start; }
+.step-view-body { flex: 1; min-width: 0; }
+.step-view-text { font-size: 14px; color: var(--text-primary); line-height: 1.4; }
+.step-time-badge { margin-left: 6px; }
+.step-prod-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.recipe-empty { font-size: 13px; color: var(--text-muted); }
+.recipe-ingr-list { display: flex; flex-direction: column; gap: 12px; }
+.ingr-group { display: flex; flex-direction: column; gap: 3px; }
+.ingr-group-head { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); margin-bottom: 2px; }
+.ingr-line { display: flex; align-items: baseline; gap: 8px; font-size: 14px; color: var(--text-primary); }
+.ingr-line-name { flex: 1; }
+.ingr-line .ingr-amt { font-size: 13px; color: var(--text-muted); }
+.ingr-line-alts { font-size: 13px; color: var(--text-muted); }
+/* "+ ИЛИ" chips on an ingredient row (wizard step 2) */
+.ingr-alts { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 8px 0; align-items: center; }
+.ingr-alt-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--bg-hover); color: var(--text-secondary); }
+.ingr-alt-x { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
+.ingr-alt-add { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px dashed var(--border-default); background: transparent; color: var(--text-muted); cursor: pointer; }
+.ingr-alt-add:hover { color: var(--accent-fill); border-color: var(--accent-fill); }
+.ingr-alt-input { font-size: 12px; padding: 2px 8px; max-width: 140px; }
+
+/* ── Recipe wizard (create modal) ── */
+.recipe-wizard .rw-nav { display: flex; gap: 4px; margin-bottom: 14px; }
+.rw-step { flex: 1; text-align: center; padding: 6px 4px; font-size: 12px; color: var(--text-muted); border-bottom: 2px solid var(--border-default); cursor: pointer; white-space: nowrap; }
+.rw-step.active { color: var(--accent-fill); border-bottom-color: var(--accent-fill); font-weight: 500; }
 
 /* ── Meal Plan (calendar day view) ── */
 .meal-plan-block { margin-bottom: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); padding: 10px 14px; background: var(--bg-card); }

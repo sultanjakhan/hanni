@@ -1,66 +1,66 @@
-// ── food-blacklist-view.js — Blacklist as a catalog-style screen ──
-// Blocked items render with the catalog's own components: a product is a
-// product card, a subgroup / category is a tile — each at its own level.
+// ── food-blacklist-view.js — Food preferences screen ──
+// Level sub-tabs (🚫 Не ем / 👎 Не люблю / 💚 Люблю) show one level at a time.
+// Inside, entries are grouped by type (categories / subgroups / products /
+// dishes), each a uniform product-card. A single "+" adds to the active level.
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { CAT_LABELS, CAT_ORDER, loadCatalog, invalidateBlacklistCache } from './food-recipe-filters.js';
 import { renderProductCard } from './food-product-card.js';
-import { CAT_EMOJI } from './food-product-views.js';
 import { applyBlacklist, BL_LEVELS } from './food-blacklist-menu.js';
+import { openAddPopover } from './food-blacklist-add.js';
 
-const KIND_ICON = { category: '📂', subgroup: '🍱', product: '🥕' };
-const KIND_LABEL = { category: 'категория', subgroup: 'подгруппа', product: 'продукт' };
+const KIND_LABEL = { category: 'категория', tag: 'подгруппа', product: 'продукт', recipe: 'блюдо' };
+const TYPE_GROUPS = [
+  { type: 'category', label: 'Категории' },
+  { type: 'tag', label: 'Подгруппы' },
+  { type: 'product', label: 'Продукты' },
+  { type: 'recipe', label: 'Блюда' },
+];
+
+let activeLevel = 'hard'; // persists across reloads within the session
 
 export async function renderBlacklistPane(el) {
-  const entries = await invoke('list_food_blacklist').catch(() => []);
+  const [entries, recipes] = await Promise.all([
+    invoke('list_food_blacklist').catch(() => []),
+    invoke('get_recipes', { search: null }).catch(() => []),
+  ]);
   const catalog = await loadCatalog();
-  let addLevel = 'hard';
   const reload = () => renderBlacklistPane(el);
 
-  // Searchable index of everything blockable: categories, subgroups, products.
-  const index = [];
-  for (const c of CAT_ORDER) {
-    if (catalog.some(p => p.category === c)) index.push({ kind: 'category', value: c, label: CAT_LABELS[c] || c });
-  }
-  for (const sg of [...new Set(catalog.map(p => (p.subgroup || '').trim()).filter(Boolean))].sort()) {
-    index.push({ kind: 'subgroup', value: sg, label: sg });
-  }
-  for (const p of catalog) index.push({ kind: 'product', value: p.name, label: p.name, catalogId: p.id });
+  // One flat candidate list for the "+" popover; each option carries its type.
+  const allOptions = [
+    ...CAT_ORDER.filter(c => catalog.some(p => p.category === c))
+      .map(c => ({ type: 'category', value: c, label: CAT_LABELS[c] || c, kindLabel: KIND_LABEL.category })),
+    ...[...new Set(catalog.map(p => (p.subgroup || '').trim()).filter(Boolean))].sort()
+      .map(sg => ({ type: 'tag', value: sg, label: sg, kindLabel: KIND_LABEL.tag })),
+    ...catalog.map(p => ({ type: 'product', value: p.name, label: p.name, catalogId: p.id, kindLabel: KIND_LABEL.product })),
+    ...recipes.map(r => ({ type: 'recipe', value: r.name, label: r.name, kindLabel: KIND_LABEL.recipe })),
+  ];
 
   el.innerHTML = `<div class="bl-pane">
-    <div class="bl-add">
-      <div class="bl-pick bl-pick-level"></div>
-      <div class="bl-search">
-        <input class="form-input bl-value" placeholder="Найти продукт, подгруппу или категорию…" autocomplete="off">
-        <div class="bl-ac" style="display:none"></div>
-      </div>
+    <div class="bl-levelbar">
+      <div class="bl-levels"></div>
+      <button class="bl-add-one">+ Добавить</button>
     </div>
-    <div class="bl-sections"></div>
+    <div class="bl-body"></div>
   </div>`;
 
-  const q = (s) => el.querySelector(s);
-  const valueInp = q('.bl-value');
-  const acEl = q('.bl-ac');
-
-  function renderLevelPick() {
-    q('.bl-pick-level').innerHTML = BL_LEVELS.map(l =>
-      `<button class="bl-tab${l.level === addLevel ? ' active' : ''}" data-lvl="${l.level}">${l.icon} ${l.label}</button>`).join('');
-    el.querySelectorAll('[data-lvl]').forEach(b =>
-      b.onclick = () => { addLevel = b.dataset.lvl; renderLevelPick(); });
-  }
+  el.querySelector('.bl-add-one').onclick = (ev) => openAddPopover(ev.currentTarget,
+    { placeholder: 'Категория, подгруппа, продукт или блюдо…', options: allOptions },
+    (o) => applyBlacklist(o.type, o.value, activeLevel, o.catalogId || null, reload));
 
   function addRemove(node, id) {
     const btn = document.createElement('button');
     btn.className = 'bl-remove';
     btn.textContent = '×';
-    btn.title = 'Убрать из блэклиста';
+    btn.title = 'Убрать из предпочтений';
     btn.onclick = (ev) => { ev.stopPropagation(); removeEntry(id); };
     node.appendChild(btn);
   }
 
-  // One catalog-style tile/card for a blacklist entry, at its own level.
+  const lvlMod = (level) => level === 'hard' ? '--blocked' : level === 'love' ? '--love' : '--soft';
+
   function entryTile(e, level) {
-    const mod = level === 'hard' ? '--blocked' : '--soft';
     if (e.type === 'product') {
       const prod = catalog.find(p => p.name.toLowerCase() === e.value.toLowerCase())
         || { name: e.value, category: 'other', tags: '' };
@@ -69,63 +69,47 @@ export async function renderBlacklistPane(el) {
       addRemove(card, e.id);
       return card;
     }
-    const tile = document.createElement('div');
+    let name, pill;
     if (e.type === 'category') {
-      const count = catalog.filter(p => p.category === e.value).length;
-      tile.className = `cat-tile cat-tile${mod}`;
-      tile.innerHTML = `<div class="cat-tile-emoji">${CAT_EMOJI[e.value] || '📦'}</div>
-        <div class="cat-tile-name">${escapeHtml(CAT_LABELS[e.value] || e.value)}</div>
-        <div class="cat-tile-count">${count}</div>`;
-    } else { // type 'tag' = catalog subgroup
-      const count = catalog.filter(p => (p.subgroup || '').toLowerCase() === e.value.toLowerCase()).length;
-      tile.className = `sg-tile sg-tile${mod}`;
-      tile.innerHTML = `<div class="sg-tile-name">${escapeHtml(e.value)}</div>
-        <div class="sg-tile-count">${count}</div>`;
+      name = CAT_LABELS[e.value] || e.value;
+      pill = `${KIND_LABEL.category} · ${catalog.filter(p => p.category === e.value).length}`;
+    } else if (e.type === 'recipe') {
+      name = e.value;
+      pill = KIND_LABEL.recipe;
+    } else { // 'tag' = catalog subgroup
+      name = e.value;
+      pill = `${KIND_LABEL.tag} · ${catalog.filter(p => (p.subgroup || '').toLowerCase() === e.value.toLowerCase()).length}`;
     }
-    addRemove(tile, e.id);
-    return tile;
+    const card = document.createElement('div');
+    card.className = `product-card product-card${lvlMod(level)}`;
+    card.innerHTML = `<div class="product-card-name">${escapeHtml(name)}</div>
+      <div class="product-card-tags"><span class="product-card-cat product-cat-gray">${escapeHtml(pill)}</span></div>`;
+    addRemove(card, e.id);
+    return card;
   }
 
-  function renderSections() {
-    const box = q('.bl-sections');
+  function renderLevels() {
+    el.querySelector('.bl-levels').innerHTML = BL_LEVELS.map(l =>
+      `<button class="bl-level-tab${l.level === activeLevel ? ' active' : ''}" data-lvl="${l.level}">${l.icon} ${l.label}</button>`).join('');
+    el.querySelectorAll('.bl-level-tab').forEach(b =>
+      b.onclick = () => { activeLevel = b.dataset.lvl; renderLevels(); renderBody(); });
+  }
+
+  function renderBody() {
+    const box = el.querySelector('.bl-body');
     box.innerHTML = '';
-    for (const l of BL_LEVELS) {
-      const items = entries.filter(e => (e.level || 'hard') === l.level);
-      const sec = document.createElement('div');
-      sec.className = 'bl-section';
-      sec.innerHTML = `<div class="bl-section-head">${l.icon} ${l.label}</div>`;
-      if (!items.length) {
-        sec.insertAdjacentHTML('beforeend', '<div class="bl-empty">пусто</div>');
-      } else {
-        for (const [kind, gridCls] of [['category', 'cat-grid'], ['tag', 'sg-grid'], ['product', 'recipe-grid']]) {
-          const ofKind = items.filter(e => e.type === kind);
-          if (!ofKind.length) continue;
-          const grid = document.createElement('div');
-          grid.className = gridCls;
-          for (const e of ofKind) grid.appendChild(entryTile(e, l.level));
-          sec.appendChild(grid);
-        }
-      }
-      box.appendChild(sec);
+    let any = false;
+    for (const g of TYPE_GROUPS) {
+      const items = entries.filter(e => (e.level || 'hard') === activeLevel && e.type === g.type);
+      if (!items.length) continue;
+      any = true;
+      box.insertAdjacentHTML('beforeend', `<div class="bl-subhead"><span>${g.label}</span></div>`);
+      const grid = document.createElement('div');
+      grid.className = 'recipe-grid';
+      for (const e of items) grid.appendChild(entryTile(e, activeLevel));
+      box.appendChild(grid);
     }
-  }
-
-  function renderAC() {
-    const ql = valueInp.value.trim().toLowerCase();
-    if (!ql) { acEl.style.display = 'none'; return; }
-    const hits = index.filter(x => x.label.toLowerCase().includes(ql)).slice(0, 14);
-    if (!hits.length) { acEl.style.display = 'none'; return; }
-    acEl.innerHTML = hits.map((h, i) =>
-      `<div class="bl-ac-row" data-i="${i}">${KIND_ICON[h.kind]} ${escapeHtml(h.label)}
-        <small>${KIND_LABEL[h.kind]}</small></div>`).join('');
-    acEl.style.display = '';
-    acEl.querySelectorAll('.bl-ac-row').forEach(row =>
-      row.onmousedown = (ev) => { ev.preventDefault(); pick(hits[parseInt(row.dataset.i)]); });
-  }
-
-  async function pick(hit) {
-    const type = hit.kind === 'category' ? 'category' : hit.kind === 'subgroup' ? 'tag' : 'product';
-    await applyBlacklist(type, hit.value, addLevel, hit.catalogId || null, reload);
+    if (!any) box.innerHTML = '<div class="bl-empty">Пусто — нажми «+ Добавить».</div>';
   }
 
   async function removeEntry(id) {
@@ -134,9 +118,6 @@ export async function renderBlacklistPane(el) {
     reload();
   }
 
-  valueInp.oninput = renderAC;
-  valueInp.onblur = () => setTimeout(() => { acEl.style.display = 'none'; }, 150);
-
-  renderLevelPick();
-  renderSections();
+  renderLevels();
+  renderBody();
 }

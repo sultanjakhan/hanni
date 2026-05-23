@@ -11,8 +11,9 @@ export const HIERARCHICAL_CATS = new Set(['meat', 'fish']);
 
 // Blacklist level → tile modifier class / icon. hard hides nothing here — the
 // catalog is a wiki, so blocked items stay visible (hard red, soft dimmed).
-const blkCls = (lvl, base) => lvl === 'hard' ? ` ${base}--blocked` : lvl === 'soft' ? ` ${base}--soft` : '';
-const blkIcon = (lvl) => lvl === 'hard' ? ' 🚫' : lvl === 'soft' ? ' 👎' : '';
+const blkCls = (lvl, base) => lvl === 'hard' ? ` ${base}--blocked`
+  : lvl === 'soft' ? ` ${base}--soft` : lvl === 'love' ? ` ${base}--love` : '';
+const blkIcon = (lvl) => lvl === 'hard' ? ' 🚫' : lvl === 'soft' ? ' 👎' : lvl === 'love' ? ' 💚' : '';
 const BL_BTN = '<button class="bl-quick" title="В блэклист">⊘</button>';
 
 // Render product cards by blacklist level — soft ("не люблю") sinks to the bottom.

@@ -1,25 +1,19 @@
 // recipe-shared.js — Backend-agnostic add-recipe modal shared between Hanni & guest.
 // Loaded as a plain <script> AFTER recipe-shared-ingredients.js. Registers
-// `window.HanniRecipe.showAddRecipeModal({ backend, onSaved })`.
-// Backend interface (Promise-returning):
-//   getCatalog()  → [{name, category, tags?}]
-//   getCuisines() → [{id, code, name, emoji}]   // id may equal code
-//   getBlacklist? → []                          // optional
-//   addCatalogItem({name, category}) → void
-//   addCuisine({code, name, emoji}) → void
-//   createRecipe(snake_case_payload) → void
+// `window.HanniRecipe.showAddRecipeModal({ backend, onSaved, recipe? })`.
+// Backend (Promise-returning): getCatalog, getCuisines, getBlacklist?,
+// addCatalogItem, addCuisine, createRecipe(payload), updateRecipe(id, payload).
 (function () {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // ── Public entry ──
-  async function showAddRecipeModal({ backend, onSaved }) {
+  async function showAddRecipeModal({ backend, onSaved, recipe }) {
     const [catalog, cuisines, blacklist] = await Promise.all([
       backend.getCatalog().catch(() => []),
       backend.getCuisines().catch(() => []),
       (backend.getBlacklist ? backend.getBlacklist() : Promise.resolve([])).catch(() => []),
     ]);
-    buildModal({ backend, onSaved, catalog, cuisines, blacklist });
+    buildModal({ backend, onSaved, catalog, cuisines, blacklist, recipe });
   }
 
   function chip(id, label, active) {
@@ -31,52 +25,71 @@
       <div class="rf-acc-body" style="display:${open ? '' : 'none'}">${content}</div></div>`;
   }
 
-  function buildModal({ backend, onSaved, catalog, cuisines, blacklist }) {
+  function buildModal({ backend, onSaved, catalog, cuisines, blacklist, recipe }) {
     const ingrApi = (window.HanniRecipe && window.HanniRecipe.ingredients) || null;
+    const stepsApi = (window.HanniRecipe && window.HanniRecipe.steps) || null;
     if (!ingrApi) { alert('recipe-shared-ingredients.js не загружен'); return; }
 
-    const state = { tags: new Set(['universal']), diff: 'easy', cuisine: 'kz' };
+    const r = recipe || {};
+    const imgApi = (window.HanniRecipe && window.HanniRecipe.image) || null;
+    const state = { tags: new Set((r.tags || 'universal').split(',').map(x => x.trim()).filter(Boolean)), diff: r.difficulty || 'easy', cuisine: r.cuisine || 'kz', image: r.image || '' };
     const mealsHtml = ['breakfast:Завтрак', 'lunch:Обед', 'dinner:Ужин', 'universal:Универсал']
       .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.tags.has(id)); }).join('');
     const diffsHtml = ['easy:Лёгкий', 'medium:Средний', 'hard:Сложный']
       .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.diff === id); }).join('');
     const defC = cuisines.find(c => (c.id || c.code) === state.cuisine);
+    const stepsPaneHtml = stepsApi ? `<div id="r-steps"></div>`
+      : `<textarea class="form-textarea" id="r-instr" rows="6" placeholder="1. Сварить картофель 20 мин.\n2. Натереть на тёрке."></textarea>`;
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
-    overlay.innerHTML = `<div class="modal" style="max-width:560px;max-height:90vh;overflow-y:auto;">
-      <div class="modal-title">Новый рецепт</div>
-      <div class="form-group"><label class="form-label">Название <span class="req">*</span></label>
-        <input class="form-input" id="r-name" placeholder="Название рецепта"></div>
-      <div class="form-group"><label class="form-label">Ингредиенты <span class="req">*</span></label>
-        <div id="r-ingr-rows"></div></div>
-      <div class="form-group"><label class="form-label">Приготовление <span class="req">*</span></label>
-        <textarea class="form-textarea" id="r-instr" rows="5" placeholder="1. Сварить картофель 20 мин.\n2. Натереть на тёрке.\n3. Смешать с майонезом."></textarea></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div class="form-group"><label class="form-label">Подготовка (мин)</label><input class="form-input" id="r-prep" type="number" value="10"></div>
-        <div class="form-group"><label class="form-label">Готовка (мин)</label><input class="form-input" id="r-cook" type="number" value="20"></div>
-        <div class="form-group"><label class="form-label">Порции</label><input class="form-input" id="r-serv" type="number" value="2"></div>
-        <div class="form-group"><label class="form-label">Калории</label><input class="form-input" id="r-cal" type="number"></div>
+    overlay.innerHTML = `<div class="modal recipe-wizard" style="max-width:560px;max-height:90vh;overflow-y:auto;">
+      <div class="modal-title">${recipe ? 'Изменить рецепт' : 'Новый рецепт'}</div>
+      <div class="rw-nav">
+        <div class="rw-step active" data-step="1">1 · Блюдо</div>
+        <div class="rw-step" data-step="2">2 · Продукты</div>
+        <div class="rw-step" data-step="3">3 · Приготовление</div>
       </div>
-      ${acc('Тип блюда', 'tags', `<div class="add-chips" data-field="tags">${mealsHtml}</div>`, true)}
-      ${acc('Сложность', 'diff', `<div class="add-chips" data-field="diff">${diffsHtml}</div>`, false)}
-      <div class="form-group"><label class="form-label">Кухня</label>
-        <div style="position:relative;">
-          <input class="form-input" id="r-cuisine-input" placeholder="Поиск кухни..." value="${defC ? `${defC.emoji} ${esc(defC.name)}` : ''}" autocomplete="off">
-          <div class="ingr-autocomplete" id="r-cuisine-dd" style="display:none;width:100%;"></div>
+      <div class="rw-pane" data-pane="1">
+        <div class="form-group"><label class="form-label">Название <span class="req">*</span></label>
+          <input class="form-input" id="r-name" placeholder="Название рецепта" value="${esc(r.name || '')}"></div>
+        ${imgApi ? imgApi.fieldHtml(r) : ''}
+        <div class="form-group"><label class="form-label">Тип блюда</label><div class="add-chips" data-field="tags">${mealsHtml}</div></div>
+        <div class="form-group"><label class="form-label">Сложность</label><div class="add-chips" data-field="diff">${diffsHtml}</div></div>
+        <div class="form-group"><label class="form-label">Кухня</label>
+          <div style="position:relative;">
+            <input class="form-input" id="r-cuisine-input" placeholder="Поиск кухни..." value="${defC ? `${defC.emoji} ${esc(defC.name)}` : ''}" autocomplete="off">
+            <div class="ingr-autocomplete" id="r-cuisine-dd" style="display:none;width:100%;"></div>
+          </div>
+          <div id="new-cuisine-form" style="display:none;margin-top:6px;"></div>
         </div>
-        <div id="new-cuisine-form" style="display:none;margin-top:6px;"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div class="form-group"><label class="form-label">Подготовка (мин)</label><input class="form-input" id="r-prep" type="number" value="${r.prep_time ?? 10}"></div>
+          <div class="form-group"><label class="form-label">Готовка (мин)</label><input class="form-input" id="r-cook" type="number" value="${r.cook_time ?? 20}"></div>
+          <div class="form-group"><label class="form-label">Порции</label><input class="form-input" id="r-serv" type="number" value="${r.servings ?? 2}"></div>
+          <div class="form-group"><label class="form-label">Ккал / 100 г</label><input class="form-input" id="r-cal" type="number" value="${r.calories ?? ''}"></div>
+        </div>
+        ${acc('Оценки и КБЖУ (на 100 г)', 'extra', `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div class="form-group"><label class="form-label">Полезность (1-10)</label><input class="form-input" id="r-health" type="number" min="1" max="10" value="${r.health_score ?? 5}"></div>
+          <div class="form-group"><label class="form-label">Цена (1-10)</label><input class="form-input" id="r-price" type="number" min="1" max="10" value="${r.price_score ?? 5}"></div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div class="form-group"><label class="form-label">Белки (г/100г)</label><input class="form-input" id="r-protein" type="number" value="${r.protein ?? 0}"></div>
+          <div class="form-group"><label class="form-label">Жиры (г/100г)</label><input class="form-input" id="r-fat" type="number" value="${r.fat ?? 0}"></div>
+          <div class="form-group"><label class="form-label">Углеводы (г/100г)</label><input class="form-input" id="r-carbs" type="number" value="${r.carbs ?? 0}"></div></div>`, false)}
       </div>
-      ${acc('БЖУ и оценки', 'extra', `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div class="form-group"><label class="form-label">Полезность (1-10)</label><input class="form-input" id="r-health" type="number" min="1" max="10" value="5"></div>
-        <div class="form-group"><label class="form-label">Цена (1-10)</label><input class="form-input" id="r-price" type="number" min="1" max="10" value="5"></div></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-        <div class="form-group"><label class="form-label">Белки (г)</label><input class="form-input" id="r-protein" type="number" value="0"></div>
-        <div class="form-group"><label class="form-label">Жиры (г)</label><input class="form-input" id="r-fat" type="number" value="0"></div>
-        <div class="form-group"><label class="form-label">Углеводы (г)</label><input class="form-input" id="r-carbs" type="number" value="0"></div></div>`, false)}
+      <div class="rw-pane" data-pane="2" style="display:none">
+        <label class="form-label">Ингредиенты</label>
+        <div id="r-ingr-rows"></div>
+      </div>
+      <div class="rw-pane" data-pane="3" style="display:none">
+        <label class="form-label">Приготовление по шагам</label>
+        ${stepsPaneHtml}
+      </div>
       <div class="modal-actions">
         <button class="btn-secondary" id="r-cancel">Отмена</button>
-        <button class="btn-primary" id="r-save">Сохранить</button>
+        <button class="btn-secondary" id="r-back" style="display:none">← Назад</button>
+        <button class="btn-primary" id="r-next">Далее →</button>
+        <button class="btn-primary" id="r-save" style="display:none">Сохранить</button>
       </div></div>`;
 
     document.body.appendChild(overlay);
@@ -86,7 +99,10 @@
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
     overlay.querySelector('#r-cancel').onclick = close;
 
-    ingrApi.renderIngredientRows(overlay.querySelector('#r-ingr-rows'), catalog, blacklist, backend);
+    const rowsEl = overlay.querySelector('#r-ingr-rows');
+    ingrApi.renderIngredientRows(rowsEl, catalog, blacklist, backend, r.ingredient_items);
+    if (stepsApi) stepsApi.renderStepRows(overlay.querySelector('#r-steps'),
+      () => ingrApi.collectIngredientItems(rowsEl), r.instructions);
     overlay.querySelectorAll('.rf-acc-header').forEach(hdr => hdr.onclick = () => {
       const body = hdr.nextElementSibling, open = body.style.display !== 'none';
       body.style.display = open ? 'none' : '';
@@ -95,23 +111,46 @@
     bindMultiChips(overlay, 'tags', state);
     bindChips(overlay, 'diff', state);
     bindCuisineInput(overlay, state, cuisines, backend);
+    if (imgApi) imgApi.attach(overlay, state);
+    let step = 1;
+    const nameOk = () => {
+      const nm = overlay.querySelector('#r-name');
+      if (nm.value.trim()) return true;
+      nm.classList.add('input-error'); showStep(1); nm.focus(); return false;
+    };
+    function showStep(n) {
+      step = n;
+      overlay.querySelectorAll('.rw-pane').forEach(p => { p.style.display = p.dataset.pane === String(n) ? '' : 'none'; });
+      overlay.querySelectorAll('.rw-step').forEach(s => s.classList.toggle('active', s.dataset.step === String(n)));
+      overlay.querySelector('#r-back').style.display = n > 1 ? '' : 'none';
+      overlay.querySelector('#r-next').style.display = n < 3 ? '' : 'none';
+      overlay.querySelector('#r-save').style.display = n === 3 ? '' : 'none';
+    }
+    overlay.querySelector('#r-back').onclick = () => showStep(Math.max(1, step - 1));
+    overlay.querySelector('#r-next').onclick = () => { if (step > 1 || nameOk()) showStep(Math.min(3, step + 1)); };
+    overlay.querySelectorAll('.rw-step').forEach(s => s.onclick = () => {
+      const t = parseInt(s.dataset.step);
+      if (t === 1 || nameOk()) showStep(t);
+    });
 
     overlay.querySelector('#r-save').onclick = async () => {
-      const nameEl = overlay.querySelector('#r-name');
-      const name = nameEl?.value?.trim();
-      if (!name) { nameEl.classList.add('input-error'); nameEl.focus(); return; }
-      const ingredient_items = ingrApi.collectIngredientItems(overlay.querySelector('#r-ingr-rows'));
+      if (!nameOk()) return;
+      const name = overlay.querySelector('#r-name').value.trim();
+      const ingredient_items = ingrApi.collectIngredientItems(rowsEl);
+      const instructions = stepsApi
+        ? JSON.stringify(stepsApi.collectSteps(overlay.querySelector('#r-steps')))
+        : (overlay.querySelector('#r-instr')?.value?.trim() || '');
       const v = id => parseInt(overlay.querySelector(`#${id}`)?.value) || 0;
+      const payload = {
+        name, description: '', instructions, ingredients: ingredient_items.flatMap(i => [i.name, ...String(i.alternatives || '').split(',').map(s => s.trim()).filter(Boolean)]).join(', '),
+        prep_time: v('r-prep'), cook_time: v('r-cook'), servings: v('r-serv') || 1, calories: v('r-cal'),
+        tags: [...state.tags].join(','), difficulty: state.diff, cuisine: state.cuisine,
+        health_score: v('r-health') || 5, price_score: v('r-price') || 5,
+        protein: v('r-protein'), fat: v('r-fat'), carbs: v('r-carbs'), image: state.image, ingredient_items,
+      };
       try {
-        await backend.createRecipe({
-          name, description: '',
-          instructions: overlay.querySelector('#r-instr')?.value?.trim() || '',
-          prep_time: v('r-prep'), cook_time: v('r-cook'), servings: v('r-serv') || 1, calories: v('r-cal'),
-          tags: [...state.tags].join(','), difficulty: state.diff, cuisine: state.cuisine,
-          health_score: v('r-health') || 5, price_score: v('r-price') || 5,
-          protein: v('r-protein'), fat: v('r-fat'), carbs: v('r-carbs'),
-          ingredient_items,
-        });
+        if (recipe) await backend.updateRecipe(recipe.id, payload);
+        else await backend.createRecipe(payload);
         close(); if (onSaved) await onSaved();
       } catch (e) { alert('Ошибка: ' + (e.message || e)); }
     };
