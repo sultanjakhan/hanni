@@ -39,19 +39,14 @@ function priorityDots(p) {
   return `<span class="rt-dots tw-dots" title="Важность ${n}/5">${dots}</span>`;
 }
 
-// Right-side meta:
-// - Events (meetings): planned time HH:MM — duplicates the notification context.
-// - Schedules/notes: ⌀ average actual execution time from history; plain
-//   time-of-day on a schedule isn't a deadline so we don't show it. Overdue
-//   state is signalled by the orange row colour, no "−Nч" needed.
+// Right-side meta: ONLY execution time (⌀ average actual from history). No
+// planned times — picker is a launcher, not a schedule view; "когда делать"
+// belongs in notifications/calendar, not in every row.
 function metaText(p, _nowMin, avgDur) {
   const avg = avgDur[`${p.source_type}:${p.source_id}`];
-  if (p.source_type === 'event' && p.planned_time) {
-    return `<span class="tw-meta" title="Время встречи">${String(p.planned_time).slice(0, 5)}</span>`;
-  }
   if (avg) return `<span class="tw-meta" title="Среднее по истории">⌀ ${fmtMins(avg)}</span>`;
-  if (p.source_type === 'event' && p.duration_minutes) {
-    return `<span class="tw-meta">~${fmtMins(p.duration_minutes)}</span>`;
+  if (p.duration_minutes) {
+    return `<span class="tw-meta" title="Плановая длительность">~${fmtMins(p.duration_minutes)}</span>`;
   }
   return '';
 }

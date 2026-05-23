@@ -17,7 +17,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
     // ── 1. Calendar events on date
     let mut e_stmt = conn.prepare(
         "SELECT id, title, time, duration_minutes, category, color, completed, priority
-         FROM events WHERE date=?1"
+         FROM events WHERE date=?1 AND (source IS NULL OR source != 'auto_health')"
     ).map_err(|e| format!("DB error: {}", e))?;
     let events_iter = e_stmt.query_map(rusqlite::params![date], |row| {
         let id: i64 = row.get(0)?;

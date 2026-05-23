@@ -5,7 +5,6 @@ import { invoke } from './state.js';
 import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
 import { buildPickerBody, loadCategoryWeights } from './task-picker-view.js';
 import { pickRecommendedTaskId, pickStartChainId } from './task-picker-sort.js';
-import { openWeightsEditor } from './task-weights-editor.js';
 
 let widget = null;
 let panel = null;
@@ -84,21 +83,13 @@ async function openStartDropdown(preserveScroll = false) {
   panel = document.createElement('div');
   panel.className = 'tw-panel';
   panel.innerHTML = `
-    <div class="tw-panel-header">
-      <span>Запустить таск</span>
-      <button class="tw-gear" title="Важность категорий">⚙</button>
-    </div>
+    <div class="tw-panel-header"><span>Запустить таск</span></div>
     <div class="tw-panel-body">${bodyHtml}</div>
     <div class="tw-add-row">
       <input class="tw-add-input" type="text" placeholder="+ Новая задача на сегодня" maxlength="200">
     </div>`;
   widget.appendChild(panel);
   if (savedScroll > 0) panel.scrollTop = savedScroll;
-
-  panel.querySelector('.tw-gear').addEventListener('click', (e) => {
-    e.stopPropagation();
-    openWeightsEditor(panel, () => openStartDropdown());
-  });
 
   const addInput = panel.querySelector('.tw-add-input');
   addInput.addEventListener('click', (e) => e.stopPropagation());
