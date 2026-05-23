@@ -785,6 +785,7 @@ pub fn run() {
             timeline_afk::sync_timeline_auto,
             timeline_health::sync_health_to_timeline,
             calendar_health::sync_health_to_calendar,
+            calendar_health::dedup_auto_health_events,
             commands_timeline_today::get_today_planned,
             commands_timeline_today::start_task_block,
             commands_timeline_today::complete_task_block,

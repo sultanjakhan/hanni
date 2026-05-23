@@ -147,6 +147,10 @@ async function refreshCalendarInner() {
     }
     return;
   }
+  // Idempotent: collapse any auto_health duplicates that may have crept in
+  // from earlier code paths before this side restarted with the startup
+  // dedup migration. Cheap, runs every refresh, ms-level even on big DBs.
+  invoke('dedup_auto_health_events').catch(() => {});
   const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
   const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
   if (activeView === 'week') await renderWeekCalendar(innerEl, events || []);
@@ -316,15 +320,19 @@ async function renderCalendar(el, events, tasks) {
 
   // Build pills for a date — calendar grid shows ONLY events with explicit time.
   // Schedules and time-less items live in Day-view "Список" only.
+  // Pills inherit the event's own color when set (Sleep = blue, Walking = green,
+  // user-coloured events too) and fall back to the orange/green class otherwise.
   function dayPills(dateStr) {
     const items = [];
-    for (const e of (eventsByDate[dateStr] || [])) items.push({ title: e.title, icon: '', color: 'orange' });
-    for (const t of (tasksByDate[dateStr] || [])) items.push({ title: t.title || 'Задача', icon: '', color: 'green' });
+    for (const e of (eventsByDate[dateStr] || [])) items.push({ title: e.title, icon: '', color: 'orange', hex: e.color || null });
+    for (const t of (tasksByDate[dateStr] || [])) items.push({ title: t.title || 'Задача', icon: '', color: 'green', hex: null });
     const visible = items.slice(0, MAX_PILLS);
     const extra = items.length - MAX_PILLS;
-    let html = visible.map(it =>
-      `<div class="cal-pill cal-pill-${it.color}">${it.icon ? it.icon + ' ' : ''}${escapeHtml(it.title)}</div>`
-    ).join('');
+    let html = visible.map(it => {
+      const style = it.hex ? ` style="background:${it.hex}22;color:${it.hex};border-left:3px solid ${it.hex};"` : '';
+      const cls = it.hex ? 'cal-pill' : `cal-pill cal-pill-${it.color}`;
+      return `<div class="${cls}"${style}>${it.icon ? it.icon + ' ' : ''}${escapeHtml(it.title)}</div>`;
+    }).join('');
     if (extra > 0) html += `<div class="cal-pill-more">+${extra} ещё</div>`;
     return html;
   }
