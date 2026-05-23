@@ -21,9 +21,12 @@ fn exercise_title(etype: &str) -> &'static str {
     }
 }
 
-/// UPDATE the existing auto_health event with this external_id, or INSERT a
-/// new one if none exists. Stable id across re-syncs → no LAN-sync duplicate
-/// rows on the Mac.
+/// UPDATE the existing auto_health event for (date, title, time), or INSERT
+/// a new one if none exists. Looking up by content rather than external_id
+/// is what keeps the row stable: prior versions of this code used different
+/// external_id formats, so an external_id lookup would have missed and we'd
+/// have churned out new auto-increment ids on every sync — exactly the
+/// thing that caused the Mac duplicates to begin with.
 fn upsert_event(
     conn: &rusqlite::Connection,
     external_id: &str, title: &str, desc: &str,
@@ -31,10 +34,10 @@ fn upsert_event(
 ) -> bool {
     let updated = conn.execute(
         "UPDATE events
-            SET title=?1, description=?2, time=?3, duration_minutes=?4,
-                color=?5, updated_at=?6
-          WHERE external_id=?7 AND source='auto_health'",
-        rusqlite::params![title, desc, time, dur_min, color, now, external_id],
+            SET description=?1, duration_minutes=?2, color=?3,
+                external_id=?4, updated_at=?5
+          WHERE date=?6 AND title=?7 AND time=?8 AND source='auto_health'",
+        rusqlite::params![desc, dur_min, color, external_id, now, date, title, time],
     ).unwrap_or(0);
     if updated > 0 { return true; }
     conn.execute(
@@ -83,7 +86,9 @@ pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> R
             // across re-imports → upsert hits the existing row.
             let ext_id = format!("sleep:{date}:{time}:{dur_min}");
             wanted.push(ext_id.clone());
-            if upsert_event(&conn, &ext_id, "Сон", "", &date, &time, dur_min, "#a78bfa", &now) {
+            // Blue — visually distinct from the green walking blocks and the
+            // ~purple "scheduled" tone elsewhere; matches user request.
+            if upsert_event(&conn, &ext_id, "Сон", "", &date, &time, dur_min, "#3b82f6", &now) {
                 count += 1;
             }
         }

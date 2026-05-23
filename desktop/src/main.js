@@ -247,14 +247,16 @@ document.addEventListener('keydown', (e) => {
 // ══════════════════════════════════════════════
 
 (async () => {
-  // Render built-in tabs from localStorage immediately so the drawer isn't
-  // visibly empty for the 1-5s the DB takes to come up on Android cold start.
-  // Custom pages add on top once the poll below succeeds.
+  // Paint the tab drawer immediately from localStorage so it isn't visibly
+  // empty for the 1-5s the DB takes to come up. We deliberately DON'T call
+  // activateView() here — that would load the active tab's content with
+  // DB invokes still racing the Rust setup() hook, and the resulting empty
+  // Calendar/Day-view stays cached until something forces a refresh.
+  // The post-poll activateView() below paints content once invokes work.
   try {
     renderTabBar();
-    activateView();
     if (IS_MOBILE) updateMobileTitle();
-  } catch (e) { console.warn('[hanni] early render skipped', e); }
+  } catch (e) { console.warn('[hanni] early tab-bar paint skipped', e); }
 
   // Load custom pages into TAB_REGISTRY before rendering.
   // Android: the webview boots in parallel with the Rust setup() hook, where
@@ -376,7 +378,11 @@ document.addEventListener('keydown', (e) => {
   if (IS_MOBILE) {
     autoImportHealth();
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') autoImportHealth();
+      if (document.visibilityState !== 'visible') return;
+      autoImportHealth();
+      // Re-paint the active tab so the user sees fresh events (sleep/walks
+      // just imported, or anything Mac pushed while we were backgrounded).
+      try { activateView(); } catch (_) {}
     });
     startHealthPolling(); // 15-min poll while foregrounded
     checkAndroidUpdate(); // GitHub Releases → APK update banner (no-op on desktop)
