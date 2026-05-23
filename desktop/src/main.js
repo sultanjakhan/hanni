@@ -254,7 +254,7 @@ document.addEventListener('keydown', (e) => {
   // until the DB answers. On desktop the DB is managed before the window
   // exists, so this succeeds on attempt #0 (zero delay, behaviour unchanged).
   let customPages = [];
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + 5000;
   for (let attempt = 0; ; attempt++) {
     try {
       customPages = await invoke('get_custom_pages');
@@ -269,7 +269,7 @@ document.addEventListener('keydown', (e) => {
         const RELOAD_KEY = '_hanni_db_reload_attempted';
         if (!sessionStorage.getItem(RELOAD_KEY)) {
           sessionStorage.setItem(RELOAD_KEY, '1');
-          console.warn('[hanni] DB not ready in 15s — reloading once to recover');
+          console.warn('[hanni] DB not ready in 5s — reloading once to recover');
           location.reload();
           return;
         }
