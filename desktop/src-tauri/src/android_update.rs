@@ -1,11 +1,36 @@
-// android_update.rs — Android-only APK update check.
+// android_update.rs — Android-only APK update check + in-app install.
 // Tauri's updater plugin is desktop-only, so on Android we poll the GitHub
-// Releases API for the latest tag + APK asset and let the user download it
-// via the system browser (manual install). No native install intent.
+// Releases API for the latest tag + APK asset, download it in-app, and hand
+// it to the OS package installer via a FileProvider content:// URI.
 
 use serde::Serialize;
-use tauri::AppHandle;
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
+
+#[cfg(target_os = "android")]
+use tauri::plugin::PluginHandle;
+
+#[cfg(target_os = "android")]
+pub struct InstallApkHandle<R: Runtime>(pub PluginHandle<R>);
+
+/// Tauri plugin that bridges to the Kotlin InstallApkPlugin.
+pub fn install_apk_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("install-apk")
+        .setup(|app, _api| {
+            #[cfg(target_os = "android")]
+            {
+                let handle = _api.register_android_plugin(
+                    "com.sultanjakhan.hanni", "InstallApkPlugin"
+                )?;
+                app.manage(InstallApkHandle(handle));
+            }
+            #[cfg(not(target_os = "android"))]
+            { let _ = app; }
+            Ok(())
+        })
+        .build()
+}
 
 const RELEASES_API: &str = "https://api.github.com/repos/sultanjakhan/hanni/releases/latest";
 
@@ -87,9 +112,8 @@ pub async fn check_apk_update(app: AppHandle) -> Result<ApkUpdate, String> {
     Ok(ApkUpdate { available, version: latest, apk_url, notes })
 }
 
-/// Opens an APK download URL in the system browser (cross-platform via the
-/// opener plugin — macos.rs::open_url shells out to `open`, which is unavailable
-/// on Android).
+/// Opens an APK download URL in the system browser (fallback path; the
+/// in-app flow is download_apk + install_apk).
 #[tauri::command]
 pub async fn open_apk_url(app: AppHandle, url: String) -> Result<(), String> {
     if !url.starts_with("https://") {
@@ -98,4 +122,97 @@ pub async fn open_apk_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| format!("open failed: {e}"))
+}
+
+/// Downloads the APK to the app's cache dir, emitting `apk-download-progress`
+/// events with `{loaded, total}` so the banner can show progress. Returns the
+/// absolute file path on success.
+#[tauri::command]
+pub async fn download_apk(app: AppHandle, url: String, version: String) -> Result<String, String> {
+    if !url.starts_with("https://") {
+        return Err("Only https URLs allowed".into());
+    }
+    let cache_dir: PathBuf = app.path().app_cache_dir()
+        .map_err(|e| format!("no cache dir: {e}"))?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("mkdir: {e}"))?;
+    let safe_ver: String = version.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-' || *c == '_').collect();
+    let dest = cache_dir.join(format!("hanni-update-{safe_ver}.apk"));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(&url)
+        .header("User-Agent", "Hanni-Android-Updater")
+        .send().await
+        .map_err(|e| format!("download request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download HTTP {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+
+    use std::io::Write;
+    use futures_util::StreamExt;
+    let mut file = std::fs::File::create(&dest).map_err(|e| format!("create: {e}"))?;
+    let mut loaded: u64 = 0;
+    let mut last_emit: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("chunk: {e}"))?;
+        file.write_all(&bytes).map_err(|e| format!("write: {e}"))?;
+        loaded += bytes.len() as u64;
+        // Emit at most every ~256KB to avoid event spam.
+        if loaded - last_emit > 256_000 || loaded == total {
+            let _ = app.emit("apk-download-progress",
+                serde_json::json!({"loaded": loaded, "total": total}));
+            last_emit = loaded;
+        }
+    }
+    file.sync_all().ok();
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Hands the downloaded APK to the OS package installer via FileProvider.
+#[tauri::command]
+pub async fn install_apk<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<InstallApkHandle<R>>();
+        handle.0.run_mobile_plugin::<serde_json::Value>(
+            "installApk",
+            serde_json::json!({"path": path}),
+        ).map_err(|e| format!("{e}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = (app, path); Err("install_apk is Android-only".into()) }
+}
+
+/// True if the user has granted "Install unknown apps" for Hanni. When false,
+/// the banner must first open settings via open_install_settings().
+#[tauri::command]
+pub async fn can_install_apk<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<InstallApkHandle<R>>();
+        match handle.0.run_mobile_plugin::<serde_json::Value>("canInstall", &()) {
+            Ok(v) => Ok(v.get("granted").and_then(|g| g.as_bool()).unwrap_or(false)),
+            Err(e) => Err(format!("{e}")),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Ok(false) }
+}
+
+#[tauri::command]
+pub async fn open_install_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<InstallApkHandle<R>>();
+        handle.0.run_mobile_plugin::<serde_json::Value>("openInstallSettings", &())
+            .map_err(|e| format!("{e}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Err("Android-only".into()) }
 }

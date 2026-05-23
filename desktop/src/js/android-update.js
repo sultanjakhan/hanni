@@ -1,8 +1,8 @@
-// android-update.js — Android-only: check GitHub Releases for a newer APK and
-// show a dismissible banner. Tapping "Скачать" opens the APK URL in the system
-// browser; the user installs it manually (sideload). Desktop has the native
-// Tauri updater, so this is gated to Android user-agents only.
-import { invoke } from './state.js';
+// android-update.js — Android-only: poll GitHub Releases for a newer APK,
+// show a dismissible banner. Tap "Скачать" downloads the APK in-app with
+// progress, then hands it to the OS package installer (one tap → installer
+// dialog, no Chrome/Files round-trip).
+import { invoke, listen } from './state.js';
 
 const IS_ANDROID = /android/i.test(navigator.userAgent);
 
@@ -28,13 +28,16 @@ function showUpdateBanner(info) {
   text.className = 'apk-update-text';
   text.textContent = `Доступна версия ${info.version}`;
 
-  const download = document.createElement('button');
-  download.className = 'apk-update-btn';
-  download.textContent = 'Скачать';
-  download.addEventListener('click', () => {
-    invoke('open_apk_url', { url: info.apk_url })
-      .catch(e => console.error('[hanni] open apk failed', e));
-  });
+  const progress = document.createElement('div');
+  progress.className = 'apk-update-progress';
+  const progressFill = document.createElement('div');
+  progressFill.className = 'apk-update-progress-fill';
+  progress.appendChild(progressFill);
+  progress.style.display = 'none';
+
+  const action = document.createElement('button');
+  action.className = 'apk-update-btn';
+  action.textContent = 'Скачать';
 
   const dismiss = document.createElement('button');
   dismiss.className = 'apk-update-close';
@@ -42,6 +45,54 @@ function showUpdateBanner(info) {
   dismiss.textContent = '×';
   dismiss.addEventListener('click', () => bar.remove());
 
-  bar.append(text, download, dismiss);
+  let unlistenProgress = null;
+  action.addEventListener('click', async () => {
+    action.disabled = true;
+    action.textContent = '0%';
+    progress.style.display = 'block';
+
+    // Subscribe to download progress events before kicking off the download.
+    unlistenProgress = await listen('apk-download-progress', (e) => {
+      const { loaded, total } = e.payload || {};
+      if (total > 0) {
+        const pct = Math.round((loaded / total) * 100);
+        progressFill.style.width = pct + '%';
+        action.textContent = pct + '%';
+      } else {
+        // Unknown total — show indeterminate label.
+        action.textContent = Math.round(loaded / 1024 / 1024) + ' МБ';
+      }
+    });
+
+    try {
+      // 1. Make sure "Install unknown apps" is granted. If not, deep-link the
+      //    user to the OS settings; they come back and tap Скачать again.
+      const canInstall = await invoke('can_install_apk').catch(() => false);
+      if (!canInstall) {
+        await invoke('open_install_settings');
+        text.textContent = 'Разреши установку и нажми Скачать ещё раз';
+        action.textContent = 'Скачать';
+        action.disabled = false;
+        progress.style.display = 'none';
+        return;
+      }
+      // 2. Download APK to app cache (Rust emits progress events).
+      const path = await invoke('download_apk', { url: info.apk_url, version: info.version });
+      // 3. Hand the file to the OS installer.
+      action.textContent = 'Установка…';
+      await invoke('install_apk', { path });
+      // The OS installer takes over; banner stays so user can dismiss later.
+    } catch (e) {
+      console.error('[hanni] apk update failed', e);
+      text.textContent = 'Не удалось обновить: ' + (e?.message || e);
+      action.textContent = 'Повторить';
+      action.disabled = false;
+      progress.style.display = 'none';
+    } finally {
+      if (unlistenProgress) { unlistenProgress(); unlistenProgress = null; }
+    }
+  });
+
+  bar.append(text, progress, action, dismiss);
   document.body.appendChild(bar);
 }

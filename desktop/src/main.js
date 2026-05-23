@@ -247,6 +247,15 @@ document.addEventListener('keydown', (e) => {
 // ══════════════════════════════════════════════
 
 (async () => {
+  // Render built-in tabs from localStorage immediately so the drawer isn't
+  // visibly empty for the 1-5s the DB takes to come up on Android cold start.
+  // Custom pages add on top once the poll below succeeds.
+  try {
+    renderTabBar();
+    activateView();
+    if (IS_MOBILE) updateMobileTitle();
+  } catch (e) { console.warn('[hanni] early render skipped', e); }
+
   // Load custom pages into TAB_REGISTRY before rendering.
   // Android: the webview boots in parallel with the Rust setup() hook, where
   // the DB is managed only after init_database() finishes. The first call can

@@ -316,7 +316,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(health_connect_plugin::init());
+        .plugin(health_connect_plugin::init())
+        .plugin(android_update::install_apk_plugin());
 
     // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
     // POSITION/SIZE are handled in window_state.rs (sync atomic write to a
@@ -421,6 +422,10 @@ pub fn run() {
             macos::open_url,
             android_update::check_apk_update,
             android_update::open_apk_url,
+            android_update::download_apk,
+            android_update::install_apk,
+            android_update::can_install_apk,
+            android_update::open_install_settings,
             macos::send_notification,
             macos::set_volume,
             macos::open_app,
