@@ -5,6 +5,7 @@ import { invoke } from './state.js';
 import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
 import { buildPickerBody, loadCategoryWeights } from './task-picker-view.js';
 import { pickRecommendedTaskId, pickStartChainId } from './task-picker-sort.js';
+import { isDanKoePractice, openDanKoeModal } from './dankoe-quick-modal.js';
 
 let widget = null;
 let panel = null;
@@ -118,6 +119,14 @@ async function openStartDropdown(preserveScroll = false) {
   panel.querySelectorAll('.tw-item[data-idx]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const p = orderedItems[parseInt(btn.dataset.idx)];
+      // Dan Koe practices open a journaling modal (text + history), not a timer.
+      if (p.source_type === 'schedule' && isDanKoePractice(p.title)) {
+        closeDropdown();
+        await openDanKoeModal(p.title, p.source_id, () => {
+          window.dispatchEvent(new Event('task-state-changed'));
+        });
+        return;
+      }
       const isCheck = p.tracking_mode === 'check';
       try {
         if (isCheck && p.source_type === 'schedule') {

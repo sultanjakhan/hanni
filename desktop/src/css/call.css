@@ -1391,3 +1391,67 @@ body.qw-popover-open #task-control-widget {
   animation: pulse-focus 2s infinite;
   pointer-events: none;
 }
+
+/* Dan Koe quick journaling modal (opened from picker) */
+.dk-quick-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 9999;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.dk-quick-modal {
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-card);
+  width: 100%; max-width: 560px; max-height: calc(100vh - 48px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.dk-quick-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border-default);
+  font-size: 15px; font-weight: 600; color: var(--text-primary);
+}
+.dk-quick-close {
+  background: none; border: none; cursor: pointer; color: var(--text-secondary);
+  font-size: 16px; padding: 4px 8px; border-radius: var(--radius-sm);
+}
+.dk-quick-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+.dk-quick-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
+.dk-quick-text {
+  width: 100%; min-height: 140px; padding: 12px;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md, 8px);
+  background: var(--bg-card); color: var(--text-primary); font-size: 14px;
+  font-family: inherit; resize: vertical; outline: none; box-sizing: border-box;
+}
+.dk-quick-text:focus { border-color: var(--accent-blue); }
+.dk-quick-history {
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-default);
+}
+.dk-quick-history-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-secondary); font-weight: 600; margin-bottom: 8px;
+}
+.dk-quick-history-item {
+  padding: 8px 10px; margin-bottom: 6px; background: var(--bg-card);
+  border-radius: var(--radius-sm); font-size: 13px;
+}
+.dk-quick-history-date {
+  font-size: 11px; color: var(--text-muted); margin-bottom: 4px;
+}
+.dk-quick-history-text { color: var(--text-primary); white-space: pre-wrap; }
+.dk-quick-empty {
+  margin-top: 16px; padding: 12px; text-align: center;
+  color: var(--text-muted); font-size: 13px; font-style: italic;
+}
+.dk-quick-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid var(--border-default);
+}
+.dk-quick-cancel, .dk-quick-save {
+  padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 13px; border: 1px solid var(--border-default);
+}
+.dk-quick-cancel { background: transparent; color: var(--text-secondary); }
+.dk-quick-cancel:hover { background: var(--bg-hover); color: var(--text-primary); }
+.dk-quick-save {
+  background: var(--accent-blue); color: #fff; border-color: var(--accent-blue);
+  font-weight: 500;
+}
+.dk-quick-save:hover { filter: brightness(0.95); }
