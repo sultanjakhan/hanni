@@ -1,5 +1,6 @@
 // commands_share.rs — Tauri commands for managing share-links from the UI
 
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use rand::Rng;
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -33,9 +34,23 @@ pub struct ShareLinkRow {
 }
 
 // Static cloud URL — works 24/7 even when Hanni is closed (read from
-// Firestore via Firebase Hosting).
+// Firestore via Firebase Hosting). When a Cloudflare tunnel is live we
+// append `?t=<tunnel>` so the guest can bypass Firestore on first visit
+// (covers the 50k/day free quota blowing up).
 fn cloud_url(token: &str) -> String {
     format!("https://hanni-2e5d0.web.app/s/{}", token)
+}
+
+fn cloud_url_with_tunnel(conn: &rusqlite::Connection, token: &str) -> String {
+    let base = cloud_url(token);
+    let tunnel: Option<String> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='share_tunnel_url'",
+        [], |r| r.get(0),
+    ).ok();
+    match tunnel.filter(|s| !s.is_empty()) {
+        Some(t) => format!("{}?t={}", base, utf8_percent_encode(&t, NON_ALPHANUMERIC)),
+        None => base,
+    }
 }
 
 #[tauri::command]
@@ -107,9 +122,9 @@ pub async fn create_share_link(
         eprintln!("[share] tunnel unavailable: {}", e);
     }
 
-    // Static cloud URL — works 24/7 even when Hanni is closed (read from
-    // Firestore). Writes still require Hanni online for the axum tunnel.
-    let url = format!("https://hanni-2e5d0.web.app/s/{}", token);
+    // Static cloud URL with live tunnel embedded — guest reads via axum
+    // (zero Firestore reads) when the host is online.
+    let url = { let conn = db.conn(); cloud_url_with_tunnel(&conn, &token) };
 
     Ok(ShareLinkRow {
         id, token: token.clone(), tab, scope, permissions, label: label_val,
@@ -137,7 +152,7 @@ pub fn list_share_links(
             let iter = stmt.query_map(rusqlite::params![t], |r| row_to_link(r))
                 .map_err(|e| format!("Query error: {}", e))?;
             iter.filter_map(|x| x.ok())
-                .map(|mut l| { l.url = Some(cloud_url(&l.token)); l })
+                .map(|mut l| { l.url = Some(cloud_url_with_tunnel(&conn, &l.token)); l })
                 .collect()
         }
         None => {
@@ -149,7 +164,7 @@ pub fn list_share_links(
             let iter = stmt.query_map([], |r| row_to_link(r))
                 .map_err(|e| format!("Query error: {}", e))?;
             iter.filter_map(|x| x.ok())
-                .map(|mut l| { l.url = Some(cloud_url(&l.token)); l })
+                .map(|mut l| { l.url = Some(cloud_url_with_tunnel(&conn, &l.token)); l })
                 .collect()
         }
     };
