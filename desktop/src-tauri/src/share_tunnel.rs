@@ -78,7 +78,12 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
         "--url", &format!("http://127.0.0.1:{}", port),
     ])
     .stdout(Stdio::null())
-    .stderr(Stdio::piped());
+    .stderr(Stdio::piped())
+    // CRITICAL: without this the cloudflared subprocess survives Hanni
+    // quit, so each restart leaks a tunnel (and the next Hanni start
+    // can't tell which trycloudflare URL is "ours"). kill_on_drop ties
+    // the child's lifetime to the Child handle inside ShareTunnel.
+    .kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {}", e))?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
