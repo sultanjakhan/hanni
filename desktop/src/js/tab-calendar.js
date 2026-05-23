@@ -527,7 +527,10 @@ async function renderWeekCalendar(el, events) {
     allDayHtml += `<div class="wk-allday-cell${isToday ? ' wk-col-today' : ''}">${cellHtml}</div>`;
   }
 
-  // Hour grid (0:00 - 23:00)
+  // Hour grid (0:00 - 23:00) — cells are click targets only; events are
+  // painted by the absolute-positioned overlay below so a Sleep at 22:00
+  // can span into the next column's morning hours.
+  const HOUR_PX = 48;
   const hours = Array.from({length: 24}, (_, i) => i);
   let gridHtml = '';
   for (const h of hours) {
@@ -535,32 +538,58 @@ async function renderWeekCalendar(el, events) {
     for (let i = 0; i < 7; i++) {
       const dateStr = dayDates[i];
       const isToday = dateStr === todayStr;
-      // Events at this hour (with explicit time)
-      const hourEvts = (eventsByDate[dateStr] || []).filter(e => e.time && parseInt(e.time.split(':')[0]) === h);
-      // Schedules hidden from grid by design — only events live here
-      const hourScheds = [];
-
-      let cellHtml = '';
-      for (const s of hourScheds) {
-        const icon = SCH_CAT_ICONS[s.category] || '📌';
-        const min = s.time_of_day.split(':')[1] || '00';
-        cellHtml += `<div class="wk-ev wk-ev-${CAT_COLORS[s.category] || 'blue'}"><span class="wk-ev-min">:${min}</span> ${icon} ${escapeHtml(s.title)}</div>`;
-      }
-      for (const e of hourEvts) {
-        const min = e.time.split(':')[1] || '00';
-        cellHtml += `<div class="wk-ev wk-ev-orange"><span class="wk-ev-min">:${min}</span> ${escapeHtml(e.title)}</div>`;
-      }
-
-      // Current time indicator
       let nowLine = '';
       if (isToday && isCurrentWeek && h === currentHour) {
         const pct = (currentMin / 60) * 100;
         nowLine = `<div class="wk-now-line" style="top:${pct}%"><div class="wk-now-dot"></div></div>`;
       }
-
-      gridHtml += `<div class="wk-cell${isToday ? ' wk-col-today' : ''}" data-date="${dateStr}" data-hour="${h}">${nowLine}${cellHtml}</div>`;
+      gridHtml += `<div class="wk-cell${isToday ? ' wk-col-today' : ''}" data-date="${dateStr}" data-hour="${h}">${nowLine}</div>`;
     }
   }
+
+  // Event overlay: one column per day, blocks absolutely positioned by
+  // start time and proportional to duration. Mirrors the Day-view block,
+  // including continuations from the prior day (sleep crossing midnight).
+  const hhmm = (mins) => `${String(Math.floor((mins%1440)/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
+  const minToPx = (m) => Math.round(m * (HOUR_PX / 60));
+  const blockHtml = (e, top, height, label, continued) => {
+    const color = e.color || 'var(--text-secondary)';
+    const tip = `${e.title || ''} · ${label} · ${e.duration_minutes || 60}м`;
+    return `<div class="wk-block" title="${escapeHtml(tip)}"
+      style="top:${top}px;height:${Math.max(height, 18)}px;background:${color}22;border-left:3px solid ${color};">
+      <span class="wk-block-time">${label}</span>
+      <span class="wk-block-title">${continued ? '↳ ' : ''}${escapeHtml(e.title || '')}</span>
+    </div>`;
+  };
+  const overlayCols = dayDates.map((dateStr, i) => {
+    const blocks = [];
+    // Today's events that start with a real time.
+    for (const e of (eventsByDate[dateStr] || [])) {
+      if (!e.time) continue;
+      const [hh, mm] = e.time.split(':').map(Number);
+      const startMin = hh * 60 + mm;
+      const endMin = startMin + (e.duration_minutes || 60);
+      const visEnd = Math.min(endMin, 1440);
+      blocks.push(blockHtml(e, minToPx(startMin), minToPx(visEnd - startMin),
+        `${e.time} – ${hhmm(endMin)}`, false));
+    }
+    // Continuation from previous day in the same week (Sleep crossing midnight).
+    const prev = i > 0 ? dayDates[i - 1] : (() => {
+      const d = new Date(weekStart); d.setDate(weekStart.getDate() - 1);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    })();
+    for (const e of (eventsByDate[prev] || [])) {
+      if (!e.time) continue;
+      const [hh, mm] = e.time.split(':').map(Number);
+      const endMin = hh * 60 + mm + (e.duration_minutes || 60);
+      if (endMin <= 1440) continue;
+      const leftover = endMin - 1440;
+      blocks.push(blockHtml(e, 0, minToPx(leftover), `00:00 – ${hhmm(leftover)}`, true));
+    }
+    return `<div class="wk-block-col">${blocks.join('')}</div>`;
+  });
+  const blockLayerHtml = `<div class="wk-block-layer">${overlayCols.join('')}</div>`;
+  gridHtml += blockLayerHtml;
 
   const startLabel = `${weekStart.getDate()} ${monthsShort[weekStart.getMonth()]}`;
   const endDate = new Date(weekStart);
