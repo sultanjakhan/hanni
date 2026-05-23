@@ -1,4 +1,8 @@
-// calendar_health.rs — Sync sleep_sessions + exercise → events (Calendar Day-view)
+// calendar_health.rs — Sync sleep_sessions + exercise → events (Calendar Day-view).
+// Uses upsert by content-derived external_id so re-sync doesn't churn auto-
+// increment ids — without that LAN-sync ends up with stale tombstones and
+// the Mac accumulates duplicates of every sleep/walk.
+
 use crate::types::HanniDb;
 use crate::timeline_health::normalize_time;
 
@@ -17,56 +21,88 @@ fn exercise_title(etype: &str) -> &'static str {
     }
 }
 
+/// UPDATE the existing auto_health event with this external_id, or INSERT a
+/// new one if none exists. Stable id across re-syncs → no LAN-sync duplicate
+/// rows on the Mac.
+fn upsert_event(
+    conn: &rusqlite::Connection,
+    external_id: &str, title: &str, desc: &str,
+    date: &str, time: &str, dur_min: i64, color: &str, now: &str,
+) -> bool {
+    let updated = conn.execute(
+        "UPDATE events
+            SET title=?1, description=?2, time=?3, duration_minutes=?4,
+                color=?5, updated_at=?6
+          WHERE external_id=?7 AND source='auto_health'",
+        rusqlite::params![title, desc, time, dur_min, color, now, external_id],
+    ).unwrap_or(0);
+    if updated > 0 { return true; }
+    conn.execute(
+        "INSERT INTO events (title, description, date, time, duration_minutes,
+            category, color, source, external_id, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,'health',?6,'auto_health',?7,?8,?8)",
+        rusqlite::params![title, desc, date, time, dur_min, color, external_id, now],
+    ).is_ok()
+}
+
 /// Sync sleep + exercise for a given date into the events table so they
-/// appear in Calendar Day-view alongside manual events. Idempotent: removes
-/// prior auto_health rows for the date before inserting current ones.
+/// appear in Calendar Day-view. Upserts by content-derived external_id so
+/// re-syncs don't create duplicate rows; auto_health rows for the date
+/// whose external_id isn't produced by the current import get deleted
+/// (handles a Watch session disappearing from Health Connect).
 #[tauri::command]
 pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
-
-    conn.execute(
-        "DELETE FROM events WHERE date=?1 AND source='auto_health'",
-        rusqlite::params![date],
-    ).ok();
-
-    let mut count = 0i64;
     let now = chrono::Local::now().to_rfc3339();
+    let mut count = 0i64;
+    let mut wanted: Vec<String> = Vec::new();
+
+    // Collapse any historical duplicates left over from the previous
+    // DELETE+INSERT scheme — idempotent, fast, runs only for this date.
+    let _ = conn.execute(
+        "DELETE FROM events WHERE source='auto_health' AND date=?1
+         AND id NOT IN (
+           SELECT min(id) FROM events WHERE source='auto_health' AND date=?1
+           GROUP BY title, time, duration_minutes
+         )",
+        rusqlite::params![date],
+    );
 
     // Sleep sessions → events
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, start_time, duration_minutes FROM sleep_sessions
+        "SELECT start_time, duration_minutes FROM sleep_sessions
          WHERE date=?1 AND source='health_connect'"
     ) {
-        let sessions: Vec<(i64, String, i64)> = stmt.query_map(
-            rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        let sessions: Vec<(String, i64)> = stmt.query_map(
+            rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?))
         ).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default();
-        for (sid, start, dur_min) in sessions {
+        for (start, dur_min) in sessions {
             if dur_min < 5 { continue; }
             let time = normalize_time(&start);
-            let ext_id = format!("sleep:{sid}");
-            let res = conn.execute(
-                "INSERT INTO events (title, description, date, time, duration_minutes,
-                    category, color, source, external_id, created_at)
-                 VALUES ('Сон','',?1,?2,?3,'health','#a78bfa','auto_health',?4,?5)",
-                rusqlite::params![date, time, dur_min, ext_id, now],
-            );
-            if res.is_ok() { count += 1; }
+            // Content-derived id: same sleep produces the same external_id
+            // across re-imports → upsert hits the existing row.
+            let ext_id = format!("sleep:{date}:{time}:{dur_min}");
+            wanted.push(ext_id.clone());
+            if upsert_event(&conn, &ext_id, "Сон", "", &date, &time, dur_min, "#a78bfa", &now) {
+                count += 1;
+            }
         }
     }
 
-    // Exercise (walking/running/etc) → events. We don't have a real start
-    // time in health_log yet, so we fan them out from 12:00 in 1-minute
-    // increments so multiple walks on the same day don't collide on the same
-    // visual slot. notes format from import_exercise: "{etype}: {title}".
+    // Exercise (walking/running/etc) → events. Health Connect sessions don't
+    // carry per-session times in health_log yet, so we fan out from 12:00 in
+    // 1-minute steps; the index ensures multiple walks the same day get
+    // distinct event slots without clobbering each other.
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT rowid, value, notes FROM health_log
+        "SELECT value, notes FROM health_log
          WHERE date=?1 AND type='exercise' ORDER BY rowid"
     ) {
-        let rows: Vec<(i64, f64, String)> = stmt.query_map(
-            rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        let rows: Vec<(f64, String)> = stmt.query_map(
+            rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?))
         ).map(|rs| rs.filter_map(|r| r.ok()).collect()).unwrap_or_default();
         let mut slot = 12 * 60i64; // start at 12:00
-        for (rid, dur, notes) in rows {
+        let mut idx = 0;
+        for (dur, notes) in rows {
             let dur_min = dur as i64;
             if dur_min < 5 { continue; }
             let etype = notes.split(':').next().unwrap_or("").trim();
@@ -74,15 +110,34 @@ pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> R
             let title = exercise_title(etype);
             let time = format!("{:02}:{:02}", slot / 60, slot % 60);
             slot += 1;
-            let ext_id = format!("exercise:{rid}");
-            let res = conn.execute(
-                "INSERT INTO events (title, description, date, time, duration_minutes,
-                    category, color, source, external_id, created_at)
-                 VALUES (?1,?2,?3,?4,?5,'health','#34d399','auto_health',?6,?7)",
-                rusqlite::params![title, detail, date, time, dur_min, ext_id, now],
-            );
-            if res.is_ok() { count += 1; }
+            // Content-derived id: stable across re-imports for the same
+            // walk on the same date in the same slot.
+            let ext_id = format!("exercise:{date}:{idx}:{dur_min}");
+            idx += 1;
+            wanted.push(ext_id.clone());
+            if upsert_event(&conn, &ext_id, title, detail, &date, &time, dur_min, "#34d399", &now) {
+                count += 1;
+            }
         }
+    }
+
+    // Drop auto_health rows for this date that don't match anything in the
+    // current import — handles HC sessions that vanished from the source.
+    if wanted.is_empty() {
+        let _ = conn.execute(
+            "DELETE FROM events WHERE date=?1 AND source='auto_health'",
+            rusqlite::params![date],
+        );
+    } else {
+        let placeholders = (0..wanted.len()).map(|i| format!("?{}", i + 2)).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "DELETE FROM events WHERE date=?1 AND source='auto_health'
+             AND (external_id IS NULL OR external_id NOT IN ({placeholders}))"
+        );
+        let mut params: Vec<rusqlite::types::Value> = Vec::with_capacity(1 + wanted.len());
+        params.push(date.clone().into());
+        for w in &wanted { params.push(w.clone().into()); }
+        let _ = conn.execute(&sql, rusqlite::params_from_iter(params));
     }
 
     Ok(count)

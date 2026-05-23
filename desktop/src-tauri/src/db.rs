@@ -2563,3 +2563,18 @@ pub fn migrate_dedup_health_exercise(conn: &rusqlite::Connection) {
         [],
     ).ok();
 }
+
+/// One-time-per-launch cleanup: an earlier sync_health_to_calendar did
+/// DELETE+INSERT on every poll, so LAN-sync ended up with stale tombstones
+/// and the receiver accumulated duplicate Sleep/Exercise events. Collapse
+/// to one row per (date, title, time, duration_minutes) on both phone and
+/// Mac. Idempotent.
+pub fn migrate_dedup_auto_health_events(conn: &rusqlite::Connection) {
+    conn.execute(
+        "DELETE FROM events WHERE source='auto_health' AND id NOT IN (
+            SELECT MIN(id) FROM events WHERE source='auto_health'
+            GROUP BY date, title, time, duration_minutes
+        )",
+        [],
+    ).ok();
+}
