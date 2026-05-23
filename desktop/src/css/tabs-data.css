@@ -56,7 +56,7 @@
 }
 .cal-day:hover { background: var(--bg-hover); }
 .cal-day.other { opacity: 0.3; }
-.cal-day.selected { background: var(--color-blue-bg); }
+.cal-day.selected { background: transparent; box-shadow: inset 0 0 0 2px var(--accent-blue); }
 .cal-day-num {
   font-size: 12px; color: var(--text-muted); font-weight: 400;
   padding: 2px; margin-bottom: 2px;
@@ -372,7 +372,7 @@
   width: 28px; height: 28px; display: inline-flex;
   align-items: center; justify-content: center;
 }
-.wk-hdr.wk-today { background: var(--color-blue-bg); }
+.wk-hdr.wk-today { background: transparent; }
 
 /* All-day row */
 .wk-allday {
@@ -434,7 +434,7 @@
   transition: background var(--transition-fast);
 }
 .wk-cell:hover { background: var(--bg-hover); }
-.wk-col-today { background: var(--color-blue-bg); }
+.wk-col-today { background: rgba(35, 131, 226, 0.05); }
 
 /* Events in cells */
 .wk-ev {
