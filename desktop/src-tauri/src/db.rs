@@ -1001,6 +1001,37 @@ pub fn migrate_recipe_extra2(conn: &rusqlite::Connection) {
     }
 }
 
+// Photo (data URL), taste rating (0-5) and post-cooking note for recipes.
+pub fn migrate_recipe_media(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT image FROM recipes LIMIT 1").is_err() {
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN image TEXT", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN taste_rating INTEGER NOT NULL DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE recipes ADD COLUMN cook_note TEXT NOT NULL DEFAULT ''", []);
+    }
+}
+
+// Per-cooking history: each cooking of a recipe is one immutable row with its
+// own date + taste rating + note, optionally linked to a calendar event.
+pub fn migrate_cooking_log(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS cooking_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recipe_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            taste_rating INTEGER NOT NULL DEFAULT 0,
+            cook_note TEXT NOT NULL DEFAULT '',
+            event_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_cooking_log_recipe ON cooking_log(recipe_id);"
+    ).ok();
+    let now = chrono::Local::now().to_rfc3339();
+    conn.execute(
+        "INSERT OR IGNORE INTO event_categories (name, color, icon, sort_order, created_at) VALUES ('Готовка', '#cb8a05', '🍳', 7, ?1)",
+        rusqlite::params![now],
+    ).ok();
+}
+
 /// One-time migration: clear seed recipes (v0.36)
 pub fn migrate_clear_seed_recipes(conn: &rusqlite::Connection) {
     let has_flag = conn.prepare("SELECT 1 FROM _migrations WHERE name='clear_seed_recipes'").ok()
@@ -1695,6 +1726,7 @@ pub fn enable_crr_tables(conn: &rusqlite::Connection) {
         "job_sources", "job_roles", "job_vacancies", "job_search_log",
         "dashboard_widgets", "timeline_activity_types", "timeline_blocks",
         "timeline_goals", "sleep_sessions", "sleep_stages", "heart_rate_samples",
+        "cooking_log",
     ];
 
     for table in &tables {
@@ -1710,9 +1742,9 @@ pub fn migrate_food_blacklist(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS food_blacklist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            type TEXT NOT NULL CHECK(type IN ('tag','product','category','keyword')),
+            type TEXT NOT NULL CHECK(type IN ('tag','product','category','keyword','recipe')),
             value TEXT NOT NULL,
-            level TEXT NOT NULL DEFAULT 'hard' CHECK(level IN ('hard','soft')),
+            level TEXT NOT NULL DEFAULT 'hard' CHECK(level IN ('hard','soft','love')),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(type, value)
         );"
@@ -1764,6 +1796,62 @@ pub fn migrate_food_blacklist(conn: &rusqlite::Connection) {
         }
         let _ = conn.execute("DELETE FROM facts WHERE id=?1", rusqlite::params![fact_id]);
     }
+}
+
+// Add the 'love' level (positive marker) to food_blacklist. The CHECK constraint
+// lives inside CREATE TABLE and can't be ALTERed, so existing DBs whose table SQL
+// still forbids 'love' are rebuilt. food_blacklist isn't a CRR table, so the
+// drop/rename is safe. Must run after migrate_catalog_links (catalog_id column).
+pub fn migrate_food_blacklist_love(conn: &rusqlite::Connection) {
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='food_blacklist'",
+        [], |r| r.get(0),
+    ).unwrap_or_default();
+    if sql.is_empty() || sql.contains("love") { return; }
+
+    conn.execute_batch(
+        "CREATE TABLE food_blacklist_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL CHECK(type IN ('tag','product','category','keyword')),
+            value TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'hard' CHECK(level IN ('hard','soft','love')),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            catalog_id INTEGER REFERENCES ingredient_catalog(id) ON DELETE SET NULL,
+            UNIQUE(type, value)
+        );
+        INSERT INTO food_blacklist_new (id, type, value, level, created_at, catalog_id)
+            SELECT id, type, value, level, created_at, catalog_id FROM food_blacklist;
+        DROP TABLE food_blacklist;
+        ALTER TABLE food_blacklist_new RENAME TO food_blacklist;"
+    ).ok();
+}
+
+// Add the 'recipe' type (preferences on whole dishes) to food_blacklist. Same
+// rebuild approach as the 'love' migration: the type CHECK can't be ALTERed, so
+// existing DBs whose table SQL still forbids 'recipe' are rebuilt to the final
+// canonical schema. Idempotent. Must run after migrate_food_blacklist_love.
+pub fn migrate_food_blacklist_recipe(conn: &rusqlite::Connection) {
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='food_blacklist'",
+        [], |r| r.get(0),
+    ).unwrap_or_default();
+    if sql.is_empty() || sql.contains("recipe") { return; }
+
+    conn.execute_batch(
+        "CREATE TABLE food_blacklist_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL CHECK(type IN ('tag','product','category','keyword','recipe')),
+            value TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'hard' CHECK(level IN ('hard','soft','love')),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            catalog_id INTEGER REFERENCES ingredient_catalog(id) ON DELETE SET NULL,
+            UNIQUE(type, value)
+        );
+        INSERT INTO food_blacklist_new (id, type, value, level, created_at, catalog_id)
+            SELECT id, type, value, level, created_at, catalog_id FROM food_blacklist;
+        DROP TABLE food_blacklist;
+        ALTER TABLE food_blacklist_new RENAME TO food_blacklist;"
+    ).ok();
 }
 
 /// Classify a blacklist string: category code, tag in catalog, product name, else keyword.
@@ -2205,6 +2293,25 @@ pub fn migrate_priority(conn: &rusqlite::Connection) {
     // 0 = none, 1..5 from green to red (low → critical).
     conn.execute("ALTER TABLE notes ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
     conn.execute("ALTER TABLE events ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
+}
+
+pub fn migrate_schedule_priority(conn: &rusqlite::Connection) {
+    // Same 0..5 importance scale as migrate_priority, extended to schedules so the
+    // task picker can rank recurring tasks alongside events/notes.
+    conn.execute("ALTER TABLE schedules ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
+}
+
+pub fn migrate_task_pins(conn: &rusqlite::Connection) {
+    // Manually pinned tasks in the "Запустить таск" picker. Local-only (not CRR);
+    // keyed by the (source_type, source_id) the picker already uses.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS task_pins (
+            source_type TEXT NOT NULL,
+            source_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (source_type, source_id)
+        );"
+    ).ok();
 }
 
 pub fn migrate_event_categories(conn: &rusqlite::Connection) {

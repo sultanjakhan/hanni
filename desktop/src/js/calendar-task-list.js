@@ -3,6 +3,17 @@
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml } from './utils.js';
 import { SECTION_DEFS, renderItemRow, renderSection } from './calendar-task-list-row.js';
+import { timeToMin } from './task-picker-sort.js';
+
+// A timed item counts as past-time today within the same 3h grace as the picker.
+function isPastTimeToday(timeStr, done, isToday) {
+  if (!isToday || done) return false;
+  const t = timeToMin(timeStr);
+  if (t === null) return false;
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return t < nowMin && (nowMin - t) <= 180;
+}
 
 const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
 
@@ -67,11 +78,13 @@ async function loadDayItems(date) {
   }
   for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date))) {
     const bi = blockInfo('schedule', s.id);
-    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done: completedIds.has(s.id), priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null });
+    const done = completedIds.has(s.id);
+    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday) });
   }
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
-    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done: !!e.completed, priority: e.priority || 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
+    const done = !!e.completed;
+    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
   }
   for (const t of (tasks || []).filter(t => t.due_date === date)) {
     const bi = blockInfo('note', t.id);
@@ -96,6 +109,7 @@ function renderToolbar(dayLabel, isToday) {
         <div class="ctl-add-menu" id="ctl-add-menu" hidden>
           <button class="ctl-add-menu-item" data-add-kind="event">📅 Событие</button>
           <button class="ctl-add-menu-item" data-add-kind="note">📝 Задача</button>
+          <button class="ctl-add-menu-item" data-add-kind="cooking">🍳 Готовка</button>
         </div>
       </div>
     </div>
@@ -157,6 +171,10 @@ function wire(el) {
 
   const date = () => S.calDayDate || todayStr();
   const openEvent = () => { S.selectedCalendarDate = date(); tabLoaders.openCalendarAddEvent?.(); };
+  const openCooking = async () => {
+    const { showCookingLogModal } = await import('./food-cooking-log.js');
+    showCookingLogModal(date(), () => renderCalendarTaskList(el));
+  };
   const openNewNote = async () => {
     try {
       const id = await invoke('create_note', { title: '', content: '', tags: '', status: 'task', tabName: null, dueDate: date(), reminderAt: null });
@@ -193,6 +211,7 @@ function wire(el) {
       document.removeEventListener('keydown', closeOnEsc);
       if (btn.dataset.addKind === 'event') openEvent();
       else if (btn.dataset.addKind === 'note') openNewNote();
+      else if (btn.dataset.addKind === 'cooking') openCooking();
     });
   });
   el.querySelector('#ctl-add-empty')?.addEventListener('click', openEvent);

@@ -21,6 +21,7 @@ mod commands_meta;
 mod pm_matrix;
 mod routine;
 mod routine_engine;
+mod task_pins;
 mod mcp;
 mod agent;
 mod vacancy;
@@ -173,6 +174,8 @@ fn init_database() -> HanniDb {
     migrate_recipe_difficulty(&conn);
     migrate_recipe_extra(&conn);
     migrate_recipe_extra2(&conn);
+    migrate_recipe_media(&conn);
+    migrate_cooking_log(&conn);
     migrate_clear_seed_recipes(&conn);
     migrate_reseed_ingredient_catalog(&conn);
     migrate_catalog_tags_v3(&conn);
@@ -194,8 +197,12 @@ fn init_database() -> HanniDb {
     db::migrate_catalog_subgroup(&conn);
     db::migrate_catalog_parent(&conn);
     db::migrate_catalog_links(&conn);
+    db::migrate_food_blacklist_love(&conn);
+    db::migrate_food_blacklist_recipe(&conn);
     db::migrate_share_links(&conn);
     db::migrate_priority(&conn);
+    db::migrate_schedule_priority(&conn);
+    db::migrate_task_pins(&conn);
     db::migrate_event_categories(&conn);
     db::migrate_drop_mindset(&conn);
     db::migrate_dev_matrix(&conn);
@@ -540,6 +547,8 @@ pub fn run() {
             routine_engine::set_routine_node_status,
             routine_engine::get_routine_now,
             routine_engine::delete_routine_run,
+            task_pins::toggle_task_pin,
+            task_pins::get_task_pins,
             // Dan Koe Protocol
             commands_data::get_dan_koe_entry,
             commands_data::save_dan_koe_entry,
@@ -608,6 +617,8 @@ pub fn run() {
             commands_data::add_cuisine,
             commands_data::toggle_favorite_recipe,
             commands_data::mark_recipe_cooked,
+            commands_data::log_cooking,
+            commands_data::get_cooking_log,
             commands_data::add_product,
             commands_data::get_products,
             commands_data::update_product,
@@ -765,6 +776,7 @@ pub fn run() {
             commands_timeline_today::pause_task_block,
             commands_timeline_today::finish_task_block,
             commands_timeline_today::get_active_block,
+            commands_timeline_today::get_task_avg_durations,
             // Sync
             sync_commands::sync_now,
             sync_commands::get_sync_status,

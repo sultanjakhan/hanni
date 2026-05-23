@@ -36,7 +36,7 @@ export function renderItemRow(item, dateStr) {
     : '';
   const overdueBadge = item.overdueDate
     ? `<span class="ctl-overdue-badge" title="Срок: ${escapeHtml(item.overdueDate)}">${fmtOverdue(item.overdueDate, dateStr)}</span>`
-    : '';
+    : (item.pastTime ? `<span class="ctl-overdue-badge" title="Сегодня прошло запланированное время">⚠️</span>` : '');
   // Show ▶ when there is room left: not done OR (has target and not yet reached)
   const showStart = !active && (!done || (target > 0 && !targetReached));
   const trackBtns = active

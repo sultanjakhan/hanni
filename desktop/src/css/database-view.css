@@ -2581,3 +2581,6 @@ a.dev-case-title:hover { text-decoration: underline; color: var(--accent); }
 .dev-cp-skill-score[data-tier="mid"]  { color: var(--color-yellow); }
 .dev-cp-skill-score[data-tier="low"]  { color: var(--color-red); }
 .dev-cp-skill-score[data-tier="none"] { color: var(--text-faint); }
+
+/* Computed overdue column type */
+.cell-overdue { color: var(--color-orange); font-size: 12px; white-space: nowrap; }

@@ -11,18 +11,25 @@ struct RNode {
 }
 struct REdge { from: i64, to: i64, trigger: String, value: Option<i64> }
 
-/// Start an active pass of a chain for the day. Idempotent per (chain, date).
+/// Start (or restart) an active pass of a chain for the day. If a run already
+/// exists — including one completed earlier today — it is reset to 'active' and
+/// its step statuses cleared, so re-clicking "Я встал" restarts the routine
+/// instead of silently doing nothing.
 #[tauri::command]
 pub fn start_routine_run(chain_id: i64, date: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
     let conn = db.conn();
     conn.execute(
-        "INSERT OR IGNORE INTO routine_runs (chain_id, date, state) VALUES (?1, ?2, 'active')",
+        "INSERT INTO routine_runs (chain_id, date, state) VALUES (?1, ?2, 'active')
+         ON CONFLICT(chain_id, date) DO UPDATE SET state='active', completed_at=NULL",
         rusqlite::params![chain_id, date],
     ).map_err(|e| format!("DB error: {}", e))?;
-    conn.query_row(
+    let run_id: i64 = conn.query_row(
         "SELECT id FROM routine_runs WHERE chain_id=?1 AND date=?2",
         rusqlite::params![chain_id, date], |r| r.get(0),
-    ).map_err(|e| format!("DB error: {}", e))
+    ).map_err(|e| format!("DB error: {}", e))?;
+    conn.execute("DELETE FROM routine_node_status WHERE run_id=?1", rusqlite::params![run_id])
+        .map_err(|e| format!("DB error: {}", e))?;
+    Ok(run_id)
 }
 
 /// Cancel a run: drop it and its node statuses (the chain returns to "not started").

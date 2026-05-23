@@ -611,13 +611,30 @@ body.qw-popover-open #task-control-widget {
   order: -1;
 }
 .tw-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-default);
 }
+.tw-gear, .tw-back {
+  background: none; border: none; cursor: pointer; color: var(--text-secondary);
+  font-size: 14px; padding: 2px 5px; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.tw-gear:hover, .tw-back:hover { background: var(--bg-hover); color: var(--text-primary); }
+.tw-w-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 13px; color: var(--text-primary); }
+.tw-w-row .tw-item-title { flex: 1; }
 .tw-panel-body { padding: 6px; }
+.tw-add-row { border-top: 1px solid var(--border-default); padding: 6px; }
+.tw-add-input {
+  width: 100%; border: none; background: transparent; color: var(--text-primary);
+  font-size: 13px; padding: 6px 8px; outline: none; box-sizing: border-box;
+}
+.tw-add-input::placeholder { color: var(--text-muted); }
 .tw-empty {
   padding: 16px;
   text-align: center;
@@ -640,6 +657,39 @@ body.qw-popover-open #task-control-widget {
   transition: background 0.1s;
 }
 .tw-item:hover { background: var(--bg-hover); }
+/* Spotlight variants: recommended (next-action), overdue, pinned */
+.tw-item--recommended { background: var(--accent-blue); color: #fff; font-weight: 500; }
+.tw-item--recommended:hover { background: var(--accent-blue); filter: brightness(0.94); }
+.tw-item--recommended .tw-meta { color: rgba(255,255,255,0.85); }
+.tw-item--recommended .rt-dot { background: rgba(255,255,255,0.4); }
+.tw-item--recommended .rt-dot.on { background: #fff; }
+.tw-item--overdue { border-left: 3px solid var(--color-orange); background: var(--color-orange-bg); }
+.tw-item--overdue:hover { background: var(--color-orange-bg); }
+.tw-item--pinned { border-left: 3px solid var(--color-green); background: var(--color-green-bg); }
+.tw-item--pinned:hover { background: var(--color-green-bg); }
+/* Right-side meta + recommendation label */
+.tw-dots { flex-shrink: 0; cursor: default; }
+.tw-meta { flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+.tw-meta--late { color: var(--color-orange); }
+.tw-now {
+  flex-shrink: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  background: rgba(255,255,255,0.25); color: #fff; padding: 2px 6px; border-radius: 6px;
+}
+.tw-pin {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.tw-item:hover .tw-pin { opacity: 0.55; }
+.tw-pin:hover { opacity: 1; }
+.tw-pin--on { opacity: 1; color: var(--color-green); }
+/* Routine cancel: subtle, not a task-like row */
+.tw-rt-cancel { padding: 4px 10px; opacity: 0.55; }
+.tw-rt-cancel:hover { opacity: 1; }
+.tw-rt-cancel .tw-item-icon { font-size: 11px; }
+.tw-rt-cancel .tw-item-title { font-size: 11px; color: var(--text-muted); }
 .tw-item-icon { flex-shrink: 0; font-size: 14px; }
 .tw-item-title {
   flex: 1;

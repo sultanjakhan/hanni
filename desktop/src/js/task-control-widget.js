@@ -3,6 +3,9 @@
 // Active: ■ pulsing red → click = stop
 import { invoke } from './state.js';
 import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
+import { buildPickerBody, loadCategoryWeights } from './task-picker-view.js';
+import { pickRecommendedTaskId, pickStartChainId } from './task-picker-sort.js';
+import { openWeightsEditor } from './task-weights-editor.js';
 
 let widget = null;
 let panel = null;
@@ -26,21 +29,6 @@ function escapeHtml(s) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
-
-// Mirrors SCH_CAT_ICONS in tab-calendar.js / calendar-task-list.js. Keep in sync.
-const SCH_CAT_ICONS = {
-  health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡',
-  practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽'
-};
-
-function taskIcon(p) {
-  if (p.source_type === 'schedule') return SCH_CAT_ICONS[p.category] || SCH_CAT_ICONS.other;
-  if (p.source_type === 'event') return '📅';
-  if (p.source_type === 'note') return '📝';
-  return '•';
-}
-
-const GROUP_TITLES = { event: 'События', schedule: 'Расписание', note: 'Заметки' };
 
 async function refreshState() {
   const blocks = await invoke('get_timeline_blocks', { date: localDate() }).catch(() => []);
@@ -73,38 +61,61 @@ async function openStartDropdown() {
   const planned = await invoke('get_today_planned', { date: localDate() }).catch(() => []);
   const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done');
 
-  const groups = {
-    event:    startable.filter(p => p.source_type === 'event'),
-    schedule: startable.filter(p => p.source_type === 'schedule')
-                       .sort((a, b) => (a.category || '').localeCompare(b.category || '')),
-    note:     startable.filter(p => p.source_type === 'note'),
-  };
-  const nonEmpty = Object.entries(groups).filter(([, items]) => items.length > 0);
-  const showHeaders = nonEmpty.length > 1;
-  const orderedItems = nonEmpty.flatMap(([, items]) => items);
-  const routineHtml = await renderRoutineSection();
+  const weights = await loadCategoryWeights();
+  const pins = await invoke('get_task_pins').catch(() => []);
+  const avgRows = await invoke('get_task_avg_durations').catch(() => []);
+  const avgDur = Object.fromEntries(avgRows.map(a => [`${a.source_type}:${a.source_id}`, a.avg_minutes]));
+  const chains = await invoke('get_routine_chains').catch(() => []);
+  const now = await invoke('get_routine_now', { date: localDate() }).catch(() => []);
+  // Recommendation precedence: active routine step → start an auto-trigger chain
+  // (wake first) → top regular task.
+  const routineRecId = pickRecommendedTaskId(now);
+  const chainRecId = routineRecId == null ? pickStartChainId(chains, now) : null;
+  const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId);
+  const { bodyHtml, orderedItems } = await buildPickerBody({
+    startable, weights, pins, avgDur, routineHtml,
+    routineHasRec: routineRecId != null || chainRecId != null,
+  });
 
   panel = document.createElement('div');
   panel.className = 'tw-panel';
   panel.innerHTML = `
-    <div class="tw-panel-header">Запустить таск</div>
-    <div class="tw-panel-body">
-      ${routineHtml}
-      ${orderedItems.length === 0 && !routineHtml
-        ? '<div class="tw-empty">Нет задач на сегодня</div>'
-        : nonEmpty.map(([key, items]) => `
-            ${showHeaders || routineHtml ? `<div class="tw-group-header">${GROUP_TITLES[key]}</div>` : ''}
-            ${items.map(p => {
-              const idx = orderedItems.indexOf(p);
-              return `
-                <button class="tw-item" data-idx="${idx}">
-                  <span class="tw-item-icon">${taskIcon(p)}</span>
-                  <span class="tw-item-title">${escapeHtml(p.title)}</span>
-                </button>`;
-            }).join('')}
-          `).join('')}
+    <div class="tw-panel-header">
+      <span>Запустить таск</span>
+      <button class="tw-gear" title="Важность категорий">⚙</button>
+    </div>
+    <div class="tw-panel-body">${bodyHtml}</div>
+    <div class="tw-add-row">
+      <input class="tw-add-input" type="text" placeholder="+ Новая задача на сегодня" maxlength="200">
     </div>`;
   widget.appendChild(panel);
+
+  panel.querySelector('.tw-gear').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openWeightsEditor(panel, () => openStartDropdown());
+  });
+
+  const addInput = panel.querySelector('.tw-add-input');
+  addInput.addEventListener('click', (e) => e.stopPropagation());
+  addInput.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    const title = addInput.value.trim();
+    if (!title) return;
+    await invoke('create_note', {
+      title, content: '', tags: '', status: 'task', tabName: null,
+      dueDate: localDate(), reminderAt: null,
+    }).catch(() => {});
+    await openStartDropdown();
+  });
+
+  panel.querySelectorAll('.tw-pin[data-pin-idx]').forEach(star => {
+    star.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const p = orderedItems[parseInt(star.dataset.pinIdx)];
+      await invoke('toggle_task_pin', { sourceType: p.source_type, sourceId: p.source_id }).catch(() => {});
+      await openStartDropdown();
+    });
+  });
 
   wireRoutineSection(panel, () => openStartDropdown());
 

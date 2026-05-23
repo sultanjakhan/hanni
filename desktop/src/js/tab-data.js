@@ -2047,6 +2047,7 @@ async function loadSchedule(subTab) {
       const today = new Date().toISOString().slice(0, 10);
       const completions = await invoke('get_schedule_completions', { date: today }).catch(() => []);
       const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
+      schedules.forEach(s => { s.completed_today = completedIds.has(s.id); });
       const sortByExpired = (list) => {
         const notEx = list.filter(s => !isScheduleExpired(s));
         const ex = list.filter(s => isScheduleExpired(s));
@@ -2079,6 +2080,7 @@ async function loadSchedule(subTab) {
         const fresh = await invoke('get_schedules', { category: null }).catch(() => []);
         const comp = await invoke('get_schedule_completions', { date: today }).catch(() => []);
         const cIds = new Set(comp.filter(c => c.completed).map(c => c.schedule_id));
+        fresh.forEach(s => { s.completed_today = cIds.has(s.id); });
         const active = sortByExpired(fresh.filter(s => s.is_active));
         const frozen = fresh.filter(s => !s.is_active);
         dbv.schema.records = active;

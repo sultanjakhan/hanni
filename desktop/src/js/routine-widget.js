@@ -9,16 +9,10 @@ const CAT_ICONS = {
   practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽',
 };
 
-function localDate() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-/// HTML for the routine section; '' when there are no chains.
-export async function renderRoutineSection() {
-  const date = localDate();
-  const chains = await invoke('get_routine_chains').catch(() => []);
-  const now = await invoke('get_routine_now', { date }).catch(() => []);
+/// HTML for the routine section; '' when there are no chains. `now` is the
+/// get_routine_now payload; `recommendedId` is the active task to highlight blue;
+/// `chainRecId` is the chain whose start button to highlight as "сейчас".
+export async function renderRoutineSection(chains = [], now = [], recommendedId = null, chainRecId = null) {
   if (!chains.length) return '';
 
   let rows = '';
@@ -26,7 +20,8 @@ export async function renderRoutineSection() {
     const run = now.find(r => r.chain_id === c.id);
     if (run) {
       for (const t of run.tasks) {
-        rows += `<button class="tw-item" data-rt-task="${t.id}" data-rt-run="${run.run_id}">
+        const cls = t.id === recommendedId ? 'tw-item tw-item--recommended' : 'tw-item';
+        rows += `<button class="${cls}" data-rt-task="${t.id}" data-rt-run="${run.run_id}">
           <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
           <span class="tw-item-title">${escapeHtml(t.title)}</span>
         </button>`;
@@ -44,9 +39,11 @@ export async function renderRoutineSection() {
     } else {
       const isWake = c.trigger_type === 'sleep_end';
       const label = isWake ? `${escapeHtml(c.title)} — Я встал` : `${escapeHtml(c.title)} — начать`;
-      rows += `<button class="tw-item" data-rt-chain="${c.id}">
+      const isRec = c.id === chainRecId;
+      rows += `<button class="tw-item ${isRec ? 'tw-item--recommended' : ''}" data-rt-chain="${c.id}">
         <span class="tw-item-icon">${isWake ? '☀️' : '▶️'}</span>
         <span class="tw-item-title">${label}</span>
+        ${isRec ? '<span class="tw-now">сейчас</span>' : ''}
       </button>`;
     }
   }

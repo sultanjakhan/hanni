@@ -2,6 +2,7 @@ import { S, invoke, getTypeIcon } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { formatPropValue, startInlineEdit, startFixedCellEdit } from './db-cell-editors.js';
 import { getType } from './db-type-registry.js';
+import { timeToMin } from '../task-picker-sort.js';
 import { renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
 import { applyQuickDateFilter } from './db-filter-logic.js';
 import { getHiddenFixedCols, getDeletedFixedCols, getFixedColName, buildUnifiedColumns } from './db-properties.js';
@@ -15,6 +16,17 @@ import { enableRowDrag } from './db-drag-rows.js';
 import { enableColumnDrag } from './db-col-drag.js';
 import { wireColumnResize } from './db-col-resize.js';
 import { wireColumnClicks } from './db-col-clicks.js';
+
+// Computed value for the readonly "overdue" column type. Overdue when the record
+// opts into tracking (track_overdue), has a time that's already passed today, and
+// isn't completed today. completed_today is stamped onto the record by the caller.
+function computeOverdue(r) {
+  if (!r || !r.track_overdue || r.completed_today) return '';
+  const tm = timeToMin(r.time_of_day);
+  if (tm === null) return '';
+  const now = new Date();
+  return tm < now.getHours() * 60 + now.getMinutes() ? 'overdue' : '';
+}
 
 export async function renderTableView(el, ctx) {
   const {
@@ -83,7 +95,7 @@ export async function renderTableView(el, ctx) {
         return `<td>${val}</td>`;
       } else {
         const p = col.def;
-        const autoVals = { created_time: r.created_at, last_edited: r.updated_at, unique_id: rid };
+        const autoVals = { created_time: r.created_at, last_edited: r.updated_at, unique_id: rid, overdue: computeOverdue(r) };
         const raw = autoVals[p.type] ?? valuesMap[rid]?.[p.id] ?? '';
         const isReadonly = getType(p.type).auto;
         const cellClass = isReadonly ? 'cell-readonly' : 'cell-editable';

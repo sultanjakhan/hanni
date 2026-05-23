@@ -11,6 +11,11 @@ function selectBadgeColor(val, prop) {
 }
 
 export function formatPropValue(val, prop) {
+  if (prop.type === 'overdue') {
+    return val === 'overdue'
+      ? '<span class="cell-overdue" title="\u0412\u0440\u0435\u043c\u044f \u043f\u0440\u043e\u0448\u043b\u043e, \u0437\u0430\u0434\u0430\u0447\u0430 \u043d\u0435 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d\u0430">\u26a0\ufe0f \u041f\u0440\u043e\u0441\u0440\u043e\u0447\u0435\u043d\u043e</span>'
+      : '<span class="text-faint">\u2014</span>';
+  }
   if (!val && val !== 0) return '<span class="text-faint">\u2014</span>';
   if (prop.type === 'checkbox') return `<span class="cell-check-round${val === 'true' ? ' checked' : ''}"></span>`;
   if (prop.type === 'select' || prop.type === 'multi_select' || prop.type === 'status') {

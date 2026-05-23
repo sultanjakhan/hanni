@@ -16,7 +16,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
 
     // ── 1. Calendar events on date
     let mut e_stmt = conn.prepare(
-        "SELECT id, title, time, duration_minutes, category, color, completed
+        "SELECT id, title, time, duration_minutes, category, color, completed, priority
          FROM events WHERE date=?1"
     ).map_err(|e| format!("DB error: {}", e))?;
     let events_iter = e_stmt.query_map(rusqlite::params![date], |row| {
@@ -27,6 +27,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         let category: String = row.get(4)?;
         let color: String = row.get(5)?;
         let completed: i64 = row.get(6)?;
+        let priority: i64 = row.get(7)?;
         let planned_time = if time.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(time) };
         Ok(serde_json::json!({
             "source_type": "event",
@@ -39,6 +40,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             "completed": completed == 1,
             "status_extra": if completed == 1 { "done" } else { "planned" },
             "tracking_mode": "track",
+            "priority": priority,
         }))
     }).map_err(|e| format!("Query error: {}", e))?;
     for it in events_iter.flatten() { items.push(it); }
@@ -48,7 +50,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
     let mut s_stmt = conn.prepare(
         "SELECT s.id, s.title, s.category, s.frequency, s.frequency_days, s.time_of_day, s.until_date,
                 COALESCE(sc.completed, 0), COALESCE(sc.status, 'planned'),
-                COALESCE(s.tracking_mode, 'track')
+                COALESCE(s.tracking_mode, 'track'), s.priority
          FROM schedules s
          LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
          WHERE s.is_active = 1"
@@ -65,11 +67,12 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             row.get::<_, i64>(7)?,
             row.get::<_, String>(8)?,
             row.get::<_, String>(9)?,
+            row.get::<_, i64>(10)?,
         ))
     }).map_err(|e| format!("Query error: {}", e))?;
 
     for tup in schedules_iter.flatten() {
-        let (id, title, category, frequency, frequency_days, time_of_day, until_date, completed, sc_status, tracking_mode) = tup;
+        let (id, title, category, frequency, frequency_days, time_of_day, until_date, completed, sc_status, tracking_mode, priority) = tup;
         // until_date filter
         if let Some(ref ud) = until_date {
             if !ud.is_empty() && date.as_str() > ud.as_str() { continue; }
@@ -96,18 +99,20 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             "completed": completed == 1,
             "status_extra": sc_status,
             "tracking_mode": tracking_mode,
+            "priority": priority,
         }));
     }
 
     // ── 3. Notes tasks with due_date = date
     let mut n_stmt = conn.prepare(
-        "SELECT id, title, status FROM notes
+        "SELECT id, title, status, priority FROM notes
          WHERE archived = 0 AND status IN ('task', 'done', 'skipped') AND due_date = ?1"
     ).map_err(|e| format!("DB error: {}", e))?;
     let notes_iter = n_stmt.query_map(rusqlite::params![date], |row| {
         let id: i64 = row.get(0)?;
         let title: String = row.get(1)?;
         let status: String = row.get(2)?;
+        let priority: i64 = row.get(3)?;
         Ok(serde_json::json!({
             "source_type": "note",
             "source_id": id,
@@ -119,6 +124,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             "completed": status == "done",
             "status_extra": status,
             "tracking_mode": "check",
+            "priority": priority,
         }))
     }).map_err(|e| format!("Query error: {}", e))?;
     for it in notes_iter.flatten() { items.push(it); }
@@ -351,6 +357,30 @@ pub fn get_active_block(db: tauri::State<'_, HanniDb>) -> Result<Option<serde_js
         }
     ).ok();
     Ok(row)
+}
+
+/// Average actual duration (minutes) per task across finished blocks, for the
+/// picker to show an expected time. Only tasks with real history are returned.
+#[tauri::command]
+pub fn get_task_avg_durations(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let mut stmt = conn.prepare(
+        "SELECT source_type, source_id,
+                CAST(ROUND(AVG(duration_minutes)) AS INTEGER) AS avg_min, COUNT(*) AS n
+         FROM timeline_blocks
+         WHERE is_active = 0 AND source_type IS NOT NULL AND source_id IS NOT NULL
+               AND duration_minutes > 0
+         GROUP BY source_type, source_id"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let rows = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "source_type": r.get::<_, String>(0)?,
+            "source_id": r.get::<_, i64>(1)?,
+            "avg_minutes": r.get::<_, i64>(2)?,
+            "samples": r.get::<_, i64>(3)?,
+        }))
+    }).map_err(|e| format!("Query error: {}", e))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 // Sweep on app startup: close orphan active blocks from previous days.
