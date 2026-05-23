@@ -2564,6 +2564,18 @@ pub fn migrate_dedup_health_exercise(conn: &rusqlite::Connection) {
     ).ok();
 }
 
+/// health_log used to drop the per-session start time from Health Connect,
+/// so every walking/exercise row landed at the default 12:00 slot. Add a
+/// start_time TEXT column ("HH:MM") so import_exercise can persist the real
+/// start, and sync_health_to_calendar/timeline can use it. Idempotent (the
+/// ALTER fails silently if the column already exists).
+pub fn migrate_health_log_start_time(conn: &rusqlite::Connection) {
+    let _ = conn.execute(
+        "ALTER TABLE health_log ADD COLUMN start_time TEXT DEFAULT ''",
+        [],
+    );
+}
+
 /// One-time-per-launch cleanup: an earlier sync_health_to_calendar did
 /// DELETE+INSERT on every poll, so LAN-sync ended up with stale tombstones
 /// and the receiver accumulated duplicate Sleep/Exercise events. Collapse

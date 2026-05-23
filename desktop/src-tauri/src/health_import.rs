@@ -212,10 +212,16 @@ fn import_exercise(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
         let dur = s["duration_minutes"].as_f64().unwrap_or(0.0);
         let etype = s["type"].as_str().unwrap_or("other");
         let title = s["title"].as_str().unwrap_or("");
+        // Kotlin readExerciseSessions hands us the per-session start time
+        // already formatted "HH:MM" in the local zone — persist it so the
+        // Calendar/Timeline syncs can place the block at the real start
+        // instead of falling back to a 12:00 default.
+        let start_time = s["start_time"].as_str().unwrap_or("");
         let notes = format!("{}: {}", etype, title);
         let _ = conn.execute(
-            "INSERT INTO health_log (date, type, value, unit, notes, created_at) VALUES (?1,'exercise',?2,'minutes',?3,?4)",
-            rusqlite::params![date, dur, notes, now],
+            "INSERT INTO health_log (date, type, value, unit, notes, start_time, created_at)
+             VALUES (?1,'exercise',?2,'minutes',?3,?4,?5)",
+            rusqlite::params![date, dur, notes, start_time, now],
         );
         count += 1;
     }

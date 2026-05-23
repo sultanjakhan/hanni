@@ -53,23 +53,41 @@ fn sync_sleep(conn: &rusqlite::Connection, date: &str, type_id: i64) -> i64 {
 }
 
 fn sync_exercise(conn: &rusqlite::Connection, date: &str, type_id: i64) -> i64 {
-    // Exercise is stored in health_log as type='exercise', notes='running: Morning jog'
+    // Exercise is stored in health_log as type='exercise', notes='running: Morning jog',
+    // start_time as 'HH:MM' from Health Connect (or '' for legacy rows).
     let mut stmt = match conn.prepare(
-        "SELECT value, notes FROM health_log WHERE date=?1 AND type='exercise'"
+        "SELECT value, notes, COALESCE(start_time,'') FROM health_log
+         WHERE date=?1 AND type='exercise' ORDER BY start_time, rowid"
     ) { Ok(s) => s, Err(_) => return 0 };
 
-    let exercises: Vec<(f64, String)> = stmt.query_map(
-        rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?))
+    let exercises: Vec<(f64, String, String)> = stmt.query_map(
+        rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     ).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default();
 
     let mut count = 0i64;
-    for (dur_min, notes) in exercises {
+    let mut fallback_slot = 12 * 60i64;
+    for (dur_min, notes, st) in exercises {
         if dur_min < 5.0 { continue; }
-        // We don't have exact times for exercise from health_log,
-        // so place it at a default slot (12:00) with the known duration
-        let start = "12:00".to_string();
-        let end_min = 12 * 60 + dur_min as i64;
-        let end = format!("{:02}:{:02}", end_min / 60, end_min % 60);
+        // Use the real per-session start when we have it; otherwise lay
+        // walks down sequentially from 12:00 so back-to-back sessions
+        // don't stack on top of each other.
+        let (start, start_min) = if st.len() >= 5 && st.chars().nth(2) == Some(':') {
+            let s5 = st[..5].to_string();
+            let parts: Vec<&str> = s5.split(':').collect();
+            let hm = parts[0].parse::<i64>().unwrap_or(12) * 60
+                + parts.get(1).and_then(|p| p.parse::<i64>().ok()).unwrap_or(0);
+            (s5, hm)
+        } else {
+            let s = format!("{:02}:{:02}", fallback_slot / 60, fallback_slot % 60);
+            let m = fallback_slot;
+            fallback_slot += dur_min as i64;
+            (s, m)
+        };
+        let end_min = start_min + dur_min as i64;
+        // Clip end-of-day display at 23:59 so the timeline row doesn't run
+        // visually off into the next day; duration stays correct.
+        let display_end = end_min.min(1439);
+        let end = format!("{:02}:{:02}", display_end / 60, display_end % 60);
         conn.execute(
             "INSERT INTO timeline_blocks (type_id,date,start_time,end_time,duration_minutes,source,notes)
              VALUES (?1,?2,?3,?4,?5,'auto_health',?6)",

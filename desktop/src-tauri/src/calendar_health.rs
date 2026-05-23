@@ -94,27 +94,31 @@ pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> R
         }
     }
 
-    // Exercise (walking/running/etc) → events. Health Connect sessions don't
-    // carry per-session times in health_log yet, so we fan out from 12:00 in
-    // 1-minute steps; the index ensures multiple walks the same day get
-    // distinct event slots without clobbering each other.
+    // Exercise (walking/running/etc) → events. Uses the per-session start
+    // time persisted by import_exercise; only falls back to a fanned-out
+    // 12:00 slot for rows imported before the migration added the column.
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT value, notes FROM health_log
-         WHERE date=?1 AND type='exercise' ORDER BY rowid"
+        "SELECT value, notes, COALESCE(start_time,'') FROM health_log
+         WHERE date=?1 AND type='exercise' ORDER BY start_time, rowid"
     ) {
-        let rows: Vec<(f64, String)> = stmt.query_map(
-            rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?))
+        let rows: Vec<(f64, String, String)> = stmt.query_map(
+            rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         ).map(|rs| rs.filter_map(|r| r.ok()).collect()).unwrap_or_default();
-        let mut slot = 12 * 60i64; // start at 12:00
+        let mut slot = 12 * 60i64; // fallback start at 12:00
         let mut idx = 0;
-        for (dur, notes) in rows {
+        for (dur, notes, st) in rows {
             let dur_min = dur as i64;
             if dur_min < 5 { continue; }
             let etype = notes.split(':').next().unwrap_or("").trim();
             let detail = notes.splitn(2, ':').nth(1).unwrap_or("").trim();
             let title = exercise_title(etype);
-            let time = format!("{:02}:{:02}", slot / 60, slot % 60);
-            slot += 1;
+            let time = if st.len() >= 5 && st.chars().nth(2) == Some(':') {
+                st[..5].to_string()
+            } else {
+                let t = format!("{:02}:{:02}", slot / 60, slot % 60);
+                slot += 1;
+                t
+            };
             // Content-derived id: stable across re-imports for the same
             // walk on the same date in the same slot.
             let ext_id = format!("exercise:{date}:{idx}:{dur_min}");

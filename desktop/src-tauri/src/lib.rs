@@ -209,6 +209,7 @@ fn init_database() -> HanniDb {
     db::migrate_drop_mindset(&conn);
     db::migrate_dev_matrix(&conn);
     db::migrate_sync_meta(&conn);
+    db::migrate_health_log_start_time(&conn);
     db::migrate_dedup_health_exercise(&conn);
     db::migrate_dedup_auto_health_events(&conn);
     db::migrate_shopping_list(&conn);
