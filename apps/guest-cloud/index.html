@@ -197,7 +197,7 @@
     // Cache-bust: every deploy bumps this so the CDN's 5-min edge cache
     // doesn't pin gust-* modules to an old build (which silently breaks
     // the post-load render trigger below).
-    const V = '20260524e';
+    const V = '20260524f';
     for (const src of scripts) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');

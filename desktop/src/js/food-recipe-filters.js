@@ -144,7 +144,7 @@ export function recipeBlockLevel(r, bl) {
 }
 // matchBL = "should this recipe be hidden" — only hard hides; soft stays (deprioritised).
 export const matchBL = (r, bl) => recipeBlockLevel(r, bl) === 'hard';
-export const matchMeal = (r, f) => f === 'all' || (r.tags || '').split(',').map(t => t.trim()).includes(f);
+export const matchMeal = (r, f) => f === 'all' || (r.tags || '').split(/[,\s]+/).map(t => t.trim()).includes(f);
 export const matchCuisine = (r, f) => f === 'all' || (r.cuisine || 'other') === f;
 export const matchDiff = (r, f) => f === 'all' || (r.difficulty || 'easy') === f;
 export const matchSearch = (r, q) => !q || `${r.name} ${r.ingredients || ''}`.toLowerCase().includes(q);

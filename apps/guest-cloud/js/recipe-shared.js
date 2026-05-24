@@ -32,7 +32,14 @@
 
     const r = recipe || {};
     const imgApi = (window.HanniRecipe && window.HanniRecipe.image) || null;
-    const state = { tags: new Set((r.tags || 'universal').split(',').map(x => x.trim()).filter(Boolean)), diff: r.difficulty || 'easy', cuisine: r.cuisine || 'kz', image: r.image || '' };
+    // Split on comma or whitespace — tolerates legacy rows where the
+    // guest-create code joined tags with " shared-by:" (space-separated).
+    // Drop the `shared-by:*` meta-tag from the meal-chip state but keep it
+    // around in `metaTags` so save can write it back unchanged.
+    const allTagParts = (r.tags || 'universal').split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
+    const metaTags = allTagParts.filter(t => t.startsWith('shared-by:'));
+    const mealTags = allTagParts.filter(t => !t.startsWith('shared-by:'));
+    const state = { tags: new Set(mealTags.length ? mealTags : ['universal']), metaTags, diff: r.difficulty || 'easy', cuisine: r.cuisine || 'kz', image: r.image || '' };
     const mealsHtml = ['breakfast:Завтрак', 'lunch:Обед', 'dinner:Ужин', 'universal:Универсал']
       .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.tags.has(id)); }).join('');
     const diffsHtml = ['easy:Лёгкий', 'medium:Средний', 'hard:Сложный']
@@ -157,7 +164,7 @@
       const payload = {
         name, description: '', instructions, ingredients: ingredient_items.flatMap(i => [i.name, ...String(i.alternatives || '').split(',').map(s => s.trim()).filter(Boolean)]).join(', '),
         prep_time: v('r-prep'), cook_time: v('r-cook'), servings: v('r-serv') || 1, calories: v('r-cal'),
-        tags: [...state.tags].join(','), difficulty: state.diff, cuisine: state.cuisine,
+        tags: [...state.tags, ...state.metaTags].join(','), difficulty: state.diff, cuisine: state.cuisine,
         health_score: v('r-health') || 5, price_score: v('r-price') || 5,
         protein: v('r-protein'), fat: v('r-fat'), carbs: v('r-carbs'), image: state.image, ingredient_items,
       };

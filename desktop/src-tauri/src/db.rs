@@ -1508,6 +1508,18 @@ pub fn migrate_timeline_today(conn: &rusqlite::Connection) {
     ).ok();
 }
 
+// Normalise " shared-by:" (space) → ",shared-by:" (comma). The old axum
+// create_recipe joined existing tags with the auto-injected author tag
+// using a space, so the UI's split(",") rendered it as a single bogus chip.
+// Idempotent — REPLACE is a no-op when there's no space variant left.
+pub fn migrate_recipe_tags_separator(conn: &rusqlite::Connection) {
+    let _ = conn.execute(
+        "UPDATE recipes SET tags = REPLACE(tags, ' shared-by:', ',shared-by:') \
+         WHERE tags LIKE '% shared-by:%'",
+        [],
+    );
+}
+
 pub fn migrate_sleep(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sleep_sessions (

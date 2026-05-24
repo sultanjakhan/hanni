@@ -75,7 +75,7 @@ pub async fn create_recipe(
     let tags = if prev_tags.is_empty() {
         format!("shared-by:{}", author_tag)
     } else {
-        format!("{} shared-by:{}", prev_tags, author_tag)
+        format!("{},shared-by:{}", prev_tags, author_tag)
     };
     // Build flat ingredients string from items if provided (for legacy `ingredients` column).
     let flat_ingredients = if let Some(items) = &req.ingredient_items {

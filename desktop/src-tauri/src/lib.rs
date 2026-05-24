@@ -195,6 +195,7 @@ fn init_database() -> HanniDb {
     db::migrate_timeline_today(&conn);
     commands_timeline_today::auto_close_orphan_blocks(&conn);
     db::migrate_sleep(&conn);
+    db::migrate_recipe_tags_separator(&conn);
     db::migrate_sports_catalog(&conn);
     db::migrate_food_blacklist(&conn);
     db::migrate_catalog_subgroup(&conn);

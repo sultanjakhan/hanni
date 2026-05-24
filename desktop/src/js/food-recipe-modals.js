@@ -64,7 +64,10 @@ export async function showRecipeDetail(id, reloadFn) {
   const steps = parseSteps(recipe.instructions || '');
   const diffLabel = { easy: 'лёгкая', medium: 'средняя', hard: 'сложная' }[recipe.difficulty] || 'лёгкая';
   const MEAL_LABELS = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', universal: 'Универсал' };
-  const mealHtml = (recipe.tags || '').split(',').map(t => t.trim()).filter(Boolean)
+  // Tolerant split (handles legacy space-joined `shared-by:`) + drop
+  // meta-tags from chip rendering — `shared-by:guest` is metadata, not UX.
+  const mealHtml = (recipe.tags || '').split(/[,\s]+/).map(t => t.trim()).filter(Boolean)
+    .filter(t => !t.startsWith('shared-by:'))
     .map(t => `<span class="rd-tag rd-tag--meal">${MEAL_LABELS[t] || t}</span>`).join('');
   const cuisines = await loadCuisines();
   const cuisineLabel = cuisines.find(c => c.id === recipe.cuisine)?.label || '🌍 Другая';

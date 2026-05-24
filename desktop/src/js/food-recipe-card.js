@@ -9,7 +9,8 @@ export const getIngrNames = (r) => (r.ingredients || '').split(',').map(s => {
 }).filter(Boolean);
 
 export function renderCard(r, onIngrClick, onDuplicate) {
-  const tags = (r.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+  const tags = (r.tags || '').split(/[,\s]+/).map(t => t.trim()).filter(Boolean)
+    .filter(t => !t.startsWith('shared-by:'));
   const badgesHtml = tags.map(t => {
     const c = MEAL_COLORS[t] || 'gray';
     const label = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', universal: 'Универсал' }[t] || t;
