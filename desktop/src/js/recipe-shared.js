@@ -134,6 +134,9 @@
       const t = parseInt(s.dataset.step);
       if (t === 1 || nameOk()) showStep(t);
     });
+    // In edit-mode the save button must be reachable from step 1, not just
+    // step 3 — re-run showStep(1) so display is recomputed for `recipe`.
+    if (recipe) showStep(1);
 
     overlay.querySelector('#r-save').onclick = async () => {
       if (!nameOk()) return;
