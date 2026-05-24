@@ -387,7 +387,11 @@ document.addEventListener('keydown', (e) => {
       // just imported, or anything Mac pushed while we were backgrounded).
       try { activateView(); } catch (_) {}
     });
-    startHealthPolling(); // 15-min poll while foregrounded
+    startHealthPolling(); // 3-min poll while foregrounded
+    // Schedule WorkManager-driven periodic HC pull so the watch → Hanni →
+    // Mac path keeps flowing even when this WebView/Rust process is dead.
+    // Android caps the interval at 15 min; we ask for the minimum.
+    invoke('bg_sync_enable', { intervalMinutes: 15 }).catch(() => {});
     checkAndroidUpdate(); // GitHub Releases → APK update banner (no-op on desktop)
   }
 

@@ -99,6 +99,9 @@ dependencies {
     implementation("androidx.health.connect:connect-client:1.1.0-alpha10")
     // Coroutines for Health Connect async calls
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // WorkManager — periodic background pull from Health Connect even when
+    // the Tauri WebView/Rust process is not running.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")

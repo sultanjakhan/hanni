@@ -36,6 +36,7 @@ mod sync_commands;
 mod health_connect;
 mod health_connect_plugin;
 mod health_import;
+mod bg_sync;
 mod sleep_analysis;
 mod timeline_health;
 mod calendar_health;
@@ -322,7 +323,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(health_connect_plugin::init())
-        .plugin(android_update::install_apk_plugin());
+        .plugin(android_update::install_apk_plugin())
+        .plugin(bg_sync::init());
 
     // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
     // POSITION/SIZE are handled in window_state.rs (sync atomic write to a
@@ -431,6 +433,10 @@ pub fn run() {
             android_update::install_apk,
             android_update::can_install_apk,
             android_update::open_install_settings,
+            bg_sync::bg_sync_enable,
+            bg_sync::bg_sync_disable,
+            bg_sync::bg_sync_status,
+            bg_sync::bg_sync_run_once,
             macos::send_notification,
             macos::set_volume,
             macos::open_app,
