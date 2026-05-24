@@ -2,6 +2,7 @@
   "identifier": "mobile",
   "description": "Capability for Android",
   "platforms": ["android", "iOS"],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "opener:default",
