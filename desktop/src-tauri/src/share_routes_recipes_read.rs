@@ -95,7 +95,7 @@ pub async fn get_recipe(
     let mut recipe = conn.query_row(
         "SELECT id, name, description, ingredients, instructions, prep_time, cook_time,
                 servings, calories, tags, difficulty, cuisine, protein, fat, carbs,
-                favorite, health_score, price_score
+                favorite, health_score, price_score, image
          FROM recipes WHERE id=?1",
         rusqlite::params![id],
         |r| Ok(serde_json::json!({
@@ -117,6 +117,7 @@ pub async fn get_recipe(
             "favorite": r.get::<_, i64>(15).unwrap_or(0),
             "health_score": r.get::<_, i64>(16).unwrap_or(5),
             "price_score": r.get::<_, i64>(17).unwrap_or(5),
+            "image": r.get::<_, String>(18).unwrap_or_default(),
         }))
     ).map_err(|_| (StatusCode::NOT_FOUND, "Recipe not found".into()))?;
 

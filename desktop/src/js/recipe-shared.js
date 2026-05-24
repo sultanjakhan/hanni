@@ -37,7 +37,7 @@
       .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.tags.has(id)); }).join('');
     const diffsHtml = ['easy:Лёгкий', 'medium:Средний', 'hard:Сложный']
       .map(s => { const [id, l] = s.split(':'); return chip(id, l, state.diff === id); }).join('');
-    const defC = cuisines.find(c => (c.id || c.code) === state.cuisine);
+    const defC = cuisines.find(c => c.code === state.cuisine);
     const stepsPaneHtml = stepsApi ? `<div id="r-steps"></div>`
       : `<textarea class="form-textarea" id="r-instr" rows="6" placeholder="1. Сварить картофель 20 мин.\n2. Натереть на тёрке."></textarea>`;
 
@@ -124,7 +124,9 @@
       overlay.querySelectorAll('.rw-step').forEach(s => s.classList.toggle('active', s.dataset.step === String(n)));
       overlay.querySelector('#r-back').style.display = n > 1 ? '' : 'none';
       overlay.querySelector('#r-next').style.display = n < 3 ? '' : 'none';
-      overlay.querySelector('#r-save').style.display = n === 3 ? '' : 'none';
+      // Edit-mode: save always visible (user may want to fix one field without
+      // walking through the wizard). Create-mode keeps the wizard flow.
+      overlay.querySelector('#r-save').style.display = (recipe || n === 3) ? '' : 'none';
     }
     overlay.querySelector('#r-back').onclick = () => showStep(Math.max(1, step - 1));
     overlay.querySelector('#r-next').onclick = () => { if (step > 1 || nameOk()) showStep(Math.min(3, step + 1)); };
@@ -187,15 +189,15 @@
       const lc = q.toLowerCase();
       const matches = lc ? cuisines.filter(c => c.name.toLowerCase().includes(lc)) : cuisines;
       dd.innerHTML = matches.map(c =>
-        `<div class="ingr-autocomplete-item" data-id="${esc(c.id || c.code)}">${c.emoji} ${esc(c.name)}</div>`).join('')
+        `<div class="ingr-autocomplete-item" data-id="${esc(c.code)}">${c.emoji} ${esc(c.name)}</div>`).join('')
         + `<div class="ingr-autocomplete-item ingr-autocomplete-create" data-id="__new__">+ Новая кухня</div>`;
       dd.style.display = '';
       dd.querySelectorAll('.ingr-autocomplete-item').forEach(opt => {
         opt.onmousedown = (e) => {
           e.preventDefault(); dd.style.display = 'none';
           if (opt.dataset.id === '__new__') return showNewCuisineForm();
-          const c = cuisines.find(x => (x.id || x.code) === opt.dataset.id);
-          if (c) { state.cuisine = c.id || c.code; inp.value = `${c.emoji} ${c.name}`; }
+          const c = cuisines.find(x => x.code === opt.dataset.id);
+          if (c) { state.cuisine = c.code; inp.value = `${c.emoji} ${c.name}`; }
         };
       });
     }

@@ -285,58 +285,15 @@
     } catch (e) { alert('Ошибка: ' + (e.message || e)); }
   }
 
-  function openEditModal() {
+  // Edit uses the same wizard modal as Add (recipe-shared.js) so guests get
+  // ingredients, steps, image, tags, cuisine, KBJU — not just 7 primitive
+  // fields. The bare-bones legacy modal silently dropped structured data.
+  async function openEditModal() {
     const r = state.current;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `<div class="modal" style="max-width:480px;max-height:90vh;overflow-y:auto">
-      <div class="modal-title">Изменить рецепт</div>
-      <div class="form-group"><label class="form-label">Название</label>
-        <input class="form-input" id="re-name" value="${esc(r.name)}"></div>
-      <div class="form-group"><label class="form-label">Описание</label>
-        <textarea class="form-textarea" id="re-desc" rows="2">${esc(r.description || '')}</textarea></div>
-      <div class="form-group"><label class="form-label">Приготовление</label>
-        <textarea class="form-textarea" id="re-instr" rows="4">${esc(stepsToText(r.instructions || ''))}</textarea></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="form-group"><label class="form-label">Подготовка (мин)</label>
-          <input class="form-input" id="re-prep" type="number" value="${r.prep_time || 0}"></div>
-        <div class="form-group"><label class="form-label">Готовка (мин)</label>
-          <input class="form-input" id="re-cook" type="number" value="${r.cook_time || 0}"></div>
-        <div class="form-group"><label class="form-label">Порций</label>
-          <input class="form-input" id="re-serv" type="number" value="${r.servings || 1}"></div>
-        <div class="form-group"><label class="form-label">Калории</label>
-          <input class="form-input" id="re-kcal" type="number" value="${r.calories || 0}"></div>
-      </div>
-      <div id="re-msg"></div>
-      <div class="modal-actions">
-        <button class="btn-secondary" id="re-cancel">Отмена</button>
-        <button class="btn-primary" id="re-save">Сохранить</button>
-      </div></div>`;
-    document.body.appendChild(overlay);
-    const close = () => overlay.remove();
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    overlay.querySelector('#re-cancel').onclick = close;
-    overlay.querySelector('#re-save').onclick = async () => {
-      const msg = overlay.querySelector('#re-msg');
-      const payload = {
-        name: overlay.querySelector('#re-name').value.trim(),
-        description: overlay.querySelector('#re-desc').value,
-        instructions: overlay.querySelector('#re-instr').value,
-        prep_time: parseInt(overlay.querySelector('#re-prep').value) || 0,
-        cook_time: parseInt(overlay.querySelector('#re-cook').value) || 0,
-        servings: parseInt(overlay.querySelector('#re-serv').value) || 1,
-        calories: parseInt(overlay.querySelector('#re-kcal').value) || 0,
-        author: recallAuthor() || 'guest',
-      };
-      if (!payload.name) { msg.innerHTML = '<div class="err">Название обязательно</div>'; return; }
-      msg.innerHTML = '<div class="muted">Сохраняем…</div>';
-      try {
-        await api(`/recipes/${r.id}`, { method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        close();
-        await openDetail(r.id);
-      } catch (e) { msg.innerHTML = `<div class="err">${esc(e.message || e)}</div>`; }
-    };
+    if (!window.HanniGuest?.recipeAdd?.showEditRecipeModal) {
+      alert('Модуль редактирования не загружен'); return;
+    }
+    await window.HanniGuest.recipeAdd.showEditRecipeModal(r, state.catalog, () => openDetail(r.id));
   }
 
   function render() {

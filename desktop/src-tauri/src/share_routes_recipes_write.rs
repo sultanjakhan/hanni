@@ -135,6 +135,16 @@ struct UpdateRecipeReq {
     cook_time: Option<i64>,
     servings: Option<i64>,
     calories: Option<i64>,
+    tags: Option<String>,
+    difficulty: Option<String>,
+    cuisine: Option<String>,
+    protein: Option<i64>,
+    fat: Option<i64>,
+    carbs: Option<i64>,
+    health_score: Option<i64>,
+    price_score: Option<i64>,
+    image: Option<String>,
+    ingredient_items: Option<Vec<IngredientItem>>,
     author: Option<String>,
 }
 
@@ -166,26 +176,64 @@ pub async fn update_recipe(
     macro_rules! add { ($col:expr, $val:expr) => {
         if let Some(v) = $val { updates.push(format!("{}=?", $col)); params.push(Box::new(v)); }
     }; }
+    // If ingredient_items provided, derive the flat `ingredients` column from
+    // them — matches CreateRecipeReq behavior so the legacy text field stays
+    // in sync with the structured rows.
+    let derived_ingredients: Option<String> = req.ingredient_items.as_ref().map(|items|
+        items.iter()
+            .filter(|i| !i.name.trim().is_empty())
+            .map(|i| format!("{}: {}{}",
+                i.name, i.amount.unwrap_or(0.0), i.unit.clone().unwrap_or_else(|| "г".into())))
+            .collect::<Vec<_>>().join(", ")
+    );
     add!("name", req.name.clone());
     add!("description", req.description.clone());
-    add!("ingredients", req.ingredients.clone());
+    add!("ingredients", derived_ingredients.or(req.ingredients.clone()));
     add!("instructions", req.instructions.clone());
     add!("prep_time", req.prep_time);
     add!("cook_time", req.cook_time);
     add!("servings", req.servings);
     add!("calories", req.calories);
-    if updates.is_empty() {
+    add!("tags", req.tags.clone());
+    add!("difficulty", req.difficulty.clone());
+    add!("cuisine", req.cuisine.clone());
+    add!("protein", req.protein);
+    add!("fat", req.fat);
+    add!("carbs", req.carbs);
+    add!("health_score", req.health_score);
+    add!("price_score", req.price_score);
+    add!("image", req.image.clone());
+    let has_field_updates = !updates.is_empty();
+    let has_items = req.ingredient_items.is_some();
+    if !has_field_updates && !has_items {
         return Err((StatusCode::BAD_REQUEST, "No fields to update".into()));
     }
-    updates.push("updated_at=?".into());
-    params.push(Box::new(now.clone()));
-    params.push(Box::new(id));
-    let sql = format!("UPDATE recipes SET {} WHERE id=?", updates.join(", "));
-    let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
-    let changed = conn.execute(&sql, params_ref.as_slice())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    if changed == 0 {
-        return Err((StatusCode::NOT_FOUND, "Recipe not found".into()));
+    if has_field_updates {
+        updates.push("updated_at=?".into());
+        params.push(Box::new(now.clone()));
+        params.push(Box::new(id));
+        let sql = format!("UPDATE recipes SET {} WHERE id=?", updates.join(", "));
+        let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let changed = conn.execute(&sql, params_ref.as_slice())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        if changed == 0 {
+            return Err((StatusCode::NOT_FOUND, "Recipe not found".into()));
+        }
+    }
+    // Replace structured ingredients when provided. Matches Hanni-side
+    // update_recipe semantics (DELETE + INSERT) so guests can fix ingredient
+    // amounts/units without losing the structured rows.
+    if let Some(items) = &req.ingredient_items {
+        conn.execute("DELETE FROM recipe_ingredients WHERE recipe_id=?1",
+            rusqlite::params![id]).ok();
+        for it in items.iter().filter(|i| !i.name.trim().is_empty()) {
+            let _ = conn.execute(
+                "INSERT INTO recipe_ingredients (recipe_id, name, amount, unit) VALUES (?1,?2,?3,?4)",
+                rusqlite::params![id, it.name.trim(),
+                    it.amount.unwrap_or(0.0), it.unit.clone().unwrap_or_else(|| "г".into())],
+            );
+        }
+        crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     }
     let author_tag = req.author.as_deref().unwrap_or("guest");
     log_activity(&conn, ctx.id, "edit_recipe",
