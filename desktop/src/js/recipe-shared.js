@@ -134,9 +134,17 @@
       const t = parseInt(s.dataset.step);
       if (t === 1 || nameOk()) showStep(t);
     });
-    // In edit-mode the save button must be reachable from step 1, not just
-    // step 3 — re-run showStep(1) so display is recomputed for `recipe`.
-    if (recipe) showStep(1);
+    // Edit-mode: collapse the 3-step wizard into one long scrollable form.
+    // Users want to fix any single field (name, prep_time, an ingredient)
+    // without walking through validation gates between panes. The wizard
+    // flow stays for new recipes where step-by-step guidance helps.
+    if (recipe) {
+      overlay.querySelector('.rw-nav').style.display = 'none';
+      overlay.querySelectorAll('.rw-pane').forEach(p => { p.style.display = ''; });
+      overlay.querySelector('#r-back').style.display = 'none';
+      overlay.querySelector('#r-next').style.display = 'none';
+      overlay.querySelector('#r-save').style.display = '';
+    }
 
     overlay.querySelector('#r-save').onclick = async () => {
       if (!nameOk()) return;
