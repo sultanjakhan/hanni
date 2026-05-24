@@ -65,6 +65,40 @@
         return o.v;
       } catch { return null; }
     }
+    // Last-known-good tunnel URL (independent of META cache). When the URL
+    // baked into ?t= is dead, we try this BEFORE hitting Firestore — keeps
+    // repeat visitors off the quota even when Hanni has restarted.
+    const TUNNEL_KEY = 'hg:tunnel:' + token;
+    const TUNNEL_TTL = 24 * 60 * 60 * 1000;
+    function loadCachedTunnel() {
+      try {
+        const raw = localStorage.getItem(TUNNEL_KEY);
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        if (Date.now() - o.t > TUNNEL_TTL) return null;
+        return o.v;
+      } catch { return null; }
+    }
+    function saveCachedTunnel(url) {
+      if (!url) return;
+      try { localStorage.setItem(TUNNEL_KEY, JSON.stringify({ t: Date.now(), v: url })); } catch {}
+    }
+    async function pingTunnel(url) {
+      try {
+        const r = await fetch(url.replace(/\/+$/, '') + '/share/health',
+          { credentials: 'omit', mode: 'cors' });
+        return r.ok;
+      } catch { return false; }
+    }
+    function synthDoc(tunnelUrl) {
+      return { fields: {
+        tab:         { stringValue: qp.get('tab')   || 'food' },
+        scope:       { stringValue: qp.get('s')     || 'all'  },
+        label:       { stringValue: qp.get('label') || 'Общий доступ' },
+        permissions: { stringValue: qp.get('p')     || '["view","add","edit","delete","comment"]' },
+        tunnel_url:  { stringValue: tunnelUrl },
+      } };
+    }
     const metaUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}`
       + `/databases/(default)/documents/share_links/${encodeURIComponent(token)}`
       + `?key=${encodeURIComponent(cfg.apiKey)}`;
@@ -75,31 +109,25 @@
     const qp = new URLSearchParams(location.search);
     const tunnelOverride = qp.get('t');
     let doc = loadCachedMeta(META_TTL);
-    if (!doc && tunnelOverride) {
-      // Pre-flight: cloudflared trycloudflare URLs are EPHEMERAL (every
-      // Hanni restart = new URL), so a `?t=` from yesterday is usually
-      // dead. Probe /share/health and bail with a clear message before
-      // we waste the Firestore quota on a fallback that will 429 anyway.
-      let tunnelOk = false;
-      try {
-        const r = await fetch(tunnelOverride.replace(/\/+$/, '') + '/share/health',
-          { credentials: 'omit', mode: 'cors' });
-        tunnelOk = r.ok;
-      } catch {}
-      if (!tunnelOk) {
-        app.innerHTML = '<div class="err">Эта ссылка устарела или хозяин сейчас офлайн.<br><small>Перешли ему: «Hanni перезапустился, нужна новая ссылка». Cloudflare-туннель меняется при каждом старте.</small></div>';
-        return;
-      }
-      // Synthesise a minimal Firestore-shaped doc so the unwrap code below
-      // works unchanged. Real metadata will fill in on next successful fetch.
-      doc = { fields: {
-        tab:         { stringValue: qp.get('tab')   || 'food' },
-        scope:       { stringValue: qp.get('s')     || 'all'  },
-        label:       { stringValue: qp.get('label') || 'Общий доступ' },
-        permissions: { stringValue: qp.get('p')     || '["view","add","edit","delete","comment"]' },
-        tunnel_url:  { stringValue: tunnelOverride },
-      } };
+    // Step 1: try the tunnel URL baked into the link (?t=). When it's alive
+    // we skip Firestore entirely — that's the whole point of `?t=`.
+    if (!doc && tunnelOverride && await pingTunnel(tunnelOverride)) {
+      saveCachedTunnel(tunnelOverride);
+      doc = synthDoc(tunnelOverride);
     }
+    // Step 2: ?t= is dead (or absent) — try the last-known-good tunnel we
+    // saved on a previous visit. Keeps repeat visitors off Firestore even
+    // after Hanni restarts, as long as another visitor has fetched the
+    // fresh URL within the last 24h.
+    if (!doc) {
+      const cachedTunnel = loadCachedTunnel();
+      if (cachedTunnel && cachedTunnel !== tunnelOverride && await pingTunnel(cachedTunnel)) {
+        doc = synthDoc(cachedTunnel);
+      }
+    }
+    // Step 3: both URLs dead — read share_links/{token} from Firestore. The
+    // mirror loop pushes the live tunnel_url on every Hanni start, so this
+    // is the source of truth when local caches miss.
     if (!doc) {
       try {
         const r = await fetch(metaUrl, { credentials: 'omit' });
@@ -110,6 +138,7 @@
         if (!r.ok) throw new Error('Firestore ' + r.status);
         doc = await r.json();
         try { localStorage.setItem(META_KEY, JSON.stringify({ t: Date.now(), v: doc })); } catch {}
+        saveCachedTunnel(doc.fields?.tunnel_url?.stringValue);
       } catch (e) {
         // 429 / network error → try stale cache; only then bail.
         const stale = loadCachedMeta(Infinity);
@@ -168,7 +197,7 @@
     // Cache-bust: every deploy bumps this so the CDN's 5-min edge cache
     // doesn't pin gust-* modules to an old build (which silently breaks
     // the post-load render trigger below).
-    const V = '20260523c';
+    const V = '20260524c';
     for (const src of scripts) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');
