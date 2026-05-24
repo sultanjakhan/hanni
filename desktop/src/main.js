@@ -263,35 +263,31 @@ document.addEventListener('keydown', (e) => {
 
   // Load custom pages into TAB_REGISTRY before rendering.
   // Android: the webview boots in parallel with the Rust setup() hook, where
-  // the DB is managed only after init_database() finishes. The first call can
-  // hit unmanaged state and fail, leaving only the forced 'chat' tab. Poll
-  // until the DB answers. On desktop the DB is managed before the window
-  // exists, so this succeeds on attempt #0 (zero delay, behaviour unchanged).
-  let customPages = [];
-  const deadline = Date.now() + 5000;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      customPages = await invoke('get_custom_pages');
-      if (attempt > 0) console.log('[hanni] DB ready after', attempt, 'attempts');
-      break;
-    } catch (e) {
-      if (Date.now() >= deadline) {
-        // Android cold-start race: webview can load before Rust state.manage(db)
-        // finishes, and subsequent invokes never recover in this session. A
-        // single reload picks up the now-managed state. Guarded by sessionStorage
-        // so we don't loop if the reload doesn't help.
-        const RELOAD_KEY = '_hanni_db_reload_attempted';
-        if (!sessionStorage.getItem(RELOAD_KEY)) {
-          sessionStorage.setItem(RELOAD_KEY, '1');
-          console.warn('[hanni] DB not ready in 5s — reloading once to recover');
-          location.reload();
-          return;
-        }
-        console.error('[hanni] DB not ready after reload retry, chat-only fallback', e);
-        break;
+  // the DB is managed only after init_database() finishes. While migrations
+  // run, invoke() can hang indefinitely (no resolve, no reject), so a bare
+  // `await invoke()` deadlocks main.js. Wrap each attempt in a Promise.race
+  // with a per-attempt timeout, retry until total deadline, then fall through
+  // with empty customPages — the UI still renders, custom pages just won't
+  // appear until next launch. On desktop attempt #0 wins immediately.
+  const dbReady = async (cmd, args, perAttemptMs = 800, totalMs = 30000) => {
+    const end = Date.now() + totalMs;
+    for (;;) {
+      try {
+        return await Promise.race([
+          invoke(cmd, args),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('attempt-timeout')), perAttemptMs)),
+        ]);
+      } catch (e) {
+        if (Date.now() >= end) throw e;
+        await new Promise(r => setTimeout(r, 200));
       }
-      await new Promise(r => setTimeout(r, attempt < 10 ? 100 : 300));
     }
+  };
+  let customPages = [];
+  try {
+    customPages = await dbReady('get_custom_pages');
+  } catch (e) {
+    console.warn('[hanni] get_custom_pages not ready in 30s, continuing without custom pages', e);
   }
   for (const page of customPages) {
     const tabId = `page_${page.id}`;
@@ -324,7 +320,10 @@ document.addEventListener('keydown', (e) => {
   // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis
   for (const tabId of S.openTabs) {
     try {
-      const raw = await invoke('get_ui_state', { key: `tab_meta_${tabId}` });
+      const raw = await Promise.race([
+        invoke('get_ui_state', { key: `tab_meta_${tabId}` }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('tab_meta-timeout')), 1500)),
+      ]);
       if (raw) {
         const meta = JSON.parse(raw);
         if (meta.icon) {
@@ -366,7 +365,10 @@ document.addEventListener('keydown', (e) => {
 
   // Auto-restore last conversation (reuse loadConversation to get feedback buttons + ratings)
   try {
-    const convs = await invoke('get_conversations', { limit: 1 });
+    const convs = await Promise.race([
+      invoke('get_conversations', { limit: 1 }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('get_conversations-timeout')), 3000)),
+    ]);
     if (convs.length > 0 && convs[0].id) {
       await loadConversation(convs[0].id);
     }
