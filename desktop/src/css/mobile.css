@@ -5,6 +5,31 @@
 
 /* ── Mobile fixes (toolbar + FAB + Day-grid) ── */
 
+/* Eliminate Android WebView's 300ms click delay + flaky tap-to-click on
+   interactive elements. Without `touch-action: manipulation` the browser
+   waits to see if the tap is a double-tap-to-zoom and frequently drops
+   the click on quick or off-center taps — symptom: "кнопки не нажимаются"
+   on FAB widgets (tw-btn/mw-btn/nw-btn/qw-btn), drawer rows, and chips. */
+.mobile button,
+.mobile [role="button"],
+.mobile a,
+.mobile .tab-item,
+.mobile .mw-btn,
+.mobile .nw-btn,
+.mobile .qw-btn,
+.mobile .tw-btn,
+.mobile .setting-pill,
+.mobile .tab-settings-tab,
+.mobile .sub-tab-pill,
+.mobile .uni-tab,
+.mobile #mobile-hamburger,
+.mobile #tab-add,
+.mobile .tab-dropdown-item {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+
 /* Sub-tab bar (Дашборд / Таблица / Цели / Заметки / Память):
    on narrow viewports the last tab gets cut off. Make the row
    horizontally scrollable so all tabs remain reachable. */
