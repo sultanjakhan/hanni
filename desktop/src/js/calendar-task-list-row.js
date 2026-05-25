@@ -26,10 +26,13 @@ export function renderItemRow(item, dateStr) {
   const active = item.block?.is_active;
   const done = !!item.done;
   const pr = item.priority || 0;
+  const eff = item._eff != null ? item._eff : pr;
+  // Map effective priority to one of 6 colour buckets (matches priority pills).
+  const effBucket = Math.max(0, Math.min(5, Math.round(eff)));
   const target = item.targetMinutes || 0;
   const actual = item.actualMinutes || 0;
   const targetReached = target > 0 && actual >= target;
-  const cls = ['ctl-row', done && 'ctl-done', active && 'ctl-active', pr > 0 && `ctl-pr-${pr}`, item.overdueDate && 'ctl-overdue'].filter(Boolean).join(' ');
+  const cls = ['ctl-row', done && 'ctl-done', active && 'ctl-active', pr > 0 && `ctl-pr-${pr}`, item.overdueDate && 'ctl-overdue', effBucket > 0 && `ctl-eff-${effBucket}`, item._isTopEff && !done && 'ctl-top-eff'].filter(Boolean).join(' ');
   const durBadge = active && item.block?.duration_minutes ? `<span class="ctl-duration">${item.block.duration_minutes} мин</span>` : '';
   const progressBadge = target > 0
     ? `<span class="ctl-progress${targetReached ? ' ctl-progress-done' : ''}">${actual} / ${target} мин</span>`
@@ -52,6 +55,7 @@ export function renderItemRow(item, dateStr) {
     <div class="ctl-check${done ? ' done' : ''}" data-ctl-check>${done ? '✓' : ''}</div>
     <span class="ctl-icon">${item.icon}</span>
     <span class="ctl-title">${escapeHtml(item.title)}</span>
+    ${item._isTopEff && !done ? '<span class="ctl-top-badge" title="Топ важности на сегодня">🔥</span>' : ''}
     ${overdueBadge}
     ${progressBadge}
     ${durBadge}

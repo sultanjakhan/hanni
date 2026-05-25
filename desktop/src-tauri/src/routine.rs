@@ -5,10 +5,13 @@
 use crate::types::HanniDb;
 
 fn node_json(r: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    // source_id may be an integer (legacy) or a UUID string (post-CRR
+    // schedules). Read as Option<String>; SQLite returns either text
+    // verbatim or numeric coerced to text via rusqlite's TryFrom impl.
     Ok(serde_json::json!({
         "id": r.get::<_, i64>(0)?,
         "source_type": r.get::<_, String>(1)?,
-        "source_id": r.get::<_, Option<i64>>(2)?,
+        "source_id": r.get::<_, Option<String>>(2)?,
         "title": r.get::<_, String>(3)?,
         "category": r.get::<_, String>(4)?,
         "icon": r.get::<_, Option<String>>(5)?,
@@ -68,7 +71,7 @@ pub fn get_routine_chains(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_jso
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn create_routine_node(
-    chain_id: i64, source_type: String, source_id: Option<i64>, title: String,
+    chain_id: i64, source_type: String, source_id: Option<String>, title: String,
     category: Option<String>, pos_x: i64, pos_y: i64, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
@@ -87,7 +90,7 @@ pub fn create_routine_node(
 pub fn update_routine_node(
     id: i64, title: Option<String>, category: Option<String>, pos_x: Option<i64>,
     pos_y: Option<i64>, priority: Option<i64>, requirement: Option<String>,
-    source_id: Option<i64>, db: tauri::State<'_, HanniDb>,
+    source_id: Option<String>, db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
     if let Some(v) = title { conn.execute("UPDATE routine_nodes SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }

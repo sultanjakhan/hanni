@@ -20,7 +20,6 @@ fn shift_date(date: &str, delta: i64) -> Result<String, String> {
 pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut items: Vec<serde_json::Value> = Vec::new();
-    eprintln!("[get_today_planned] called date={}", date);
 
     // ── 1. Calendar events on date
     let mut e_stmt = conn.prepare(
@@ -52,7 +51,6 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         }))
     }).map_err(|e| format!("Query error: {}", e))?;
     for it in events_iter.flatten() { items.push(it); }
-    eprintln!("[get_today_planned] after events: {} items", items.len());
 
     // ── 2. Schedules matching today + completion status
     let dow = day_of_week(&date)?;
@@ -65,36 +63,10 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
          LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
          WHERE s.is_active = 1"
     ).map_err(|e| format!("DB error: {}", e))?;
+    // schedules.id is TEXT after cr-sqlite CRR conversion — read as String.
     let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone()], |row| {
         Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, Option<String>>(6)?,
-            row.get::<_, i64>(7)?,
-            row.get::<_, String>(8)?,
-            row.get::<_, String>(9)?,
-            row.get::<_, i64>(10)?,
-            row.get::<_, i64>(11)?,
-        ))
-    }).map_err(|e| format!("Query error: {}", e))?;
-
-    let mut sch_count = 0i64;
-    let mut parse_err_count = 0i64;
-    for row_res in schedules_iter {
-        match row_res {
-            Ok(_) => sch_count += 1,
-            Err(e) => { parse_err_count += 1; if parse_err_count < 3 { eprintln!("[planned] sched parse err: {}", e); } }
-        }
-    }
-    eprintln!("[planned] sched rows OK={} err={}", sch_count, parse_err_count);
-    // Re-run for actual processing.
-    let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone()], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
+            row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
@@ -142,8 +114,6 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         }));
     }
 
-    eprintln!("[get_today_planned] after schedules: {} items", items.len());
-
     // ── 2b. Carry-over: yesterday's track_overdue schedules that weren't
     // completed. The picker treats these as overdue regardless of time_of_day.
     if let Ok(yesterday) = shift_date(&date, -1) {
@@ -159,7 +129,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         ).map_err(|e| format!("DB error: {}", e))?;
         let overdue_iter = o_stmt.query_map(rusqlite::params![yesterday.clone()], |row| {
             Ok((
-                row.get::<_, i64>(0)?,
+                row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
@@ -169,9 +139,9 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
                 row.get::<_, String>(7)?,
             ))
         }).map_err(|e| format!("Query error: {}", e))?;
-        let already_today: std::collections::HashSet<i64> = items.iter()
+        let already_today: std::collections::HashSet<String> = items.iter()
             .filter(|v| v["source_type"] == "schedule")
-            .filter_map(|v| v["source_id"].as_i64())
+            .filter_map(|v| v["source_id"].as_str().map(|s| s.to_string()))
             .collect();
         for tup in overdue_iter.flatten() {
             let (id, title, category, frequency, frequency_days, time_of_day, priority, tracking_mode) = tup;

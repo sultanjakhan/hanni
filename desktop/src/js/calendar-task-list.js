@@ -4,6 +4,7 @@ import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml } from './utils.js';
 import { SECTION_DEFS, renderItemRow, renderSection } from './calendar-task-list-row.js';
 import { timeToMin } from './task-picker-sort.js';
+import { effectivePriority, loadCategoryWeights } from './effective-priority.js';
 
 // A timed item counts as past-time today within the same 3h grace as the picker.
 // `enabled` is the opt-in flag (track_overdue for schedules; true for events —
@@ -75,22 +76,22 @@ async function loadDayItems(date) {
     }
     for (const s of (scheds || []).filter(s => s.track_overdue && scheduleMatchesDate(s, yesterday) && !yCompletedIds.has(s.id))) {
       const bi = blockInfo('schedule', s.id);
-      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
+      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
     }
   }
   for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date))) {
     const bi = blockInfo('schedule', s.id);
     const done = completedIds.has(s.id);
-    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday, !!s.track_overdue) });
+    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday, !!s.track_overdue) });
   }
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
     const done = !!e.completed;
-    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
+    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, category: e.category, planned_time: e.time, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
   }
   for (const t of (tasks || []).filter(t => t.due_date === date)) {
     const bi = blockInfo('note', t.id);
-    groups.note.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: '99:99', icon: '📝', done: t.status === 'done', priority: t.priority || 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
+    groups.note.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: '99:99', icon: '📝', done: t.status === 'done', priority: t.priority || 0, category: 'task', block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
   }
   for (const k of Object.keys(groups)) {
     groups[k].sort((a, b) => (b.priority - a.priority) || a.sortKey.localeCompare(b.sortKey));
@@ -288,6 +289,29 @@ export async function renderCalendarTaskList(el, opts) {
 
   const groups = await loadDayItems(date);
   const totalCount = groups.schedule.length + groups.event.length + groups.note.length;
+
+  // effective_priority = manual priority + boosters. Sort by it (desc),
+  // then by time (asc) so the morning-block still flows naturally.
+  // Top-3 across all not-done items get a 🔥 badge.
+  const weights = await loadCategoryWeights(invoke);
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const allItems = [...groups.overdue, ...groups.schedule, ...groups.event, ...groups.note];
+  for (const it of allItems) it._eff = effectivePriority(it, weights, nowMin);
+  const topThreeEff = allItems.filter(it => !it.done)
+    .sort((a, b) => b._eff - a._eff).slice(0, 3)
+    .filter(it => it._eff >= 2)
+    .map(it => `${it.kind}:${it.id}`);
+  for (const it of allItems) {
+    it._isTopEff = topThreeEff.includes(`${it.kind}:${it.id}`);
+  }
+  for (const key of ['overdue', 'schedule', 'event', 'note']) {
+    groups[key].sort((a, b) => {
+      if (b._eff !== a._eff) return b._eff - a._eff;
+      return (a.sortKey || '99:99').localeCompare(b.sortKey || '99:99');
+    });
+  }
+
   const bodyHtml = totalCount
     ? SECTION_DEFS.map(def => renderSection(def, groups[def.key], date)).join('')
     : `<div class="ctl-empty">

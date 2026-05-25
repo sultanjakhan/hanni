@@ -71,39 +71,37 @@ pub fn set_routine_node_status(
     //   2) fallback by matching node.title against schedules.title
     //      case-insensitively — covers older nodes built before source_id
     //      was assigned, so the routine click still propagates.
-    let node_info: Option<(String, Option<i64>, String)> = conn.query_row(
+    let node_info: Option<(String, Option<String>, String)> = conn.query_row(
         "SELECT source_type, source_id, title FROM routine_nodes WHERE id=?1",
         rusqlite::params![node_id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?)),
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, String>(2)?)),
     ).ok();
     let date: Option<String> = conn.query_row(
         "SELECT date FROM routine_runs WHERE id=?1",
         rusqlite::params![run_id], |r| r.get::<_, String>(0),
     ).ok();
-    let resolved_sid: Option<i64> = node_info.as_ref().and_then(|(stype, sid, title)| {
+    let resolved_sid: Option<String> = node_info.as_ref().and_then(|(stype, sid, title)| {
         if stype != "schedule" { return None; }
-        if let Some(s) = sid { return Some(*s); }
+        if let Some(s) = sid { if !s.is_empty() { return Some(s.clone()); } }
         // Title fallback (Rust lowercase — Unicode-aware, unlike SQLite LOWER):
         //   1) exact match on lowercase title
-        //   2) substring match (node title contained in schedule title), but
-        //      only when it's unambiguous — one match. "Зубы" matching both
-        //      "Зубы утром" and "Зубы вечером" would be wrong to auto-pick.
+        //   2) substring match — accept only when unique.
         let want = title.to_lowercase();
         let mut stmt = conn.prepare(
             "SELECT id, title FROM schedules WHERE is_active = 1"
         ).ok()?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         }).ok()?;
-        let all: Vec<(i64, String)> = rows.filter_map(|r| r.ok())
+        let all: Vec<(String, String)> = rows.filter_map(|r| r.ok())
             .map(|(i, t)| (i, t.to_lowercase())).collect();
         if let Some((id, _)) = all.iter().find(|(_, t)| *t == want) {
-            return Some(*id);
+            return Some(id.clone());
         }
-        let subs: Vec<i64> = all.iter()
+        let subs: Vec<String> = all.iter()
             .filter(|(_, t)| t.contains(&want) || want.contains(t))
-            .map(|(i, _)| *i).collect();
-        if subs.len() == 1 { Some(subs[0]) } else { None }
+            .map(|(i, _)| i.clone()).collect();
+        if subs.len() == 1 { Some(subs.into_iter().next().unwrap()) } else { None }
     });
     if let (Some(sid), Some(d)) = (resolved_sid, date) {
         {

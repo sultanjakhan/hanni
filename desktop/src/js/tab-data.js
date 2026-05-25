@@ -2042,6 +2042,38 @@ async function loadSchedule(subTab) {
       bindCheckboxes(paneEl, 'schedule_tracking', active, 'id', trackCtx);
       renderBulkBar(paneEl, 'schedule_tracking', trackCtx);
     },
+    renderWeights: async (paneEl) => {
+      const { loadCategoryWeights, saveCategoryWeights } = await import('./effective-priority.js');
+      const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
+      const cats = Array.from(new Set(schedules.filter(s => s.is_active).map(s => s.category || 'other'))).sort();
+      const weights = await loadCategoryWeights(invoke);
+      const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
+      const row = c => {
+        const w = typeof weights[c] === 'number' ? weights[c] : 1;
+        return `<div class="weights-row">
+          <span class="weights-icon">${SCH_CAT_ICONS[c] || '🏷️'}</span>
+          <span class="weights-name">${escapeHtml(c)}</span>
+          <input type="range" min="0" max="5" step="1" value="${w}" data-w-cat="${escapeHtml(c)}" class="weights-slider">
+          <span class="weights-val" data-w-val="${escapeHtml(c)}">${w}</span>
+        </div>`;
+      };
+      paneEl.innerHTML = `
+        <div class="weights-wrap">
+          <div class="weights-hint">Вес категории влияет на «эффективную важность» задач в Списке Calendar и в picker. 0 = понижает, 1 = нейтрально, 5 = всегда в топе.</div>
+          <div class="weights-list">${cats.map(row).join('')}</div>
+        </div>`;
+      paneEl.querySelectorAll('[data-w-cat]').forEach(sl => {
+        sl.addEventListener('input', (e) => {
+          const cat = e.target.dataset.wCat;
+          const v = parseInt(e.target.value, 10);
+          const valEl = paneEl.querySelector(`[data-w-val="${CSS.escape(cat)}"]`);
+          if (valEl) valEl.textContent = String(v);
+          weights[cat] = v;
+          clearTimeout(sl._saveTimer);
+          sl._saveTimer = setTimeout(() => saveCategoryWeights(invoke, weights).catch(() => {}), 300);
+        });
+      });
+    },
     renderTable: async (paneEl) => {
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
       const today = new Date().toISOString().slice(0, 10);

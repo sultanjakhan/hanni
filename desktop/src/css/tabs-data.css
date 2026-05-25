@@ -186,6 +186,42 @@
   background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
 }
 .ctl-row.ctl-done .ctl-title { color: var(--text-muted); text-decoration: line-through; }
+
+/* Effective-priority left stripe (matches the picker's 0-5 priority colours). */
+.ctl-row[class*="ctl-eff-"] { border-left: 3px solid transparent; padding-left: 11px; }
+.ctl-row.ctl-eff-1 { border-left-color: var(--color-green, #22c55e); }
+.ctl-row.ctl-eff-2 { border-left-color: var(--color-lime, #84cc16); }
+.ctl-row.ctl-eff-3 { border-left-color: var(--color-yellow, #eab308); }
+.ctl-row.ctl-eff-4 { border-left-color: var(--color-orange, #f97316); }
+.ctl-row.ctl-eff-5 { border-left-color: var(--color-red, #ef4444); }
+.ctl-row.ctl-top-eff { background: color-mix(in srgb, var(--color-orange, #f97316) 6%, transparent); }
+.ctl-top-badge {
+  font-size: 11px; line-height: 1; flex-shrink: 0;
+  padding: 2px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--color-orange, #f97316) 18%, transparent);
+}
+
+/* Schedule → Веса category-weights slider list */
+.weights-wrap { padding: 8px 4px; }
+.weights-hint {
+  font-size: 12px; color: var(--text-muted); margin-bottom: 12px;
+  line-height: 1.4; max-width: 560px;
+}
+.weights-list { display: flex; flex-direction: column; gap: 4px; max-width: 560px; }
+.weights-row {
+  display: grid; grid-template-columns: 24px 1fr 200px 32px;
+  align-items: center; gap: 12px;
+  padding: 6px 10px; border-radius: 6px;
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+}
+.weights-row:hover { background: var(--bg-hover); }
+.weights-icon { font-size: 14px; text-align: center; }
+.weights-name { font-size: 13px; color: var(--text-primary); }
+.weights-slider { width: 100%; cursor: pointer; }
+.weights-val {
+  font-variant-numeric: tabular-nums; text-align: center;
+  font-weight: 600; font-size: 13px; color: var(--accent-fill);
+}
 .ctl-check {
   width: 18px; height: 18px; border: 1.5px solid var(--border-default);
   border-radius: 4px; display: flex; align-items: center; justify-content: center;
