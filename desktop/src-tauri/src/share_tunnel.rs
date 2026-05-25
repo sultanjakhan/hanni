@@ -47,6 +47,31 @@ pub fn find_cloudflared() -> Option<PathBuf> {
 
 // ── Start tunnel (subprocess) and wait for the public URL line on stderr ──
 
+/// Probe `tailscale ip -4`. If the host is on a Tailnet, return a stable
+/// URL the user's other devices can reach forever — no ephemeral tunnel,
+/// no Firestore, no quota. Falls back to None on machines without
+/// Tailscale (or on Android, where the CLI doesn't ship).
+fn detect_tailscale_url(port: u16) -> Option<String> {
+    let candidates = [
+        "/usr/local/bin/tailscale",
+        "/opt/homebrew/bin/tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        "tailscale",
+    ];
+    for bin in candidates {
+        let out = match std::process::Command::new(bin).args(["ip", "-4"]).output() {
+            Ok(o) if o.status.success() => o,
+            _ => continue,
+        };
+        let ip = String::from_utf8_lossy(&out.stdout).lines().next()
+            .unwrap_or("").trim().to_string();
+        if ip.starts_with("100.") {
+            return Some(format!("http://{}:{}", ip, port));
+        }
+    }
+    None
+}
+
 pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String> {
     {
         let st = app.state::<ShareTunnel>();
@@ -65,6 +90,24 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
             guard.url = None;
             guard.child = None;
         }
+    }
+
+    // Tailscale: stable peer-to-peer URL for the user's own devices. We
+    // record it as `share_tailscale_url` so clients in the same tailnet
+    // can skip the public tunnel, but we DO NOT return early — external
+    // guests (no Tailscale) still need the public cloudflared endpoint.
+    if let Some(ts_url) = detect_tailscale_url(port) {
+        eprintln!("[tunnel] Tailscale URL detected (internal): {}", ts_url);
+        let db = app.state::<crate::types::HanniDb>();
+        let conn = db.conn();
+        let _ = conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('share_tailscale_url', ?1) \
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            rusqlite::params![ts_url],
+        );
+        let _ = app.emit("share-tunnel", serde_json::json!({
+            "url": &ts_url, "source": "tailscale"
+        }));
     }
 
     let bin = find_cloudflared()
