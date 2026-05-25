@@ -37,7 +37,52 @@ struct SyncReq {
 }
 
 #[derive(Serialize, Deserialize, Default)]
-struct SyncBatch { rows: Vec<RowItem>, tombs: Vec<TombItem> }
+struct SyncBatch {
+    rows: Vec<RowItem>,
+    tombs: Vec<TombItem>,
+    /// Server hint: «I'm reachable at this address». Lets a phone that
+    /// first synced over local Wi-Fi (192.168.x) silently upgrade to the
+    /// stable Tailscale IP for all subsequent rounds. Empty when no
+    /// Tailscale interface is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    peer_hint: Option<String>,
+}
+
+/// On macOS/Linux: ask the Tailscale CLI for our advertised IPv4.
+/// On Android the CLI doesn't ship; we just return None — the phone is a
+/// *client* of LAN sync anyway, so it has nothing to hint with.
+/// Cached after first call so we don't spawn `tailscale` per request.
+fn detect_my_tailscale_addr() -> Option<String> {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<Option<String>> = OnceLock::new();
+    CACHED.get_or_init(|| {
+        #[cfg(target_os = "android")]
+        { None }
+        #[cfg(not(target_os = "android"))]
+        {
+            let candidates = [
+                "/usr/local/bin/tailscale",
+                "/opt/homebrew/bin/tailscale",
+                "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+                "tailscale",
+            ];
+            for bin in candidates {
+                let out = match std::process::Command::new(bin)
+                    .args(["ip", "-4"]).output() {
+                    Ok(o) if o.status.success() => o,
+                    _ => continue,
+                };
+                let ip = String::from_utf8_lossy(&out.stdout)
+                    .lines().next().unwrap_or("").trim().to_string();
+                // Sanity: Tailscale CGNAT range is 100.64.0.0/10.
+                if ip.starts_with("100.") {
+                    return Some(format!("{}:{}", ip, LAN_PORT));
+                }
+            }
+            None
+        }
+    }).clone()
+}
 
 fn cursor_of(cursors: &Map<String, Value>, table: &str) -> String {
     cursors.get(table).and_then(|v| v.as_str()).unwrap_or(EPOCH).to_string()
@@ -77,7 +122,7 @@ fn gather(conn: &rusqlite::Connection, cursors: &Map<String, Value>, tomb_cursor
             .filter_map(Result::ok).collect();
         Ok::<_, rusqlite::Error>(v)
     })().unwrap_or_default();
-    SyncBatch { rows, tombs }
+    SyncBatch { rows, tombs, peer_hint: None }
 }
 
 /// Apply a received batch. Table names are validated against SYNC_TABLES
@@ -186,12 +231,25 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
 
     let conn = db.conn();
     let applied = apply_batch(&conn, &theirs);
-    let mine_batch = SyncBatch { rows: req.rows, tombs: req.tombs };
+    let mine_batch = SyncBatch { rows: req.rows, tombs: req.tombs, peer_hint: None };
     advance_cursors(&conn, &[&mine_batch, &theirs]);
     set_setting(&conn, "lan_cursor_tombstones", &chrono::Local::now().to_rfc3339());
 
+    // Auto-upgrade peer to Tailscale once the server has told us its
+    // CGNAT address. Switches a phone that first synced over local Wi-Fi
+    // (192.168.x) to the stable 100.x address so the next round works
+    // from any network, with no manual reconfiguration.
+    let mut adopted: Option<String> = None;
+    if let Some(hint) = theirs.peer_hint.as_deref() {
+        if !hint.is_empty() && hint != peer && hint.starts_with("100.") {
+            set_setting(&conn, "lan_sync_peer", hint);
+            adopted = Some(hint.to_string());
+        }
+    }
+
     Ok(json!({ "sent": mine_batch.rows.len(), "received": applied,
-               "deletes": theirs.tombs.len() }))
+               "deletes": theirs.tombs.len(),
+               "peer_adopted": adopted }))
 }
 
 // ── Server (0.0.0.0:8244, sync endpoint only) ────────────────────────────
@@ -210,8 +268,10 @@ pub async fn spawn_lan_sync_server(app: AppHandle) {
         if want.is_empty() || req.key != want {
             return Err((StatusCode::UNAUTHORIZED, "bad key".into()));
         }
-        apply_batch(&conn, &SyncBatch { rows: req.rows, tombs: req.tombs });
-        Ok(Json(gather(&conn, &req.cursors, &req.tomb_cursor)))
+        apply_batch(&conn, &SyncBatch { rows: req.rows, tombs: req.tombs, peer_hint: None });
+        let mut batch = gather(&conn, &req.cursors, &req.tomb_cursor);
+        batch.peer_hint = detect_my_tailscale_addr();
+        Ok(Json(batch))
     }
 
     let router = Router::new()

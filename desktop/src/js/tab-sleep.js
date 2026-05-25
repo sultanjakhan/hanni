@@ -58,10 +58,13 @@ export async function renderSleepPane(el) {
   el.querySelector('#sleep-import-btn')?.addEventListener('click', () => importFromHealthConnect(el));
   el.querySelector('#sleep-grant-btn')?.addEventListener('click', () => grantAndImport(el));
 
-  // Lazy auto-import on enter (throttled inside autoImportHealth) — runs in
-  // the background so the pane stays responsive
+  // Lazy auto-import on enter — runs in the background so the pane stays
+  // responsive. Force-bypass the 60-second throttle here: if the user just
+  // opened the Sleep view, they want to see fresh data even if a poll ran
+  // 30 s ago — Samsung Health writes sleep to HC ~30–60 min after waking,
+  // so the throttle window often hides the morning's session.
   if (IS_MOBILE && hcGranted) {
-    autoImportHealth().then(ok => { if (ok) renderSleepPane(el); });
+    autoImportHealth({ force: true }).then(ok => { if (ok) renderSleepPane(el); });
   }
 }
 
