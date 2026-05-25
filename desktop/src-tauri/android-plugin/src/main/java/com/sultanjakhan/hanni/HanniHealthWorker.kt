@@ -147,17 +147,9 @@ class HanniHealthWorker(
 
     private fun insertExercise(db: SQLiteDatabase, arr: JSONArray) {
         val now = isoNow()
-        // Clear today/recent exercises for the date range we just imported,
-        // mirroring import_exercise's idempotency. Done per-date to keep
-        // unrelated days untouched.
-        val dates = HashSet<String>()
-        for (i in 0 until arr.length()) {
-            val d = arr.optJSONObject(i)?.optString("date")
-            if (!d.isNullOrEmpty()) dates.add(d)
-        }
-        for (d in dates) {
-            db.delete("health_log", "type='exercise' AND date=?", arrayOf(d))
-        }
+        // Upsert per session by (date, start_time, notes). Old code did
+        // delete-by-date which clobbered Mac-synced rows on every poll —
+        // post-Phase 2 ids are UUIDs, deleting them creates orphans.
         for (i in 0 until arr.length()) {
             val s = arr.optJSONObject(i) ?: continue
             val date = s.optString("date")
@@ -166,16 +158,30 @@ class HanniHealthWorker(
             val etype = s.optString("type", "other")
             val title = s.optString("title", "")
             val startTime = s.optString("start_time", "")
-            val cv = ContentValues().apply {
-                put("date", date)
-                put("type", "exercise")
-                put("value", dur)
-                put("unit", "minutes")
-                put("notes", "$etype: $title")
-                put("start_time", startTime)
-                put("created_at", now)
+            val notes = "$etype: $title"
+            val cur = db.rawQuery(
+                "SELECT id FROM health_log " +
+                "WHERE type='exercise' AND date=? AND COALESCE(start_time,'')=? AND notes=? LIMIT 1",
+                arrayOf(date, startTime, notes)
+            )
+            val existingId: String? = if (cur.moveToFirst()) cur.getString(0) else null
+            cur.close()
+            if (existingId != null) {
+                val patch = ContentValues().apply { put("value", dur) }
+                db.update("health_log", patch, "id=?", arrayOf(existingId))
+            } else {
+                val cv = ContentValues().apply {
+                    put("id", java.util.UUID.randomUUID().toString())
+                    put("date", date)
+                    put("type", "exercise")
+                    put("value", dur)
+                    put("unit", "minutes")
+                    put("notes", notes)
+                    put("start_time", startTime)
+                    put("created_at", now)
+                }
+                db.insert("health_log", null, cv)
             }
-            db.insert("health_log", null, cv)
         }
     }
 
@@ -186,18 +192,31 @@ class HanniHealthWorker(
             val date = d.optString("date")
             if (date.isEmpty()) continue
             val steps = d.optDouble("steps", 0.0)
-            // Upsert by (date, type='steps') — only one steps row per day.
-            db.delete("health_log", "date=? AND type='steps'", arrayOf(date))
-            val cv = ContentValues().apply {
-                put("date", date)
-                put("type", "steps")
-                put("value", steps)
-                put("unit", "count")
-                put("notes", "")
-                put("start_time", "")
-                put("created_at", now)
+            // Upsert by (date, type='steps'). Post-Phase 2 id is TEXT UUIDv4
+            // — never DELETE first, that would orphan stages/timeline blocks
+            // and replace a Mac-synced UUID on every poll.
+            val cur = db.rawQuery(
+                "SELECT id FROM health_log WHERE date=? AND type='steps' LIMIT 1",
+                arrayOf(date)
+            )
+            val existingId: String? = if (cur.moveToFirst()) cur.getString(0) else null
+            cur.close()
+            if (existingId != null) {
+                val patch = ContentValues().apply { put("value", steps) }
+                db.update("health_log", patch, "id=?", arrayOf(existingId))
+            } else {
+                val cv = ContentValues().apply {
+                    put("id", java.util.UUID.randomUUID().toString())
+                    put("date", date)
+                    put("type", "steps")
+                    put("value", steps)
+                    put("unit", "count")
+                    put("notes", "")
+                    put("start_time", "")
+                    put("created_at", now)
+                }
+                db.insert("health_log", null, cv)
             }
-            db.insert("health_log", null, cv)
         }
     }
 

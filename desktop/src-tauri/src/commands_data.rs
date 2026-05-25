@@ -1381,7 +1381,7 @@ pub fn get_dan_koe_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Va
 // ── v0.7.0: Health & Habits commands ──
 
 #[tauri::command]
-pub fn log_health(health_type: String, value: f64, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn log_health(health_type: String, value: f64, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d").to_string();
@@ -1389,8 +1389,8 @@ pub fn log_health(health_type: String, value: f64, notes: Option<String>, db: ta
         "sleep" => "hours", "water" => "glasses", "weight" => "kg", "mood" => "1-5", "steps" => "steps",
         _ => "",
     };
-    // Upsert: update if same date+type exists
-    let existing: Option<i64> = conn.query_row(
+    // Upsert: update if same date+type exists. Since Phase 2 id is TEXT (UUIDv7).
+    let existing: Option<String> = conn.query_row(
         "SELECT id FROM health_log WHERE date=?1 AND type=?2 LIMIT 1",
         rusqlite::params![date, health_type],
         |row| row.get(0),
@@ -1402,11 +1402,13 @@ pub fn log_health(health_type: String, value: f64, notes: Option<String>, db: ta
         ).map_err(|e| format!("DB error: {}", e))?;
         Ok(id)
     } else {
+        let new_id = crate::types::new_uuid_v7();
         conn.execute(
-            "INSERT INTO health_log (date, type, value, unit, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![date, health_type, value, unit, notes.unwrap_or_default(), now.to_rfc3339()],
+            "INSERT INTO health_log (id, date, type, value, unit, notes, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![new_id, date, health_type, value, unit, notes.unwrap_or_default(), now.to_rfc3339()],
         ).map_err(|e| format!("DB error: {}", e))?;
-        Ok(conn.last_insert_rowid())
+        Ok(new_id)
     }
 }
 

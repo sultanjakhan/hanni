@@ -289,7 +289,7 @@ pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
 
         -- v0.7.0: Health Log & Habits
         CREATE TABLE IF NOT EXISTS health_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             date TEXT NOT NULL,
             type TEXT NOT NULL,
             value REAL NOT NULL,
@@ -1585,7 +1585,7 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
 
         -- v0.34.0: Heart rate samples for Health Connect integration
         CREATE TABLE IF NOT EXISTS heart_rate_samples (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             date TEXT NOT NULL,
             time TEXT NOT NULL,
             bpm INTEGER NOT NULL,
@@ -2739,6 +2739,152 @@ pub fn migrate_sleep_to_uuid_pk(conn: &rusqlite::Connection) {
     } else {
         eprintln!("[migrate_sleep_to_uuid_pk] migrated {} sessions to UUID pk",
                   session_id_map.len());
+    }
+}
+
+/// Phase 2 of UUID-PK migration: health_log + heart_rate_samples.
+/// Same motivation as Phase 1 — auto-increment ids collide across devices
+/// so peer-pushed rows either overwrite our local row (LWW silent overwrite)
+/// or pile up as duplicates. Idempotent.
+pub fn migrate_health_to_uuid_pk(conn: &rusqlite::Connection) {
+    use std::collections::HashMap;
+
+    // ── health_log ──
+    if !column_is_text(conn, "health_log", "id") && {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='health_log'",
+            [], |r| r.get(0),
+        ).unwrap_or(0);
+        n > 0
+    } {
+        let result: Result<usize, rusqlite::Error> = (|| {
+            // Build id → UUIDv7 map for existing rows.
+            let mut id_map: HashMap<i64, String> = HashMap::new();
+            let ids: Vec<i64> = conn.prepare("SELECT id FROM health_log")?
+                .query_map([], |r| r.get(0))?.filter_map(Result::ok).collect();
+            for id in ids { id_map.insert(id, crate::types::new_uuid_v7()); }
+            let n = id_map.len();
+
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE health_log_new (
+                     id TEXT PRIMARY KEY,
+                     date TEXT NOT NULL,
+                     type TEXT NOT NULL,
+                     value REAL NOT NULL,
+                     unit TEXT NOT NULL DEFAULT '',
+                     notes TEXT NOT NULL DEFAULT '',
+                     created_at TEXT NOT NULL,
+                     start_time TEXT NOT NULL DEFAULT '',
+                     updated_at TEXT NOT NULL DEFAULT ''
+                 );"
+            )?;
+
+            let mut sel = conn.prepare(
+                "SELECT id, date, type, value, unit, notes, created_at,
+                        COALESCE(start_time, ''), COALESCE(updated_at, '')
+                 FROM health_log"
+            )?;
+            let rows: Vec<(i64, String, String, f64, String, String, String, String, String)> =
+                sel.query_map([], |r| Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
+                    r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?,
+                )))?.filter_map(Result::ok).collect();
+            drop(sel);
+            for (old_id, date, ty, val, unit, notes, ca, st, ua) in &rows {
+                let new_id = id_map.get(old_id).cloned().unwrap_or_default();
+                conn.execute(
+                    "INSERT INTO health_log_new
+                     (id, date, type, value, unit, notes, created_at, start_time, updated_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                    rusqlite::params![new_id, date, ty, val, unit, notes, ca, st, ua],
+                )?;
+            }
+
+            conn.execute_batch(
+                "DELETE FROM sync_tombstones WHERE table_name='health_log';
+                 DROP TABLE health_log;
+                 ALTER TABLE health_log_new RENAME TO health_log;
+                 CREATE INDEX IF NOT EXISTS idx_health_log_date ON health_log(date);
+                 COMMIT;"
+            )?;
+            Ok(n)
+        })();
+        match result {
+            Ok(n) => eprintln!("[migrate_health_to_uuid_pk] health_log: migrated {n} rows"),
+            Err(e) => {
+                eprintln!("[migrate_health_to_uuid_pk] health_log failed: {e}");
+                let _ = conn.execute_batch("ROLLBACK;");
+            }
+        }
+    }
+
+    // ── heart_rate_samples ──
+    if !column_is_text(conn, "heart_rate_samples", "id") && {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='heart_rate_samples'",
+            [], |r| r.get(0),
+        ).unwrap_or(0);
+        n > 0
+    } {
+        let result: Result<usize, rusqlite::Error> = (|| {
+            let mut id_map: HashMap<i64, String> = HashMap::new();
+            let ids: Vec<i64> = conn.prepare("SELECT id FROM heart_rate_samples")?
+                .query_map([], |r| r.get(0))?.filter_map(Result::ok).collect();
+            for id in ids { id_map.insert(id, crate::types::new_uuid_v7()); }
+            let n = id_map.len();
+
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE heart_rate_samples_new (
+                     id TEXT PRIMARY KEY,
+                     date TEXT NOT NULL,
+                     time TEXT NOT NULL,
+                     bpm INTEGER NOT NULL,
+                     source TEXT NOT NULL DEFAULT 'health_connect',
+                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                     updated_at TEXT NOT NULL DEFAULT '',
+                     UNIQUE(date, time, source)
+                 );"
+            )?;
+
+            let mut sel = conn.prepare(
+                "SELECT id, date, time, bpm, source, created_at,
+                        COALESCE(updated_at, '')
+                 FROM heart_rate_samples"
+            )?;
+            let rows: Vec<(i64, String, String, i64, String, String, String)> =
+                sel.query_map([], |r| Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
+                    r.get(4)?, r.get(5)?, r.get(6)?,
+                )))?.filter_map(Result::ok).collect();
+            drop(sel);
+            for (old_id, date, time, bpm, src, ca, ua) in &rows {
+                let new_id = id_map.get(old_id).cloned().unwrap_or_default();
+                let _ = conn.execute(
+                    "INSERT OR IGNORE INTO heart_rate_samples_new
+                     (id, date, time, bpm, source, created_at, updated_at)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    rusqlite::params![new_id, date, time, bpm, src, ca, ua],
+                );
+            }
+
+            conn.execute_batch(
+                "DELETE FROM sync_tombstones WHERE table_name='heart_rate_samples';
+                 DROP TABLE heart_rate_samples;
+                 ALTER TABLE heart_rate_samples_new RENAME TO heart_rate_samples;
+                 CREATE INDEX IF NOT EXISTS idx_hr_samples_date ON heart_rate_samples(date);
+                 COMMIT;"
+            )?;
+            Ok(n)
+        })();
+        match result {
+            Ok(n) => eprintln!("[migrate_health_to_uuid_pk] heart_rate_samples: migrated {n} rows"),
+            Err(e) => {
+                eprintln!("[migrate_health_to_uuid_pk] heart_rate_samples failed: {e}");
+                let _ = conn.execute_batch("ROLLBACK;");
+            }
+        }
     }
 }
 

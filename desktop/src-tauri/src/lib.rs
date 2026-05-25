@@ -218,6 +218,7 @@ fn init_database() -> HanniDb {
     db::migrate_dedup_auto_health_events(&conn);
     db::migrate_shopping_list(&conn);
     db::migrate_sleep_to_uuid_pk(&conn); // Phase 1: UUID PK for sleep_*
+    db::migrate_health_to_uuid_pk(&conn); // Phase 2: UUID PK for health_log + heart_rate_samples
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag

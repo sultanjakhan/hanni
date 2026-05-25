@@ -164,15 +164,17 @@ fn import_steps(db: &HanniDb, days: &[serde_json::Value]) -> usize {
     for d in days {
         let date = d["date"].as_str().unwrap_or_default();
         let steps = d["steps"].as_f64().unwrap_or(0.0);
-        let existing: Option<i64> = conn.query_row(
+        let existing: Option<String> = conn.query_row(
             "SELECT id FROM health_log WHERE date=?1 AND type='steps'", [date], |r| r.get(0),
         ).ok();
         if let Some(id) = existing {
             let _ = conn.execute("UPDATE health_log SET value=?1 WHERE id=?2", rusqlite::params![steps, id]);
         } else {
+            let new_id = crate::types::new_uuid_v7();
             let _ = conn.execute(
-                "INSERT INTO health_log (date, type, value, unit, notes, created_at) VALUES (?1,'steps',?2,'steps','',?3)",
-                rusqlite::params![date, steps, now],
+                "INSERT INTO health_log (id, date, type, value, unit, notes, created_at)
+                 VALUES (?1,?2,'steps',?3,'steps','',?4)",
+                rusqlite::params![new_id, date, steps, now],
             );
         }
         count += 1;
@@ -188,9 +190,10 @@ fn import_heart_rate(db: &HanniDb, samples: &[serde_json::Value]) -> usize {
         let date = s["date"].as_str().unwrap_or_default();
         let time = s["time"].as_str().unwrap_or_default();
         let bpm = s["bpm"].as_i64().unwrap_or(0);
+        let new_id = crate::types::new_uuid_v7();
         if conn.execute(
-            "INSERT OR IGNORE INTO heart_rate_samples (date, time, bpm) VALUES (?1,?2,?3)",
-            rusqlite::params![date, time, bpm],
+            "INSERT OR IGNORE INTO heart_rate_samples (id, date, time, bpm) VALUES (?1,?2,?3,?4)",
+            rusqlite::params![new_id, date, time, bpm],
         ).is_ok() { count += 1; }
     }
     count
@@ -200,17 +203,10 @@ fn import_heart_rate(db: &HanniDb, samples: &[serde_json::Value]) -> usize {
 fn import_exercise(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
-    // Idempotency: Health Connect returns every session in the window, so clear
-    // this batch's dates first — re-importing then can't pile up duplicates.
-    let mut dates: Vec<&str> = sessions.iter().filter_map(|s| s["date"].as_str()).collect();
-    dates.sort_unstable();
-    dates.dedup();
-    for &date in &dates {
-        let _ = conn.execute(
-            "DELETE FROM health_log WHERE type='exercise' AND date=?1",
-            rusqlite::params![date],
-        );
-    }
+    // Idempotency: Health Connect returns every session in the window each
+    // poll. Upsert by (date, start_time, title) so re-imports refresh in
+    // place instead of duplicating. Avoids the old delete-by-date pattern
+    // which wiped Mac-synced rows on every phone poll.
     let mut count = 0;
     for s in sessions {
         let date = s["date"].as_str().unwrap_or_default();
@@ -223,11 +219,25 @@ fn import_exercise(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
         // instead of falling back to a 12:00 default.
         let start_time = s["start_time"].as_str().unwrap_or("");
         let notes = format!("{}: {}", etype, title);
-        let _ = conn.execute(
-            "INSERT INTO health_log (date, type, value, unit, notes, start_time, created_at)
-             VALUES (?1,'exercise',?2,'minutes',?3,?4,?5)",
-            rusqlite::params![date, dur, notes, start_time, now],
-        );
+        let existing: Option<String> = conn.query_row(
+            "SELECT id FROM health_log
+             WHERE type='exercise' AND date=?1 AND COALESCE(start_time,'')=?2 AND notes=?3
+             LIMIT 1",
+            rusqlite::params![date, start_time, notes], |r| r.get(0),
+        ).ok();
+        if let Some(id) = existing {
+            let _ = conn.execute(
+                "UPDATE health_log SET value=?1 WHERE id=?2",
+                rusqlite::params![dur, id],
+            );
+        } else {
+            let new_id = crate::types::new_uuid_v7();
+            let _ = conn.execute(
+                "INSERT INTO health_log (id, date, type, value, unit, notes, start_time, created_at)
+                 VALUES (?1,?2,'exercise',?3,'minutes',?4,?5,?6)",
+                rusqlite::params![new_id, date, dur, notes, start_time, now],
+            );
+        }
         count += 1;
     }
     count
