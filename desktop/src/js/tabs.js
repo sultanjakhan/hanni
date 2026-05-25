@@ -2,6 +2,7 @@
 
 import { S, invoke, listen, TAB_REGISTRY, TAB_ICONS, TAB_SETTINGS_DEFS, saveTabs, tabLoaders, loadTabSetting, saveTabSetting, IS_MOBILE } from './state.js';
 import { escapeHtml, confirmModal, renderTabSettingsPage, setupPageHeaderControls, renderPageHeader } from './utils.js';
+import { renderSecuritySection, wireSecurityControls } from './settings-security.js';
 
 // ── Mobile drawer (ChatGPT/Claude-style sidebar) ──
 let drawerBackdrop = null;
@@ -50,6 +51,7 @@ const SETTINGS_SECTIONS = {
     { id: 'tools', label: 'Инструменты' },
     { id: 'data', label: 'Данные' },
     { id: 'sync', label: 'Синхронизация' },
+    { id: 'security', label: 'Безопасность' },
     { id: 'appearance', label: 'Оформление' },
     { id: 'about', label: 'О Hanni' },
   ],
@@ -884,6 +886,7 @@ async function renderSettingsPage(tabId, sectionId) {
   // Wire up controls
   wireSettingsControls(el, tabId);
   wireSyncControls(el);
+  wireSecurityControls(el);
   wireManageControls(el, tabId);
 }
 
@@ -935,6 +938,8 @@ async function renderSettingsSectionContent(tabId, sectionId) {
       <button class="btn-smallall" style="margin-top:12px;">+ Подключить MCP</button></div>`;
   } else if (sectionId === 'sync') {
     return renderSyncSection();
+  } else if (sectionId === 'security') {
+    return await renderSecuritySection();
   } else if (sectionId === 'manage') {
     return renderManageSection(tabId);
   }

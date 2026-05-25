@@ -204,6 +204,7 @@ fn init_database() -> HanniDb {
     db::migrate_food_blacklist_love(&conn);
     db::migrate_food_blacklist_recipe(&conn);
     db::migrate_share_links(&conn);
+    db::migrate_automation_log(&conn);
     db::migrate_priority(&conn);
     db::migrate_schedule_priority(&conn);
     db::migrate_event_linked_tab(&conn);
@@ -766,6 +767,9 @@ pub fn run() {
             vacancy::vacancy_search_source,
             // Automation API
             commands_meta::auto_eval_callback,
+            commands_meta::rotate_api_token,
+            commands_meta::get_api_token_preview,
+            commands_meta::list_automation_log,
             // Body Records (3D Body Tab)
             commands_data::create_body_record,
             commands_data::get_body_records,

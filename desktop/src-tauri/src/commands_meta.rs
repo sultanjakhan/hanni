@@ -992,6 +992,69 @@ pub fn api_token_path() -> PathBuf {
     hanni_data_dir().join("api_token.txt")
 }
 
+/// Replace the API token file with a fresh UUID. The running server keeps
+/// the old token in memory, so a process restart is required for the new
+/// one to take effect. Returns the new token so the UI can show it once.
+#[tauri::command]
+pub fn rotate_api_token() -> Result<String, String> {
+    let path = api_token_path();
+    let token = uuid::Uuid::new_v4().to_string();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {}", e))?;
+    }
+    std::fs::write(&path, &token).map_err(|e| format!("write: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(token)
+}
+
+/// Returns the current API token (first 8 chars + ellipsis) for display
+/// in Settings. We don't ship the full token to JS to keep it out of
+/// devtools history — the UI only needs a preview to confirm rotation.
+#[tauri::command]
+pub fn get_api_token_preview() -> Result<String, String> {
+    let path = api_token_path();
+    let token = std::fs::read_to_string(&path).map_err(|e| format!("read: {}", e))?;
+    let token = token.trim();
+    if token.len() < 8 { return Ok(token.to_string()); }
+    Ok(format!("{}…", &token[..8]))
+}
+
+#[derive(serde::Serialize)]
+pub struct AutomationLogRow {
+    pub id: i64,
+    pub ts: i64,
+    pub script_hash: String,
+    pub script_preview: String,
+    pub success: bool,
+    pub duration_ms: i64,
+}
+
+#[tauri::command]
+pub fn list_automation_log(limit: Option<i64>, db: tauri::State<'_, HanniDb>) -> Result<Vec<AutomationLogRow>, String> {
+    let conn = db.conn();
+    let lim = limit.unwrap_or(100).clamp(1, 1000);
+    let mut stmt = conn.prepare(
+        "SELECT id, ts, script_hash, script_preview, success, duration_ms
+         FROM automation_log ORDER BY ts DESC LIMIT ?1"
+    ).map_err(|e| format!("prepare: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![lim], |r| {
+        Ok(AutomationLogRow {
+            id: r.get(0)?,
+            ts: r.get(1)?,
+            script_hash: r.get(2)?,
+            script_preview: r.get(3)?,
+            success: r.get::<_, i64>(4)? != 0,
+            duration_ms: r.get(5)?,
+        })
+    }).map_err(|e| format!("query: {}", e))?;
+    let out: Vec<_> = rows.flatten().collect();
+    Ok(out)
+}
+
 pub fn get_or_create_api_token() -> String {
     let path = api_token_path();
     if path.exists() {
@@ -1017,20 +1080,54 @@ pub fn get_or_create_api_token() -> String {
 }
 
 pub async fn spawn_api_server(app_handle: AppHandle) {
-    use axum::{Router, routing::{get, post}, extract::{State as AxumState, Query}, Json, http::{StatusCode, HeaderMap}};
+    use axum::{Router, routing::{get, post}, extract::{State as AxumState, Query, DefaultBodyLimit}, Json, http::{StatusCode, HeaderMap}};
+    use std::sync::{Arc, Mutex};
+    use subtle::ConstantTimeEq;
 
     let api_token = get_or_create_api_token();
+
+    // /auto/eval body cap: a single eval script over this size is almost
+    // certainly malicious or a runaway log dump. 256 KiB matches the
+    // share-server body limit (share_auth::BODY_LIMIT_BYTES).
+    const AUTO_EVAL_BODY_LIMIT: usize = 256 * 1024;
+    // Rate-limit per IP: same posture as share_auth::RATE_LIMIT_PER_MINUTE.
+    // Server is loopback-only so the IP is effectively always 127.0.0.1,
+    // but keying by IP keeps the door open for future tunneling.
+    const AUTO_EVAL_RATE_PER_MINUTE: u32 = 100;
+    // Retention: automation_log rows older than this are pruned lazily.
+    const AUTO_LOG_RETENTION_SECS: i64 = 7 * 24 * 60 * 60;
 
     #[derive(Clone)]
     struct ApiState {
         app: AppHandle,
         token: String,
+        // (count, window_start_epoch_secs) keyed by source IP.
+        rate_limit: Arc<Mutex<HashMap<String, (u32, i64)>>>,
     }
 
     let state = ApiState {
-        app: app_handle,
+        app: app_handle.clone(),
         token: api_token,
+        rate_limit: Arc::new(Mutex::new(HashMap::new())),
     };
+
+    // Background retention: prune automation_log once an hour. Kept lazy
+    // (no separate scheduler crate) — a single task per server lifetime.
+    {
+        let app = app_handle.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let cutoff = chrono::Utc::now().timestamp() - AUTO_LOG_RETENTION_SECS;
+                let db = app.state::<HanniDb>();
+                let _ = db.conn().execute(
+                    "DELETE FROM automation_log WHERE ts < ?1",
+                    rusqlite::params![cutoff],
+                );
+            }
+        });
+    }
 
     pub fn check_auth(headers: &HeaderMap, token: &str) -> Result<(), (StatusCode, String)> {
         let auth = headers
@@ -1038,11 +1135,47 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         let provided = auth.strip_prefix("Bearer ").unwrap_or(auth);
-        if provided == token {
+        // Constant-time compare so byte-by-byte timing can't be used to
+        // brute-force the token. Length mismatch short-circuits because
+        // ct_eq panics on unequal slices — we want a stable false instead.
+        let ok = provided.len() == token.len()
+            && bool::from(provided.as_bytes().ct_eq(token.as_bytes()));
+        if ok {
             Ok(())
         } else {
             Err((StatusCode::UNAUTHORIZED, "Invalid token".into()))
         }
+    }
+
+    fn rate_limit_check(state: &ApiState, key: &str) -> Result<(), (StatusCode, String)> {
+        let now = chrono::Utc::now().timestamp();
+        let mut map = state.rate_limit.lock().unwrap();
+        // Bound map growth so spammed distinct keys can't exhaust memory
+        // (matches share_auth::rate_limit_check cap).
+        if map.len() > 10_000 {
+            map.retain(|_, (_, started)| now - *started < 60);
+        }
+        let entry = map.entry(key.to_string()).or_insert((0, now));
+        if now - entry.1 >= 60 { *entry = (0, now); }
+        entry.0 += 1;
+        if entry.0 > AUTO_EVAL_RATE_PER_MINUTE {
+            Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".into()))
+        } else { Ok(()) }
+    }
+
+    fn log_automation(app: &AppHandle, script: &str, success: bool, duration_ms: i64) {
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(script.as_bytes());
+        let hash = hex::encode(hasher.finalize());
+        let preview: String = script.chars().take(200).collect();
+        let ts = chrono::Utc::now().timestamp();
+        let db = app.state::<HanniDb>();
+        let _ = db.conn().execute(
+            "INSERT INTO automation_log (ts, script_hash, script_preview, success, duration_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![ts, hash, preview, success as i64, duration_ms],
+        );
     }
 
     #[derive(Deserialize)]
@@ -1192,6 +1325,12 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         Json(req): Json<EvalReq>,
     ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
         check_auth(&headers, &state.token)?;
+        // Loopback-only server: a single rate-limit bucket is enough.
+        // If we ever expose this beyond 127.0.0.1, switch to per-IP keying.
+        rate_limit_check(&state, "loopback")?;
+
+        let started = std::time::Instant::now();
+        let script = req.script.clone();
 
         let cb_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = tokio::sync::oneshot::channel::<String>();
@@ -1215,19 +1354,35 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         );
 
         if let Some(win) = state.app.get_webview_window("main") {
-            win.eval(&wrapped).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("eval error: {}", e)))?;
+            if let Err(e) = win.eval(&wrapped) {
+                let dur = started.elapsed().as_millis() as i64;
+                log_automation(&state.app, &script, false, dur);
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("eval error: {}", e)));
+            }
         } else {
+            let dur = started.elapsed().as_millis() as i64;
+            log_automation(&state.app, &script, false, dur);
             return Err((StatusCode::INTERNAL_SERVER_ERROR, "No main webview found".into()));
         }
 
-        match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await;
+        let dur = started.elapsed().as_millis() as i64;
+        match outcome {
             Ok(Ok(result)) => {
                 let inner: serde_json::Value = serde_json::from_str(&result)
                     .unwrap_or(serde_json::Value::String(result));
+                let script_failed = inner.get("__error").is_some();
+                log_automation(&state.app, &script, !script_failed, dur);
                 Ok(Json(serde_json::json!({ "result": inner })))
             }
-            Ok(Err(_)) => Err((StatusCode::INTERNAL_SERVER_ERROR, "Channel closed".into())),
-            Err(_) => Err((StatusCode::REQUEST_TIMEOUT, "Script timed out after 10s".into())),
+            Ok(Err(_)) => {
+                log_automation(&state.app, &script, false, dur);
+                Err((StatusCode::INTERNAL_SERVER_ERROR, "Channel closed".into()))
+            }
+            Err(_) => {
+                log_automation(&state.app, &script, false, dur);
+                Err((StatusCode::REQUEST_TIMEOUT, "Script timed out after 10s".into()))
+            }
         }
     }
 
@@ -1272,7 +1427,10 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         .route("/api/chat", post(api_chat))
         .route("/api/memory/search", get(api_memory_search))
         .route("/api/memory", post(api_memory_add))
-        .route("/auto/eval", post(auto_eval))
+        .route(
+            "/auto/eval",
+            post(auto_eval).layer(DefaultBodyLimit::max(AUTO_EVAL_BODY_LIMIT)),
+        )
         .route("/oauth/google/callback", get(google_oauth_callback))
         .with_state(state);
 

@@ -759,3 +759,51 @@
   color: var(--text-primary);
   border-bottom-color: var(--text-primary);
 }
+
+/* ── Security section ── */
+
+.security-token-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: var(--radius-small, 4px);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.security-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.security-log-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle, var(--text-muted));
+  padding: 6px 8px;
+}
+
+.security-log-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.security-log-table .security-log-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted);
+}
+
+.security-log-table .security-log-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.security-log-ok { color: var(--color-green); }
+.security-log-err { color: var(--color-red); }

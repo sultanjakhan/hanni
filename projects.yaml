@@ -535,6 +535,7 @@ _shared:
       - desktop/src/js/icons.js
       - desktop/src/js/emoji-data.js
       - desktop/src/js/emoji-picker.js
+      - desktop/src/js/settings-security.js
     rust:
       - desktop/src-tauri/src/lib.rs
       - desktop/src-tauri/src/main.rs
@@ -547,6 +548,7 @@ _shared:
       - desktop/src-tauri/src/window_state.rs
       - desktop/src-tauri/src/dashboard.rs
       - desktop/src-tauri/src/mcp.rs
+    tables: [automation_log]
 
   ui_common:
     description: "Общие CSS: base, layout, themes, mobile, settings, emoji"

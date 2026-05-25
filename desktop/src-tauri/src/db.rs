@@ -2301,6 +2301,23 @@ pub fn migrate_share_links(conn: &rusqlite::Connection) {
     ).ok();
 }
 
+pub fn migrate_automation_log(conn: &rusqlite::Connection) {
+    // v0.90.0: audit trail for /auto/eval. Lets the user see what
+    // remote-controlled the app and when. Retention is enforced by a
+    // periodic DELETE in the API server (see commands_meta.rs).
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS automation_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            script_hash TEXT NOT NULL,
+            script_preview TEXT NOT NULL DEFAULT '',
+            success INTEGER NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_automation_log_ts ON automation_log(ts);"
+    ).ok();
+}
+
 /// Returns the column names of `table` from `PRAGMA table_info`. Returns
 /// Err if the table doesn't exist (caller decides whether to skip).
 pub fn table_columns_in(conn: &rusqlite::Connection, table: &str) -> Result<Vec<String>, String> {
