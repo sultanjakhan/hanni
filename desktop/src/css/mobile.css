@@ -316,12 +316,13 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
    purpose on Android — and a stray inset can swallow taps near the top. */
 .mobile #drag-region { display: none; }
 
-/* Right-rail FAB widgets are 40px circles pinned at right:16, stacked
-   from bottom:176. On a 360-px viewport that's ~56px of dead column on
-   the right — without this, Calendar Month/Week views render Sunday
-   underneath the FABs and the user can't see those days. Compact the
-   FABs (32px) and reserve a matching gutter on the right of the active
-   view so day-grid columns no longer collide with them. */
+/* Right-rail FAB widgets are 40-px circles pinned bottom-right. On a
+   narrow 360-px viewport they sit on top of Calendar's Sunday column and
+   Calendar's own "+ Событие" button — earlier I reserved a 48-px right
+   gutter on every view, but that clipped the very `+` it was trying to
+   protect. Instead, slim the FABs to 32 px and dim them to 55 % opacity
+   so they never compete visually with primary actions in the page. They
+   fade up to full opacity on touch, so the affordance stays. */
 .mobile .mw-btn,
 .mobile .nw-btn,
 .mobile .qw-btn,
@@ -334,9 +335,22 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 .mobile .quotes-widget,
 .mobile .task-widget,
 .mobile #task-control-widget {
-  right: 8px;
+  right: 6px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
 }
-.mobile #content-area > .view.active { padding-right: 48px; }
+.mobile .music-widget:active,
+.mobile .notification-widget:active,
+.mobile .quotes-widget:active,
+.mobile .task-widget:active,
+.mobile #task-control-widget:active,
+.mobile .music-widget:focus-within,
+.mobile .notification-widget:focus-within,
+.mobile .quotes-widget:focus-within,
+.mobile .task-widget:focus-within,
+.mobile #task-control-widget:focus-within {
+  opacity: 1;
+}
 
 /* Command palette: full width on mobile */
 .mobile .cmd-palette {
