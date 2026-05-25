@@ -100,7 +100,8 @@ fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>, String> 
     Ok(out)
 }
 
-pub(crate) fn row_to_json(conn: &Connection, table: &str, id: i64) -> Result<Option<Value>, String> {
+pub(crate) fn row_to_json(conn: &Connection, table: &str, id: &rusqlite::types::Value)
+                          -> Result<Option<Value>, String> {
     let cols = table_columns(conn, table)?;
     let select = cols.join(", ");
     let sql = format!("SELECT {} FROM {} WHERE id = ?1", select, table);
@@ -116,7 +117,7 @@ pub(crate) fn row_to_json(conn: &Connection, table: &str, id: i64) -> Result<Opt
     match row {
         Ok(v) => Ok(Some(v)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("row_to_json {} #{}: {}", table, id, e)),
+        Err(e) => Err(format!("row_to_json {} #{:?}: {}", table, id, e)),
     }
 }
 
@@ -256,7 +257,8 @@ async fn push_table(db: &HanniDb, table: &str, client: &reqwest::Client,
         let mut payloads: Vec<(i64, String, Value)> = Vec::new();
         let mut max = cursor.clone();
         for (id, ts) in &dirty {
-            if let Some(row) = row_to_json(&conn, table, *id)? {
+            let id_val = rusqlite::types::Value::Integer(*id);
+            if let Some(row) = row_to_json(&conn, table, &id_val)? {
                 payloads.push((*id, ts.clone(), row));
                 if ts > &max { max = ts.clone(); }
             }
@@ -322,8 +324,20 @@ async fn push_tombstones(db: &HanniDb, client: &reqwest::Client,
 pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, Value>)
               -> Result<bool, String>
 {
-    let id = fields.get("id").and_then(|v| v.as_i64())
-        .ok_or_else(|| format!("{}: row missing integer id", table))?;
+    let id_value = fields.get("id").cloned()
+        .ok_or_else(|| format!("{}: row missing id", table))?;
+    if matches!(id_value, Value::Null) {
+        return Err(format!("{}: row id is null", table));
+    }
+    // `id` can be INTEGER (legacy AUTOINCREMENT tables) or TEXT (UUIDv7
+    // tables migrated in Phase 1+). Convert once for both SQL binding
+    // and tombstone lookup (which keys by stringified id).
+    let id_sql = json_to_sqlite(&id_value);
+    let id_str = match &id_value {
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
     let remote_ts = fields.get("_updated_at").and_then(|v| v.as_str())
         .unwrap_or("");
 
@@ -347,7 +361,7 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
     // the still-present remote row (LWW alone can't tell delete from absence).
     let tomb_ts: Option<String> = conn.query_row(
         "SELECT deleted_at FROM sync_tombstones WHERE table_name=?1 AND row_id=?2",
-        rusqlite::params![table, id], |r| r.get(0),
+        rusqlite::params![table, &id_str], |r| r.get(0),
     ).ok();
     if let Some(tomb) = &tomb_ts {
         if tomb.as_str() >= remote_ts { return Ok(false); }
@@ -356,7 +370,7 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
     // LWW: skip if local is newer-or-equal.
     let local_ts: Option<String> = conn.query_row(
         &format!("SELECT updated_at FROM {} WHERE id = ?1", table),
-        rusqlite::params![id], |r| r.get(0),
+        rusqlite::params![&id_sql], |r| r.get(0),
     ).ok();
     if let Some(local) = &local_ts {
         if local.as_str() >= remote_ts { return Ok(false); }
@@ -381,7 +395,7 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
     let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
     if let Err(e) = conn.execute(&sql, refs.as_slice()) {
         // Don't fail the whole pull on one bad row — log and move on.
-        eprintln!("[sync_owner] upsert {} #{}: {}", table, id, e);
+        eprintln!("[sync_owner] upsert {} #{}: {}", table, id_str, e);
         return Ok(false);
     }
     Ok(true)

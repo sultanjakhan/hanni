@@ -95,7 +95,10 @@ fn gather(conn: &rusqlite::Connection, cursors: &Map<String, Value>, tomb_cursor
     let mut rows = Vec::new();
     for table in SYNC_TABLES {
         let since = cursor_of(cursors, table);
-        let ids: Vec<i64> = (|| {
+        // `id` can be INTEGER (legacy AUTOINCREMENT tables) or TEXT (tables
+        // migrated to UUIDv7 in Phase 1+). Read as raw SQLite Value so the
+        // same code path serves both.
+        let ids: Vec<rusqlite::types::Value> = (|| {
             let mut stmt = conn.prepare(&format!(
                 "SELECT id FROM {} WHERE updated_at > ?1 ORDER BY updated_at LIMIT {}",
                 table, BATCH_LIMIT))?;
@@ -103,7 +106,7 @@ fn gather(conn: &rusqlite::Connection, cursors: &Map<String, Value>, tomb_cursor
                 .filter_map(Result::ok).collect();
             Ok::<_, rusqlite::Error>(v)
         })().unwrap_or_default();
-        for id in ids {
+        for id in &ids {
             if let Ok(Some(Value::Object(mut f))) = row_to_json(conn, table, id) {
                 // upsert_row reads `_updated_at` for the LWW comparison.
                 if let Some(ua) = f.get("updated_at").cloned() {

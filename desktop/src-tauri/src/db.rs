@@ -2434,6 +2434,17 @@ pub const SYNC_TABLES: &[&str] = &[
     "heart_rate_samples", "event_categories",
 ];
 
+/// Whether `table.column` is declared TEXT in the current schema. Used
+/// by UUID migrations (Phase 1+) so they're idempotent — re-running on
+/// an already-migrated DB is a no-op.
+pub fn column_is_text(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+    conn.query_row(
+        &format!("SELECT type FROM pragma_table_info('{}') WHERE name=?1", table),
+        rusqlite::params![column],
+        |r| r.get::<_, String>(0),
+    ).map(|t| t.to_uppercase().contains("TEXT")).unwrap_or(false)
+}
+
 pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
     // 0. Heal divergent installs that shipped earlier init_db without the
     // projects/tasks tables (e.g. Android v0.73.x). Idempotent for any host

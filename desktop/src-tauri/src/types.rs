@@ -204,6 +204,16 @@ pub fn data_file_path() -> PathBuf {
     hanni_data_dir().join("life-tracker-data.json")
 }
 
+/// UUIDv7 — time-ordered 128-bit id, lexicographically sortable by
+/// creation time. Used as primary key on sync-eligible tables that used
+/// to rely on integer auto-increment: two devices generating rows in
+/// parallel never collide (vs INTEGER PRIMARY KEY AUTOINCREMENT which
+/// each device walks 1, 2, 3 independently), and the timestamp prefix
+/// keeps row indices clustered.
+pub fn new_uuid_v7() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
+
 // ── Chat types ──
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

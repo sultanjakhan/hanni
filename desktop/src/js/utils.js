@@ -39,6 +39,33 @@ export function escapeHtml(text) {
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// UUIDv7 — time-ordered 128-bit id, lexicographically sortable. Used as
+// primary key on sync-eligible tables that used to rely on integer
+// auto-increment so two devices generating rows in parallel never
+// collide. Format: 48-bit unix-ms timestamp + 4-bit version + 12-bit
+// random + 2-bit variant + 62-bit random. Spec: RFC 9562 §5.7.
+export function uuidV7() {
+  const ms = BigInt(Date.now());
+  const rand = new Uint8Array(10);
+  crypto.getRandomValues(rand);
+  // bytes 0..5: timestamp (big-endian)
+  const b = new Uint8Array(16);
+  b[0] = Number((ms >> 40n) & 0xffn);
+  b[1] = Number((ms >> 32n) & 0xffn);
+  b[2] = Number((ms >> 24n) & 0xffn);
+  b[3] = Number((ms >> 16n) & 0xffn);
+  b[4] = Number((ms >> 8n)  & 0xffn);
+  b[5] = Number( ms         & 0xffn);
+  // byte 6: version (0111) in high nibble + 4 random bits
+  b[6] = 0x70 | (rand[0] & 0x0f);
+  b[7] = rand[1];
+  // byte 8: variant (10) in top 2 bits + 6 random bits
+  b[8] = 0x80 | (rand[2] & 0x3f);
+  for (let i = 9; i < 16; i++) b[i] = rand[i - 6];
+  const hex = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // Local YYYY-MM-DD, optionally offset by N days (negative = past).
 export function localDate(offsetDays = 0) {
   const d = new Date();
