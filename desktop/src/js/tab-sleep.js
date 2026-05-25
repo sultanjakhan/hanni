@@ -59,12 +59,16 @@ export async function renderSleepPane(el) {
   el.querySelector('#sleep-grant-btn')?.addEventListener('click', () => grantAndImport(el));
 
   // Lazy auto-import on enter — runs in the background so the pane stays
-  // responsive. Force-bypass the 60-second throttle here: if the user just
-  // opened the Sleep view, they want to see fresh data even if a poll ran
-  // 30 s ago — Samsung Health writes sleep to HC ~30–60 min after waking,
-  // so the throttle window often hides the morning's session.
+  // responsive. We force-bypass the 60-second throttle only if last sync
+  // is older than 2 min; an unconditional force blocked Tauri's async
+  // runtime for the full HC read window (~30+ s on Samsung), starving the
+  // automation server. The 2-min staleness check still catches the
+  // common morning case where Samsung Health writes the night's sleep to
+  // HC after the user wakes up.
   if (IS_MOBILE && hcGranted) {
-    autoImportHealth({ force: true }).then(ok => { if (ok) renderSleepPane(el); });
+    const lastSync = +(localStorage.getItem('hc_last_sync') || 0);
+    const stale = (Date.now() - lastSync) > 2 * 60 * 1000;
+    autoImportHealth({ force: stale }).then(ok => { if (ok) renderSleepPane(el); });
   }
 }
 
