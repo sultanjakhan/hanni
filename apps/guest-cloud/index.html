@@ -125,9 +125,26 @@
         doc = synthDoc(cachedTunnel);
       }
     }
-    // Step 3: both URLs dead — read share_links/{token} from Firestore. The
-    // mirror loop pushes the live tunnel_url on every Hanni start, so this
-    // is the source of truth when local caches miss.
+    // Step 2.5: try the GitHub gist tunnel pointer. Hanni rewrites this on
+    // every cloudflared start, so it stays fresh even when Firestore writes
+    // are quota-blocked. Public gist, anonymous read, no rate limit issues
+    // at our scale. Always-latest URL — no SHA pin.
+    if (!doc) {
+      try {
+        const r = await fetch('https://gist.githubusercontent.com/sultanjakhan/f06a1fd40d1a32b2311aa44dcf9f9b16/raw/hanni-tunnel.json?ts=' + Date.now(),
+          { credentials: 'omit', mode: 'cors' });
+        if (r.ok) {
+          const { tunnel } = await r.json();
+          if (tunnel && await pingTunnel(tunnel)) {
+            saveCachedTunnel(tunnel);
+            doc = synthDoc(tunnel);
+          }
+        }
+      } catch {}
+    }
+    // Step 3: every tunnel candidate is dead — read share_links/{token}
+    // from Firestore. The mirror loop pushes the live tunnel_url on every
+    // Hanni start, so this is the source of truth when local caches miss.
     if (!doc) {
       try {
         const r = await fetch(metaUrl, { credentials: 'omit' });
@@ -197,7 +214,7 @@
     // Cache-bust: every deploy bumps this so the CDN's 5-min edge cache
     // doesn't pin gust-* modules to an old build (which silently breaks
     // the post-load render trigger below).
-    const V = '20260524f';
+    const V = '20260525a';
     for (const src of scripts) {
       await new Promise((resolve, reject) => {
         const tag = document.createElement('script');

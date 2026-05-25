@@ -133,8 +133,9 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
             // Persist tunnel URL + mark share_links dirty so the mirror loop
             // pushes the new URL into Firestore — guests on Firebase Hosting
             // read it from share_links/{token}.tunnel_url to know where to
-            // POST writes.
-            {
+            // POST writes. Also read gist credentials for the always-fresh
+            // pointer push below.
+            let gist: Option<(String, String)> = {
                 let db = app.state::<crate::types::HanniDb>();
                 let conn = db.conn();
                 let _ = conn.execute(
@@ -143,6 +144,29 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
                     rusqlite::params![u],
                 );
                 crate::sync_share::mark_dirty(&conn, "share_links");
+                let id: Option<String> = conn.query_row(
+                    "SELECT value FROM app_settings WHERE key='share_gist_id'",
+                    [], |r| r.get(0)).ok();
+                let tok: Option<String> = conn.query_row(
+                    "SELECT value FROM app_settings WHERE key='share_gist_token'",
+                    [], |r| r.get(0)).ok();
+                match (id, tok) {
+                    (Some(i), Some(t)) if !i.is_empty() && !t.is_empty() => Some((i, t)),
+                    _ => None,
+                }
+            };
+            // Public gist pointer: gives guests a path to recover the live
+            // tunnel even when Firestore quota is exhausted. Best-effort —
+            // failures don't block tunnel startup.
+            if let Some((gist_id, token)) = gist {
+                let url_for_push = u.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = push_tunnel_to_gist(&gist_id, &token, &url_for_push).await {
+                        eprintln!("[tunnel] gist push failed: {}", e);
+                    } else {
+                        eprintln!("[tunnel] gist updated with {}", url_for_push);
+                    }
+                });
             }
             let _ = app.emit("tunnel-up", u.clone());
             Ok(u)
@@ -152,6 +176,39 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
             Err("cloudflared did not produce a public URL within 20s".into())
         }
     }
+}
+
+// Push the live tunnel URL into a public GitHub gist so guests can recover
+// it client-side without dragging Firestore reads. The gist has a single
+// file `hanni-tunnel.json` with shape {"tunnel":"...","updated_at":"..."}.
+// Guest fetches the latest-raw URL — that endpoint always serves the
+// freshest revision (no SHA pinning).
+async fn push_tunnel_to_gist(gist_id: &str, token: &str, url: &str) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "files": {
+            "hanni-tunnel.json": {
+                "content": serde_json::json!({
+                    "tunnel": url,
+                    "updated_at": chrono::Utc::now().to_rfc3339(),
+                }).to_string()
+            }
+        }
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build().map_err(|e| e.to_string())?;
+    let resp = client.patch(&format!("https://api.github.com/gists/{}", gist_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "Hanni")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .json(&payload)
+        .send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("gist PATCH {}: {}", resp.status(),
+            resp.text().await.unwrap_or_default()));
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
