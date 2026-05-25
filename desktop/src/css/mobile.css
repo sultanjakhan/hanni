@@ -354,6 +354,20 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
   opacity: 1;
 }
 
+/* FAB popover-панели на мобиле раскладываются от правого края FAB-кнопки
+   вверх. Дефолтная .tw-panel — 360 px (на 360-px вьюпорте уходит за
+   левый край); остальные 280 px чуть теснят правый край. Перетягиваем
+   max-width на безопасное значение под viewport, чтобы любая панель
+   гарантированно влезала независимо от длины элементов. */
+.mobile .tw-panel,
+.mobile .ap-panel,
+.mobile .qp-panel,
+.mobile .nw-panel {
+  width: auto;
+  max-width: calc(100vw - 16px);
+  min-width: 260px;
+}
+
 /* Command palette: full width on mobile */
 .mobile .cmd-palette {
   width: 100%;
