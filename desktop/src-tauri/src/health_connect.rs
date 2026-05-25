@@ -115,18 +115,29 @@ pub fn get_sleep_stats(db: State<'_, HanniDb>, days: i64) -> SleepStats {
         "SELECT COALESCE(AVG(duration_minutes), 0), COUNT(*) FROM sleep_sessions WHERE date >= ?1",
         [&since_str], |r| Ok((r.get(0)?, r.get(1)?)),
     ).unwrap_or((0.0, 0));
+    // sleep_stages.start_time / end_time stored as HH:MM (time-of-day,
+    // no date). When a stage crosses midnight (start=23:30, end=01:00),
+    // julianday(end)-julianday(start) goes negative. Add 24 h whenever
+    // end < start so the duration is always positive.
+    let stage_dur =
+        "(julianday(ss.end_time) - julianday(ss.start_time) \
+         + (julianday(ss.end_time) < julianday(ss.start_time))) * 1440";
     let avg_deep: f64 = conn.query_row(
-        "SELECT COALESCE(AVG(mins), 0) FROM (
-            SELECT SUM((julianday(ss.end_time) - julianday(ss.start_time)) * 1440) as mins
-            FROM sleep_stages ss JOIN sleep_sessions s ON ss.session_id = s.id
-            WHERE s.date >= ?1 AND ss.stage = 'deep' GROUP BY s.id)",
+        &format!(
+            "SELECT COALESCE(AVG(mins), 0) FROM (
+                SELECT SUM({stage_dur}) as mins
+                FROM sleep_stages ss JOIN sleep_sessions s ON ss.session_id = s.id
+                WHERE s.date >= ?1 AND ss.stage = 'deep' GROUP BY s.id)"
+        ),
         [&since_str], |r| r.get(0),
     ).unwrap_or(0.0);
     let avg_rem: f64 = conn.query_row(
-        "SELECT COALESCE(AVG(mins), 0) FROM (
-            SELECT SUM((julianday(ss.end_time) - julianday(ss.start_time)) * 1440) as mins
-            FROM sleep_stages ss JOIN sleep_sessions s ON ss.session_id = s.id
-            WHERE s.date >= ?1 AND ss.stage = 'rem' GROUP BY s.id)",
+        &format!(
+            "SELECT COALESCE(AVG(mins), 0) FROM (
+                SELECT SUM({stage_dur}) as mins
+                FROM sleep_stages ss JOIN sleep_sessions s ON ss.session_id = s.id
+                WHERE s.date >= ?1 AND ss.stage = 'rem' GROUP BY s.id)"
+        ),
         [&since_str], |r| r.get(0),
     ).unwrap_or(0.0);
     SleepStats { avg_duration_minutes: avg_dur, avg_deep_minutes: avg_deep, avg_rem_minutes: avg_rem, total_sessions: total }
