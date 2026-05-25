@@ -336,19 +336,21 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 .mobile .task-widget,
 .mobile #task-control-widget {
   right: 6px;
+}
+/* Apply opacity to the FAB *trigger* only — not the whole widget, or
+   the popover/panel inherits the fade and becomes unreadable. The
+   open popover must be fully opaque. */
+.mobile .mw-btn,
+.mobile .nw-btn,
+.mobile .qw-btn,
+.mobile .tw-btn {
   opacity: 0.55;
   transition: opacity 0.15s;
 }
-.mobile .music-widget:active,
-.mobile .notification-widget:active,
-.mobile .quotes-widget:active,
-.mobile .task-widget:active,
-.mobile #task-control-widget:active,
-.mobile .music-widget:focus-within,
-.mobile .notification-widget:focus-within,
-.mobile .quotes-widget:focus-within,
-.mobile .task-widget:focus-within,
-.mobile #task-control-widget:focus-within {
+.mobile .mw-btn:active,
+.mobile .nw-btn:active,
+.mobile .qw-btn:active,
+.mobile .tw-btn:active {
   opacity: 1;
 }
 
