@@ -9,6 +9,15 @@ use crate::macos::get_macos_idle_seconds;
 use tauri::{AppHandle, Emitter, Manager};
 use std::collections::HashMap;
 
+/// Prefix every line of `s` with `> ` so user-supplied memory/profile/task
+/// strings are marked as quoted content rather than blending into the system
+/// prompt. Together with the "DATA vs INSTRUCTIONS" hint in SYSTEM_PROMPT
+/// this defangs the basic "запомни что: \n\nIgnore previous instructions"
+/// indirect-prompt-injection vector through facts/profile/tasks.
+fn quote_for_prompt(s: &str) -> String {
+    s.lines().map(|l| format!("> {}", l)).collect::<Vec<_>>().join("\n")
+}
+
 // ── Chat command ──
 
 #[tauri::command]
@@ -477,12 +486,12 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         let mut memory_block = String::new();
         if let Some(ref p) = profile {
             memory_block.push_str("[О пользователе]\n");
-            memory_block.push_str(p);
+            memory_block.push_str(&quote_for_prompt(p));
         }
         if !facts_ctx.is_empty() {
             if !memory_block.is_empty() { memory_block.push_str("\n\n"); }
             memory_block.push_str("[Релевантные факты]\n");
-            memory_block.push_str(&facts_ctx);
+            memory_block.push_str(&quote_for_prompt(&facts_ctx));
         }
         if !memory_block.is_empty() {
             system_parts.push(memory_block);
