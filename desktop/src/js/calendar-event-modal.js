@@ -8,6 +8,43 @@ import { showCategoryManager, showAddCategory } from './calendar-category-manage
 import { renderTemplatesAccordion, bindTemplates } from './calendar-event-templates.js';
 import { markBought } from './shopping-list.js';
 
+// Tabs that make sense to attach an event/task to. Excludes utility tabs
+// (timeline = activity log, schedule = recurring rules) and Calendar itself.
+// Icons override TAB_REGISTRY because some tabs (notes) ship an inline SVG
+// there — useless inside an <option>. Plain emoji renders cleanly.
+const PROJECT_TABS = [
+  { id: 'notes',       icon: '📝', label: 'Notes' },
+  { id: 'jobs',        icon: '💼', label: 'Jobs' },
+  { id: 'projects',    icon: '📁', label: 'Projects' },
+  { id: 'development', icon: '🚀', label: 'Development' },
+  { id: 'home',        icon: '🏠', label: 'Home' },
+  { id: 'hobbies',     icon: '🎮', label: 'Hobbies' },
+  { id: 'sports',      icon: '⚽', label: 'Sports' },
+  { id: 'health',      icon: '❤️',  label: 'Health' },
+  { id: 'food',        icon: '🍔', label: 'Food' },
+  { id: 'money',       icon: '💰', label: 'Money' },
+  { id: 'people',      icon: '👥', label: 'People' },
+];
+
+function renderProjectPicker(current) {
+  const cur = current || '';
+  const opts = PROJECT_TABS
+    .map(t => `<option value="${escapeHtml(t.id)}"${t.id === cur ? ' selected' : ''}>${t.icon} ${escapeHtml(t.label)}</option>`)
+    .join('');
+  return `<select class="form-select" id="evm-linked-tab">
+    <option value=""${!cur ? ' selected' : ''}>— Без привязки —</option>
+    ${opts}
+  </select>`;
+}
+
+// Default time: now rounded UP to nearest 5 minutes (so it isn't already past).
+function nextRoundedTime() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() + (5 - d.getMinutes() % 5) % 5);
+  if (d.getMinutes() === new Date().getMinutes()) d.setMinutes(d.getMinutes() + 5);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 const PRIORITY_LEVELS = [
   { v: 0, label: 'Нет',          hex: 'var(--bg-hover)',     text: 'var(--text-secondary)' },
   { v: 1, label: '1 · низкий',   hex: 'var(--color-green)',  text: '#fff' },
@@ -38,12 +75,19 @@ function categoryOptions(cats, current) {
   ).join('');
 }
 
+// "+ Новая" / "⚙️ Управление" are folded into the select itself as
+// sentinel values — keeps the row visually identical to Project and
+// drops two cluttering icon buttons from the form.
+const CAT_ACTION_NEW = '__new__';
+const CAT_ACTION_MANAGE = '__manage__';
+
 function renderCategoryPicker(cats, current) {
-  return `<div class="evm-cat-row">
-    <select class="form-select" id="evm-cat">${categoryOptions(cats, current)}</select>
-    <button type="button" class="btn-icon" id="evm-cat-new" title="Новая категория">+</button>
-    <button type="button" class="btn-icon" id="evm-cat-manage" title="Управление категориями">⚙️</button>
-  </div>`;
+  return `<select class="form-select" id="evm-cat">
+    ${categoryOptions(cats, current)}
+    <option disabled>──────────</option>
+    <option value="${CAT_ACTION_NEW}">+ Новая категория…</option>
+    <option value="${CAT_ACTION_MANAGE}">⚙️ Управление…</option>
+  </select>`;
 }
 
 export async function showEventModal(eventId = null) {
@@ -58,41 +102,80 @@ export async function showEventModal(eventId = null) {
   }
 
   const initDate = event?.date || S.selectedCalendarDate || new Date().toISOString().split('T')[0];
-  const initTime = event?.time || '';
+  const initTime = event?.time || (isEdit ? '' : nextRoundedTime());
   const initTitle = event?.title || '';
   const initDesc = event?.description || '';
   const initCat = event?.category || 'general';
   const initPri = event?.priority ?? 0;
   const initDur = event?.duration_minutes || 60;
+  const initTab = event?.linked_tab || '';
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   // ctx carries side-effects opened by a template (e.g. shopping picker
   // pre-selects items; on Save we mark them bought_at).
   const ctx = { shoppingPickedIds: null };
-  overlay.innerHTML = `<div class="modal modal-compact">
-    <div class="modal-title">${isEdit ? 'Редактировать событие' : 'Новое событие'}</div>
+  overlay.innerHTML = `<div class="modal modal-compact evm-modal">
+    ${isEdit ? '<button type="button" class="evm-del-corner" id="evm-del" title="Удалить событие">🗑</button>' : ''}
     ${isEdit ? '' : renderTemplatesAccordion()}
-    <div class="form-row"><input class="form-input" id="evm-title" placeholder="Название" value="${escapeHtml(initTitle)}"></div>
-    <div class="form-row">
-      <input class="form-input" id="evm-date" type="date" value="${initDate}">
-      <input class="form-input" id="evm-time" type="time" style="max-width:120px;" value="${initTime}">
-      <input class="form-input" id="evm-dur" type="number" min="5" step="5" style="max-width:90px;" value="${initDur}" title="Длительность, мин">
+    <div class="form-row evm-title-row">
+      <span class="evm-tpl-prefix" id="evm-tpl-prefix" hidden></span>
+      <input class="form-input" id="evm-title" placeholder="Название" value="${escapeHtml(initTitle)}">
     </div>
-    <div class="form-row evm-label">Категория</div>
-    ${renderCategoryPicker(cats, initCat)}
+    <div class="form-row evm-when-row">
+      <label class="evm-field">
+        <span class="evm-field-label">Дата</span>
+        <input class="form-input" id="evm-date" type="date" value="${initDate}">
+      </label>
+      <label class="evm-field">
+        <span class="evm-field-label">Время</span>
+        <input class="form-input" id="evm-time" type="time" value="${initTime}">
+      </label>
+      <label class="evm-field evm-field-dur">
+        <span class="evm-field-label">Длительность</span>
+        <span class="evm-dur-wrap"><input class="form-input" id="evm-dur" type="number" min="5" step="5" value="${initDur}"><span class="evm-dur-unit">мин</span></span>
+      </label>
+    </div>
+    <div class="evm-classify">
+      <div class="evm-classify-col">
+        <div class="evm-label">🏷️ Категория</div>
+        ${renderCategoryPicker(cats, initCat)}
+      </div>
+      <div class="evm-classify-col">
+        <div class="evm-label">📂 Проект</div>
+        ${renderProjectPicker(initTab)}
+      </div>
+    </div>
     <div class="form-row evm-label">Важность</div>
     ${renderPriorityPicker(initPri)}
-    <textarea class="form-textarea" id="evm-desc" placeholder="Описание (необязательно)" rows="2">${escapeHtml(initDesc)}</textarea>
-    <div class="modal-actions">
-      ${isEdit ? '<button class="btn-secondary evm-del" id="evm-del">Удалить</button>' : ''}
-      <button class="btn-secondary" id="evm-cancel">Отмена</button>
-      <button class="btn-primary" id="evm-save">${isEdit ? 'Сохранить' : 'Создать'}</button>
+    <details class="evm-desc-wrap"${initDesc ? ' open' : ''}>
+      <summary class="evm-desc-toggle">＋ Описание${initDesc ? '' : ' (необязательно)'}</summary>
+      <textarea class="form-textarea" id="evm-desc" placeholder="Заметки, контекст…" rows="2">${escapeHtml(initDesc)}</textarea>
+    </details>
+    <div class="modal-actions evm-actions">
+      <button class="evm-cancel-link" id="evm-cancel">Отмена</button>
+      <button class="btn-primary evm-save-btn" id="evm-save">${isEdit ? 'Сохранить' : 'Создать'}</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#evm-cancel')?.addEventListener('click', () => overlay.remove());
+
+  // ESC closes the modal — AbortController lets us detach the global
+  // keydown listener as soon as the modal element is removed from DOM.
+  const keyCtl = new AbortController();
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { overlay.remove(); keyCtl.abort(); }
+  }, { signal: keyCtl.signal });
+  new MutationObserver((_, obs) => {
+    if (!document.body.contains(overlay)) { keyCtl.abort(); obs.disconnect(); }
+  }).observe(document.body, { childList: true });
+  const titleInput = overlay.querySelector('#evm-title');
+  titleInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); overlay.querySelector('#evm-save')?.click(); }
+  });
+  // Autofocus title for fast capture: open modal → type → Enter.
+  setTimeout(() => titleInput?.focus(), 50);
 
   if (!isEdit) bindTemplates(overlay, ctx);
 
@@ -106,20 +189,37 @@ export async function showEventModal(eventId = null) {
     });
   });
 
-  // Category: + new / manage
-  overlay.querySelector('#evm-cat-new')?.addEventListener('click', () => {
-    showAddCategory(async (newName) => {
-      cats = await loadCategories(true);
-      const sel = overlay.querySelector('#evm-cat');
-      if (sel) sel.innerHTML = categoryOptions(cats, newName);
-    });
-  });
-  overlay.querySelector('#evm-cat-manage')?.addEventListener('click', () => {
-    showCategoryManager(async () => {
-      cats = await loadCategories(true);
-      const sel = overlay.querySelector('#evm-cat');
-      if (sel) sel.innerHTML = categoryOptions(cats, sel.value);
-    });
+  // Category select: +/⚙️ are sentinel options. On pick → run the
+  // action, then re-render options keeping the prior real selection
+  // (so the form value doesn't get stuck on a sentinel).
+  const refreshCatOptions = (keepValue) => {
+    const sel = overlay.querySelector('#evm-cat');
+    if (!sel) return;
+    const html = renderCategoryPicker(cats, keepValue);
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    sel.innerHTML = tmp.firstElementChild.innerHTML;
+    sel.dataset.prev = sel.value;
+  };
+  const catSel = overlay.querySelector('#evm-cat');
+  if (catSel) catSel.dataset.prev = catSel.value;
+  catSel?.addEventListener('change', (e) => {
+    const v = e.target.value;
+    const prev = e.target.dataset.prev || 'general';
+    if (v === CAT_ACTION_NEW) {
+      e.target.value = prev;
+      showAddCategory(async (newName) => {
+        cats = await loadCategories(true);
+        refreshCatOptions(newName);
+      });
+    } else if (v === CAT_ACTION_MANAGE) {
+      e.target.value = prev;
+      showCategoryManager(async () => {
+        cats = await loadCategories(true);
+        refreshCatOptions(prev);
+      });
+    } else {
+      e.target.dataset.prev = v;
+    }
   });
 
   // Delete (edit-mode only)
@@ -141,6 +241,7 @@ export async function showEventModal(eventId = null) {
     const cat = overlay.querySelector('#evm-cat')?.value || 'general';
     const pri = parseInt(overlay.querySelector('.evm-priority')?.dataset.evmPriority || '0', 10);
     const desc = overlay.querySelector('#evm-desc')?.value || '';
+    const linkedTab = overlay.querySelector('#evm-linked-tab')?.value || '';
     const catColor = (cats.find(c => c.name === cat)?.color) || '#9B9B9B';
 
     try {
@@ -149,12 +250,12 @@ export async function showEventModal(eventId = null) {
           id: Number(eventId),
           title, description: desc, date, time,
           durationMinutes: dur, category: cat, color: catColor,
-          completed: null, priority: pri,
+          completed: null, priority: pri, linkedTab,
         });
       } else {
         await invoke('create_event', {
           title, description: desc, date, time,
-          durationMinutes: dur, category: cat, color: catColor, priority: pri,
+          durationMinutes: dur, category: cat, color: catColor, priority: pri, linkedTab,
         });
         if (ctx.shoppingPickedIds?.length) {
           await markBought(ctx.shoppingPickedIds).catch(() => {});

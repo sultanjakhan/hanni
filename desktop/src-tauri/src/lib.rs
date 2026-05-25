@@ -206,6 +206,7 @@ fn init_database() -> HanniDb {
     db::migrate_share_links(&conn);
     db::migrate_priority(&conn);
     db::migrate_schedule_priority(&conn);
+    db::migrate_event_linked_tab(&conn);
     db::migrate_task_pins(&conn);
     db::migrate_event_categories(&conn);
     db::migrate_drop_mindset(&conn);

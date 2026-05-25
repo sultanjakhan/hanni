@@ -513,6 +513,19 @@
 .evm-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 .evm-cat-row { display: flex; gap: var(--space-2); align-items: center; }
 .evm-cat-row .form-select { flex: 1; }
+
+/* Category + Project side-by-side — they're related classifiers, so
+   grouping them in one row visually reinforces that and saves height. */
+.evm-classify {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);
+  margin: var(--space-2) 0;
+}
+.evm-classify-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.evm-classify-col .evm-label { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.evm-classify-col .form-select { width: 100%; }
+@media (max-width: 460px) {
+  .evm-classify { grid-template-columns: 1fr; }
+}
 .evm-priority { display: flex; gap: 6px; flex-wrap: wrap; }
 .evm-pri-pill {
   width: 36px; height: 32px; border: 1px solid var(--border-default);
@@ -1984,83 +1997,87 @@
 .cal-chart-summary-empty { font-size: 13px; color: var(--text-muted); }
 
 
-/* ─── Quick-templates accordion in calendar event modal ─── */
-.evm-templates { margin-bottom: 10px; }
-.evm-templates-sum {
-  cursor: pointer; padding: 4px 2px 8px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
-  text-transform: uppercase; color: var(--text-muted);
-  user-select: none; list-style: none;
-}
-.evm-templates-sum::-webkit-details-marker { display: none; }
-.evm-templates-sum::before {
-  content: '▸'; display: inline-block; margin-right: 4px;
-  font-size: 9px; transition: transform .15s;
-}
-.evm-templates[open] .evm-templates-sum::before { transform: rotate(90deg); }
-
-/* Grid 3×3 — equal-width tiles; collapses to 2 cols on narrow modals. */
-.evm-tpl-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-}
-@media (max-width: 380px) { .evm-tpl-grid { grid-template-columns: repeat(2, 1fr); } }
-
-.evm-tpl-chip {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px; background: var(--bg-secondary);
-  border: 1px solid transparent; border-radius: var(--radius-sm);
-  font-size: 13px; color: var(--text-primary); cursor: pointer;
-  text-align: left; min-width: 0;
-  transition: background-color .12s, border-color .12s, transform .08s;
-}
-.evm-tpl-chip:hover { background: var(--bg-hover); }
-.evm-tpl-chip:active { transform: scale(0.97); }
-.evm-tpl-chip.active {
-  background: var(--bg-primary);
-  border-color: var(--accent-fill);
-  box-shadow: 0 0 0 1px var(--accent-fill);
-}
-
-/* Coloured icon tile — semantic colour cue per template. */
-.evm-tpl-ico {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; flex-shrink: 0;
-  background: var(--bg-hover); border-radius: var(--radius-sm);
-  font-size: 16px; line-height: 1;
-}
-.evm-tpl-chip[data-color="orange"] .evm-tpl-ico { background: var(--color-orange-bg); }
-.evm-tpl-chip[data-color="blue"]   .evm-tpl-ico { background: var(--color-blue-bg); }
-.evm-tpl-chip[data-color="purple"] .evm-tpl-ico { background: var(--color-purple-bg); }
-.evm-tpl-chip[data-color="yellow"] .evm-tpl-ico { background: var(--color-yellow-bg); }
-.evm-tpl-chip[data-color="red"]    .evm-tpl-ico { background: var(--color-red-bg); }
-.evm-tpl-chip[data-color="green"]  .evm-tpl-ico { background: var(--color-green-bg); }
-.evm-tpl-chip[data-color="lime"]   .evm-tpl-ico { background: var(--color-lime-bg); }
-.evm-tpl-chip[data-color="pink"]   .evm-tpl-ico { background: var(--color-pink-bg); }
-.evm-tpl-chip[data-color="gray"]   .evm-tpl-ico { background: var(--bg-hover); }
-
-.evm-tpl-lbl {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-weight: 500;
-}
-
+/* ─── Quick-template select in calendar event modal ─── */
+.evm-tpl-row { margin-bottom: 8px; }
 .evm-tpl-spec {
-  margin-top: 10px; padding: 10px; background: var(--bg-secondary);
+  margin-top: 8px; padding: 8px 10px; background: var(--bg-hover);
   border-radius: var(--radius-sm);
 }
 .evm-tpl-spec-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-muted); margin-bottom: 6px;
 }
-.evm-tpl-spec-row {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+/* Duration input + "мин" suffix so the bare number isn't confusing */
+.evm-dur-wrap {
+  position: relative; display: block;
 }
-.evm-tpl-spec-row .evm-tpl-chip {
-  flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px;
+.evm-dur-wrap .form-input {
+  width: 100%; padding-right: 32px;
 }
-.evm-tpl-chip-hint {
-  font-size: 11px; color: var(--text-muted);
+.evm-dur-unit {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: var(--text-muted); pointer-events: none;
 }
-.evm-tpl-chip.active .evm-tpl-chip-hint { color: var(--accent-fill); }
+
+/* Event modal — relative for corner trash button. */
+.evm-modal { position: relative; }
+
+/* Delete corner button (edit mode) — destructive action gets its own
+   discreet spot so it's not adjacent to Save/Cancel. */
+.evm-del-corner {
+  position: absolute; top: 10px; right: 10px;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 6px;
+  color: var(--text-muted); font-size: 14px; cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.evm-del-corner:hover { background: var(--color-red-bg, rgba(255,0,0,0.1)); color: var(--color-red); }
+
+/* Title row — template icon prefix sits flush with the input. */
+.evm-title-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.evm-tpl-prefix {
+  flex-shrink: 0; font-size: 18px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px;
+  background: var(--bg-hover); border-radius: 6px;
+}
+.evm-title-row .form-input { flex: 1; min-width: 0; }
+
+/* Date/time/duration row — labelled fields in a grid. */
+.evm-when-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-2);
+}
+.evm-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.evm-field-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-muted); font-weight: 600;
+}
+.evm-field .form-input { width: 100%; }
+
+/* Description — collapsed by default, expand on demand. */
+.evm-desc-wrap { margin: var(--space-2) 0; }
+.evm-desc-toggle {
+  cursor: pointer; padding: 4px 2px;
+  font-size: 12px; color: var(--text-muted);
+  user-select: none; list-style: none;
+}
+.evm-desc-toggle::-webkit-details-marker { display: none; }
+.evm-desc-toggle:hover { color: var(--text-primary); }
+.evm-desc-wrap[open] .evm-desc-toggle { margin-bottom: 4px; }
+
+/* Modal actions — Cancel is a ghost link, Create dominates as primary. */
+.evm-actions { display: flex; align-items: center; gap: var(--space-3); justify-content: flex-end; }
+.evm-cancel-link {
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 13px; padding: 8px 4px; cursor: pointer;
+}
+.evm-cancel-link:hover { color: var(--text-primary); }
+.evm-save-btn {
+  font-size: 14px; font-weight: 600; padding: 10px 24px; min-width: 120px;
+}
 
 /* ─── Shopping list modal & picker ─── */
 .sl-add-row { display: flex; gap: 6px; margin-bottom: 10px; }

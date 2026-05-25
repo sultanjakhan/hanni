@@ -13,48 +13,46 @@ import { itemsToDescription } from './shopping-list.js';
 // here (vs DB) is intentional — these are app-level UX shortcuts, not
 // user data; CRUD on them doesn't belong in the catalogue tables.
 const TEMPLATES = [
-  { id: 'cook',    icon: '🍳', label: 'Готовка',     color: 'orange', title: 'Готовка',          dur: 30, cat: 'Готовка', handoff: 'cook' },
-  { id: 'shower',  icon: '🚿', label: 'Душ',         color: 'blue',   title: 'Душ',              dur: 15, cat: 'Быт' },
-  { id: 'toilet',  icon: '🚽', label: 'Туалет',      color: 'gray',   title: 'Туалет',           dur: 5,  cat: 'Быт' },
-  { id: 'medit',   icon: '🧘', label: 'Медитация',   color: 'purple', title: 'Медитация',        dur: 10, cat: 'Спорт',  spec: 'medit' },
-  { id: 'book',    icon: '📚', label: 'Чтение',      color: 'yellow', title: 'Чтение',           dur: 30, cat: 'Учёба' },
-  { id: 'meds',    icon: '💊', label: 'Лекарство',   color: 'red',    title: 'Принять',          dur: 5,  cat: 'Быт',    spec: 'meds' },
-  { id: 'shop',    icon: '🛒', label: 'Закупка',     color: 'green',  title: 'Закупка продуктов', dur: 60, cat: 'Быт',   handoff: 'shop' },
-  { id: 'laundry', icon: '🧺', label: 'Постирать',   color: 'lime',   title: 'Постирать',        dur: 10, cat: 'Быт' },
-  { id: 'trash',   icon: '🗑', label: 'Мусор',       color: 'pink',   title: 'Вынести мусор',    dur: 5,  cat: 'Быт' },
-];
-
-const MEDIT_TECHNIQUES = [
-  { id: 'box',     label: 'Box 4-4-4-4',    dur: 5,  hint: 'фокус' },
-  { id: 'relax',   label: '4-7-8',          dur: 10, hint: 'расслабление' },
-  { id: 'coh',     label: 'Coherent 5-5',   dur: 10, hint: 'баланс' },
+  { id: 'cook',    icon: '🍳', label: 'Готовка',     title: 'Готовка',          dur: 30, cat: 'Готовка', tab: 'food',    handoff: 'cook' },
+  { id: 'workout', icon: '🏋️', label: 'Тренировка',  title: 'Тренировка',       dur: 60, cat: 'Спорт',   tab: 'sports' },
+  { id: 'shower',  icon: '🚿', label: 'Душ',         title: 'Душ',              dur: 15, cat: 'Быт' },
+  { id: 'toilet',  icon: '🚽', label: 'Туалет',      title: 'Туалет',           dur: 5,  cat: 'Быт' },
+  { id: 'book',    icon: '📚', label: 'Чтение',      title: 'Чтение',           dur: 30, cat: 'Учёба' },
+  { id: 'meds',    icon: '💊', label: 'Лекарство',   title: 'Принять',          dur: 5,  cat: 'Быт',    tab: 'health', spec: 'meds' },
+  { id: 'shop',    icon: '🛒', label: 'Закупка',     title: 'Закупка продуктов', dur: 60, cat: 'Быт',   tab: 'home',   handoff: 'shop' },
+  { id: 'laundry', icon: '🧺', label: 'Постирать',   title: 'Постирать',        dur: 10, cat: 'Быт' },
+  { id: 'trash',   icon: '🗑', label: 'Мусор',       title: 'Вынести мусор',    dur: 5,  cat: 'Быт' },
 ];
 
 export function renderTemplatesAccordion() {
-  const chips = TEMPLATES.map(t => `
-    <button type="button" class="evm-tpl-chip" data-tpl="${t.id}" data-color="${t.color}">
-      <span class="evm-tpl-ico">${t.icon}</span><span class="evm-tpl-lbl">${escapeHtml(t.label)}</span>
-    </button>`).join('');
-  return `<details class="evm-templates" open>
-    <summary class="evm-templates-sum">⚡ Шаблоны</summary>
-    <div class="evm-tpl-grid">${chips}</div>
+  const opts = TEMPLATES.map(t =>
+    `<option value="${t.id}">${t.icon} ${escapeHtml(t.label)}</option>`
+  ).join('');
+  return `<div class="form-row evm-tpl-row">
+    <select class="form-select" id="evm-tpl-sel">
+      <option value="">⚡ Шаблон — выбери для авто-заполнения…</option>
+      ${opts}
+    </select>
     <div class="evm-tpl-spec" id="evm-tpl-spec" hidden></div>
-  </details>`;
+  </div>`;
 }
 
-// Wire the accordion buttons after the modal HTML is in the DOM.
+// Wire the template select after the modal HTML is in the DOM.
 // Some templates close the event modal (cook, shop) — others mutate
 // the existing fields in place.
 export function bindTemplates(overlay, ctx) {
+  const sel = overlay.querySelector('#evm-tpl-sel');
   const specEl = overlay.querySelector('#evm-tpl-spec');
-  overlay.querySelectorAll('.evm-tpl-chip').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tpl = TEMPLATES.find(t => t.id === btn.dataset.tpl);
-      if (!tpl) return;
-      overlay.querySelectorAll('.evm-tpl-chip').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      handleTemplate(tpl, overlay, specEl, ctx);
-    });
+  if (!sel) return;
+  sel.addEventListener('change', () => {
+    const tpl = TEMPLATES.find(t => t.id === sel.value);
+    if (!tpl) {
+      if (specEl) { specEl.hidden = true; specEl.innerHTML = ''; }
+      const prefix = overlay.querySelector('#evm-tpl-prefix');
+      if (prefix) { prefix.textContent = ''; prefix.hidden = true; }
+      return;
+    }
+    handleTemplate(tpl, overlay, specEl, ctx);
   });
 }
 
@@ -66,6 +64,17 @@ function applyPrefill(overlay, tpl) {
   if (durEl) durEl.value = tpl.dur;
   if (catEl && Array.from(catEl.options).some(o => o.value === tpl.cat)) {
     catEl.value = tpl.cat;
+  }
+  if (tpl.tab) {
+    const tabSel = overlay.querySelector('#evm-linked-tab');
+    if (tabSel && Array.from(tabSel.options).some(o => o.value === tpl.tab)) {
+      tabSel.value = tpl.tab;
+    }
+  }
+  const prefix = overlay.querySelector('#evm-tpl-prefix');
+  if (prefix) {
+    prefix.textContent = tpl.icon || '';
+    prefix.hidden = !tpl.icon;
   }
 }
 
@@ -93,28 +102,6 @@ function handleTemplate(tpl, overlay, specEl, ctx) {
   }
 
   applyPrefill(overlay, tpl);
-
-  if (tpl.spec === 'medit') {
-    specEl.hidden = false;
-    specEl.innerHTML = `<div class="evm-tpl-spec-label">Техника дыхания</div>
-      <div class="evm-tpl-spec-row">${MEDIT_TECHNIQUES.map(m => `
-        <button type="button" class="evm-tpl-chip" data-mt="${m.id}">
-          <span>${escapeHtml(m.label)}</span>
-          <span class="evm-tpl-chip-hint">${escapeHtml(m.hint)} · ${m.dur}м</span>
-        </button>`).join('')}</div>`;
-    specEl.querySelectorAll('[data-mt]').forEach(b => {
-      b.addEventListener('click', () => {
-        const m = MEDIT_TECHNIQUES.find(x => x.id === b.dataset.mt);
-        if (!m) return;
-        specEl.querySelectorAll('[data-mt]').forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        const titleEl = overlay.querySelector('#evm-title');
-        if (titleEl) titleEl.value = `Медитация · ${m.label}`;
-        const durEl = overlay.querySelector('#evm-dur');
-        if (durEl) durEl.value = m.dur;
-      });
-    });
-  }
 
   if (tpl.spec === 'meds') {
     specEl.hidden = false;

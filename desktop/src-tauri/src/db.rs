@@ -2329,6 +2329,12 @@ pub fn migrate_schedule_priority(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE schedules ADD COLUMN priority INTEGER NOT NULL DEFAULT 0", []).ok();
 }
 
+pub fn migrate_event_linked_tab(conn: &rusqlite::Connection) {
+    // Optional link from a calendar event to a Hanni tab (food, sports, …).
+    // Empty string = no link. Mirrors the notes.tab_name pattern.
+    conn.execute("ALTER TABLE events ADD COLUMN linked_tab TEXT NOT NULL DEFAULT ''", []).ok();
+}
+
 pub fn migrate_task_pins(conn: &rusqlite::Connection) {
     // Manually pinned tasks in the "Запустить таск" picker. Local-only (not CRR);
     // keyed by the (source_type, source_id) the picker already uses.
