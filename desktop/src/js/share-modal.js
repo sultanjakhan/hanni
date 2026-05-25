@@ -252,12 +252,24 @@ async function submitCreate(overlay, tabId) {
     resetFooter(overlay, tabId);
     await refreshList(overlay, tabId);
     if (!tunnelUp) {
-      const errLine = status && status.error ? `<br><span style="opacity:.7">${escapeHtml(status.error)}</span>` : '';
+      const err = status && status.error || '';
+      // The real cause matters: 429 from trycloudflare is a temporary rate
+      // limit (wait, don't reinstall), missing binary needs install, anything
+      // else is a generic "tunnel down" with the raw error for debugging.
+      let cause;
+      if (/429|Too Many|RESOURCE_EXHAUSTED|trycloudflare/i.test(err)) {
+        cause = `Cloudflare временно <b>ограничивает</b> trycloudflare с этого IP (HTTP 429). Туннель встанет сам через 15–30 минут — пока что гости смогут <b>читать</b> через Firebase, но <b>писать</b> не получится.`;
+      } else if (/not installed|brew install/i.test(err)) {
+        cause = `cloudflared не найден. Поставь: <code>brew install cloudflared</code>`;
+      } else {
+        cause = `Ссылка создана, но туннель не поднят — гости смогут <b>читать</b>, но <b>писать</b> не получится.`;
+      }
+      const errLine = err ? `<br><span style="opacity:.7">${escapeHtml(err)}</span>` : '';
       const body = overlay.querySelector('#share-body');
       if (body) {
         const warn = document.createElement('div');
         warn.className = 'share-warn';
-        warn.innerHTML = `Ссылка создана, но cloudflared tunnel не поднят — гости смогут <b>читать</b> через Firebase, но <b>записывать</b> не получится. Поставь: <code>brew install cloudflared</code>${errLine}`;
+        warn.innerHTML = `${cause}${errLine}`;
         body.prepend(warn);
       }
     }

@@ -135,6 +135,10 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
     let re = regex::Regex::new(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
         .map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(stderr).lines();
+    // 429 from trycloudflare = our IP is being rate-limited by Cloudflare
+    // (typically after a burst of restarts). Capture it so we can surface a
+    // real cause instead of the generic "tunnel did not produce a URL".
+    let mut saw_429 = false;
     let url = {
         let mut found: Option<String> = None;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -146,6 +150,10 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
             let line = tokio::time::timeout(remaining, reader.next_line()).await;
             match line {
                 Ok(Ok(Some(l))) => {
+                    if l.contains("429") || l.contains("Too Many Requests")
+                        || l.contains("error code: 1015") {
+                        saw_429 = true;
+                    }
                     if let Some(m) = re.find(&l) {
                         found = Some(m.as_str().to_string());
                         break;
@@ -216,7 +224,15 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
         }
         None => {
             let _ = child.kill().await;
-            Err("cloudflared did not produce a public URL within 20s".into())
+            let msg = if saw_429 {
+                "Cloudflare ограничивает trycloudflare (429). Подожди 15–30 минут, потом попробуй снова. Или поставь named tunnel.".to_string()
+            } else {
+                "cloudflared did not produce a public URL within 20s".to_string()
+            };
+            // Surface the cause so tunnel_status reports it accurately.
+            let st = app.state::<ShareTunnel>();
+            if let Ok(mut g) = st.0.lock() { g.error = Some(msg.clone()); }
+            Err(msg)
         }
     }
 }
