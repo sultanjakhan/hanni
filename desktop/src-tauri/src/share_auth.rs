@@ -62,6 +62,12 @@ pub fn require_perm(ctx: &LinkCtx, needed: &str) -> Result<(), (StatusCode, Stri
 pub fn rate_limit_check(state: &ShareServerState, token: &str) -> Result<(), (StatusCode, String)> {
     let now = chrono::Local::now().timestamp();
     let mut map = state.rate_limit.lock().unwrap();
+    // Bound map growth: attacker spamming distinct random tokens otherwise
+    // makes this HashMap a memory-exhaustion vector. Stale entries (window
+    // already expired) carry no information, drop them when map gets big.
+    if map.len() > 10_000 {
+        map.retain(|_, (_, started)| now - *started < 60);
+    }
     let entry = map.entry(token.to_string()).or_insert((0, now));
     if now - entry.1 >= 60 { *entry = (0, now); }
     entry.0 += 1;
@@ -91,11 +97,37 @@ pub fn log_activity(conn: &rusqlite::Connection, link_id: i64, action: &str, pay
 
 pub fn ua_ip(headers: &HeaderMap, addr: &SocketAddr) -> (String, String) {
     let ua = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    let ip = addr.ip().to_string();
+    // Behind Cloudflare Tunnel the TCP peer is always 127.0.0.1. The real
+    // guest IP travels in CF-Connecting-IP (set by Cloudflare; the server
+    // only binds to 127.0.0.1 so untrusted senders can't reach it directly).
+    // Fall back to X-Forwarded-For first hop, then the TCP peer for local dev.
+    let ip = headers.get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| headers.get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| addr.ip().to_string());
     (ua, ip)
 }
 
 pub fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
      .replace('"', "&quot;").replace('\'', "&#39;")
+}
+
+/// Sanitize a guest-supplied display name. Strips HTML-relevant and control
+/// characters, caps length at 30. Keeps Cyrillic, emoji, common punctuation —
+/// only removes what could break renderers or enable stored XSS.
+/// Returns `default_name` if input is None / empty / all-stripped.
+pub fn sanitize_author(input: Option<&str>, default_name: &str) -> String {
+    let raw = input.unwrap_or("").trim();
+    let cleaned: String = raw.chars()
+        .filter(|c| !matches!(c, '<' | '>' | '"' | '\'' | '&' | '\0'..='\x1f' | '\x7f'))
+        .take(30)
+        .collect();
+    if cleaned.is_empty() { default_name.to_string() } else { cleaned }
 }

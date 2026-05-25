@@ -2,9 +2,10 @@
 // Runs on 127.0.0.1:8239 (prod) / 8240 (dev). Cloudflare Tunnel exposes it to the internet.
 
 use axum::{
-    extract::{Path, State as AxumState},
+    extract::{Path, Request, State as AxumState},
     http::{HeaderValue, Method, StatusCode, header},
-    response::Html,
+    middleware::{self, Next},
+    response::{Html, Response},
     routing::{delete, get, patch},
     Json, Router,
 };
@@ -76,15 +77,21 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/assets/fridge-shared.js", get(asset_js_fridge_shared))
         .route("/s/{token}/assets/guest_fridge.js", get(asset_js_fridge))
         .with_state(state)
-        // Allow Firebase-Hosted guest UI to POST/PATCH/DELETE writes here.
-        // Static origin is .web.app / .firebaseapp.com — both belong to the
-        // same Firebase project. Localhost stays open for dev tooling.
+        // Strip Referer on outbound navigation — share-link tokens live in
+        // URL paths, leaking them via the Referer header to any external
+        // page a guest happens to open is a token-exposure risk.
+        .layer(middleware::from_fn(add_security_headers))
+        // Allow only Hanni's own Firebase Hosting origins (both .web.app and
+        // .firebaseapp.com point at the same project — Firebase provisions
+        // both domains by default). Pinning prevents any other Firebase
+        // project from initiating cross-origin requests against a leaked
+        // share link. Localhost stays open for dev tooling.
         .layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
                     origin.to_str().map(|s|
-                        s.ends_with(".web.app")
-                        || s.ends_with(".firebaseapp.com")
+                        s == "https://hanni-2e5d0.web.app"
+                        || s == "https://hanni-2e5d0.firebaseapp.com"
                         || s.starts_with("http://127.0.0.1")
                         || s.starts_with("http://localhost")
                     ).unwrap_or(false)
@@ -108,6 +115,15 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok", "service": "share" }))
+}
+
+async fn add_security_headers(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    response.headers_mut().insert(
+        "referrer-policy",
+        HeaderValue::from_static("no-referrer"),
+    );
+    response
 }
 
 async fn landing(

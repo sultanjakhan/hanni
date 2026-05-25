@@ -11,7 +11,8 @@ use std::net::SocketAddr;
 use tauri::Manager;
 
 use crate::share_auth::{
-    load_link, require_perm, rate_limit_check, log_activity, ua_ip, BODY_LIMIT_BYTES,
+    load_link, require_perm, rate_limit_check, log_activity, sanitize_author, ua_ip,
+    BODY_LIMIT_BYTES,
 };
 use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
@@ -137,7 +138,7 @@ pub async fn create_meal_plan(
     }
 
     let now = chrono::Local::now().to_rfc3339();
-    let author_tag = req.author.as_deref().unwrap_or("guest");
+    let author_tag = sanitize_author(req.author.as_deref(), "guest");
     let prev_notes = req.notes.clone().unwrap_or_default();
     let notes = if prev_notes.is_empty() {
         format!("[добавил: {}]", author_tag)

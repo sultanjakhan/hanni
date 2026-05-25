@@ -10,7 +10,8 @@ use std::net::SocketAddr;
 use tauri::Manager;
 
 use crate::share_auth::{
-    load_link, require_perm, rate_limit_check, log_activity, ua_ip, BODY_LIMIT_BYTES,
+    load_link, require_perm, rate_limit_check, log_activity, sanitize_author, ua_ip,
+    BODY_LIMIT_BYTES,
 };
 use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
@@ -69,8 +70,7 @@ pub async fn create_comment(
     let conn = db.conn();
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "comment")?;
-    let author = req.author.as_deref().unwrap_or("Guest").trim();
-    let author = if author.is_empty() { "Guest" } else { author };
+    let author = sanitize_author(req.author.as_deref(), "Guest");
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO share_comments (link_id, entity_type, entity_id, author, text, created_at)

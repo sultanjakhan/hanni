@@ -10,7 +10,8 @@ use std::net::SocketAddr;
 use tauri::Manager;
 
 use crate::share_auth::{
-    load_link, require_perm, rate_limit_check, log_activity, ua_ip, BODY_LIMIT_BYTES,
+    load_link, require_perm, rate_limit_check, log_activity, sanitize_author, ua_ip,
+    BODY_LIMIT_BYTES,
 };
 use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
@@ -70,7 +71,7 @@ pub async fn create_recipe(
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes".into()));
     }
     let now = chrono::Local::now().to_rfc3339();
-    let author_tag = req.author.as_deref().unwrap_or("guest");
+    let author_tag = sanitize_author(req.author.as_deref(), "guest");
     let prev_tags = req.tags.clone().unwrap_or_default();
     let tags = if prev_tags.is_empty() {
         format!("shared-by:{}", author_tag)
@@ -235,7 +236,7 @@ pub async fn update_recipe(
         }
         crate::sync_share::mark_dirty(&conn, "recipe_ingredients");
     }
-    let author_tag = req.author.as_deref().unwrap_or("guest");
+    let author_tag = sanitize_author(req.author.as_deref(), "guest");
     log_activity(&conn, ctx.id, "edit_recipe",
         &serde_json::json!({ "recipe_id": id, "author": author_tag }).to_string(),
         &ip, &ua);
