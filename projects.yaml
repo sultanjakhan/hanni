@@ -729,33 +729,7 @@ _shared:
       # docs/architecture/** и docs/projects/** — 159 файлов
 
 # ════════════════════════════════════════════════════════════════════
-# _dead — кандидаты на удаление в cleanup pass
-# ════════════════════════════════════════════════════════════════════
-# Эти пути будут удалены отдельным cleanup commit-ом после grep-верификации,
-# что нигде не импортируются.
-
-_dead:
-  chat_folder:
-    paths: [chat/]
-    reason: |
-      Abandoned split: README обещает symlinks в src/js/ и src-tauri/src/,
-      но это обычные файлы, отличающиеся от рабочих. Последний коммит март 2026.
-      voice_server.py идентичен desktop/voice_server.py — дубликат.
-      Рабочие файлы — в desktop/src/, эта папка не используется.
-    files_count: 27
-    verify_before_delete: "git grep -E 'from .chat/|require.*chat/|chat/(js|rust|css)' -- ':!chat/'"
-
-  tg_bot_folder:
-    paths: [tg-bot/]
-    reason: |
-      Telegram bot для трекинга вакансий (Python, Aiogram). Отдельный side-project,
-      не интегрирован с Hanni. По решению пользователя — архивируется.
-      Последний коммит апрель 2026.
-    files_count: 7
-    verify_before_delete: "Проверить нет ли ссылок из docs/ или README"
-
-# ════════════════════════════════════════════════════════════════════
-# _archive — удалённые проекты, для исторической справки
+# _archive — удалённые проекты и папки, для исторической справки
 # ════════════════════════════════════════════════════════════════════
 
 _archive:
@@ -763,3 +737,13 @@ _archive:
     description: "Журнал, mood log, principles — таб удалён в v0.70"
     note: "Миграция migrate_drop_mindset() в db.rs дропает journal_entries / mood_log / principles"
     removed_at: "v0.70"
+
+  chat_folder:
+    description: "Abandoned split-папка `chat/` (27 файлов): README обещал symlinks в src/, на деле — обычные расходящиеся копии"
+    note: "voice_server.py был идентичен desktop/voice_server.py, остальные файлы расходились. Рабочие файлы — в desktop/src/"
+    removed_at: "2026-05-25 (cleanup commit)"
+
+  tg_bot_folder:
+    description: "Telegram bot для трекинга вакансий (Aiogram), отдельный side-project, не интегрирован с Hanni"
+    note: "На диске может остаться tg-bot/.venv/ (untracked Python venv) — удалить отдельно через rm -rf если нужно"
+    removed_at: "2026-05-25 (cleanup commit)"
