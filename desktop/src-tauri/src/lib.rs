@@ -220,6 +220,7 @@ fn init_database() -> HanniDb {
     db::migrate_sleep_to_uuid_pk(&conn); // Phase 1: UUID PK for sleep_*
     db::migrate_health_to_uuid_pk(&conn); // Phase 2: UUID PK for health_log + heart_rate_samples
     db::migrate_schedules_to_uuid_pk(&conn); // Phase 3: UUID PK for schedules + schedule_completions
+    db::backfill_routine_nodes_source_id(&conn); // Phase 3 follow-up: heal orphans on installs that ran the migration before the remap was added
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag

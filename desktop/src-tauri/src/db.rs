@@ -3088,6 +3088,83 @@ pub fn migrate_schedules_to_uuid_pk(conn: &rusqlite::Connection) {
     }
 }
 
+/// Orphan backfill for installs that ran migrate_schedules_to_uuid_pk BEFORE
+/// the routine_nodes remap was added inside it: schedules now have UUID ids
+/// but routine_nodes.source_id still holds the old INTEGER ids that no longer
+/// match anything. Without this, routine→schedule mirroring in
+/// set_routine_node_status falls back to a title heuristic, which silently
+/// fails when two schedules share a substring (e.g. "Зубы утром" / "Зубы
+/// вечером"). Idempotent: skips rows whose source_id is already TEXT.
+pub fn backfill_routine_nodes_source_id(conn: &rusqlite::Connection) {
+    // Only relevant if both tables exist and schedules is already UUID-typed.
+    if !column_is_text(conn, "schedules", "id") { return; }
+    let has_routine: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='routine_nodes'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    if has_routine == 0 { return; }
+
+    // Find nodes whose source_id is still stored as INTEGER — those are the
+    // orphans. typeof() reports the per-row storage class, so post-migration
+    // remapped rows (stored as TEXT) are skipped automatically.
+    let orphans: Vec<(i64, String)> = match conn.prepare(
+        "SELECT id, title FROM routine_nodes
+         WHERE source_type='schedule' AND source_id IS NOT NULL
+           AND typeof(source_id)='integer'"
+    ) {
+        Ok(mut stmt) => stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rs| rs.filter_map(|r| r.ok()).collect()).unwrap_or_default(),
+        Err(_) => return,
+    };
+    if orphans.is_empty() { return; }
+
+    // Snapshot active schedules so the title lookup is Rust-side (Unicode-
+    // aware lowercasing — SQLite LOWER() is ASCII-only and would miss
+    // Cyrillic). Same matching strategy as routine_engine's runtime fallback:
+    // exact lowercase match, then unambiguous substring.
+    let scheds: Vec<(String, String)> = match conn.prepare(
+        "SELECT id, title FROM schedules WHERE is_active = 1"
+    ) {
+        Ok(mut stmt) => stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map(|rs| rs.filter_map(|r| r.ok())
+                .map(|(i, t)| (i, t.to_lowercase())).collect())
+            .unwrap_or_default(),
+        Err(_) => return,
+    };
+
+    let mut fixed = 0i64;
+    let mut cleared = 0i64;
+    for (rn_id, title) in &orphans {
+        let want = title.to_lowercase();
+        let exact = scheds.iter().find(|(_, t)| *t == want).map(|(i, _)| i.clone());
+        let resolved = if let Some(uuid) = exact {
+            Some(uuid)
+        } else {
+            let subs: Vec<&String> = scheds.iter()
+                .filter(|(_, t)| t.contains(&want) || want.contains(t))
+                .map(|(i, _)| i).collect();
+            if subs.len() == 1 { Some(subs[0].clone()) } else { None }
+        };
+        match resolved {
+            Some(uuid) => {
+                if conn.execute(
+                    "UPDATE routine_nodes SET source_id=?1 WHERE id=?2",
+                    rusqlite::params![uuid, rn_id],
+                ).is_ok() { fixed += 1; }
+            }
+            None => {
+                // No safe match — clear the dangling reference so future
+                // resolves don't try to use a stale INTEGER id again.
+                if conn.execute(
+                    "UPDATE routine_nodes SET source_id=NULL WHERE id=?1",
+                    rusqlite::params![rn_id],
+                ).is_ok() { cleared += 1; }
+            }
+        }
+    }
+    eprintln!("[backfill_routine_nodes_source_id] fixed {fixed}, cleared {cleared} orphans");
+}
+
 /// One-time cleanup: an earlier import_exercise inserted a fresh health_log row
 /// on every Health Connect sync, so identical exercises piled up — and
 /// sync_health_to_timeline then turned each into its own timeline_block.
