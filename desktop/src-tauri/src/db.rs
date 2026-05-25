@@ -1523,7 +1523,7 @@ pub fn migrate_recipe_tags_separator(conn: &rusqlite::Connection) {
 pub fn migrate_sleep(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sleep_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             date TEXT NOT NULL,
             start_time TEXT NOT NULL,
             end_time TEXT NOT NULL,
@@ -1535,8 +1535,8 @@ pub fn migrate_sleep(conn: &rusqlite::Connection) {
             UNIQUE(date, start_time, source)
         );
         CREATE TABLE IF NOT EXISTS sleep_stages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER NOT NULL REFERENCES sleep_sessions(id) ON DELETE CASCADE,
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES sleep_sessions(id) ON DELETE CASCADE,
             start_time TEXT NOT NULL,
             end_time TEXT NOT NULL,
             stage TEXT NOT NULL
@@ -2553,13 +2553,35 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
         "CREATE TABLE IF NOT EXISTS sync_tombstones (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             table_name TEXT NOT NULL,
-            row_id INTEGER NOT NULL,
+            row_id TEXT NOT NULL,
             deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE(table_name, row_id)
         );
         CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted_at
             ON sync_tombstones(deleted_at);"
     ).ok();
+    // Migrate row_id from INTEGER to TEXT for installs that shipped the
+    // old schema. SQLite stores values per their declared affinity, so an
+    // INTEGER column comparing against a UUID parameter (TEXT) would try
+    // to coerce the UUID to 0 and silently match the wrong tombstone.
+    if !column_is_text(conn, "sync_tombstones", "row_id") {
+        conn.execute_batch(
+            "ALTER TABLE sync_tombstones RENAME TO sync_tombstones_legacy_int;
+             CREATE TABLE sync_tombstones (
+                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                 table_name TEXT NOT NULL,
+                 row_id TEXT NOT NULL,
+                 deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 UNIQUE(table_name, row_id)
+             );
+             INSERT INTO sync_tombstones (table_name, row_id, deleted_at)
+                 SELECT table_name, CAST(row_id AS TEXT), deleted_at
+                 FROM sync_tombstones_legacy_int;
+             DROP TABLE sync_tombstones_legacy_int;
+             CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted_at
+                 ON sync_tombstones(deleted_at);"
+        ).ok();
+    }
     for table in SYNC_TABLES {
         let trig = format!(
             "DROP TRIGGER IF EXISTS {table}_tombstone; \
@@ -2585,6 +2607,138 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
             "INSERT INTO app_settings (key, value) VALUES ('device_id', ?1)",
             rusqlite::params![id],
         );
+    }
+}
+
+/// Phase 1 of UUID-PK migration: replace AUTOINCREMENT INTEGER ids in
+/// sleep_sessions + sleep_stages with UUIDv7 TEXT ids so cross-device
+/// sync stops orphaning stages (two devices' Mac/phone independent
+/// auto-increments collided, FK by id sent invalid session_id to peer
+/// and Hanni UI showed `avg_deep_minutes=0`). Idempotent — re-running
+/// on an already-migrated DB short-circuits.
+pub fn migrate_sleep_to_uuid_pk(conn: &rusqlite::Connection) {
+    if column_is_text(conn, "sleep_sessions", "id") {
+        return; // already migrated
+    }
+    // sleep_sessions may not exist on a fresh install that's about to
+    // get its first init_db pass — that's fine, the new init_db schema
+    // will create the TEXT-pk version.
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sleep_sessions'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    if exists == 0 { return; }
+
+    use std::collections::HashMap;
+    let mut session_id_map: HashMap<i64, String> = HashMap::new();
+
+    let result: Result<(), rusqlite::Error> = (|| {
+        // 1. Collect existing sessions + build i64 → UUIDv7 map.
+        let mut stmt = conn.prepare("SELECT id FROM sleep_sessions")?;
+        let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?
+            .filter_map(Result::ok).collect();
+        drop(stmt);
+        for id in ids {
+            session_id_map.insert(id, crate::types::new_uuid_v7());
+        }
+
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE sleep_sessions_new (
+                 id TEXT PRIMARY KEY,
+                 date TEXT NOT NULL,
+                 start_time TEXT NOT NULL,
+                 end_time TEXT NOT NULL,
+                 duration_minutes INTEGER NOT NULL,
+                 source TEXT NOT NULL DEFAULT 'manual',
+                 quality_score INTEGER,
+                 notes TEXT NOT NULL DEFAULT '',
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT '',
+                 UNIQUE(date, start_time, source)
+             );
+             CREATE TABLE sleep_stages_new (
+                 id TEXT PRIMARY KEY,
+                 session_id TEXT NOT NULL REFERENCES sleep_sessions_new(id) ON DELETE CASCADE,
+                 start_time TEXT NOT NULL,
+                 end_time TEXT NOT NULL,
+                 stage TEXT NOT NULL,
+                 updated_at TEXT NOT NULL DEFAULT ''
+             );"
+        )?;
+
+        // 2. Copy sessions with new UUIDs.
+        let mut sel = conn.prepare(
+            "SELECT id, date, start_time, end_time, duration_minutes, source,
+                    quality_score, notes, created_at,
+                    COALESCE(updated_at, '')
+             FROM sleep_sessions"
+        )?;
+        let rows: Vec<(i64, String, String, String, i64, String, Option<i64>, String, String, String)> =
+            sel.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,
+                r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(sel);
+        for (old_id, date, st, en, dur, src, qs, notes, ca, ua) in &rows {
+            let new_id = session_id_map.get(old_id).cloned().unwrap_or_default();
+            conn.execute(
+                "INSERT INTO sleep_sessions_new
+                 (id, date, start_time, end_time, duration_minutes, source,
+                  quality_score, notes, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                rusqlite::params![new_id, date, st, en, dur, src, qs, notes, ca, ua],
+            )?;
+        }
+
+        // 3. Copy stages — rewrite session_id from i64 to mapped UUID.
+        // Drop orphans whose session_id no longer exists.
+        let mut sel = conn.prepare(
+            "SELECT session_id, start_time, end_time, stage,
+                    COALESCE(updated_at, '')
+             FROM sleep_stages"
+        )?;
+        let stage_rows: Vec<(i64, String, String, String, String)> =
+            sel.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(sel);
+        for (old_sid, st, en, stage, ua) in &stage_rows {
+            let parent_uuid = match session_id_map.get(old_sid) {
+                Some(u) => u.clone(),
+                None => continue, // orphan — parent gone
+            };
+            let stage_uuid = crate::types::new_uuid_v7();
+            conn.execute(
+                "INSERT INTO sleep_stages_new
+                 (id, session_id, start_time, end_time, stage, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6)",
+                rusqlite::params![stage_uuid, parent_uuid, st, en, stage, ua],
+            )?;
+        }
+
+        // 4. Swap old tables out. sync_tombstones for sleep_* now carries
+        // stringified old-INTEGER ids that mean nothing post-migration —
+        // wipe so re-pushes of pre-migration tombstones don't poison.
+        conn.execute_batch(
+            "DELETE FROM sync_tombstones WHERE table_name IN ('sleep_sessions','sleep_stages');
+             DROP TABLE sleep_stages;
+             DROP TABLE sleep_sessions;
+             ALTER TABLE sleep_sessions_new RENAME TO sleep_sessions;
+             ALTER TABLE sleep_stages_new RENAME TO sleep_stages;
+             CREATE INDEX IF NOT EXISTS idx_sleep_date ON sleep_sessions(date);
+             CREATE INDEX IF NOT EXISTS idx_sleep_stages_session ON sleep_stages(session_id);
+             COMMIT;"
+        )?;
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        eprintln!("[migrate_sleep_to_uuid_pk] failed: {} — rolling back", e);
+        let _ = conn.execute_batch("ROLLBACK;");
+    } else {
+        eprintln!("[migrate_sleep_to_uuid_pk] migrated {} sessions to UUID pk",
+                  session_id_map.len());
     }
 }
 

@@ -109,12 +109,16 @@ class HanniHealthWorker(
             val endTime = s.optString("end_time")
             val dur = s.optLong("duration_minutes", 0L)
             if (date.isEmpty() || startTime.isEmpty() || endTime.isEmpty() || dur <= 0) continue
-            db.delete(
-                "sleep_sessions",
-                "date=? AND start_time=? AND source='health_connect'",
-                arrayOf(date, startTime)
-            )
+            // Phase 1 UUID PK: generate a v4 UUID (Java stdlib) and INSERT
+            // with CONFLICT_IGNORE on UNIQUE(date, start_time, source). If a
+            // session already exists (either ours from a prior tick or one
+            // pulled from the Mac via LAN sync), the insert is a no-op and
+            // we just refresh end_time/duration so the night doesn't get
+            // pinned to the first segment we saw. We never DELETE the
+            // existing row — that would replace a Mac-side UUID and create
+            // a duplicate after the next sync.
             val cv = ContentValues().apply {
+                put("id", java.util.UUID.randomUUID().toString())
                 put("date", date)
                 put("start_time", startTime)
                 put("end_time", endTime)
@@ -122,7 +126,22 @@ class HanniHealthWorker(
                 put("source", "health_connect")
                 put("created_at", now)
             }
-            db.insertWithOnConflict("sleep_sessions", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+            val rowId = db.insertWithOnConflict(
+                "sleep_sessions", null, cv, SQLiteDatabase.CONFLICT_IGNORE
+            )
+            if (rowId == -1L) {
+                // Conflict — session already existed. Refresh end_time + duration
+                // (last write wins, HC may extend a session as the night progresses).
+                val patch = ContentValues().apply {
+                    put("end_time", endTime)
+                    put("duration_minutes", dur)
+                }
+                db.update(
+                    "sleep_sessions", patch,
+                    "date=? AND start_time=? AND source='health_connect'",
+                    arrayOf(date, startTime)
+                )
+            }
         }
     }
 

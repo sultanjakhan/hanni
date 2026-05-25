@@ -114,38 +114,43 @@ fn import_sleep_sessions(db: &HanniDb, sessions: &[serde_json::Value]) -> usize 
         // Wall-clock span so a fragmented night shows as one continuous block.
         let dur = (night.end - night.start).num_minutes().max(0);
 
-        // Idempotency: skip if a session with same (date, start_time, source)
-        // already exists. There's no UNIQUE constraint on sleep_sessions, so
-        // re-importing would otherwise create duplicates every visibilitychange.
-        let existing: Option<i64> = conn.query_row(
+        // Idempotency: dedup by (date, start_time, source). Since Phase 1
+        // sleep_sessions has UNIQUE(date, start_time, source) — use that.
+        let existing: Option<String> = conn.query_row(
             "SELECT id FROM sleep_sessions WHERE date=?1 AND start_time=?2 AND source='health_connect'",
             rusqlite::params![night.date, night.start_time], |r| r.get(0),
         ).ok();
 
-        let sid = if let Some(id) = existing {
+        let sid: String = if let Some(id) = existing {
             // Refresh stages so any new HC data shows up.
-            let _ = conn.execute("DELETE FROM sleep_stages WHERE session_id=?1", rusqlite::params![id]);
+            let _ = conn.execute("DELETE FROM sleep_stages WHERE session_id=?1", rusqlite::params![&id]);
             let _ = conn.execute(
                 "UPDATE sleep_sessions SET end_time=?1, duration_minutes=?2 WHERE id=?3",
-                rusqlite::params![night.end_time, dur, id],
+                rusqlite::params![night.end_time, dur, &id],
             );
             id
         } else {
+            let new_id = crate::types::new_uuid_v7();
             if conn.execute(
-                "INSERT INTO sleep_sessions (date, start_time, end_time, duration_minutes, source) VALUES (?1,?2,?3,?4,'health_connect')",
-                rusqlite::params![night.date, night.start_time, night.end_time, dur],
+                "INSERT INTO sleep_sessions (id, date, start_time, end_time, duration_minutes, source)
+                 VALUES (?1,?2,?3,?4,?5,'health_connect')",
+                rusqlite::params![new_id, night.date, night.start_time, night.end_time, dur],
             ).is_err() { continue; }
             count += 1;
-            conn.last_insert_rowid()
+            new_id
         };
 
-        if sid > 0 {
-            for st in &night.stages {
-                let _ = conn.execute(
-                    "INSERT INTO sleep_stages (session_id, start_time, end_time, stage) VALUES (?1,?2,?3,?4)",
-                    rusqlite::params![sid, st["start_time"].as_str().unwrap_or(""), st["end_time"].as_str().unwrap_or(""), st["stage"].as_str().unwrap_or("")],
-                );
-            }
+        for st in &night.stages {
+            let stage_id = crate::types::new_uuid_v7();
+            let _ = conn.execute(
+                "INSERT INTO sleep_stages (id, session_id, start_time, end_time, stage) VALUES (?1,?2,?3,?4,?5)",
+                rusqlite::params![
+                    stage_id, &sid,
+                    st["start_time"].as_str().unwrap_or(""),
+                    st["end_time"].as_str().unwrap_or(""),
+                    st["stage"].as_str().unwrap_or(""),
+                ],
+            );
         }
     }
     count
