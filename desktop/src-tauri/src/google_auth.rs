@@ -139,7 +139,26 @@ pub fn google_auth_set_config(
 }
 
 #[tauri::command]
-pub fn google_auth_signout(db: State<'_, HanniDb>) -> Result<(), String> {
+pub async fn google_auth_signout(db: State<'_, HanniDb>) -> Result<(), String> {
+    let session = { load_session(&db.conn()) };
+    // Best-effort revoke of the Google OAuth grant before wiping local
+    // state. If the network call fails we still clear locally — leaving
+    // valid refresh-tokens behind after a signout would be worse than a
+    // stale grant on Google's side.
+    if let Some(s) = session.as_ref() {
+        if !s.google_refresh_token.is_empty() {
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_default();
+            let _ = client.post("https://oauth2.googleapis.com/revoke")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(format!("token={}", enc(&s.google_refresh_token)))
+                .send()
+                .await;
+        }
+    }
+
     let conn = db.conn();
     del_setting(&conn, SETTING_SESSION);
     del_setting(&conn, SETTING_PENDING_STATE);
