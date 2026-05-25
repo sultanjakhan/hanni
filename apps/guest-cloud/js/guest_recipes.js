@@ -69,6 +69,9 @@
     if (haveTunnel) {
       try { return await api('/recipes'); }
       catch (e) {
+        // Revoked/expired/forbidden links bubble up — falling back to
+        // Firestore would just render stale data the host already killed.
+        if (e?.code === 'LINK_REVOKED' || e?.code === 'LINK_EXPIRED' || e?.code === 'LINK_FORBIDDEN') throw e;
         console.warn('[guest_recipes] tunnel failed, falling back to Firestore:', e?.message || e);
       }
     }
@@ -79,6 +82,7 @@
     if (haveTunnel) {
       try { return await api(`/recipes/${id}`); }
       catch (e) {
+        if (e?.code === 'LINK_REVOKED' || e?.code === 'LINK_EXPIRED' || e?.code === 'LINK_FORBIDDEN') throw e;
         console.warn('[guest_recipes] tunnel detail failed, falling back to Firestore:', e?.message || e);
       }
     }
@@ -107,7 +111,11 @@
       state.view = 'list';
       render();
     } catch (e) {
-      state.mount.innerHTML = `<div class="err">Ошибка: ${esc(e.message || e)}</div>`;
+      const msg = e?.code === 'LINK_REVOKED' ? 'Ссылка отозвана хозяином.'
+        : e?.code === 'LINK_EXPIRED' ? 'Срок действия ссылки истёк.'
+        : e?.code === 'LINK_FORBIDDEN' ? 'Доступ запрещён.'
+        : `Ошибка: ${esc(e.message || e)}`;
+      state.mount.innerHTML = `<div class="err">${msg}</div>`;
     }
   }
 

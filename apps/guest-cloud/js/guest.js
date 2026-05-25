@@ -23,7 +23,19 @@
       throw err;
     }
     const r = await fetch(base + path, { credentials: 'omit', ...opts });
-    if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    if (!r.ok) {
+      // 410 Gone == revoked/expired link. Axum sends a plain-text body
+      // like "Link revoked" or "Link expired". Surface a typed error so
+      // the bootstrap can show "Ссылка отозвана" instead of a generic
+      // Firestore-fallback failure.
+      const body = (await r.text()) || r.statusText;
+      const err = new Error(body);
+      if (r.status === 410) err.code = body.toLowerCase().includes('expired')
+        ? 'LINK_EXPIRED' : 'LINK_REVOKED';
+      else if (r.status === 403) err.code = 'LINK_FORBIDDEN';
+      err.status = r.status;
+      throw err;
+    }
     // After a successful write, drop the matching Firestore cache so the next
     // read fetches fresh data (writes go through axum; Firestore mirror lags).
     const m = (opts.method || 'GET').toUpperCase();
