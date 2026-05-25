@@ -298,6 +298,45 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 .mobile .page-header-title {
   font-size: 24px;
 }
+.mobile .page-header-icon-btn {
+  font-size: 24px;
+  margin-bottom: var(--space-1);
+}
+.mobile .page-header-icon-btn.page-header-icon-svg svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Drawer border-right leaks ~1px on the right edge when the drawer is
+   off-screen (translateX -100%) on devices with subpixel rounding.
+   The visual artefact looks like an unexplained vertical line. */
+.mobile #tab-bar { border-right: none; }
+
+/* The desktop drag region for traffic-light window controls has no
+   purpose on Android — and a stray inset can swallow taps near the top. */
+.mobile #drag-region { display: none; }
+
+/* Right-rail FAB widgets are 40px circles pinned at right:16, stacked
+   from bottom:176. On a 360-px viewport that's ~56px of dead column on
+   the right — without this, Calendar Month/Week views render Sunday
+   underneath the FABs and the user can't see those days. Compact the
+   FABs (32px) and reserve a matching gutter on the right of the active
+   view so day-grid columns no longer collide with them. */
+.mobile .mw-btn,
+.mobile .nw-btn,
+.mobile .qw-btn,
+.mobile .tw-btn {
+  width: 32px;
+  height: 32px;
+}
+.mobile .music-widget,
+.mobile .notification-widget,
+.mobile .quotes-widget,
+.mobile .task-widget,
+.mobile #task-control-widget {
+  right: 8px;
+}
+.mobile #content-area > .view.active { padding-right: 48px; }
 
 /* Command palette: full width on mobile */
 .mobile .cmd-palette {

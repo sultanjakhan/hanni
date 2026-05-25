@@ -337,6 +337,18 @@ try {
     if (saved.sub) {
       Object.assign(S.activeSubTab, saved.sub);
       if (S.activeSubTab.chat && S.activeSubTab.chat !== 'Настройки') S.activeSubTab.chat = null;
+      // Mobile: never restore "Настройки" — drawer/gear UX is opaque on
+      // small screens, so a stray gear-tap shouldn't permanently land the
+      // user on a settings page they don't know how to leave. Each
+      // re-open snaps back to the content view; tapping gear again still
+      // works for one-shot edits.
+      const FORCE_MOBILE = (() => { try { return localStorage.getItem('hanni_force_mobile') === '1'; } catch { return false; } })();
+      const _isMobile = /android/i.test(navigator.userAgent) || window.innerWidth < 640 || FORCE_MOBILE;
+      if (_isMobile) {
+        for (const k of Object.keys(S.activeSubTab)) {
+          if (S.activeSubTab[k] === 'Настройки') S.activeSubTab[k] = null;
+        }
+      }
     }
   }
 } catch (_) {}
