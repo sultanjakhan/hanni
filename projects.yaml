@@ -721,8 +721,9 @@ _shared:
       - pc/tts_server.py  # Qwen3-TTS на GPU (отдельная машина)
 
   docs:
-    description: "Folder-level CLAUDE.md + per-project docs/"
+    description: "Folder-level CLAUDE.md + per-project docs/ + manifest"
     files:
+      - projects.yaml  # этот файл, single source of truth для структуры
       - desktop/src/CLAUDE.md
       - desktop/src-tauri/CLAUDE.md
       - desktop/hanni-mcp/CLAUDE.md
