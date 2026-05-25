@@ -132,8 +132,10 @@ fn gather(conn: &rusqlite::Connection, cursors: &Map<String, Value>, tomb_cursor
 /// before any SQL interpolation.
 fn apply_batch(conn: &rusqlite::Connection, batch: &SyncBatch) -> usize {
     let mut applied = 0;
+    let mut touched_schedules = false;
     for item in &batch.rows {
         if !SYNC_TABLES.contains(&item.t.as_str()) { continue; }
+        if item.t == "schedules" { touched_schedules = true; }
         if let Ok(true) = upsert_row(conn, &item.t, &item.f) { applied += 1; }
     }
     for t in &batch.tombs {
@@ -141,6 +143,11 @@ fn apply_batch(conn: &rusqlite::Connection, batch: &SyncBatch) -> usize {
         let _ = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", t.tt),
                              rusqlite::params![t.id]);
     }
+    // Phase 3 follow-up: if this batch added schedules from a peer, two
+    // independently-migrated devices can end up with two rows for the same
+    // logical schedule. Collapse them right after apply so the next round
+    // doesn't echo the duplicates and the user never sees them in UI.
+    if touched_schedules { crate::db::dedup_schedules_by_title(conn); }
     applied
 }
 

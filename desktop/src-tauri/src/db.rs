@@ -3165,6 +3165,83 @@ pub fn backfill_routine_nodes_source_id(conn: &rusqlite::Connection) {
     eprintln!("[backfill_routine_nodes_source_id] fixed {fixed}, cleared {cleared} orphans");
 }
 
+/// Collapse schedules with identical (lowercased) titles into a single canonical
+/// row, remap their completions, and tombstone the losers so the deletion
+/// propagates across LAN sync. Needed because Phase 3 migrated Mac and phone
+/// independently — each device generated its own UUIDv7 for the same logical
+/// schedule, and a subsequent LAN exchange creates two rows where there should
+/// be one.
+///
+/// Canonical = id with smallest lex order: UUIDv7 sorts by generation time, so
+/// the device that migrated earliest (Mac) wins automatically — matches the
+/// user's "Mac is authority" decision without needing peer metadata.
+///
+/// Completion merge for overlapping dates: canonical wins (loser's row is
+/// dropped). For non-overlapping dates, loser's completion is remapped to
+/// canonical's schedule_id. Idempotent — when no two active schedules share a
+/// lowercased title, no rows are touched.
+pub fn dedup_schedules_by_title(conn: &rusqlite::Connection) -> (usize, usize) {
+    use std::collections::HashMap;
+    if !column_is_text(conn, "schedules", "id") { return (0, 0); }
+
+    let groups: Vec<(String, Vec<String>)> = match conn.prepare(
+        "SELECT lower(title), id FROM schedules WHERE is_active=1 ORDER BY id"
+    ) {
+        Ok(mut stmt) => {
+            let rows: Vec<(String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map(|rs| rs.filter_map(|r| r.ok()).collect()).unwrap_or_default();
+            let mut g: HashMap<String, Vec<String>> = HashMap::new();
+            for (t, id) in rows { g.entry(t).or_default().push(id); }
+            g.into_iter().filter(|(_, v)| v.len() > 1).collect()
+        }
+        Err(_) => return (0, 0),
+    };
+    if groups.is_empty() { return (0, 0); }
+
+    let now = chrono::Local::now().to_rfc3339();
+    let mut deleted = 0usize;
+    let mut remapped = 0usize;
+
+    for (_title, ids) in groups {
+        let canonical = &ids[0]; // smallest lex = oldest UUIDv7
+        for loser in ids.iter().skip(1) {
+            // 1) Drop loser completions whose date is already covered by
+            //    canonical (canonical wins on conflict).
+            let _ = conn.execute(
+                "DELETE FROM schedule_completions
+                 WHERE schedule_id=?1
+                   AND date IN (SELECT date FROM schedule_completions WHERE schedule_id=?2)",
+                rusqlite::params![loser, canonical],
+            );
+            // 2) Remap remaining loser completions to canonical.
+            let r = conn.execute(
+                "UPDATE schedule_completions
+                    SET schedule_id=?1, updated_at=?2
+                  WHERE schedule_id=?3",
+                rusqlite::params![canonical, now, loser],
+            ).unwrap_or(0);
+            remapped += r;
+            // 3) Tombstone the loser so other devices delete their copy.
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO sync_tombstones (table_name, row_id, deleted_at)
+                 VALUES ('schedules', ?1, ?2)",
+                rusqlite::params![loser, now],
+            );
+            // 4) Delete the duplicate schedule locally.
+            let d = conn.execute(
+                "DELETE FROM schedules WHERE id=?1",
+                rusqlite::params![loser],
+            ).unwrap_or(0);
+            deleted += d;
+        }
+    }
+
+    if deleted > 0 || remapped > 0 {
+        eprintln!("[dedup_schedules_by_title] deleted {deleted} dup schedules, remapped {remapped} completions");
+    }
+    (deleted, remapped)
+}
+
 /// One-time cleanup: an earlier import_exercise inserted a fresh health_log row
 /// on every Health Connect sync, so identical exercises piled up — and
 /// sync_health_to_timeline then turned each into its own timeline_block.
