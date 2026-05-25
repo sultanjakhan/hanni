@@ -296,13 +296,16 @@ async function renderCalendar(el, events, tasks) {
   const selDate = S.selectedCalendarDate;
   const selCompletions = selDate ? await invoke('get_schedule_completions', { date: selDate }).catch(() => []) : [];
   const completedIds = new Set(selCompletions.filter(c => c.completed).map(c => c.schedule_id));
+  const skippedIds = new Set(selCompletions.filter(c => c.status === 'skipped').map(c => c.schedule_id));
   // Challenges: load completions for previous day
   let challengeDoneIds = completedIds;
+  let challengeSkippedIds = skippedIds;
   if (selDate) {
     const prevD = new Date(selDate + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
     const prevDate = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}-${String(prevD.getDate()).padStart(2,'0')}`;
     const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
     challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
+    challengeSkippedIds = new Set(prevComps.filter(c => c.status === 'skipped').map(c => c.schedule_id));
   }
 
   const firstDay = new Date(S.calendarYear, S.calendarMonth, 1);
@@ -369,12 +372,15 @@ async function renderCalendar(el, events, tasks) {
 
     const schHtml = dayScheds.map(s => {
       const done = s.marks_previous_day ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+      const skipped = s.marks_previous_day ? challengeSkippedIds.has(s.id) : skippedIds.has(s.id);
       const icon = SCH_CAT_ICONS[s.category] || '◽';
-      return `<div class="cal-panel-item" data-sch-toggle="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}">
-        <div class="cal-panel-check${done ? ' done' : ''}">${done ? '✓' : ''}</div>
+      const stateCls = done ? ' done' : skipped ? ' skipped' : '';
+      return `<div class="cal-panel-item${stateCls}" data-sch-toggle="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}">
+        <div class="cal-panel-check${stateCls}">${done ? '✓' : skipped ? '−' : ''}</div>
         <span class="cal-panel-time">${s.time_of_day || ''}</span>
         <span class="cal-panel-icon">${icon}</span>
-        <span class="cal-panel-title${done ? ' done' : ''}">${escapeHtml(s.title)}</span>
+        <span class="cal-panel-title${stateCls}">${escapeHtml(s.title)}</span>
+        <button type="button" class="cal-panel-skip" data-sch-skip="${s.id}" title="Пропустить (закрыть задачу)">−</button>
       </div>`;
     }).join('');
 
@@ -449,14 +455,31 @@ async function renderCalendar(el, events, tasks) {
 
   // Schedule completion toggles
   el.querySelectorAll('[data-sch-toggle]').forEach(item => {
-    item.addEventListener('click', async () => {
+    item.addEventListener('click', async (e) => {
+      // Inner skip button has its own handler — don't double-fire.
+      if (e.target.closest('[data-sch-skip]')) return;
       const schId = parseInt(item.dataset.schToggle);
       let date = selDate;
       if (item.dataset.schPrev === '1') {
         const prev = new Date(selDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
         date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
       }
-      await invoke('toggle_schedule_completion', { scheduleId: schId, date }).catch(e => console.error('toggle schedule:', e));
+      await invoke('toggle_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('toggle schedule:', err));
+      refreshCalendarInner();
+    });
+  });
+  // Skip ("−") — close task without marking done. Toggles skipped/planned.
+  el.querySelectorAll('[data-sch-skip]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const schId = parseInt(btn.dataset.schSkip);
+      const item = btn.closest('[data-sch-toggle]');
+      let date = selDate;
+      if (item?.dataset.schPrev === '1') {
+        const prev = new Date(selDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
+        date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
+      }
+      await invoke('skip_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('skip schedule:', err));
       refreshCalendarInner();
     });
   });
@@ -675,11 +698,13 @@ async function renderDayCalendar(el, events) {
   const dayScheds = [];
   const completions = await invoke('get_schedule_completions', { date: S.calDayDate }).catch(() => []);
   const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
+  const skippedIds = new Set(completions.filter(c => c.status === 'skipped').map(c => c.schedule_id));
   // Challenges mark completion for previous day
   const prevD = new Date(S.calDayDate + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
   const prevDate = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}-${String(prevD.getDate()).padStart(2,'0')}`;
   const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
   const challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
+  const challengeSkippedIds = new Set(prevComps.filter(c => c.status === 'skipped').map(c => c.schedule_id));
 
   const hours = Array.from({length: 24}, (_, i) => i);
   const isViewingToday = S.calDayDate === `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
@@ -742,11 +767,15 @@ async function renderDayCalendar(el, events) {
   const allDay = dayEvents.filter(e => !e.time);
   const noTimeSchHtml = noTimeScheds.map(s => {
     const done = s.marks_previous_day ? challengeDoneIds.has(s.id) : completedIds.has(s.id);
+    const skipped = s.marks_previous_day ? challengeSkippedIds.has(s.id) : skippedIds.has(s.id);
     const icon = SCH_CAT_ICONS[s.category] || '◽';
-    return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${done ? 'opacity:0.5;' : ''}">
+    const dim = done || skipped;
+    const mark = done ? '✅' : skipped ? '➖' : '⬜';
+    return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${dim ? 'opacity:0.5;' : ''}">
       <span class="day-event-time">${icon}</span>
-      <span class="day-event-title" style="${done ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
-      <span style="font-size:13px;">${done ? '✅' : '⬜'}</span>
+      <span class="day-event-title" style="${dim ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
+      <span style="font-size:13px;">${mark}</span>
+      <button type="button" class="day-event-skip" data-day-skip="${s.id}" title="Пропустить">−</button>
     </div>`;
   }).join('');
   const allDayEvts = allDay.map(e => `<div class="day-event" style="border-left:3px solid ${e.color || 'var(--text-secondary)'};"><span class="day-event-title">${escapeHtml(e.title)}</span></div>`).join('');
@@ -843,6 +872,7 @@ async function renderDayCalendar(el, events) {
   // Schedule completion toggles in day view
   el.querySelectorAll('[data-day-sch]').forEach(item => {
     item.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-day-skip]')) return;
       e.stopPropagation();
       const schId = parseInt(item.dataset.daySch);
       let date = S.calDayDate;
@@ -851,6 +881,20 @@ async function renderDayCalendar(el, events) {
         date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
       }
       await invoke('toggle_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('day sch:', err));
+      refreshCalendarInner();
+    });
+  });
+  el.querySelectorAll('[data-day-skip]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const schId = parseInt(btn.dataset.daySkip);
+      const item = btn.closest('[data-day-sch]');
+      let date = S.calDayDate;
+      if (item?.dataset.schPrev === '1') {
+        const prev = new Date(S.calDayDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
+        date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
+      }
+      await invoke('skip_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('day skip:', err));
       refreshCalendarInner();
     });
   });

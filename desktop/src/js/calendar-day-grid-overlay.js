@@ -10,6 +10,16 @@ const DEFAULT_HOUR_PX = 48;
 
 const SOURCE_COLOR = { event: '#60a5fa', schedule: '#c084fc', note: '#4ade80', manual: '#94a3b8' };
 const SOURCE_BG    = { event: '#dbeafe', schedule: '#f3e8ff', note: '#dcfce7', manual: '#f1f5f9' };
+const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
+
+// Extract HH:MM from a stored timestamp. completed_at is RFC3339 from
+// chrono::Local — pull the local clock fields out without TZ math.
+function timestampToHM(ts) {
+  if (!ts || typeof ts !== 'string') return null;
+  const m = ts.match(/T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  return `${m[1]}:${m[2]}`;
+}
 
 const parseHM = (s) => {
   if (!s || typeof s !== 'string' || !/^\d{1,2}:\d{2}/.test(s)) return null;
@@ -160,6 +170,59 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     if (gapEnd - gapStart >= 60) {
       layer.insertAdjacentHTML('beforeend', gapHtml(gapStart, gapEnd, minToPx));
     }
+  }
+
+  // Instant schedule completions ("выпил воды", reflexions) — narrow markers
+  // at completed_at, height ~14px, never a full block. tracking_mode='check'
+  // means the schedule never opens a timeline_block, so they need their own
+  // representation here.
+  const [completions, allSchedules] = await Promise.all([
+    invoke('get_schedule_completions', { date }).catch(() => []),
+    invoke('get_schedules', { category: null }).catch(() => []),
+  ]);
+  const doneChecks = (completions || []).filter(c =>
+    c.tracking_mode === 'check' && c.completed && c.completed_at
+  );
+
+  // Split: previous-day reflections cluster into one "📝 Рефлексия" marker
+  // when there are 2+ of them — single ones stay individual.
+  const reflections = doneChecks.filter(c => c.marks_previous_day);
+  const regulars    = doneChecks.filter(c => !c.marks_previous_day);
+  const totalReflections = (allSchedules || []).filter(s =>
+    s.marks_previous_day && (s.tracking_mode || 'track') === 'check' && s.is_active !== false
+  ).length;
+
+  const renderMarker = (top, icon, label, hm, tip) => {
+    const marker = document.createElement('div');
+    marker.className = 'day-tl-instant';
+    marker.style.cssText = `top:${top}px;`;
+    marker.title = tip;
+    marker.innerHTML = `<span class="day-tl-instant-ico">${icon}</span><span class="day-tl-instant-label">${escapeHtml(label)}</span><span class="day-tl-instant-time">${hm}</span>`;
+    layer.appendChild(marker);
+  };
+
+  for (const c of regulars) {
+    const hm = timestampToHM(c.completed_at);
+    const min = parseHM(hm);
+    if (min == null) continue;
+    renderMarker(minToPx(min), SCH_CAT_ICONS[c.category] || '◽', c.title, hm, `${c.title} · ${hm}`);
+  }
+
+  if (reflections.length === 1) {
+    const c = reflections[0];
+    const hm = timestampToHM(c.completed_at);
+    const min = parseHM(hm);
+    if (min != null) renderMarker(minToPx(min), '📝', `Рефлексия: ${c.title}`, hm, `${c.title} · ${hm}`);
+  } else if (reflections.length >= 2) {
+    // Cluster: pin to the latest completed_at, summarise N/total.
+    const latest = reflections.reduce((a, b) =>
+      (a.completed_at > b.completed_at) ? a : b
+    );
+    const hm = timestampToHM(latest.completed_at);
+    const min = parseHM(hm);
+    const total = Math.max(totalReflections, reflections.length);
+    const titles = reflections.map(r => `• ${r.title}`).join('\n');
+    if (min != null) renderMarker(minToPx(min), '📝', `Рефлексия за вчера (${reflections.length}/${total})`, hm, `Рефлексия за вчера:\n${titles}`);
   }
 
   rootEl.appendChild(layer);

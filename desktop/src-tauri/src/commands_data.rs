@@ -1200,11 +1200,39 @@ pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::Sta
     }
 }
 
+/// Mark a schedule as "skipped today" — user explicitly decided not to do it.
+/// Toggle behavior: skipped → planned (cleared). Cycle from done passes through
+/// here too. Skipped counts as closed-but-not-completed: not an overdue, not a hit.
+#[tauri::command]
+pub fn skip_schedule_completion(schedule_id: i64, date: String, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+    let conn = db.conn();
+    let existing: Option<String> = conn.query_row(
+        "SELECT COALESCE(status, 'planned') FROM schedule_completions WHERE schedule_id=?1 AND date=?2",
+        rusqlite::params![schedule_id, date], |row| row.get(0),
+    ).ok();
+    let new_status = if existing.as_deref() == Some("skipped") { "planned" } else { "skipped" };
+    match existing {
+        Some(_) => {
+            conn.execute(
+                "UPDATE schedule_completions SET completed=0, completed_at=NULL, status=?3 WHERE schedule_id=?1 AND date=?2",
+                rusqlite::params![schedule_id, date, new_status],
+            ).map_err(|e| format!("DB error: {}", e))?;
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, 0, NULL, ?3)",
+                rusqlite::params![schedule_id, date, new_status],
+            ).map_err(|e| format!("DB error: {}", e))?;
+        }
+    }
+    Ok(new_status.to_string())
+}
+
 #[tauri::command]
 pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day, sc.completed_at
+        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day, sc.completed_at, COALESCE(s.tracking_mode, 'track'), COALESCE(s.marks_previous_day, 0), COALESCE(sc.status, 'planned')
          FROM schedule_completions sc JOIN schedules s ON s.id = sc.schedule_id
          WHERE sc.date=?1"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -1216,6 +1244,9 @@ pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> 
             "category": row.get::<_, String>(3)?,
             "time_of_day": row.get::<_, Option<String>>(4)?,
             "completed_at": row.get::<_, Option<String>>(5)?,
+            "tracking_mode": row.get::<_, String>(6)?,
+            "marks_previous_day": row.get::<_, i64>(7)? == 1,
+            "status": row.get::<_, String>(8)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)

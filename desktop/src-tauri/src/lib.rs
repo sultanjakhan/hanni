@@ -551,6 +551,7 @@ pub fn run() {
             commands_data::update_schedule,
             commands_data::delete_schedule,
             commands_data::toggle_schedule_completion,
+            commands_data::skip_schedule_completion,
             commands_data::get_schedule_completions,
             commands_data::get_schedule_stats,
             routine::get_routine_chains,

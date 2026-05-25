@@ -158,7 +158,14 @@ export async function showEventModal(eventId = null) {
     </div>
   </div>`;
   document.body.appendChild(overlay);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  // Close on backdrop click — use mousedown (fires before any pending
+  // select-dropdown close re-routes the mouseup into the backdrop) and
+  // guard against secondary modals layered on top (add-category, etc.).
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target !== overlay) return;
+    if (document.querySelectorAll('.modal-overlay').length > 1) return;
+    overlay.remove();
+  });
   overlay.querySelector('#evm-cancel')?.addEventListener('click', () => overlay.remove());
 
   // ESC closes the modal — AbortController lets us detach the global
