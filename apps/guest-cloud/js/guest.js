@@ -64,14 +64,14 @@
     if (ctx.scope === 'recipes') return [{ id: 'recipes', label: '🍔 Рецепты' }];
     if (ctx.scope === 'products') return [{ id: 'products', label: '🛒 Продукты' }];
     if (ctx.scope === 'meal_plan') return [{ id: 'meal_plan', label: '🍽 План' }];
-    if (ctx.scope === 'memory') return [{ id: 'memory', label: '🧠 Память' }];
+    if (ctx.scope === 'memory') return [{ id: 'memory', label: '🧠 Предпочтения' }];
     if (ctx.scope === 'fridge') return [{ id: 'fridge', label: '🥶 Холодильник' }];
     return [
       { id: 'recipes', label: '🍔 Рецепты' },
       { id: 'products', label: '🛒 Продукты' },
       { id: 'fridge', label: '🥶 Холодильник' },
       { id: 'meal_plan', label: '🍽 План' },
-      { id: 'memory', label: '🧠 Память' },
+      { id: 'memory', label: '🧠 Предпочтения' },
     ];
   }
 
@@ -127,10 +127,9 @@
   // AFTER DOMContentLoaded) can trigger the initial render at the right time.
   window.HanniGuest.renderShell = renderShell;
 
-  // Defer mount so view-modules (loaded via separate <script> tags below) are registered.
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', renderShell);
-  } else {
-    renderShell();
-  }
+  // Don't render until view-modules (recipes/products/etc) are registered.
+  // The Firebase landing script appends them dynamically AFTER guest.js, then
+  // explicitly calls window.HanniGuest.renderShell(). Auto-rendering here
+  // would race: at first call HanniGuest.recipes is still undefined and
+  // mountView() would flash "Внутренняя ошибка: модуль 'recipes' не загружен".
 })();

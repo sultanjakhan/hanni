@@ -82,7 +82,7 @@
   function render() {
     if (!state.items.length) {
       state.mount.innerHTML = `
-        <h2>Память</h2>
+        <h2>Предпочтения</h2>
         <p class="muted" style="margin:8px 0 16px">Хозяин ещё не отметил предпочтений — можно готовить что угодно.</p>`;
       return;
     }
@@ -95,7 +95,7 @@
       .filter(lvl => byLevel[lvl].length)
       .map(lvl => renderLevelGroup(lvl, byLevel[lvl])).join('');
     state.mount.innerHTML = `
-      <h2>Память (${state.items.length})</h2>
+      <h2>Предпочтения (${state.items.length})</h2>
       <p class="muted" style="margin:0 0 16px">Что хозяин ест, не ест и любит — используйте при выборе рецептов.</p>
       ${sections}`;
   }
