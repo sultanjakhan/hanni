@@ -4,6 +4,24 @@
 
 **CRITICAL: Communicate in Russian.** The user speaks Russian. All questions, plans, and explanations — in Russian.
 
+## Project Manifest (`projects.yaml`)
+
+`~/hanni/projects.yaml` — карта артефактов проектов: какие файлы, таблицы, миграции и memory-заметки относятся к каждому из 17 табов (плюс cross-cutting `share`, `sync`, `android` и общая инфра `_shared`). **Это single source of truth для структуры проекта.**
+
+### Lazy-load protocol
+- **Триггер**: пользователь упомянул проект по имени (Food, Sports, calendar и т.д.) или тегу `/<проект>` → **сначала Read `projects.yaml`**, затем точечный Read нужных артефактов из секции. Не грeпай репу вслепую
+- **Не загружай манифест автоматом каждую сессию** — только когда нужен (экономия контекста)
+- **Правка `_shared` файла** (state.js, main.js, base.css, automation API, build) → предупреди: «эта правка затронет проекты X, Y, Z — проверить?»
+
+### Maintenance (договор)
+- При **создании** нового JS/CSS/Rust файла или таблицы — обнови `projects.yaml` в **той же** задаче, не «потом»
+- При **удалении** — удали запись из манифеста тем же коммитом
+- Если файл cross-cutting и неочевидно, к какому проекту относится — **спроси**, не угадывай
+
+### Статус
+- `_meta.bootstrap_status: complete` (с 2026-05-25) — 100% покрытие 424 tracked файлов
+- Если найдёшь файл, которого нет в манифесте — это баг манифеста (или ты в `docs/`/`.claude/` — они вне scope), скажи пользователю
+
 ## Workflow: Feature Requests
 
 **ОБЯЗАТЕЛЬНО** следуй этим шагам. НЕ НАЧИНАЙ писать код без уточнения. Это БЛОКИРУЮЩЕЕ требование.

@@ -1,0 +1,765 @@
+# projects.yaml — Hanni project manifest
+#
+# Карта артефактов: проект → файлы, таблицы, миграции, memory-заметки.
+# Цель: один Read этого файла → точное знание, что относится к проекту.
+# Не пытайся выводить структуру через grep — используй этот файл как single source of truth.
+#
+# ──────────── Schema ────────────
+#   <project>:
+#     description:  одна строка о назначении проекта
+#     files:        [пути от ~/hanni/ для JS/CSS/HTML/Python/JSON/etc.]
+#     rust:         [пути src-tauri/src/...]
+#     android:      [Kotlin / Gradle / Android-resource пути]
+#     tables:       [имена SQLite-таблиц]
+#     migrations:   [имена migrate_* функций в desktop/src-tauri/src/db.rs]
+#     subprojects:  { <name>: { ...те же поля... } }
+#     memory:       [пути от memory/ без leading slash]
+#     related:      [имена других проектов — двусторонние ссылки]
+#
+# Миграции в Hanni не отдельные .sql-файлы — это функции `migrate_*` внутри db.rs,
+# вызываемые последовательно из lib.rs::run() → init_database().
+#
+# ──────────── Lazy-load protocol ────────────
+# 1. Пользователь упомянул проект → сначала Read projects.yaml
+# 2. Найди секцию → точечный Read нужных артефактов
+# 3. Правка `_shared` файла → предупреди о затронутых проектах
+#
+# ──────────── Maintenance ────────────
+# При создании нового файла — обнови манифест той же задачей.
+# При удалении — удали запись.
+
+_meta:
+  version: 2
+  bootstrap_status: complete
+  bootstrap_date: 2026-05-25
+  coverage: "416 tracked файлов покрыты (без docs/, .claude/, .github/, _dead)"
+  conventions:
+    migrations: "migrations: [...] — имена функций migrate_* в db.rs, не файлы"
+    cross_cutting: "Файл, обслуживающий несколько проектов, кладётся в самый родной + указывается в related второго"
+    folder_claude_md: "desktop/src/CLAUDE.md, desktop/src-tauri/CLAUDE.md и т.п. — folder-level rules, в _shared.docs"
+
+# ════════════════════════════════════════════════════════════════════
+# 16 Tabs (top-level)  — mindset удалён в v0.70 (см. _archive)
+# ════════════════════════════════════════════════════════════════════
+
+chat:
+  description: "AI ассистент, conversations, voice, LLM streaming, proactive actions"
+  files:
+    - desktop/src/js/chat.js
+    - desktop/src/js/conversations.js
+    - desktop/src/js/voice.js
+    - desktop/src/css/chat.css
+    - desktop/src/css/call.css
+  rust:
+    - desktop/src-tauri/src/chat.rs
+    - desktop/src-tauri/src/voice.rs
+    - desktop/src-tauri/src/voice_stubs.rs
+    - desktop/src-tauri/src/memory.rs
+    - desktop/src-tauri/src/agent.rs
+    - desktop/src-tauri/src/prompts.rs
+    - desktop/src-tauri/src/mlx_manager.rs
+    - desktop/src-tauri/src/proactive.rs
+  tables: [conversations, facts, vec_facts]
+  memory: []
+  related: []
+
+calendar:
+  description: "События, day-view, трекинг через старт/стоп, категории, Apple Calendar/iCal"
+  files:
+    - desktop/src/js/tab-calendar.js
+    - desktop/src/js/calendar-event-modal.js
+    - desktop/src/js/calendar-event-templates.js
+    - desktop/src/js/calendar-task-list.js
+    - desktop/src/js/calendar-task-list-row.js
+    - desktop/src/js/calendar-task-list-period.js
+    - desktop/src/js/calendar-task-list-finish-modal.js
+    - desktop/src/js/calendar-categories.js
+    - desktop/src/js/calendar-category-manager.js
+    - desktop/src/js/calendar-chart.js
+    - desktop/src/js/calendar-chart-filters.js
+    - desktop/src/js/calendar-chart-stats.js
+    - desktop/src/js/calendar-day-grid-overlay.js
+  rust:
+    - desktop/src-tauri/src/calendar.rs
+    - desktop/src-tauri/src/event_categories.rs
+    - desktop/src-tauri/src/calendar_health.rs
+  tables: [events, schedules, calendar_categories]
+  subprojects:
+    routine:
+      description: "Graph-редактор рутин (canvas + узлы). Рендерится в calendar day-view"
+      files:
+        - desktop/src/js/calendar-routine.js
+        - desktop/src/js/routine-canvas.js
+        - desktop/src/js/routine-widget.js
+        - desktop/src/js/routine-add-modal.js
+        - desktop/src/js/routine-node-modal.js
+        - desktop/src/js/routine-edge-menu.js
+        - desktop/src/css/routine.css
+      rust:
+        - desktop/src-tauri/src/routine.rs
+        - desktop/src-tauri/src/routine_engine.rs
+      tables: [routines, routine_nodes, routine_edges]
+  memory: [tech/project_calendar_tracking.md]
+  related: [schedule, sports, focus]
+
+focus:
+  description: "Deep work timer, блокировка сайтов через /etc/hosts"
+  files:
+    - desktop/src/js/tab-focus.js
+    - desktop/src/focus-overlay.html
+  rust: []  # logic в commands_meta.rs
+  tables: [activities]
+  memory: []
+  related: [calendar]
+
+notes:
+  description: "Заметки, теги, custom pages"
+  files:
+    - desktop/src/js/tab-notes.js
+  rust:
+    - desktop/src-tauri/src/notes.rs
+  tables: [notes, note_tags, custom_pages, project_records]
+  memory: []
+  related: [projects-tab]
+
+work:
+  description: "Задачи (flat view) + jobs (вакансии CRM)"
+  files: []
+  rust: []
+  tables: [projects, tasks, vacancies, vacancy_pipeline]
+  subprojects:
+    jobs:
+      description: "Job tracking — вакансии, источники, резюме, agent-driven поиск"
+      files:
+        - desktop/src/js/jobs-edit.js
+        - desktop/src/js/jobs-memory.js
+        - desktop/src/js/jobs-resume.js
+        - desktop/src/js/jobs-sources.js
+        - desktop/src/js/jobs-stores.js
+      rust:
+        - desktop/src-tauri/src/vacancy.rs
+  memory: []
+  related: [projects-tab, development]
+
+projects-tab:
+  description: "Custom Notion-style страницы (таб 'Projects'). DB-view движок"
+  files:
+    - desktop/src/js/db-view/db-view.js
+    - desktop/src/js/db-view/db-table.js
+    - desktop/src/js/db-view/db-list.js
+    - desktop/src/js/db-view/db-gallery.js
+    - desktop/src/js/db-view/db-kanban.js
+    - desktop/src/js/db-view/db-calendar.js
+    - desktop/src/js/db-view/db-timeline.js
+    - desktop/src/js/db-view/db-toolbar.js
+    - desktop/src/js/db-view/db-filters.js
+    - desktop/src/js/db-view/db-filter-logic.js
+    - desktop/src/js/db-view/db-sort.js
+    - desktop/src/js/db-view/db-group.js
+    - desktop/src/js/db-view/db-select.js
+    - desktop/src/js/db-view/db-selection.js
+    - desktop/src/js/db-view/db-search.js
+    - desktop/src/js/db-view/db-properties.js
+    - desktop/src/js/db-view/db-col-state.js
+    - desktop/src/js/db-view/db-col-clicks.js
+    - desktop/src/js/db-view/db-col-drag.js
+    - desktop/src/js/db-view/db-col-resize.js
+    - desktop/src/js/db-view/db-cell-nav.js
+    - desktop/src/js/db-view/db-cell-editors.js
+    - desktop/src/js/db-view/db-cell-format.js
+    - desktop/src/js/db-view/db-type-registry.js
+    - desktop/src/js/db-view/db-type-editors.js
+    - desktop/src/js/db-view/db-row-menu.js
+    - desktop/src/js/db-view/db-drag-rows.js
+    - desktop/src/js/db-view/db-table-events.js
+    - desktop/src/js/db-view/db-clipboard.js
+    - desktop/src/js/db-view/db-dropdowns.js
+    - desktop/src/js/db-view/db-option-edit.js
+    - desktop/src/js/db-view/db-import.js
+    - desktop/src/js/db-view/db-export.js
+    - desktop/src/js/db-view/db-config.js
+    - desktop/src/js/db-view/db-add-property.js
+    - desktop/src/js/db-view/db-side-peek.js
+    - desktop/src/js/db-view/db-recurrence-editor.js
+    - desktop/src/js/db-view/db-calc.js
+    - desktop/src/js/db-view/unified-layout.js
+    - desktop/src/css/database-view.css
+    - desktop/src/css/tabs-data.css
+  rust:
+    - desktop/src-tauri/src/pm_matrix.rs
+    - desktop/src-tauri/src/pm_matrix_data.md
+    - desktop/src-tauri/src/pm_matrix_theory.md
+    - desktop/src-tauri/src/pm_wiki_overview.md
+  tables: [custom_pages, project_records, property_definitions, property_values]
+  memory: []
+  related: [work, notes]
+
+development:
+  description: "Трекер обучения, dev competency matrix, wiki, CEFR"
+  files:
+    - desktop/src/js/tab-dev-matrix.js
+    - desktop/src/js/tab-dev-wiki.js
+    - desktop/src/js/tab-dev-competency-page.js
+    - desktop/src/js/dev-level.js
+    - desktop/src/js/dev-cefr.js
+    - desktop/src/js/dev-matrix-search.js
+    - desktop/src/js/wiki-markdown.js
+  rust: []  # commands_data.rs
+  tables: [learning_items, dev_competencies, wiki_pages]
+  memory: []
+  related: [work]
+
+home:
+  description: "Инвентарь дома (рендерится через db-view + tab-data.js)"
+  files: []
+  rust: []
+  tables: [home_items]
+  memory: []
+  related: []
+
+hobbies:
+  description: "Медиа-коллекции (10 типов), user lists (через db-view)"
+  files: []
+  rust: []
+  tables: [media_items, user_lists]
+  memory: []
+  related: []
+
+sports:
+  description: "Тренировки, упражнения, body tracking (3D viewer), Apple Health import"
+  files:
+    - desktop/src/js/sport-catalog.js
+    - desktop/src/js/sport-catalog-modal.js
+    - desktop/src/js/sport-catalog-card.js
+    - desktop/src/js/sport-catalog-filters.js
+    - desktop/src/js/sport-templates.js
+    - desktop/src/js/sport-template-add.js
+    - desktop/src/js/sport-template-card.js
+    - desktop/src/js/sport-template-filters.js
+    - desktop/src/js/sport-template-modals.js
+    - desktop/src/js/sport-template-exercises.js
+    - desktop/src/js/body-viewer.js
+    - desktop/src/js/body-context-menu.js
+    - desktop/src/js/body-recommendations.js
+    - desktop/src/js/body-three-bundle-entry.js
+    - desktop/src/js/tab-body.js
+    - desktop/src/css/body.css
+    - desktop/src/assets/body.glb           # 3D body model
+    - desktop/src/assets/draco/draco_decoder.wasm
+  rust:
+    - desktop/src-tauri/src/health_import.rs
+  tables: [workouts, exercises, body_records, sport_templates, sport_catalog]
+  memory: [tech/project_sports_roadmap.md]
+  related: [health, calendar]
+
+health:
+  description: "Habits, sleep, Health Connect (Android), daily log"
+  files:
+    - desktop/src/js/tab-sleep.js
+    - desktop/src/js/health-dash.js
+    - desktop/src/js/health-analysis.js
+    - desktop/src/js/health-auto-sync.js
+  rust:
+    - desktop/src-tauri/src/health_connect.rs
+    - desktop/src-tauri/src/health_connect_plugin.rs
+    - desktop/src-tauri/src/sleep_analysis.rs
+  tables: [habits, health_log, sleep_sessions]
+  memory: []
+  related: [sports, android]
+
+food:
+  description: "Питание, рецепты, продукты, кладовая, готовка, meal planning"
+  files:
+    - desktop/src/js/tab-food-recipes.js
+    - desktop/src/js/food-recipe-card.js
+    - desktop/src/js/food-recipe-filters.js
+    - desktop/src/js/food-recipe-modals.js
+    - desktop/src/js/food-recipe-add.js
+    - desktop/src/js/food-product-catalog.js
+    - desktop/src/js/food-product-modal.js
+    - desktop/src/js/food-product-card.js
+    - desktop/src/js/food-product-views.js
+    - desktop/src/js/food-product-popup.js
+    - desktop/src/js/food-blacklist-view.js
+    - desktop/src/js/food-blacklist-add.js
+    - desktop/src/js/food-blacklist-menu.js
+    - desktop/src/js/food-meal-plan.js
+    - desktop/src/js/food-cooking-log.js
+    - desktop/src/js/shopping-list.js
+    - desktop/src/js/shopping-list-modal.js
+  rust: []  # commands_data.rs + commands_shopping.rs
+  tables: [food_log, recipes, recipe_ingredients, products, ingredient_catalog, meal_plan, food_blacklist, shopping_list]
+  subprojects:
+    cooking-tracker:
+      description: "Сессии готовки: шаги, таймеры, прогресс"
+      files: [desktop/src/js/food-cooking-log.js]
+      memory: [tech/project_food_cooking_tracker.md]
+  memory: []
+  related: [share, health]
+
+money:
+  description: "Финансы (5 sub-tabs): транзакции, бюджеты, цели, подписки, долги (через db-view)"
+  files: []
+  rust: []
+  tables: [transactions, budgets, savings_goals, subscriptions, debts]
+  memory: []
+  related: []
+
+people:
+  description: "Контакты, блокировка контактов"
+  files: []
+  rust: []
+  tables: [contacts]
+  memory: []
+  related: []
+
+schedule:
+  description: "Центральный hub трекинга — daily completions, timeline, dashboards, task pins"
+  files:
+    - desktop/src/js/tab-timeline.js
+    - desktop/src/js/timeline-today.js
+    - desktop/src/js/timeline-month.js
+    - desktop/src/js/timeline-dayweek.js
+    - desktop/src/js/timeline-grid.js
+    - desktop/src/js/timeline-blocks.js
+    - desktop/src/js/timeline-types.js
+    - desktop/src/js/timeline-dash.js
+    - desktop/src/js/schedule-templates.js
+    - desktop/src/css/timeline.css
+  rust:
+    - desktop/src-tauri/src/commands_timeline.rs
+    - desktop/src-tauri/src/commands_timeline_today.rs
+    - desktop/src-tauri/src/timeline_afk.rs
+    - desktop/src-tauri/src/timeline_health.rs
+    - desktop/src-tauri/src/timeline_stats.rs
+    - desktop/src-tauri/src/task_pins.rs
+  tables: [schedules, schedule_completions]
+  memory: []
+  related: [calendar, sports, health, food, development]
+
+dankoe:
+  description: "Dan Koe dev protocol — 4 практики"
+  files:
+    - desktop/src/js/dankoe-quick-modal.js
+  rust: []
+  tables: [dan_koe_entries]
+  memory: []
+  related: [development]
+
+# ════════════════════════════════════════════════════════════════════
+# Cross-cutting top-level — отдельная инфраструктура
+# ════════════════════════════════════════════════════════════════════
+
+share:
+  description: "Share-link: гостевой просмотр через URL. Axum server :8237, Cloudflare tunnel, Firebase Hosting fallback"
+  files:
+    - desktop/src/js/share-modal.js
+    - desktop/src/js/fridge-shared.js
+    - desktop/src/js/recipe-shared.js
+    - desktop/src/js/recipe-shared-ingredients.js
+    - desktop/src/js/recipe-shared-steps.js
+    - desktop/src/js/recipe-shared-image.js
+    - desktop/src/js/cloud-share-modal.js
+  rust:
+    - desktop/src-tauri/src/commands_share.rs
+    - desktop/src-tauri/src/share_auth.rs
+    - desktop/src-tauri/src/share_server.rs
+    - desktop/src-tauri/src/share_static.rs
+    - desktop/src-tauri/src/share_tunnel.rs
+    - desktop/src-tauri/src/share_routes_comments.rs
+    - desktop/src-tauri/src/share_routes_food_meta.rs
+    - desktop/src-tauri/src/share_routes_meal_plan.rs
+    - desktop/src-tauri/src/share_routes_products_read.rs
+    - desktop/src-tauri/src/share_routes_products_write.rs
+    - desktop/src-tauri/src/share_routes_recipes_read.rs
+    - desktop/src-tauri/src/share_routes_recipes_write.rs
+  tables: [share_links, share_activity]
+  subprojects:
+    share_assets:
+      description: "Статика для axum-сервера (раздаётся гостям на :8237)"
+      files:
+        - desktop/src-tauri/src/share_assets/guest.html
+        - desktop/src-tauri/src/share_assets/guest.css
+        - desktop/src-tauri/src/share_assets/guest.js
+        - desktop/src-tauri/src/share_assets/guest_firestore.js
+        - desktop/src-tauri/src/share_assets/guest_fridge.js
+        - desktop/src-tauri/src/share_assets/guest_meal_plan.js
+        - desktop/src-tauri/src/share_assets/guest_memory.js
+        - desktop/src-tauri/src/share_assets/guest_products.js
+        - desktop/src-tauri/src/share_assets/guest_recipe_add.js
+        - desktop/src-tauri/src/share_assets/guest_recipes.js
+    guest_cloud:
+      description: "Firebase Hosting + Web SDK для гостевого доступа (Stage A read-only)"
+      files:
+        - apps/guest-cloud/index.html
+        - apps/guest-cloud/firebase-config.js
+        - apps/guest-cloud/css/guest.css
+        - apps/guest-cloud/js/guest.js
+        - apps/guest-cloud/js/guest_firestore.js
+        - apps/guest-cloud/js/guest_fridge.js
+        - apps/guest-cloud/js/guest_meal_plan.js
+        - apps/guest-cloud/js/guest_memory.js
+        - apps/guest-cloud/js/guest_products.js
+        - apps/guest-cloud/js/guest_recipe_add.js
+        - apps/guest-cloud/js/guest_recipes.js
+        - apps/guest-cloud/js/fridge-shared.js
+        - apps/guest-cloud/js/recipe-shared.js
+        - apps/guest-cloud/js/recipe-shared-ingredients.js
+        - apps/guest-cloud/js/recipe-shared-steps.js
+        - apps/guest-cloud/js/recipe-shared-image.js
+    firestore:
+      description: "Firestore rules/indexes + Firebase project config"
+      files:
+        - firebase/.firebaserc
+        - firebase/firebase.json
+        - firebase/firestore.rules
+        - firebase/firestore.indexes.json
+        - firebase/README.md
+  memory: [tech/project_share_feature.md]
+  related: [food, sync]
+
+sync:
+  description: "Mac ↔ Android синхронизация: cr-sqlite CRDT, Firestore snapshot, LAN :8244"
+  files:
+    - desktop/src/js/sync-trigger.js
+    - desktop/src/js/cloud-owner-sync.js
+  rust:
+    - desktop/src-tauri/src/sync.rs
+    - desktop/src-tauri/src/sync_commands.rs
+    - desktop/src-tauri/src/sync_owner.rs
+    - desktop/src-tauri/src/sync_owner_auto.rs
+    - desktop/src-tauri/src/sync_share.rs
+    - desktop/src-tauri/src/sync_share_auto.rs
+    - desktop/src-tauri/src/lan_sync.rs
+  tables: [sync_tombstones]
+  subprojects:
+    cloudflare-worker:
+      description: "Cloudflare Workers D1 relay для cr-sqlite changesets"
+      files:
+        - sync-worker/src/index.js
+        - sync-worker/schema.sql
+        - sync-worker/package.json
+        - sync-worker/wrangler.toml
+  memory:
+    - tech/project_stage_d_owner_sync.md
+    - tech/project_lan_sync.md
+    - tech/project_crsqlite_pk_constraint.md
+  related: [share, android]
+
+android:
+  description: "Android-сборка (Tauri + Kotlin плагины), Health Connect интеграция"
+  files:
+    - desktop/src/js/android-update.js
+    - desktop/src/css/android-update.css
+  rust:
+    - desktop/src-tauri/src/android_update.rs
+  android:
+    # Kotlin plugins (custom код)
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/BackgroundSyncPlugin.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HanniHealthWorker.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HealthConnectPlugin.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HealthConnectReaders.kt
+    # Generated Tauri Android skeleton (tauri android init)
+    - desktop/src-tauri/gen/android/.editorconfig
+    - desktop/src-tauri/gen/android/.gitignore
+    - desktop/src-tauri/gen/android/app/.gitignore
+    - desktop/src-tauri/gen/android/build.gradle.kts
+    - desktop/src-tauri/gen/android/settings.gradle
+    - desktop/src-tauri/gen/android/gradle.properties
+    - desktop/src-tauri/gen/android/gradlew
+    - desktop/src-tauri/gen/android/gradlew.bat
+    - desktop/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.jar
+    - desktop/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+    - desktop/src-tauri/gen/android/buildSrc/build.gradle.kts
+    - desktop/src-tauri/gen/android/buildSrc/src/main/java/com/sultanjakhan/hanni/kotlin/BuildTask.kt
+    - desktop/src-tauri/gen/android/buildSrc/src/main/java/com/sultanjakhan/hanni/kotlin/RustPlugin.kt
+    - desktop/src-tauri/gen/android/app/build.gradle.kts
+    - desktop/src-tauri/gen/android/app/proguard-rules.pro
+    - desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml
+    - desktop/src-tauri/gen/android/app/src/main/assets/libs/darwin-aarch64/crsqlite.dylib
+    - desktop/src-tauri/gen/android/app/src/main/java/com/sultanjakhan/hanni/InstallApkPlugin.kt
+    - desktop/src-tauri/gen/android/app/src/main/java/com/sultanjakhan/hanni/MainActivity.kt
+    # Android resources (icons, drawables, themes)
+    - desktop/src-tauri/gen/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/layout/activity_main.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+    - desktop/src-tauri/gen/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+    - desktop/src-tauri/gen/android/app/src/main/res/values-night/themes.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/values/colors.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/values/strings.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/values/themes.xml
+    - desktop/src-tauri/gen/android/app/src/main/res/xml/file_paths.xml
+  tables: []
+  memory: [tech/project_android_build_test.md]
+  related: [sync, health]
+
+# ════════════════════════════════════════════════════════════════════
+# Idea / parking lot
+# ════════════════════════════════════════════════════════════════════
+
+_ideas:
+  tracker:
+    description: "Идея tab 'tracker' (отложено)"
+    memory: [tech/project_tracker_idea.md]
+
+# ════════════════════════════════════════════════════════════════════
+# _shared — инфраструктура и общий код
+# ════════════════════════════════════════════════════════════════════
+# Правка любого файла отсюда — потенциально затрагивает несколько проектов.
+# Перед редактированием — предупреди пользователя.
+
+_shared:
+  core:
+    description: "Корневой JS/Rust, state, router, tab-loader, типы, общие команды"
+    files:
+      - desktop/src/main.js
+      - desktop/src/js/state.js
+      - desktop/src/js/tabs.js
+      - desktop/src/js/tab-data.js
+      - desktop/src/js/actions.js
+      - desktop/src/js/utils.js
+      - desktop/src/js/icons.js
+      - desktop/src/js/emoji-data.js
+      - desktop/src/js/emoji-picker.js
+    rust:
+      - desktop/src-tauri/src/lib.rs
+      - desktop/src-tauri/src/main.rs
+      - desktop/src-tauri/src/types.rs
+      - desktop/src-tauri/src/db.rs
+      - desktop/src-tauri/src/commands_meta.rs
+      - desktop/src-tauri/src/commands_data.rs
+      - desktop/src-tauri/src/commands_shopping.rs
+      - desktop/src-tauri/src/macos.rs
+      - desktop/src-tauri/src/window_state.rs
+      - desktop/src-tauri/src/dashboard.rs
+      - desktop/src-tauri/src/mcp.rs
+
+  ui_common:
+    description: "Общие CSS: base, layout, themes, mobile, settings, emoji"
+    files:
+      - desktop/src/index.html
+      - desktop/src/css/base.css
+      - desktop/src/css/layout.css
+      - desktop/src/css/tabs-main.css
+      - desktop/src/css/mobile-tabs.css
+      - desktop/src/css/mobile.css
+      - desktop/src/css/settings.css
+      - desktop/src/css/emoji-picker.css
+      - desktop/src/styles.css
+      - desktop/src/hljs-theme.css
+      - desktop/src/marked.min.js
+      - desktop/src/highlight.min.js
+    memory: [tech/design-improvements.md, tech/reference_css_palette.md]
+
+  ui_widgets:
+    description: "Generic UI widgets: dashboard, quotes, ambient, music, task-control"
+    files:
+      - desktop/src/js/task-picker-view.js
+      - desktop/src/js/task-picker-sort.js
+      - desktop/src/js/task-control-widget.js
+      - desktop/src/js/notification-widget.js
+      - desktop/src/js/dashboard-editor.js
+      - desktop/src/js/dashboard-builder.js
+      - desktop/src/js/dashboard-widgets.js
+      - desktop/src/js/quotes-player.js
+      - desktop/src/js/quotes-data.js
+      - desktop/src/js/quotes-collection.js
+      - desktop/src/js/quotes-widget.js
+      - desktop/src/js/ambient-player.js
+      - desktop/src/js/ambient-audio.js
+      - desktop/src/js/music-widget.js
+
+  ui_assets:
+    description: "Ambient audio файлы и звуки"
+    files:
+      - desktop/src/sounds/birds.m4a
+      - desktop/src/sounds/birds.ogg
+      - desktop/src/sounds/blackhole.m4a
+      - desktop/src/sounds/fireplace.m4a
+      - desktop/src/sounds/fireplace.ogg
+      - desktop/src/sounds/forest.m4a
+      - desktop/src/sounds/forest.ogg
+      - desktop/src/sounds/jupiter.m4a
+      - desktop/src/sounds/ocean.m4a
+      - desktop/src/sounds/ocean.ogg
+      - desktop/src/sounds/rain.m4a
+      - desktop/src/sounds/rain.ogg
+      - desktop/src/sounds/saturn.m4a
+      - desktop/src/sounds/space.m4a
+      - desktop/src/sounds/stream.m4a
+      - desktop/src/sounds/stream.ogg
+      - desktop/src/sounds/thunder.m4a
+      - desktop/src/sounds/thunder.ogg
+      - desktop/src/sounds/wind.m4a
+      - desktop/src/sounds/wind.ogg
+
+  vendor:
+    description: "Third-party JS-библиотеки (editorjs, three.js, draco, html2canvas)"
+    files:
+      - desktop/src/vendor/editorjs.min.js
+      - desktop/src/vendor/list.min.js
+      - desktop/src/vendor/code.min.js
+      - desktop/src/vendor/header.min.js
+      - desktop/src/vendor/checklist.min.js
+      - desktop/src/vendor/delimiter.min.js
+      - desktop/src/vendor/quote.min.js
+      - desktop/src/vendor/marker.min.js
+      - desktop/src/vendor/inline-code.min.js
+      - desktop/src/vendor/drag-drop.min.js
+      - desktop/src/vendor/html2canvas.min.js
+      - desktop/src/vendor/three-bundle.min.js
+      - desktop/src/vendor/three/three.module.min.js
+      - desktop/src/vendor/three/addons/GLTFLoader.js
+      - desktop/src/vendor/three/addons/OrbitControls.js
+      - desktop/src/vendor/three/addons/DRACOLoader.js
+      - desktop/src/assets/draco/draco_decoder.js
+      - desktop/src/assets/draco/draco_wasm_wrapper.js
+      - desktop/src/js/vendor/html2canvas.min.js
+
+  automation:
+    description: "HTTP automation API :8236 dev / :8235 prod + dev tooling, background sync loops"
+    files:
+      - desktop/tools/screenshot.sh
+      - desktop/tools/auto-reload.sh
+      - desktop/tools/auto-reload.mjs
+      - desktop/tools/dev.sh
+      - desktop/tools/post_edit_check.sh
+    rust:
+      - desktop/src-tauri/src/bg_sync.rs
+    memory: [tech/reference_automation_api.md]
+
+  build_release:
+    description: "Build config, версионирование, native deps, updater, CI/CD"
+    files:
+      - desktop/package.json
+      - desktop/package-lock.json
+      - desktop/.gitignore
+      - desktop/src-tauri/Cargo.toml
+      - desktop/src-tauri/Cargo.lock
+      - desktop/src-tauri/tauri.conf.json
+      - desktop/src-tauri/tauri.android.conf.json
+      - desktop/src-tauri/build.rs
+      - desktop/src-tauri/Entitlements.plist
+      - desktop/src-tauri/Info.plist
+      - desktop/src-tauri/.gitignore
+      - desktop/src-tauri/capabilities/default.json
+      - desktop/src-tauri/capabilities/mobile.json
+      # Desktop app icons (macOS/Windows)
+      - desktop/src-tauri/icons/icon.icns
+      - desktop/src-tauri/icons/icon.ico
+      - desktop/src-tauri/icons/icon.png
+      - desktop/src-tauri/icons/icon.svg
+      - desktop/src-tauri/icons/32x32.png
+      - desktop/src-tauri/icons/128x128.png
+      - desktop/src-tauri/icons/128x128@2x.png
+      - desktop/src-tauri/icons/StoreLogo.png
+      - desktop/src-tauri/icons/Square30x30Logo.png
+      - desktop/src-tauri/icons/Square44x44Logo.png
+      - desktop/src-tauri/icons/Square71x71Logo.png
+      - desktop/src-tauri/icons/Square89x89Logo.png
+      - desktop/src-tauri/icons/Square107x107Logo.png
+      - desktop/src-tauri/icons/Square142x142Logo.png
+      - desktop/src-tauri/icons/Square150x150Logo.png
+      - desktop/src-tauri/icons/Square284x284Logo.png
+      - desktop/src-tauri/icons/Square310x310Logo.png
+      # Native deps: cr-sqlite prebuilt libs
+      - desktop/src-tauri/libs/android-aarch64/crsqlite.so
+      - desktop/src-tauri/libs/darwin-aarch64/crsqlite.dylib
+      - desktop/src-tauri/libs/crsqlite-aarch64-linux-android.zip
+      - desktop/src-tauri/libs/crsqlite-darwin-aarch64.zip
+      # CI/CD
+      - .github/workflows/release.yml
+      - .github/workflows/release-android.yml
+      - scripts/firebase-setup.sh
+      - scripts/firebase_hosting_deploy.py
+      # Root config
+      - .gitignore
+      - .mcp.json
+      - TASKS.md
+      - CLAUDE.md
+    memory:
+      - tech/infra_secrets.md
+      - tech/project_updater_fragility.md
+
+  security:
+    description: "Auth, OAuth (Google), Firestore admin SDK, security audit"
+    rust:
+      - desktop/src-tauri/src/google_auth.rs
+      - desktop/src-tauri/src/firestore_admin.rs
+    memory: [tech/project_security_audit.md]
+
+  llm_voice:
+    description: "MLX, voice TTS/STT, MCP-сервер, finetune, Claude distillation"
+    files:
+      - desktop/voice_server.py
+      - desktop/hanni-mcp/server.py
+      - desktop/hanni-mcp/requirements.txt
+      - desktop/finetune.py
+      - desktop/finetune_data/prepare_data.py
+      - desktop/finetune_data/synthetic_examples.jsonl
+      - scripts/claude_distill.sh
+      - scripts/nightly_train.sh
+      - scripts/generate_training_data.py
+      - scripts/lora-adapters/adapter_config.json
+      - scripts/lora-data/train.jsonl
+      - scripts/lora-data/valid.jsonl
+      - scripts/com.hanni.nightly-train.plist
+      - pc/tts_server.py  # Qwen3-TTS на GPU (отдельная машина)
+
+  docs:
+    description: "Folder-level CLAUDE.md + per-project docs/"
+    files:
+      - desktop/src/CLAUDE.md
+      - desktop/src-tauri/CLAUDE.md
+      - desktop/hanni-mcp/CLAUDE.md
+      # docs/architecture/** и docs/projects/** — 159 файлов
+
+# ════════════════════════════════════════════════════════════════════
+# _dead — кандидаты на удаление в cleanup pass
+# ════════════════════════════════════════════════════════════════════
+# Эти пути будут удалены отдельным cleanup commit-ом после grep-верификации,
+# что нигде не импортируются.
+
+_dead:
+  chat_folder:
+    paths: [chat/]
+    reason: |
+      Abandoned split: README обещает symlinks в src/js/ и src-tauri/src/,
+      но это обычные файлы, отличающиеся от рабочих. Последний коммит март 2026.
+      voice_server.py идентичен desktop/voice_server.py — дубликат.
+      Рабочие файлы — в desktop/src/, эта папка не используется.
+    files_count: 27
+    verify_before_delete: "git grep -E 'from .chat/|require.*chat/|chat/(js|rust|css)' -- ':!chat/'"
+
+  tg_bot_folder:
+    paths: [tg-bot/]
+    reason: |
+      Telegram bot для трекинга вакансий (Python, Aiogram). Отдельный side-project,
+      не интегрирован с Hanni. По решению пользователя — архивируется.
+      Последний коммит апрель 2026.
+    files_count: 7
+    verify_before_delete: "Проверить нет ли ссылок из docs/ или README"
+
+# ════════════════════════════════════════════════════════════════════
+# _archive — удалённые проекты, для исторической справки
+# ════════════════════════════════════════════════════════════════════
+
+_archive:
+  mindset:
+    description: "Журнал, mood log, principles — таб удалён в v0.70"
+    note: "Миграция migrate_drop_mindset() в db.rs дропает journal_entries / mood_log / principles"
+    removed_at: "v0.70"
