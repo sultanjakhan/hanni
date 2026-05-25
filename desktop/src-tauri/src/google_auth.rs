@@ -95,6 +95,15 @@ fn enc(s: &str) -> String {
     utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
 }
 
+/// Shared HTTP client with a 30s timeout. Without one, a slow Google
+/// endpoint would hang the sign-in flow indefinitely.
+pub fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default()
+}
+
 // ── Tauri commands ───────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -215,7 +224,7 @@ pub async fn handle_oauth_callback(
         load_config(&conn).ok_or_else(|| "Google Auth not configured".to_string())?
     };
 
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     // 1. Exchange auth code → Google ID token
     let body = format!(
@@ -228,7 +237,10 @@ pub async fn handle_oauth_callback(
         .send().await.map_err(|e| format!("google token exchange: {}", e))?
         .json().await.map_err(|e| format!("google token parse: {}", e))?;
     let google_id_token = google_resp.get("id_token").and_then(|v| v.as_str())
-        .ok_or_else(|| format!("no Google id_token in response: {}", google_resp))?;
+        .ok_or_else(|| {
+            eprintln!("[google_auth] code-exchange missing id_token: {}", google_resp);
+            "Google sign-in failed — see app logs".to_string()
+        })?;
     let google_access_token = google_resp.get("access_token").and_then(|v| v.as_str())
         .unwrap_or("").to_string();
     let google_refresh_token = google_resp.get("refresh_token").and_then(|v| v.as_str())
@@ -251,7 +263,10 @@ pub async fn handle_oauth_callback(
         .json().await.map_err(|e| format!("firebase parse: {}", e))?;
 
     let id_token = fb_resp.get("idToken").and_then(|v| v.as_str())
-        .ok_or_else(|| format!("no firebase idToken: {}", fb_resp))?;
+        .ok_or_else(|| {
+            eprintln!("[google_auth] signInWithIdp missing idToken: {}", fb_resp);
+            "Firebase sign-in failed — see app logs".to_string()
+        })?;
     let refresh_token = fb_resp.get("refreshToken").and_then(|v| v.as_str())
         .ok_or_else(|| "no firebase refreshToken".to_string())?;
     let local_id = fb_resp.get("localId").and_then(|v| v.as_str())
@@ -312,14 +327,17 @@ pub async fn get_google_access_token(db: &HanniDb) -> Result<String, String> {
         "client_id={}&client_secret={}&refresh_token={}&grant_type=refresh_token",
         enc(&cfg.client_id), enc(&cfg.client_secret), enc(&session.google_refresh_token),
     );
-    let client = reqwest::Client::new();
+    let client = http_client();
     let resp: serde_json::Value = client.post("https://oauth2.googleapis.com/token")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(body)
         .send().await.map_err(|e| format!("google refresh: {}", e))?
         .json().await.map_err(|e| format!("google refresh parse: {}", e))?;
     let new_token = resp.get("access_token").and_then(|v| v.as_str())
-        .ok_or_else(|| format!("google refresh: no access_token: {}", resp))?;
+        .ok_or_else(|| {
+            eprintln!("[google_auth] refresh missing access_token: {}", resp);
+            "Google token refresh failed — see app logs".to_string()
+        })?;
     let expires_in: i64 = resp.get("expires_in").and_then(|v| v.as_i64()).unwrap_or(3600);
     session.google_access_token = new_token.to_string();
     session.google_expires_at = now_secs() + expires_in;
@@ -339,7 +357,7 @@ pub async fn get_firebase_id_token(db: &HanniDb) -> Result<(String, String, Stri
 
     if session.expires_at <= now_secs() + 60 {
         let url = format!("https://securetoken.googleapis.com/v1/token?key={}", cfg.api_key);
-        let client = reqwest::Client::new();
+        let client = http_client();
         let body = format!("grant_type=refresh_token&refresh_token={}",
                            enc(&session.firebase_refresh_token));
         let resp: serde_json::Value = client.post(&url)
@@ -349,7 +367,10 @@ pub async fn get_firebase_id_token(db: &HanniDb) -> Result<(String, String, Stri
             .json().await.map_err(|e| format!("refresh parse: {}", e))?;
 
         let new_id = resp.get("id_token").and_then(|v| v.as_str())
-            .ok_or_else(|| format!("refresh: no id_token: {}", resp))?;
+            .ok_or_else(|| {
+                eprintln!("[google_auth] Firebase token refresh missing id_token: {}", resp);
+                "Firebase token refresh failed — see app logs".to_string()
+            })?;
         let new_refresh = resp.get("refresh_token").and_then(|v| v.as_str())
             .unwrap_or(&session.firebase_refresh_token).to_string();
         let expires_in: i64 = resp.get("expires_in").and_then(|v| v.as_str())

@@ -17,7 +17,7 @@
 use serde_json::json;
 use tauri::State;
 
-use crate::google_auth::{get_google_access_token, load_config};
+use crate::google_auth::{get_google_access_token, http_client, load_config};
 use crate::types::HanniDb;
 
 const FIRESTORE_API: &str = "https://firestore.googleapis.com/v1";
@@ -141,7 +141,7 @@ pub async fn firestore_setup(
             .ok_or_else(|| "Google Auth not configured".to_string())?
     };
     let token = get_google_access_token(&db).await?;
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let db_status = ensure_database(&client, &token, &project_id, &location).await?;
     deploy_rules(&client, &token, &project_id).await?;
