@@ -1118,7 +1118,7 @@ pub fn migrate_content_blocks(conn: &rusqlite::Connection) {
 pub fn migrate_schedules(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schedules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             category TEXT NOT NULL DEFAULT 'other',
             frequency TEXT NOT NULL DEFAULT 'daily',
@@ -1129,8 +1129,8 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS schedule_completions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            schedule_id INTEGER NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+            id TEXT PRIMARY KEY,
+            schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
             date TEXT NOT NULL,
             completed INTEGER DEFAULT 0,
             completed_at TEXT,
@@ -2884,6 +2884,206 @@ pub fn migrate_health_to_uuid_pk(conn: &rusqlite::Connection) {
                 eprintln!("[migrate_health_to_uuid_pk] heart_rate_samples failed: {e}");
                 let _ = conn.execute_batch("ROLLBACK;");
             }
+        }
+    }
+}
+
+/// Phase 3 of UUID-PK migration: schedules + schedule_completions.
+/// schedule_completions.schedule_id FK is rewritten via the parent's
+/// i64 → UUID map; orphan completions are dropped. Idempotent.
+pub fn migrate_schedules_to_uuid_pk(conn: &rusqlite::Connection) {
+    use std::collections::HashMap;
+
+    if column_is_text(conn, "schedules", "id") { return; }
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schedules'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    if exists == 0 { return; }
+
+    let mut id_map: HashMap<i64, String> = HashMap::new();
+
+    let result: Result<(usize, usize), rusqlite::Error> = (|| {
+        // Map old schedules.id → UUIDv7.
+        let ids: Vec<i64> = conn.prepare("SELECT id FROM schedules")?
+            .query_map([], |r| r.get(0))?.filter_map(Result::ok).collect();
+        for id in ids { id_map.insert(id, crate::types::new_uuid_v7()); }
+
+        // Detect which optional columns exist on the live `schedules` so the
+        // migration also tolerates older installs that haven't run the
+        // priority/stage_id/etc. ALTERs yet.
+        let cols: std::collections::HashSet<String> = conn.prepare(
+            "SELECT name FROM pragma_table_info('schedules')"
+        )?.query_map([], |r| r.get::<_, String>(0))?
+          .filter_map(Result::ok).collect();
+        let has = |c: &str| cols.contains(c);
+
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE schedules_new (
+                 id TEXT PRIMARY KEY,
+                 title TEXT NOT NULL,
+                 category TEXT NOT NULL DEFAULT 'other',
+                 frequency TEXT NOT NULL DEFAULT 'daily',
+                 frequency_days TEXT,
+                 time_of_day TEXT,
+                 details TEXT DEFAULT '',
+                 is_active INTEGER DEFAULT 1,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 marks_previous_day INTEGER DEFAULT 0,
+                 until_date TEXT,
+                 track_overdue INTEGER NOT NULL DEFAULT 0,
+                 target_minutes INTEGER,
+                 updated_at TEXT NOT NULL DEFAULT '',
+                 tracking_mode TEXT NOT NULL DEFAULT 'track',
+                 stage_id INTEGER,
+                 priority INTEGER NOT NULL DEFAULT 0,
+                 requirement TEXT NOT NULL DEFAULT 'required',
+                 task_order INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE schedule_completions_new (
+                 id TEXT PRIMARY KEY,
+                 schedule_id TEXT NOT NULL REFERENCES schedules_new(id) ON DELETE CASCADE,
+                 date TEXT NOT NULL,
+                 completed INTEGER DEFAULT 0,
+                 completed_at TEXT,
+                 status TEXT DEFAULT 'done',
+                 updated_at TEXT NOT NULL DEFAULT '',
+                 UNIQUE(schedule_id, date)
+             );"
+        )?;
+
+        // Copy schedules. Use COALESCE for columns that may not exist on
+        // older installs (sentinel default from the new table).
+        let select_extras = [
+            ("marks_previous_day", "0"),
+            ("until_date", "NULL"),
+            ("track_overdue", "0"),
+            ("target_minutes", "NULL"),
+            ("updated_at", "''"),
+            ("tracking_mode", "'track'"),
+            ("stage_id", "NULL"),
+            ("priority", "0"),
+            ("requirement", "'required'"),
+            ("task_order", "0"),
+        ];
+        let extras_select = select_extras.iter()
+            .map(|(c, d)| if has(c) { format!(", {c}") } else { format!(", {d} AS {c}") })
+            .collect::<Vec<_>>().join("");
+        let sel_sql = format!(
+            "SELECT id, title, category, frequency, frequency_days, time_of_day,
+                    details, is_active, created_at{extras_select}
+             FROM schedules"
+        );
+        let mut stmt = conn.prepare(&sel_sql)?;
+        let rows: Vec<(i64, String, String, String, Option<String>, Option<String>,
+                        Option<String>, Option<i64>, String,
+                        i64, Option<String>, i64, Option<i64>, String, String, Option<i64>, i64, String, i64)> =
+            stmt.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
+                r.get(6)?, r.get(7)?, r.get(8)?,
+                r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?, r.get(13)?, r.get(14)?,
+                r.get(15)?, r.get(16)?, r.get(17)?, r.get(18)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(stmt);
+        let n_sched = rows.len();
+        for r in &rows {
+            let new_id = id_map.get(&r.0).cloned().unwrap_or_default();
+            conn.execute(
+                "INSERT INTO schedules_new
+                 (id, title, category, frequency, frequency_days, time_of_day,
+                  details, is_active, created_at,
+                  marks_previous_day, until_date, track_overdue, target_minutes,
+                  updated_at, tracking_mode, stage_id, priority, requirement, task_order)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+                rusqlite::params![
+                    new_id, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8,
+                    r.9, r.10, r.11, r.12, r.13, r.14, r.15, r.16, r.17, r.18,
+                ],
+            )?;
+        }
+
+        // Copy schedule_completions — rewrite schedule_id via id_map.
+        let comp_cols: std::collections::HashSet<String> = conn.prepare(
+            "SELECT name FROM pragma_table_info('schedule_completions')"
+        )?.query_map([], |r| r.get::<_, String>(0))?
+          .filter_map(Result::ok).collect();
+        let status_col = if comp_cols.contains("status") { "COALESCE(status,'done')" } else { "'done'" };
+        let updated_at_col = if comp_cols.contains("updated_at") { "COALESCE(updated_at,'')" } else { "''" };
+        let sel = format!(
+            "SELECT schedule_id, date, COALESCE(completed,0), completed_at, {status_col}, {updated_at_col}
+             FROM schedule_completions"
+        );
+        let mut stmt = conn.prepare(&sel)?;
+        let crows: Vec<(i64, String, i64, Option<String>, String, String)> =
+            stmt.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(stmt);
+        let mut n_comp = 0;
+        for (old_sid, date, completed, completed_at, status, ua) in &crows {
+            let parent_uuid = match id_map.get(old_sid) {
+                Some(u) => u.clone(),
+                None => continue, // orphan completion — parent gone
+            };
+            let new_id = crate::types::new_uuid_v7();
+            conn.execute(
+                "INSERT OR IGNORE INTO schedule_completions_new
+                 (id, schedule_id, date, completed, completed_at, status, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                rusqlite::params![new_id, parent_uuid, date, completed, completed_at, status, ua],
+            )?;
+            n_comp += 1;
+        }
+
+        // routine_nodes.source_id used to be INTEGER pointing at schedule
+        // ids; rewrite via id_map. routine_nodes itself isn't in SYNC_TABLES
+        // (it's local-only), but if we leave INTEGER source_id pointing at
+        // ids that no longer exist, routine→schedule resolution silently
+        // falls back to the title heuristic.
+        if conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='routine_nodes'",
+            [], |r| r.get::<_, i64>(0),
+        ).unwrap_or(0) > 0 {
+            // Read all routine_nodes.source_id (INTEGER) and remap via id_map
+            // for schedule-typed nodes, writing back as TEXT — SQLite's lax
+            // typing lets us put strings into an INTEGER column transparently.
+            let pairs: Vec<(i64, i64)> = conn.prepare(
+                "SELECT id, source_id FROM routine_nodes
+                 WHERE source_type='schedule' AND source_id IS NOT NULL"
+            )?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+              .filter_map(Result::ok).collect();
+            for (rn_id, old_sid) in &pairs {
+                if let Some(new_uuid) = id_map.get(old_sid) {
+                    let _ = conn.execute(
+                        "UPDATE routine_nodes SET source_id=?1 WHERE id=?2",
+                        rusqlite::params![new_uuid, rn_id],
+                    );
+                } else {
+                    // Parent schedule is gone — clear the dangling reference.
+                    let _ = conn.execute(
+                        "UPDATE routine_nodes SET source_id=NULL WHERE id=?1",
+                        rusqlite::params![rn_id],
+                    );
+                }
+            }
+        }
+
+        conn.execute_batch(
+            "DELETE FROM sync_tombstones WHERE table_name IN ('schedules','schedule_completions');
+             DROP TABLE schedule_completions;
+             DROP TABLE schedules;
+             ALTER TABLE schedules_new RENAME TO schedules;
+             ALTER TABLE schedule_completions_new RENAME TO schedule_completions;
+             COMMIT;"
+        )?;
+        Ok((n_sched, n_comp))
+    })();
+    match result {
+        Ok((s, c)) => eprintln!("[migrate_schedules_to_uuid_pk] migrated {s} schedules + {c} completions"),
+        Err(e) => {
+            eprintln!("[migrate_schedules_to_uuid_pk] failed: {e}");
+            let _ = conn.execute_batch("ROLLBACK;");
         }
     }
 }

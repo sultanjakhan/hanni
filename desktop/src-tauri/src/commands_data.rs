@@ -1094,15 +1094,16 @@ pub fn create_workout_from_template(template_id: i64, db: tauri::State<'_, Hanni
 // ── Schedules commands ──
 
 #[tauri::command]
-pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
     let to = track_overdue.unwrap_or(false) as i64;
     let mode = tracking_mode.unwrap_or_else(|| "track".to_string());
+    let new_id = crate::types::new_uuid_v7();
     conn.execute(
-        "INSERT INTO schedules (title, category, frequency, frequency_days, time_of_day, details, track_overdue, target_minutes, tracking_mode, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), to, target_minutes, mode, chrono::Local::now().to_rfc3339()],
+        "INSERT INTO schedules (id, title, category, frequency, frequency_days, time_of_day, details, track_overdue, target_minutes, tracking_mode, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![new_id, title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), to, target_minutes, mode, chrono::Local::now().to_rfc3339()],
     ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
+    Ok(new_id)
 }
 
 #[tauri::command]
@@ -1119,7 +1120,7 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
     } else { vec![] };
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
         Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
+            "id": row.get::<_, String>(0)?,
             "title": row.get::<_, String>(1)?,
             "category": row.get::<_, String>(2)?,
             "frequency": row.get::<_, String>(3)?,
@@ -1139,7 +1140,7 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
 }
 
 #[tauri::command]
-pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_schedule(id: String, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(v) = title { conn.execute("UPDATE schedules SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = category { conn.execute("UPDATE schedules SET category=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
@@ -1163,7 +1164,7 @@ pub fn update_schedule(id: i64, title: Option<String>, category: Option<String>,
 }
 
 #[tauri::command]
-pub fn delete_schedule(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn delete_schedule(id: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     conn.execute("DELETE FROM schedule_completions WHERE schedule_id=?1", rusqlite::params![id]).ok();
     conn.execute("DELETE FROM schedules WHERE id=?1", rusqlite::params![id])
@@ -1172,7 +1173,7 @@ pub fn delete_schedule(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::State<'_, HanniDb>) -> Result<bool, String> {
+pub fn toggle_schedule_completion(schedule_id: String, date: String, db: tauri::State<'_, HanniDb>) -> Result<bool, String> {
     let conn = db.conn();
     let existing: Option<i64> = conn.query_row(
         "SELECT completed FROM schedule_completions WHERE schedule_id=?1 AND date=?2",
@@ -1193,8 +1194,9 @@ pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::Sta
             Ok(true)
         }
         None => {
-            conn.execute("INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, 1, ?3, 'done')",
-                rusqlite::params![schedule_id, date, chrono::Local::now().to_rfc3339()]).ok();
+            let new_id = crate::types::new_uuid_v7();
+            conn.execute("INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, ?3, 1, ?4, 'done')",
+                rusqlite::params![new_id, schedule_id, date, chrono::Local::now().to_rfc3339()]).ok();
             Ok(true)
         }
     }
@@ -1204,7 +1206,7 @@ pub fn toggle_schedule_completion(schedule_id: i64, date: String, db: tauri::Sta
 /// Toggle behavior: skipped → planned (cleared). Cycle from done passes through
 /// here too. Skipped counts as closed-but-not-completed: not an overdue, not a hit.
 #[tauri::command]
-pub fn skip_schedule_completion(schedule_id: i64, date: String, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+pub fn skip_schedule_completion(schedule_id: String, date: String, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
     let existing: Option<String> = conn.query_row(
         "SELECT COALESCE(status, 'planned') FROM schedule_completions WHERE schedule_id=?1 AND date=?2",
@@ -1219,9 +1221,10 @@ pub fn skip_schedule_completion(schedule_id: i64, date: String, db: tauri::State
             ).map_err(|e| format!("DB error: {}", e))?;
         }
         None => {
+            let new_id = crate::types::new_uuid_v7();
             conn.execute(
-                "INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, 0, NULL, ?3)",
-                rusqlite::params![schedule_id, date, new_status],
+                "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, ?3, 0, NULL, ?4)",
+                rusqlite::params![new_id, schedule_id, date, new_status],
             ).map_err(|e| format!("DB error: {}", e))?;
         }
     }
@@ -1238,7 +1241,7 @@ pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> 
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map(rusqlite::params![date], |row| {
         Ok(serde_json::json!({
-            "schedule_id": row.get::<_, i64>(0)?,
+            "schedule_id": row.get::<_, String>(0)?,
             "completed": row.get::<_, i64>(1)? == 1,
             "title": row.get::<_, String>(2)?,
             "category": row.get::<_, String>(3)?,

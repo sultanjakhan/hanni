@@ -43,12 +43,16 @@ pub fn delete_routine_run(run_id: i64, db: tauri::State<'_, HanniDb>) -> Result<
 }
 
 /// Set a node's state inside a run. state 'pending' (or empty) clears the record.
+/// If the node is backed by a schedule (source_type='schedule', source_id set),
+/// mirror the state into schedule_completions so the same task in Calendar
+/// Day-view / Список / sidebar stays in sync with the routine canvas.
 #[tauri::command]
 pub fn set_routine_node_status(
     run_id: i64, node_id: i64, state: String, db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
-    if state.is_empty() || state == "pending" {
+    let clearing = state.is_empty() || state == "pending";
+    if clearing {
         conn.execute("DELETE FROM routine_node_status WHERE run_id=?1 AND node_id=?2",
             rusqlite::params![run_id, node_id]).map_err(|e| format!("DB error: {}", e))?;
     } else {
@@ -58,6 +62,78 @@ pub fn set_routine_node_status(
              ON CONFLICT(run_id, node_id) DO UPDATE SET state=excluded.state, updated_at=datetime('now')",
             rusqlite::params![run_id, node_id, state],
         ).map_err(|e| format!("DB error: {}", e))?;
+    }
+
+    // Mirror into schedule_completions when the node wraps a schedule.
+    // Two paths to find the schedule id:
+    //   1) explicit source_id on the node (set when the node was created
+    //      from a schedule);
+    //   2) fallback by matching node.title against schedules.title
+    //      case-insensitively — covers older nodes built before source_id
+    //      was assigned, so the routine click still propagates.
+    let node_info: Option<(String, Option<i64>, String)> = conn.query_row(
+        "SELECT source_type, source_id, title FROM routine_nodes WHERE id=?1",
+        rusqlite::params![node_id],
+        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?)),
+    ).ok();
+    let date: Option<String> = conn.query_row(
+        "SELECT date FROM routine_runs WHERE id=?1",
+        rusqlite::params![run_id], |r| r.get::<_, String>(0),
+    ).ok();
+    let resolved_sid: Option<i64> = node_info.as_ref().and_then(|(stype, sid, title)| {
+        if stype != "schedule" { return None; }
+        if let Some(s) = sid { return Some(*s); }
+        // Title fallback (Rust lowercase — Unicode-aware, unlike SQLite LOWER):
+        //   1) exact match on lowercase title
+        //   2) substring match (node title contained in schedule title), but
+        //      only when it's unambiguous — one match. "Зубы" matching both
+        //      "Зубы утром" and "Зубы вечером" would be wrong to auto-pick.
+        let want = title.to_lowercase();
+        let mut stmt = conn.prepare(
+            "SELECT id, title FROM schedules WHERE is_active = 1"
+        ).ok()?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }).ok()?;
+        let all: Vec<(i64, String)> = rows.filter_map(|r| r.ok())
+            .map(|(i, t)| (i, t.to_lowercase())).collect();
+        if let Some((id, _)) = all.iter().find(|(_, t)| *t == want) {
+            return Some(*id);
+        }
+        let subs: Vec<i64> = all.iter()
+            .filter(|(_, t)| t.contains(&want) || want.contains(t))
+            .map(|(i, _)| *i).collect();
+        if subs.len() == 1 { Some(subs[0]) } else { None }
+    });
+    if let (Some(sid), Some(d)) = (resolved_sid, date) {
+        {
+            if clearing {
+                let _ = conn.execute(
+                    "UPDATE schedule_completions SET completed=0, completed_at=NULL, status='planned'
+                     WHERE schedule_id=?1 AND date=?2",
+                    rusqlite::params![sid, d],
+                );
+            } else if state == "done" {
+                let now = chrono::Local::now().to_rfc3339();
+                let new_id = crate::types::new_uuid_v7();
+                let _ = conn.execute(
+                    "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
+                     VALUES (?1, ?2, ?3, 1, ?4, 'done')
+                     ON CONFLICT(schedule_id, date) DO UPDATE
+                       SET completed=1, completed_at=COALESCE(schedule_completions.completed_at, ?4), status='done'",
+                    rusqlite::params![new_id, sid, d, now],
+                );
+            } else if state == "skipped" {
+                let new_id = crate::types::new_uuid_v7();
+                let _ = conn.execute(
+                    "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
+                     VALUES (?1, ?2, ?3, 0, NULL, 'skipped')
+                     ON CONFLICT(schedule_id, date) DO UPDATE
+                       SET completed=0, completed_at=NULL, status='skipped'",
+                    rusqlite::params![new_id, sid, d],
+                );
+            }
+        }
     }
     Ok(())
 }

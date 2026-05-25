@@ -37,8 +37,11 @@ export function renderItemRow(item, dateStr) {
   const overdueBadge = item.overdueDate
     ? `<span class="ctl-overdue-badge" title="Срок: ${escapeHtml(item.overdueDate)}">${fmtOverdue(item.overdueDate, dateStr)}</span>`
     : (item.pastTime ? `<span class="ctl-overdue-badge" title="Сегодня прошло запланированное время">⚠️</span>` : '');
-  // Show ▶ when there is room left: not done OR (has target and not yet reached)
-  const showStart = !active && (!done || (target > 0 && !targetReached));
+  // Show ▶ when there is room left: not done OR (has target and not yet reached).
+  // Check-mode schedules ("выпил воды", reflections) never open a timer block —
+  // showing ▶ for them lures users into a meaningless start/stop cycle.
+  const isInstant = item.trackingMode === 'check';
+  const showStart = !isInstant && !active && (!done || (target > 0 && !targetReached));
   const trackBtns = active
     ? `<button class="ctl-track ctl-pause" data-ctl-pause="${item.block.id}" title="Пауза">⏸</button>
        <button class="ctl-track ctl-finish" data-ctl-finish="${item.block.id}" title="Готово">✓</button>`

@@ -21,6 +21,9 @@ const OVERDUE_GRACE_MIN = 180;
 // meeting is a missed meeting.
 export function isOverdue(item, nowMin) {
   if (item.completed || item.status_extra === 'done') return false;
+  // Items carried over from a previous day (status_extra='overdue' or
+  // explicit overdue_date) are always overdue — no grace window.
+  if (item.status_extra === 'overdue' || item.overdue_date) return true;
   if (item.source_type === 'schedule' && !item.track_overdue) return false;
   const t = timeToMin(item.planned_time);
   return t !== null && t < nowMin && (nowMin - t) <= OVERDUE_GRACE_MIN;

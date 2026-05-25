@@ -175,5 +175,88 @@ pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> R
         let _ = conn.execute(&sql, rusqlite::params_from_iter(params));
     }
 
+    // Auto-complete matching schedules (e.g. "Прогулка 30 мин") when the
+    // total duration of that activity type on the date crosses 15 min.
+    let _ = auto_complete_from_health(&conn, &date, &now);
+
     Ok(count)
+}
+
+/// Activity keywords we look for in schedule titles, given the auto_health
+/// event title (e.g. "🚶 Прогулка"). Keys here are the words present in
+/// `exercise_title`'s outputs so we can reverse-map straight from the
+/// already-imported event row without needing health_log's raw type.
+fn keywords_for_event_title(title: &str) -> &'static [&'static str] {
+    let t = title.to_lowercase();
+    if t.contains("прогул")      { return &["прогул", "ходьб", "walking"]; }
+    if t.contains("пробеж")      { return &["пробеж", "бег", "running"]; }
+    if t.contains("велосипед")   { return &["вело", "cycling", "biking"]; }
+    if t.contains("плавание")    { return &["плава", "swim"]; }
+    if t.contains("силов")       { return &["силов", "штанг", "качал", "strength"]; }
+    if t.contains("йог")         { return &["йог", "yoga"]; }
+    if t.contains("поход")       { return &["поход", "hiking"]; }
+    if t.contains("тренир")      { return &["тренир", "workout"]; }
+    &[]
+}
+
+/// Sum auto_health event minutes per title on `date`; for each title with
+/// total ≥15, find active schedules whose title matches the keyword set and
+/// mark them done in schedule_completions. Reads events (not health_log)
+/// because that's where the import normalises titles consistently.
+/// Idempotent — re-running keeps the existing completed_at on conflict.
+fn auto_complete_from_health(conn: &rusqlite::Connection, date: &str, now: &str) -> rusqlite::Result<()> {
+    use std::collections::HashMap;
+    const THRESHOLD_MIN: i64 = 15;
+
+    let mut totals: HashMap<String, i64> = HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT title, duration_minutes FROM events
+             WHERE date=?1 AND source='auto_health' AND title NOT LIKE 'Сон%'"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![date], |row| {
+            let title: String = row.get(0)?;
+            let dur: i64 = row.get(1)?;
+            Ok((title, dur))
+        })?;
+        for r in rows {
+            if let Ok((title, dur)) = r {
+                *totals.entry(title).or_insert(0) += dur;
+            }
+        }
+    }
+
+    // SQLite's LOWER() is ASCII-only — "Прогулка" would stay "Прогулка" and
+    // never match a cyrillic keyword. Lowercase in Rust (Unicode-aware).
+    let mut scheds: Vec<(String, String)> = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT id, title FROM schedules WHERE is_active = 1"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?.to_lowercase()))
+        })?;
+        for r in rows {
+            if let Ok(v) = r { scheds.push(v); }
+        }
+    }
+
+    for (event_title, total) in &totals {
+        if *total < THRESHOLD_MIN { continue; }
+        let keys = keywords_for_event_title(event_title);
+        if keys.is_empty() { continue; }
+        for (sid, title) in &scheds {
+            if keys.iter().any(|k| title.contains(k)) {
+                let new_id = crate::types::new_uuid_v7();
+                let _ = conn.execute(
+                    "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
+                     VALUES (?1, ?2, ?3, 1, ?4, 'done')
+                     ON CONFLICT(schedule_id, date) DO UPDATE
+                       SET completed=1, completed_at=COALESCE(schedule_completions.completed_at, ?4), status='done'",
+                    rusqlite::params![new_id, sid, date, now],
+                );
+            }
+        }
+    }
+    Ok(())
 }

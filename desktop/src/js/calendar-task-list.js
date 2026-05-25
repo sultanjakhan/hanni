@@ -75,13 +75,13 @@ async function loadDayItems(date) {
     }
     for (const s of (scheds || []).filter(s => s.track_overdue && scheduleMatchesDate(s, yesterday) && !yCompletedIds.has(s.id))) {
       const bi = blockInfo('schedule', s.id);
-      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null });
+      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
     }
   }
   for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date))) {
     const bi = blockInfo('schedule', s.id);
     const done = completedIds.has(s.id);
-    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday, !!s.track_overdue) });
+    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday, !!s.track_overdue) });
   }
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
@@ -233,6 +233,8 @@ function wire(el) {
       try { await toggleDone(kind, id, date, !row.classList.contains('ctl-done')); }
       catch (err) { console.error('ctl toggle:', err); }
       renderCalendarTaskList(el);
+      // Tell the Day-view to redraw its overlay too — completion just changed.
+      window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
     });
     row.querySelector('[data-ctl-start]')?.addEventListener('click', async (e) => {
       e.stopPropagation(); e.currentTarget.disabled = true;

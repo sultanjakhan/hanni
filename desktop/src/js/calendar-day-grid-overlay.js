@@ -180,8 +180,17 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     invoke('get_schedule_completions', { date }).catch(() => []),
     invoke('get_schedules', { category: null }).catch(() => []),
   ]);
+  // Schedules whose completion comes from a timeline_block (timer) are
+  // already drawn as proper blocks above — skip them here to avoid double.
+  // What we DO want as markers: check-mode tasks + any track-mode task
+  // that got marked done without a block (auto-from-Health, manual ✓).
+  const blockedSchedIds = new Set(
+    (blocks || [])
+      .filter(b => b.source_type === 'schedule' && b.source_id != null)
+      .map(b => b.source_id)
+  );
   const doneChecks = (completions || []).filter(c =>
-    c.tracking_mode === 'check' && c.completed && c.completed_at
+    c.completed && c.completed_at && !blockedSchedIds.has(c.schedule_id)
   );
 
   // Split: previous-day reflections cluster into one "📝 Рефлексия" marker
@@ -189,7 +198,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   const reflections = doneChecks.filter(c => c.marks_previous_day);
   const regulars    = doneChecks.filter(c => !c.marks_previous_day);
   const totalReflections = (allSchedules || []).filter(s =>
-    s.marks_previous_day && (s.tracking_mode || 'track') === 'check' && s.is_active !== false
+    s.marks_previous_day && s.is_active !== false
   ).length;
 
   const renderMarker = (top, icon, label, hm, tip) => {

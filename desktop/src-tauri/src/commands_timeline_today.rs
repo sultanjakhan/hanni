@@ -9,10 +9,18 @@ fn day_of_week(date: &str) -> Result<u32, String> {
     Ok(dt.weekday().number_from_monday())
 }
 
+// Returns date+`delta` days as YYYY-MM-DD.
+fn shift_date(date: &str, delta: i64) -> Result<String, String> {
+    let dt = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map_err(|e| format!("Invalid date: {}", e))?;
+    Ok((dt + chrono::Duration::days(delta)).format("%Y-%m-%d").to_string())
+}
+
 #[tauri::command]
 pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut items: Vec<serde_json::Value> = Vec::new();
+    eprintln!("[get_today_planned] called date={}", date);
 
     // ── 1. Calendar events on date
     let mut e_stmt = conn.prepare(
@@ -44,6 +52,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         }))
     }).map_err(|e| format!("Query error: {}", e))?;
     for it in events_iter.flatten() { items.push(it); }
+    eprintln!("[get_today_planned] after events: {} items", items.len());
 
     // ── 2. Schedules matching today + completion status
     let dow = day_of_week(&date)?;
@@ -56,6 +65,33 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
          LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
          WHERE s.is_active = 1"
     ).map_err(|e| format!("DB error: {}", e))?;
+    let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone()], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, String>(8)?,
+            row.get::<_, String>(9)?,
+            row.get::<_, i64>(10)?,
+            row.get::<_, i64>(11)?,
+        ))
+    }).map_err(|e| format!("Query error: {}", e))?;
+
+    let mut sch_count = 0i64;
+    let mut parse_err_count = 0i64;
+    for row_res in schedules_iter {
+        match row_res {
+            Ok(_) => sch_count += 1,
+            Err(e) => { parse_err_count += 1; if parse_err_count < 3 { eprintln!("[planned] sched parse err: {}", e); } }
+        }
+    }
+    eprintln!("[planned] sched rows OK={} err={}", sch_count, parse_err_count);
+    // Re-run for actual processing.
     let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone()], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -104,6 +140,68 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             "priority": priority,
             "track_overdue": track_overdue == 1,
         }));
+    }
+
+    eprintln!("[get_today_planned] after schedules: {} items", items.len());
+
+    // ── 2b. Carry-over: yesterday's track_overdue schedules that weren't
+    // completed. The picker treats these as overdue regardless of time_of_day.
+    if let Ok(yesterday) = shift_date(&date, -1) {
+        let dow_y = day_of_week(&yesterday)?;
+        let mut o_stmt = conn.prepare(
+            "SELECT s.id, s.title, s.category, s.frequency, s.frequency_days, s.time_of_day,
+                    s.priority, COALESCE(s.tracking_mode, 'track')
+             FROM schedules s
+             LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
+             WHERE s.is_active = 1 AND COALESCE(s.track_overdue, 0) = 1
+               AND COALESCE(sc.completed, 0) = 0
+               AND COALESCE(sc.status, 'planned') != 'skipped'"
+        ).map_err(|e| format!("DB error: {}", e))?;
+        let overdue_iter = o_stmt.query_map(rusqlite::params![yesterday.clone()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        }).map_err(|e| format!("Query error: {}", e))?;
+        let already_today: std::collections::HashSet<i64> = items.iter()
+            .filter(|v| v["source_type"] == "schedule")
+            .filter_map(|v| v["source_id"].as_i64())
+            .collect();
+        for tup in overdue_iter.flatten() {
+            let (id, title, category, frequency, frequency_days, time_of_day, priority, tracking_mode) = tup;
+            // Did yesterday actually require this schedule?
+            let matched_yesterday = match frequency.as_str() {
+                "daily" => true,
+                "weekly" | "custom" => frequency_days
+                    .as_deref()
+                    .map(|fd| fd.split(',').filter_map(|d| d.trim().parse::<u32>().ok()).any(|d| d == dow_y))
+                    .unwrap_or(false),
+                _ => false,
+            };
+            if !matched_yesterday { continue; }
+            if already_today.contains(&id) { continue; }
+            items.push(serde_json::json!({
+                "source_type": "schedule",
+                "source_id": id,
+                "title": title,
+                "planned_time": time_of_day,
+                "duration_minutes": serde_json::Value::Null,
+                "category": category,
+                "color": "#ef4444",
+                "completed": false,
+                "status_extra": "overdue",
+                "tracking_mode": tracking_mode,
+                "priority": priority,
+                "track_overdue": true,
+                "overdue_date": yesterday,
+            }));
+        }
     }
 
     // ── 3. Notes tasks with due_date = date
@@ -251,11 +349,12 @@ pub fn complete_task_block(
                 conn.execute("UPDATE events SET completed=1 WHERE id=?1", rusqlite::params![sid]).ok();
             }
             "schedule" => {
+                let new_id = crate::types::new_uuid_v7();
                 conn.execute(
-                    "INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status)
-                     VALUES (?1, ?2, 1, ?3, 'done')
-                     ON CONFLICT(schedule_id, date) DO UPDATE SET completed=1, completed_at=?3, status='done'",
-                    rusqlite::params![sid, block_date, now_rfc],
+                    "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
+                     VALUES (?1, ?2, ?3, 1, ?4, 'done')
+                     ON CONFLICT(schedule_id, date) DO UPDATE SET completed=1, completed_at=?4, status='done'",
+                    rusqlite::params![new_id, sid, block_date, now_rfc],
                 ).ok();
             }
             "note" => {
@@ -327,9 +426,10 @@ pub fn finish_task_block(
         match st.as_str() {
             "event" => { conn.execute("UPDATE events SET completed=1 WHERE id=?1", rusqlite::params![sid]).ok(); }
             "schedule" => {
+                let new_id = crate::types::new_uuid_v7();
                 conn.execute(
-                    "INSERT INTO schedule_completions (schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, 1, ?3, 'done') ON CONFLICT(schedule_id, date) DO UPDATE SET completed=1, completed_at=?3, status='done'",
-                    rusqlite::params![sid, block_date, now_rfc],
+                    "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, ?3, 1, ?4, 'done') ON CONFLICT(schedule_id, date) DO UPDATE SET completed=1, completed_at=?4, status='done'",
+                    rusqlite::params![new_id, sid, block_date, now_rfc],
                 ).ok();
             }
             "note" => { conn.execute("UPDATE notes SET status='done', updated_at=?1 WHERE id=?2", rusqlite::params![now_rfc, sid]).ok(); }
