@@ -4,7 +4,50 @@
 (function () {
   const u = (window.HanniGuest || {}).utils;
   if (!u) return;
-  const { api } = u;
+  const { api, ctx } = u;
+
+  // Embedded fallback cuisines — match the default rows Hanni seeds at init
+  // (desktop/src-tauri/src/db.rs). Used only when both axum /cuisines and
+  // the per-token localStorage cache are unavailable, so the dropdown
+  // still has something usable when the host tunnel is dead and the guest
+  // is on their first visit (no cache).
+  const FALLBACK_CUISINES = [
+    { code: 'kz',    name: 'Казахская',    emoji: '🇰🇿' },
+    { code: 'ru',    name: 'Русская',      emoji: '🇷🇺' },
+    { code: 'it',    name: 'Итальянская',  emoji: '🇮🇹' },
+    { code: 'jp',    name: 'Японская',     emoji: '🇯🇵' },
+    { code: 'ge',    name: 'Грузинская',   emoji: '🇬🇪' },
+    { code: 'tr',    name: 'Турецкая',     emoji: '🇹🇷' },
+    { code: 'uz',    name: 'Узбекская',    emoji: '🇺🇿' },
+    { code: 'kr',    name: 'Корейская',    emoji: '🇰🇷' },
+    { code: 'us',    name: 'Американская', emoji: '🇺🇸' },
+    { code: 'mx',    name: 'Мексиканская', emoji: '🇲🇽' },
+    { code: 'other', name: 'Другая',       emoji: '🌍' },
+  ];
+  const CUISINES_CACHE_KEY = 'hg:cuisines:' + (ctx?.token || '_');
+
+  async function fetchCuisinesResilient() {
+    // 1. Try axum — when the host is online this gives the freshest list
+    //    including custom cuisines the host added.
+    try {
+      const resp = await api('/cuisines');
+      const list = resp?.cuisines || [];
+      if (list.length) {
+        try { localStorage.setItem(CUISINES_CACHE_KEY, JSON.stringify(list)); } catch {}
+        return list;
+      }
+    } catch {}
+    // 2. Last-known-good list from localStorage. Survives across tunnel
+    //    restarts and even Hanni quits, as long as the guest visited once
+    //    while the host was up.
+    try {
+      const cached = JSON.parse(localStorage.getItem(CUISINES_CACHE_KEY) || 'null');
+      if (Array.isArray(cached) && cached.length) return cached;
+    } catch {}
+    // 3. Embedded defaults — covers the recipes the host is most likely to
+    //    have, so the cuisine chip resolves correctly even on a cold visit.
+    return FALLBACK_CUISINES;
+  }
 
   function makeBackend(catalog) {
     return {
@@ -18,7 +61,7 @@
         }
         return [];
       },
-      getCuisines: async () => (await api('/cuisines').catch(() => ({ cuisines: [] }))).cuisines || [],
+      getCuisines: fetchCuisinesResilient,
       getBlacklist: async () => [],
       addCatalogItem: async ({ name, category }) => {
         const resp = await api('/catalog', {
