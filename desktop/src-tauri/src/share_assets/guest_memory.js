@@ -61,6 +61,14 @@
   function renderLevelGroup(level, items) {
     const meta = LEVEL_META[level];
     if (!meta) return '';
+    // Empty section: keep the header so users see the structure (and know
+    // what categories Hanni supports) instead of silently hiding it.
+    if (!items.length) {
+      return `<div class="recipe-detail-section mem-level mem-level-${level}" style="opacity:0.55">
+        <h4>${meta.icon} ${esc(meta.label)} <span class="muted" style="font-weight:400">· пусто</span></h4>
+        <p class="muted" style="font-size:12px;margin-bottom:0">— пока ничего</p>
+      </div>`;
+    }
     const byType = {};
     for (const it of items) (byType[it.type] = byType[it.type] || []).push(it);
     const typeSections = Object.entries(byType).map(([t, list]) => {
@@ -91,8 +99,10 @@
       const lvl = byLevel[it.level] ? it.level : 'hard';  // legacy rows w/o level
       byLevel[lvl].push(it);
     }
+    // Render all three levels, even when empty — gives guests an at-a-glance
+    // overview of the structure (Не ем / Не люблю / Люблю) instead of
+    // hiding categories the host hasn't filled yet.
     const sections = ['hard', 'soft', 'love']
-      .filter(lvl => byLevel[lvl].length)
       .map(lvl => renderLevelGroup(lvl, byLevel[lvl])).join('');
     state.mount.innerHTML = `
       <h2>Предпочтения (${state.items.length})</h2>
