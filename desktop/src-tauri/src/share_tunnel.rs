@@ -92,6 +92,44 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
         }
     }
 
+    // Tailscale Funnel: if the user has set a public Funnel URL it survives
+    // restarts forever, has no trycloudflare rate-limit, and needs no
+    // subprocess. Adopt it and short-circuit — no cloudflared, no gist push.
+    let funnel: Option<String> = {
+        let db = app.state::<crate::types::HanniDb>();
+        let conn = db.conn();
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key='share_funnel_url'",
+            [], |r| r.get::<_, String>(0),
+        ).ok().filter(|s| !s.trim().is_empty())
+    };
+    if let Some(url) = funnel {
+        eprintln!("[tunnel] using Tailscale Funnel (stable): {}", url);
+        {
+            let st = app.state::<ShareTunnel>();
+            let mut guard = st.0.lock().map_err(|e| e.to_string())?;
+            guard.running = true;
+            guard.url = Some(url.clone());
+            guard.error = None;
+            guard.child = None;
+        }
+        // Persist as share_tunnel_url too so existing readers see it.
+        {
+            let db = app.state::<crate::types::HanniDb>();
+            let conn = db.conn();
+            let _ = conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('share_tunnel_url', ?1) \
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![url],
+            );
+        }
+        let _ = app.emit("share-tunnel", serde_json::json!({
+            "url": &url, "source": "tailscale-funnel"
+        }));
+        let _ = app.emit("tunnel-up", url.clone());
+        return Ok(url);
+    }
+
     // Tailscale: stable peer-to-peer URL for the user's own devices. We
     // record it as `share_tailscale_url` so clients in the same tailnet
     // can skip the public tunnel, but we DO NOT return early — external
