@@ -5,6 +5,7 @@
 import { invoke, listen } from './state.js';
 import { escapeHtml } from './utils.js';
 import { attachOwnerSync } from './cloud-owner-sync.js';
+import { attachLanSync } from './lan-sync-section.js';
 
 export async function openCloudShareModal() {
   let auth = { configured: false, authenticated: false };
@@ -49,6 +50,31 @@ export async function openCloudShareModal() {
         <input id="cs-owner-import">
         <button id="cs-owner-import-btn"></button>
       </div>
+    </div>
+
+    <div style="border:1px solid var(--border-subtle);border-radius:8px;padding:12px;margin-top:16px">
+      <div style="font-weight:600;margin-bottom:6px">📡 Локальная синхронизация (LAN / Tailscale)</div>
+      <p style="color:var(--text-muted);font-size:12px;margin:0 0 10px">
+        Прямое peer-to-peer соединение между Mac и телефоном. Через Wi-Fi дома или через Tailscale из любой точки. Не зависит от Firestore, не жрёт квоту.
+      </p>
+      <div style="display:grid;grid-template-columns:1fr;gap:8px">
+        <label style="font-size:12px;color:var(--text-muted)">Peer IP:Port (адрес второго устройства)
+          <input id="ls-peer" type="text" placeholder="100.x.y.z:8244"
+                 style="width:100%;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px;margin-top:2px">
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Pre-shared key (одинаковый на обоих устройствах)
+          <input id="ls-key" type="text" placeholder="hanni-lan-2026"
+                 style="width:100%;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px;margin-top:2px">
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="ls-enabled"> Включена авто-синхронизация (каждые 15 сек)
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn-primary" id="ls-save">Сохранить</button>
+        <button class="btn-secondary" id="ls-sync-now">🔄 Sync now</button>
+      </div>
+      <div id="ls-msg" style="min-height:18px;font-size:12px;margin-top:6px"></div>
     </div>
 
     <div class="modal-actions" style="margin-top:16px">
@@ -126,4 +152,5 @@ export async function openCloudShareModal() {
   }).then((fn) => { unlistenAuth = fn; }).catch(() => {});
 
   unlistenTick = attachOwnerSync(overlay, auto);
+  attachLanSync(overlay);
 }
