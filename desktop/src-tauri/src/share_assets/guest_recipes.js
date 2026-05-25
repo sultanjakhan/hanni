@@ -111,7 +111,7 @@
       state.view = 'list';
       render();
     } catch (e) {
-      const msg = e?.code === 'LINK_REVOKED' ? 'Ссылка отозвана хозяином.'
+      const msg = e?.code === 'LINK_REVOKED' ? 'Ссылка отозвана Султаном.'
         : e?.code === 'LINK_EXPIRED' ? 'Срок действия ссылки истёк.'
         : e?.code === 'LINK_FORBIDDEN' ? 'Доступ запрещён.'
         : `Ошибка: ${esc(e.message || e)}`;
