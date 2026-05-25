@@ -229,25 +229,48 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
     }
     let theirs: SyncBatch = resp.json().await.map_err(|e| format!("bad response: {}", e))?;
 
-    let conn = db.conn();
-    let applied = apply_batch(&conn, &theirs);
-    let mine_batch = SyncBatch { rows: req.rows, tombs: req.tombs, peer_hint: None };
-    advance_cursors(&conn, &[&mine_batch, &theirs]);
-    set_setting(&conn, "lan_cursor_tombstones", &chrono::Local::now().to_rfc3339());
+    // Apply received batch + advance cursors + record sync time. Done in
+    // a scope so the rusqlite Connection (which is !Send) is dropped
+    // before the next `.await`.
+    let sent_count = req.rows.len();
+    let applied;
+    let candidate_hint: Option<String>;
+    {
+        let conn = db.conn();
+        applied = apply_batch(&conn, &theirs);
+        let mine_batch = SyncBatch { rows: req.rows, tombs: req.tombs, peer_hint: None };
+        advance_cursors(&conn, &[&mine_batch, &theirs]);
+        set_setting(&conn, "lan_cursor_tombstones", &chrono::Local::now().to_rfc3339());
+        candidate_hint = theirs.peer_hint.clone().filter(|h|
+            !h.is_empty() && h != &peer && h.starts_with("100.")
+        );
+    }
 
     // Auto-upgrade peer to Tailscale once the server has told us its
-    // CGNAT address. Switches a phone that first synced over local Wi-Fi
-    // (192.168.x) to the stable 100.x address so the next round works
-    // from any network, with no manual reconfiguration.
+    // CGNAT address. Only adopt if reachable — on Android Tailscale can
+    // be paused, and adopting an unreachable peer would lock the device
+    // out of further syncs.
     let mut adopted: Option<String> = None;
-    if let Some(hint) = theirs.peer_hint.as_deref() {
-        if !hint.is_empty() && hint != peer && hint.starts_with("100.") {
-            set_setting(&conn, "lan_sync_peer", hint);
-            adopted = Some(hint.to_string());
+    if let Some(hint) = candidate_hint {
+        let probe_url = format!("http://{}/lan/sync", hint);
+        let reachable = reqwest::Client::new()
+            .post(&probe_url)
+            .timeout(std::time::Duration::from_secs(3))
+            .json(&serde_json::json!({
+                "key": "", "cursors": {}, "tomb_cursor": "",
+                "rows": [], "tombs": []
+            }))
+            .send().await
+            .map(|r| r.status().is_client_error() || r.status().is_success())
+            .unwrap_or(false);
+        if reachable {
+            let conn = db.conn();
+            set_setting(&conn, "lan_sync_peer", &hint);
+            adopted = Some(hint);
         }
     }
 
-    Ok(json!({ "sent": mine_batch.rows.len(), "received": applied,
+    Ok(json!({ "sent": sent_count, "received": applied,
                "deletes": theirs.tombs.len(),
                "peer_adopted": adopted }))
 }
