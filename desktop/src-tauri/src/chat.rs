@@ -554,7 +554,10 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         }
 
         if !task_lines.is_empty() {
-            system_parts.push(format!("[Активные задачи]\n{}", task_lines.join("\n")));
+            system_parts.push(format!(
+                "[Активные задачи]\n{}",
+                quote_for_prompt(&task_lines.join("\n"))
+            ));
         }
     }
 
@@ -599,12 +602,18 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
         let mut context_block = String::new();
         if !summaries.is_empty() {
             summaries.reverse(); // chronological order
-            context_block.push_str(&format!("[Недавние разговоры]\n{}", summaries.join("\n")));
+            context_block.push_str(&format!(
+                "[Недавние разговоры]\n{}",
+                quote_for_prompt(&summaries.join("\n"))
+            ));
         }
         if !insights_lines.is_empty() {
             if !context_block.is_empty() { context_block.push_str("\n\n"); }
             insights_lines.reverse(); // chronological
-            context_block.push_str(&format!("[Недавние решения и вопросы]\n{}", insights_lines.join("\n")));
+            context_block.push_str(&format!(
+                "[Недавние решения и вопросы]\n{}",
+                quote_for_prompt(&insights_lines.join("\n"))
+            ));
         }
         if !context_block.is_empty() {
             system_parts.push(context_block);
