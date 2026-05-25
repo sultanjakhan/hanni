@@ -1660,7 +1660,7 @@
 /* Food preferences — level sub-tabs + grouped entries */
 .bl-levelbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
 .bl-levels { display: flex; gap: 6px; flex-wrap: wrap; }
-.bl-level-tab { padding: 5px 12px; border-radius: var(--radius-pill); border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; }
+.bl-level-tab { padding: 5px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; }
 .bl-level-tab:hover { border-color: var(--border-hover); }
 .bl-level-tab.active[data-lvl="hard"] { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); background: var(--color-red-bg, rgba(224,62,62,0.08)); }
 .bl-level-tab.active[data-lvl="soft"] { color: var(--color-orange, #d9730d); border-color: var(--color-orange, #d9730d); background: var(--color-orange-bg, rgba(217,115,13,0.08)); }

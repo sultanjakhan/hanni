@@ -21,7 +21,7 @@
     grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи',
     spice: 'Специи', oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', other: 'Другое' };
 
-  const state = { mount: null, items: [] };
+  const state = { mount: null, items: [], activeLevel: 'hard' };
 
   // Tunnel-first read; Firestore only when host is offline.
   const fs = (window.HanniGuest || {}).firestore;
@@ -58,16 +58,11 @@
     return value;
   }
 
-  function renderLevelGroup(level, items) {
+  function renderLevelBody(level, items) {
     const meta = LEVEL_META[level];
     if (!meta) return '';
-    // Empty section: keep the header so users see the structure (and know
-    // what categories Hanni supports) instead of silently hiding it.
     if (!items.length) {
-      return `<div class="recipe-detail-section mem-level mem-level-${level}" style="opacity:0.55">
-        <h4>${meta.icon} ${esc(meta.label)} <span class="muted" style="font-weight:400">· пусто</span></h4>
-        <p class="muted" style="font-size:12px;margin-bottom:0">— пока ничего</p>
-      </div>`;
+      return `<p class="muted" style="font-size:13px;margin:8px 0">— пока ничего</p>`;
     }
     const byType = {};
     for (const it of items) (byType[it.type] = byType[it.type] || []).push(it);
@@ -80,11 +75,7 @@
         <div>${chips}</div>
       </div>`;
     }).join('');
-    return `<div class="recipe-detail-section mem-level mem-level-${level}">
-      <h4>${meta.icon} ${esc(meta.label)} <span class="muted" style="font-weight:400">· ${items.length}</span></h4>
-      <p class="muted" style="font-size:12px;margin-bottom:8px">${esc(meta.hint)}</p>
-      ${typeSections}
-    </div>`;
+    return `<p class="muted" style="font-size:12px;margin-bottom:8px">${esc(meta.hint)}</p>${typeSections}`;
   }
 
   function render() {
@@ -99,15 +90,27 @@
       const lvl = byLevel[it.level] ? it.level : 'hard';  // legacy rows w/o level
       byLevel[lvl].push(it);
     }
-    // Render all three levels, even when empty — gives guests an at-a-glance
-    // overview of the structure (Не ем / Не люблю / Люблю) instead of
-    // hiding categories the host hasn't filled yet.
-    const sections = ['hard', 'soft', 'love']
-      .map(lvl => renderLevelGroup(lvl, byLevel[lvl])).join('');
+    // Three sub-tabs: one level at a time, so the page mirrors Hanni's own
+    // food preferences screen instead of a long vertical stack.
+    const subTabs = ['hard', 'soft', 'love'].map(lvl => {
+      const meta = LEVEL_META[lvl];
+      const cnt = byLevel[lvl].length;
+      const active = lvl === state.activeLevel ? ' active' : '';
+      return `<button class="mem-subtab mem-subtab-${lvl}${active}" data-lvl="${lvl}">
+        ${meta.icon} ${esc(meta.label)} <span class="mem-subtab-count">${cnt || '•'}</span>
+      </button>`;
+    }).join('');
     state.mount.innerHTML = `
       <h2>Предпочтения (${state.items.length})</h2>
-      <p class="muted" style="margin:0 0 16px">Что Султан ест, не ест и любит — используйте при выборе рецептов.</p>
-      ${sections}`;
+      <p class="muted" style="margin:0 0 12px">Что Султан ест, не ест и любит — используйте при выборе рецептов.</p>
+      <div class="mem-subtabs">${subTabs}</div>
+      <div class="mem-body">${renderLevelBody(state.activeLevel, byLevel[state.activeLevel])}</div>`;
+    state.mount.querySelectorAll('.mem-subtab').forEach(b => {
+      b.addEventListener('click', () => {
+        state.activeLevel = b.dataset.lvl;
+        render();
+      });
+    });
   }
 
   window.HanniGuest = window.HanniGuest || {};

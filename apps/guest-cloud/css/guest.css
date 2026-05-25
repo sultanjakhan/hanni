@@ -329,3 +329,27 @@ b { color: var(--text-primary); }
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--text-muted); margin-bottom: 4px;
 }
+
+/* Preferences sub-tabs (Не ем / Не люблю / Люблю) — square rectangles
+   matching Hanni's own .bl-level-tab styling. */
+.mem-subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }
+.mem-subtab {
+  padding: 5px 12px; border-radius: var(--radius-md);
+  border: 1px solid var(--border-default); background: transparent;
+  color: var(--text-secondary); cursor: pointer; font-size: 13px;
+  font-family: inherit; transition: border-color var(--transition-fast);
+}
+.mem-subtab:hover { border-color: var(--border-hover); }
+.mem-subtab-count { color: var(--text-muted); margin-left: 4px; font-weight: 500; }
+.mem-subtab.active.mem-subtab-hard {
+  color: var(--color-red); border-color: var(--color-red);
+  background: rgba(224,62,62,0.08);
+}
+.mem-subtab.active.mem-subtab-soft {
+  color: var(--color-orange); border-color: var(--color-orange);
+  background: rgba(217,115,13,0.08);
+}
+.mem-subtab.active.mem-subtab-love {
+  color: var(--color-green); border-color: var(--color-green);
+  background: rgba(15,123,108,0.08);
+}
