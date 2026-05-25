@@ -311,7 +311,11 @@ pub async fn spawn_lan_sync_server(app: AppHandle) {
         .route("/lan/sync", post(handle))
         .with_state(app);
     match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", LAN_PORT)).await {
-        Ok(l) => { let _ = axum::serve(l, router).await; }
+        Ok(l) => {
+            eprintln!("[lan_sync] server on 0.0.0.0:{}", LAN_PORT);
+            let r = axum::serve(l, router).await;
+            eprintln!("[lan_sync] serve exited: {:?}", r);
+        }
         Err(e) => eprintln!("[lan_sync] bind {} failed: {}", LAN_PORT, e),
     }
 }

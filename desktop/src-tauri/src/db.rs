@@ -3184,8 +3184,12 @@ pub fn dedup_schedules_by_title(conn: &rusqlite::Connection) -> (usize, usize) {
     use std::collections::HashMap;
     if !column_is_text(conn, "schedules", "id") { return (0, 0); }
 
+    // Includes inactive schedules: archived rows still sync via SYNC_TABLES,
+    // so a Phase 3 migration collision can leave two soft-deleted copies of
+    // the same logical row — collapse those too. Completion remap is safe
+    // for inactive parents (no UI ever shows them).
     let groups: Vec<(String, Vec<String>)> = match conn.prepare(
-        "SELECT lower(title), id FROM schedules WHERE is_active=1 ORDER BY id"
+        "SELECT lower(title), id FROM schedules ORDER BY id"
     ) {
         Ok(mut stmt) => {
             let rows: Vec<(String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
