@@ -1244,6 +1244,10 @@ pub fn migrate_routine_engine(conn: &rusqlite::Connection) {
     ).ok();
     cleanup_v1_routine_chains(conn);
     seed_morning_routine(conn);
+    seed_reflection_routine(conn);
+    seed_night_routine(conn);
+    seed_meal_routine(conn);
+    seed_workout_routine(conn);
 }
 
 /// One-time cleanup: v1 seeded an empty stage-based "Утро" chain (no nodes).
@@ -1307,6 +1311,219 @@ fn seed_morning_routine(conn: &rusqlite::Connection) {
         }
     }
     conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_morning_seed_v2')", []).ok();
+}
+
+/// Seed the "Reflection" graph: an evening checklist of `challenge` habits +
+/// `growth` outcomes + Dan Koe practices. All nodes are autonomous and optional —
+/// the user marks each done or skipped depending on what actually happened today.
+/// All edges fan out from start (no inter-node order).
+fn seed_reflection_routine(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_reflection_seed_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    if conn.execute(
+        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Рефлексия', 'manual', 10)",
+        [],
+    ).is_ok() {
+        let chain_id = conn.last_insert_rowid();
+        // (key, title, category, pri, x, y, is_start)
+        let nodes: [(&str, &str, &str, i32, i32, i32, i32); 32] = [
+            ("start", "Подведу день",                    "other",     0, 30,  400, 1),
+            // Column 1 (x=200) — сладкое
+            ("sw1",   "Без сладкого",                    "challenge", 4, 200, 40,  0),
+            ("sw2",   "Без выпечки",                     "challenge", 3, 200, 120, 0),
+            ("sw3",   "Без шоколада",                    "challenge", 3, 200, 200, 0),
+            ("sw4",   "Без мороженого",                  "challenge", 3, 200, 280, 0),
+            ("sw5",   "Без печенья",                     "challenge", 3, 200, 360, 0),
+            ("sw6",   "Без конфет",                      "challenge", 3, 200, 440, 0),
+            ("sw7",   "Без сахара в чай/кофе",           "challenge", 3, 200, 520, 0),
+            // Column 2 (x=420) — напитки + еда
+            ("dr1",   "Без газировки",                   "challenge", 3, 420, 40,  0),
+            ("dr2",   "Без энергетиков",                 "challenge", 3, 420, 120, 0),
+            ("fd1",   "Без фастфуда",                    "challenge", 3, 420, 200, 0),
+            ("fd2",   "Без чипсов/снеков",               "challenge", 3, 420, 280, 0),
+            ("fd3",   "Не ел перед сном",                "challenge", 3, 420, 360, 0),
+            ("fd4",   "Не переедал",                     "challenge", 3, 420, 440, 0),
+            ("fd5",   "Готовил сам",                     "challenge", 3, 420, 520, 0),
+            // Column 3 (x=640) — экраны/цифровое
+            ("dg1",   "Без YouTube Shorts/TikTok",       "challenge", 4, 640, 40,  0),
+            ("dg2",   "Без соцсетей",                    "challenge", 4, 640, 120, 0),
+            ("dg3",   "Без порно",                       "challenge", 4, 640, 200, 0),
+            ("dg4",   "Без мастурбации",                 "challenge", 4, 640, 280, 0),
+            ("dg5",   "Без телефона перед сном",         "challenge", 4, 640, 360, 0),
+            ("dg6",   "Телефон < 1ч в день",             "challenge", 4, 640, 440, 0),
+            ("dg7",   "Не играл в комп игры",            "challenge", 3, 640, 520, 0),
+            ("dg8",   "Не одевал наушники просто так",   "challenge", 2, 640, 600, 0),
+            // Column 4 (x=860) — здоровье/growth/Dan Koe
+            ("hl1",   "Перерыв от экрана каждый час",    "challenge", 3, 860, 40,  0),
+            ("hl2",   "Следил за осанкой",               "challenge", 3, 860, 120, 0),
+            ("gr1",   "Изучил что-то новое",             "growth",    4, 860, 200, 0),
+            ("gr2",   "Научил/объяснил другому",         "growth",    3, 860, 280, 0),
+            ("gr3",   "Получил фидбек и осмыслил",       "growth",    3, 860, 360, 0),
+            ("gr4",   "Применил новый навык",            "growth",    3, 860, 440, 0),
+            ("dk1",   "Contemplation (Dan Koe)",         "practice",  4, 860, 520, 0),
+            ("dk2",   "Vision (Dan Koe)",                "practice",  4, 860, 600, 0),
+            ("dk3",   "Integration (Dan Koe)",           "practice",  4, 860, 680, 0),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (key, title, cat, pri, x, y, is_start) in nodes {
+            let stype = if is_start == 1 { "start" } else { "schedule" };
+            let req = if is_start == 1 { "required" } else { "optional" };
+            conn.execute(
+                "INSERT INTO routine_nodes
+                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+            ).ok();
+            ids.insert(key, conn.last_insert_rowid());
+        }
+        // Fan-out: every non-start node has an edge from start.
+        for (key, _, _, _, _, _, is_start) in nodes {
+            if is_start == 1 { continue; }
+            conn.execute(
+                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![chain_id, ids["start"], ids[key]],
+            ).ok();
+        }
+    }
+    conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_reflection_seed_v1')", []).ok();
+}
+
+/// Seed the "Night" graph: linear wind-down before sleep.
+fn seed_night_routine(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_night_seed_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    if conn.execute(
+        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Ночь', 'manual', 20)",
+        [],
+    ).is_ok() {
+        let chain_id = conn.last_insert_rowid();
+        let nodes = [
+            ("start",  "Готовлюсь ко сну",            "other",     0, "required", 30,  220, 1),
+            ("shower", "Душ",                          "hygiene",   4, "required", 200, 220, 0),
+            ("teeth",  "Зубы",                         "hygiene",   5, "required", 370, 220, 0),
+            ("clothes","Одежда на завтра",             "home",      2, "optional", 540, 120, 0),
+            ("phone",  "Убрать телефон с тумбочки",    "challenge", 4, "required", 540, 320, 0),
+            ("read",   "Книга/подкаст 15 мин",         "growth",    2, "optional", 710, 220, 0),
+            ("bed",    "Лёг в кровать",                "other",     3, "required", 880, 220, 0),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (key, title, cat, pri, req, x, y, is_start) in nodes {
+            let stype = if is_start == 1 { "start" } else { "schedule" };
+            conn.execute(
+                "INSERT INTO routine_nodes
+                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+            ).ok();
+            ids.insert(key, conn.last_insert_rowid());
+        }
+        let edges = [
+            ("start","shower"), ("shower","teeth"),
+            ("teeth","clothes"), ("teeth","phone"),
+            ("clothes","read"), ("phone","read"),
+            ("read","bed"),
+        ];
+        for (from, to) in edges {
+            conn.execute(
+                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![chain_id, ids[from], ids[to]],
+            ).ok();
+        }
+    }
+    conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_night_seed_v1')", []).ok();
+}
+
+/// Seed the "Meal" graph: one eat-cycle per day (UNIQUE(chain_id, date) on runs).
+fn seed_meal_routine(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_meal_seed_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    if conn.execute(
+        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Покушать', 'manual', 30)",
+        [],
+    ).is_ok() {
+        let chain_id = conn.last_insert_rowid();
+        let nodes = [
+            ("start",  "Время поесть",            "other",   0, "required", 30,  220, 1),
+            ("hands",  "Помыл руки",              "hygiene", 4, "required", 200, 220, 0),
+            ("cook",   "Выбрал/приготовил блюдо", "other",   3, "required", 370, 220, 0),
+            ("eat",    "Поел без телефона",       "health",  4, "required", 540, 220, 0),
+            ("dishes", "Помыл посуду",            "home",    3, "required", 710, 220, 0),
+            ("log",    "Записал в food log",      "health",  2, "optional", 880, 220, 0),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (key, title, cat, pri, req, x, y, is_start) in nodes {
+            let stype = if is_start == 1 { "start" } else { "schedule" };
+            conn.execute(
+                "INSERT INTO routine_nodes
+                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+            ).ok();
+            ids.insert(key, conn.last_insert_rowid());
+        }
+        let edges = [
+            ("start","hands"), ("hands","cook"), ("cook","eat"),
+            ("eat","dishes"), ("dishes","log"),
+        ];
+        for (from, to) in edges {
+            conn.execute(
+                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![chain_id, ids[from], ids[to]],
+            ).ok();
+        }
+    }
+    conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_meal_seed_v1')", []).ok();
+}
+
+/// Seed the "Workout" graph: every node (except start) is optional, so the user
+/// can complete just a warm-up or just a stretch and still finish the run.
+fn seed_workout_routine(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_workout_seed_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    if conn.execute(
+        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Спорт', 'manual', 40)",
+        [],
+    ).is_ok() {
+        let chain_id = conn.last_insert_rowid();
+        let nodes = [
+            ("start",   "На тренировку",          "other",   0, "required", 30,  220, 1),
+            ("muscle",  "Выбрал группу мышц",     "sport",   3, "optional", 200, 220, 0),
+            ("warm",    "Разминка",               "sport",   3, "optional", 370, 220, 0),
+            ("main",    "Силовая тренировка",     "sport",   4, "optional", 540, 220, 0),
+            ("stretch", "Растяжка",               "sport",   3, "optional", 710, 220, 0),
+            ("shower",  "Душ",                    "hygiene", 2, "optional", 880, 220, 0),
+        ];
+        let mut ids = std::collections::HashMap::new();
+        for (key, title, cat, pri, req, x, y, is_start) in nodes {
+            let stype = if is_start == 1 { "start" } else { "schedule" };
+            conn.execute(
+                "INSERT INTO routine_nodes
+                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+            ).ok();
+            ids.insert(key, conn.last_insert_rowid());
+        }
+        let edges = [
+            ("start","muscle"), ("muscle","warm"), ("warm","main"),
+            ("main","stretch"), ("stretch","shower"),
+        ];
+        for (from, to) in edges {
+            conn.execute(
+                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![chain_id, ids[from], ids[to]],
+            ).ok();
+        }
+    }
+    conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_workout_seed_v1')", []).ok();
 }
 
 /// v0.70: Remove Mindset tab data (journal_entries, mood_log, principles)

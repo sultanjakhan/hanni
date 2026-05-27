@@ -29,10 +29,15 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
     if (run) {
       for (const t of run.tasks) {
         const cls = t.id === recommendedId ? 'tw-item tw-item--recommended' : 'tw-item';
-        rows += `<button class="${cls}" data-rt-task="${t.id}" data-rt-run="${run.run_id}">
-          <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
-          <span class="tw-item-title">${escapeHtml(t.title)}</span>
-        </button>`;
+        rows += `<div class="tw-item-row">
+          <button class="${cls} tw-item--main" data-rt-task="${t.id}" data-rt-run="${run.run_id}">
+            <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
+            <span class="tw-item-title">${escapeHtml(t.title)}</span>
+          </button>
+          <button class="tw-item tw-rt-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Пропустить — не делал сегодня">
+            <span class="tw-item-icon">✕</span>
+          </button>
+        </div>`;
       }
       for (const t of (run.locked || [])) {
         rows += `<button class="tw-item tw-rt-locked" data-rt-unlock="${t.id}" data-rt-run="${run.run_id}">
@@ -75,6 +80,16 @@ export function wireRoutineSection(panel, onChange) {
         runId: parseInt(btn.dataset.rtRun),
         nodeId: parseInt(btn.dataset.rtTask),
         state: 'done',
+      }).catch(() => {});
+      onChange();
+    });
+  });
+  panel.querySelectorAll('[data-rt-skip]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await invoke('set_routine_node_status', {
+        runId: parseInt(btn.dataset.rtRun),
+        nodeId: parseInt(btn.dataset.rtSkip),
+        state: 'skipped',
       }).catch(() => {});
       onChange();
     });

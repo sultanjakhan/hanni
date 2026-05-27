@@ -72,9 +72,17 @@ class HanniHealthWorker(
             // Hanni keeps the DB in app_data_dir (Tauri's path resolver), not
             // the standard `databases/` sub-dir, so getDatabasePath() misses it.
             // app_data_dir on Android = filesDir's parent = /data/user/0/<pkg>/.
-            val dbPath = File(ctx.filesDir.parentFile, "hanni.db").absolutePath
+            val dbFile = File(ctx.filesDir.parentFile, "hanni.db")
+            // Race-guard: Worker may fire before Rust ever created the DB (fresh
+            // install, or after corruption-recovery the file briefly disappears).
+            // Returning success() — not retry() — avoids WorkManager backoff storm
+            // while Hanni isn't even running; next 15-min tick will see the file.
+            if (!dbFile.exists() || dbFile.length() == 0L) {
+                Log.i(TAG, "doWork skip: DB not ready yet (exists=${dbFile.exists()} size=${dbFile.length()})")
+                return@withContext Result.success()
+            }
             val db = SQLiteDatabase.openDatabase(
-                dbPath, null, SQLiteDatabase.OPEN_READWRITE
+                dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE
             )
             try {
                 insertSleep(db, sleep)

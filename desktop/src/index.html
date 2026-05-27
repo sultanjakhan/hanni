@@ -12,6 +12,12 @@
 <script src="marked.min.js"></script>
 </head>
 <body>
+<!-- Boot splash — covers the 1-2s gap between WebView load and first paint
+     (worst on Android where module parsing is slower). Removed by main.js
+     after the initial renderTabBar(). Inline styles so it shows even when
+     styles.css hasn't loaded yet. -->
+<div id="boot-splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg-primary,#fff);color:var(--text-secondary,#888);font:14px -apple-system,system-ui,sans-serif;z-index:99999;transition:opacity 180ms ease">Загрузка…</div>
+
 <!-- Drag region for window controls -->
 <div id="drag-region"></div>
 

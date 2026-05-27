@@ -690,6 +690,12 @@ body.qw-popover-open #task-control-widget {
 .tw-rt-cancel:hover { opacity: 1; }
 .tw-rt-cancel .tw-item-icon { font-size: 11px; }
 .tw-rt-cancel .tw-item-title { font-size: 11px; color: var(--text-muted); }
+/* Routine task row: main action + small skip button */
+.tw-item-row { display: flex; align-items: stretch; gap: 2px; }
+.tw-item-row .tw-item--main { flex: 1; }
+.tw-rt-skip { flex: 0 0 auto; width: auto; padding: 8px 10px; opacity: 0.45; }
+.tw-rt-skip:hover { opacity: 1; color: var(--color-orange); }
+.tw-rt-skip .tw-item-icon { font-size: 12px; }
 .tw-item-icon { flex-shrink: 0; font-size: 14px; }
 .tw-item-title {
   flex: 1;

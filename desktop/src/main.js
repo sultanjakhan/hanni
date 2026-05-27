@@ -261,6 +261,16 @@ document.addEventListener('keydown', (e) => {
     if (IS_MOBILE) updateMobileTitle();
   } catch (e) { console.warn('[hanni] early paint skipped', e); }
 
+  // First paint is up — fade out the boot splash. Done in a microtask so
+  // the browser has a chance to lay out renderTabBar's nodes first.
+  queueMicrotask(() => {
+    const splash = document.getElementById('boot-splash');
+    if (splash) {
+      splash.style.opacity = '0';
+      setTimeout(() => splash.remove(), 200);
+    }
+  });
+
   // Load custom pages into TAB_REGISTRY before rendering.
   // Android: the webview boots in parallel with the Rust setup() hook, where
   // the DB is managed only after init_database() finishes. While migrations
