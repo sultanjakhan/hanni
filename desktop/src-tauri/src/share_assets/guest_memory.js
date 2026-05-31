@@ -23,20 +23,8 @@
 
   const state = { mount: null, items: [], activeLevel: 'hard' };
 
-  // Tunnel-first read; Firestore only when host is offline.
-  const fs = (window.HanniGuest || {}).firestore;
-  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
-
   async function fetchBlacklist() {
-    if (haveTunnel) {
-      try { return await api('/blacklist'); }
-      catch (e) {
-        console.warn('[guest_memory] tunnel failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    if (!fs) throw new Error('Firestore не настроен');
-    const items = await fs.list('food_blacklist');
-    return { blacklist: items || [] };
+    return await api('/blacklist');
   }
 
   async function load() {

@@ -23,21 +23,8 @@
 
   const state = { mount: null, items: [], path: [] };
 
-  // Tunnel-first read; Firestore only when host is offline.
-  const fs = (window.HanniGuest || {}).firestore;
-  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
-
   async function fetchCatalog() {
-    if (haveTunnel) {
-      try { return await api('/products'); }
-      catch (e) {
-        console.warn('[guest_products] tunnel failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    if (!fs) throw new Error('Firestore не настроен');
-    const items = await fs.list('ingredient_catalog');
-    return { products: (items || []).sort((a, b) =>
-      String(a.name || '').localeCompare(String(b.name || ''))) };
+    return await api('/products');
   }
 
   async function load() {

@@ -21,39 +21,8 @@
     return `${d.getFullYear()}-${m}-${day}`;
   }
 
-  // Tunnel-first read; Firestore only when host is offline.
-  const fs = (window.HanniGuest || {}).firestore;
-  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
-
   async function fetchPlan(dateIso) {
-    if (haveTunnel) {
-      try { return await api(`/meal-plan?date=${encodeURIComponent(dateIso)}`); }
-      catch (e) {
-        console.warn('[guest_meal_plan] tunnel failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    if (!fs) throw new Error('Firestore не настроен');
-    const [plan, recipes] = await Promise.all([
-      fs.list('meal_plan'),
-      fs.list('recipes'),
-    ]);
-    const recipeById = new Map();
-    (recipes || []).forEach(r => recipeById.set(Number(r.id), r));
-    const meals = (plan || [])
-      .filter(p => p.date === dateIso)
-      .map(p => {
-        const r = recipeById.get(Number(p.recipe_id));
-        return {
-          id: p.id, date: p.date, meal_type: p.meal_type,
-          recipe_id: p.recipe_id, notes: p.notes || '',
-          recipe_name: r ? r.name : `Рецепт ${p.recipe_id}`,
-          calories: r ? (r.calories || 0) : 0,
-        };
-      });
-    const recipes_index = (recipes || [])
-      .map(r => ({ id: r.id, name: r.name }))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    return { meals, recipes_index };
+    return api(`/meal-plan?date=${encodeURIComponent(dateIso)}`);
   }
 
   async function load() {

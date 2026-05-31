@@ -24,7 +24,7 @@ use crate::share_routes_products_write::{create_product, delete_product, update_
 use crate::share_routes_recipes_read::{get_recipe, list_recipes};
 use crate::share_routes_recipes_write::{create_recipe, update_recipe, delete_recipe};
 use crate::share_static::{
-    asset_css, asset_js, asset_js_firestore, asset_js_fridge, asset_js_fridge_shared,
+    asset_css, asset_js, asset_js_fridge, asset_js_fridge_shared,
     asset_js_meal_plan, asset_js_memory, asset_js_products, asset_js_recipe_add,
     asset_js_recipe_shared, asset_js_recipe_shared_ingredients, asset_js_recipe_shared_steps,
     asset_js_recipes,
@@ -65,7 +65,6 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/fridge", get(list_fridge))
         .route("/s/{token}/assets/guest.css", get(asset_css))
         .route("/s/{token}/assets/guest.js", get(asset_js))
-        .route("/s/{token}/assets/guest_firestore.js", get(asset_js_firestore))
         .route("/s/{token}/assets/guest_recipes.js", get(asset_js_recipes))
         .route("/s/{token}/assets/recipe-shared.js", get(asset_js_recipe_shared))
         .route("/s/{token}/assets/recipe-shared-ingredients.js", get(asset_js_recipe_shared_ingredients))
@@ -81,22 +80,15 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         // URL paths, leaking them via the Referer header to any external
         // page a guest happens to open is a token-exposure risk.
         .layer(middleware::from_fn(add_security_headers))
-        // Allow only Hanni's own Firebase Hosting origins (both .web.app and
-        // .firebaseapp.com point at the same project — Firebase provisions
-        // both domains by default). Pinning prevents any other Firebase
-        // project from initiating cross-origin requests against a leaked
-        // share link. Localhost stays open for dev tooling.
+        // Allow same-host guest origins only: localhost/loopback for dev
+        // tooling, and any Tailscale CGNAT origin (100.64.0.0/10) — guests in
+        // the same tailnet hit the server directly at http://100.x.x.x:8240/...
         .layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
                     origin.to_str().map(|s|
-                        s == "https://hanni-2e5d0.web.app"
-                        || s == "https://hanni-2e5d0.firebaseapp.com"
-                        || s.starts_with("http://127.0.0.1")
+                        s.starts_with("http://127.0.0.1")
                         || s.starts_with("http://localhost")
-                        // Allow any Tailscale CGNAT origin (100.64.0.0/10).
-                        // Guests in the same tailnet hit the server
-                        // directly at http://100.x.x.x:8240/...
                         || s.starts_with("http://100.")
                     ).unwrap_or(false)
                 }))
@@ -140,28 +132,16 @@ async fn landing(
     AxumState(state): AxumState<ShareServerState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     rate_limit_check(&state, &token)?;
-    let (ctx, firestore_json) = {
+    let ctx = {
         let db = state.app.state::<HanniDb>();
         let conn = db.conn();
-        let ctx = load_link(&conn, &token)?;
-        // Firestore config travels to the guest so the JS client can read
-        // share_links/{token}/* from the cloud directly. Stripped of the
-        // service-account JSON (which never leaves Hanni). When cloud-share
-        // isn't configured we send `null` and the guest falls back to axum.
-        let fs_json = crate::sync_share::load_config(&conn)
-            .map(|c| serde_json::json!({
-                "project_id": c.project_id,
-                "api_key":    c.api_key,
-            }).to_string())
-            .unwrap_or_else(|| "null".into());
-        (ctx, fs_json)
+        load_link(&conn, &token)?
     };
     let html = include_str!("share_assets/guest.html")
         .replace("{{LABEL}}", &html_escape(&ctx.label))
         .replace("{{TAB}}", &html_escape(&ctx.tab))
         .replace("{{SCOPE}}", &html_escape(&ctx.scope))
         .replace("{{TOKEN}}", &html_escape(&token))
-        .replace("{{PERMS}}", &serde_json::to_string(&ctx.permissions).unwrap_or("[]".into()))
-        .replace("{{FIRESTORE}}", &firestore_json);
+        .replace("{{PERMS}}", &serde_json::to_string(&ctx.permissions).unwrap_or("[]".into()));
     Ok(Html(html))
 }

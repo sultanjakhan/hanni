@@ -1,11 +1,7 @@
 // guest.js — skeleton: shared utils + tab routing for share-link guest UI.
 (function () {
   const ctx = window.__SHARE__ || {};
-  // Static-hosted (Firebase Hosting) → ctx.tunnel_url is the absolute axum
-  // URL the host published to Firestore. Server-rendered (axum landing) →
-  // tunnel_url is undefined and we fall back to relative /s/<token>.
-  const tunnel = (ctx.tunnel_url || '').replace(/\/+$/, '');
-  const base = (tunnel || '') + `/s/${encodeURIComponent(ctx.token)}`;
+  const base = `/s/${encodeURIComponent(ctx.token)}`;
   const app = document.getElementById('app');
   const perms = ctx.permissions || [];
   const can = (p) => perms.includes(p);
@@ -13,21 +9,11 @@
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   async function api(path, opts = {}) {
-    // When hosted on Firebase (https://*.web.app) without a known tunnel URL,
-    // the host is offline — surface a clean error so view-modules can hide
-    // write controls instead of throwing CORS spam.
-    const isStaticOrigin = /\.web\.app$|\.firebaseapp\.com$/.test(location.host);
-    if (isStaticOrigin && !tunnel) {
-      const err = new Error('Hanni офлайн — изменения недоступны');
-      err.code = 'HOST_OFFLINE';
-      throw err;
-    }
     const r = await fetch(base + path, { credentials: 'omit', ...opts });
     if (!r.ok) {
       // 410 Gone == revoked/expired link. Axum sends a plain-text body
       // like "Link revoked" or "Link expired". Surface a typed error so
-      // the bootstrap can show "Ссылка отозвана" instead of a generic
-      // Firestore-fallback failure.
+      // the bootstrap can show "Ссылка отозвана" instead of a generic failure.
       const body = (await r.text()) || r.statusText;
       const err = new Error(body);
       if (r.status === 410) err.code = body.toLowerCase().includes('expired')
@@ -35,13 +21,6 @@
       else if (r.status === 403) err.code = 'LINK_FORBIDDEN';
       err.status = r.status;
       throw err;
-    }
-    // After a successful write, drop the matching Firestore cache so the next
-    // read fetches fresh data (writes go through axum; Firestore mirror lags).
-    const m = (opts.method || 'GET').toUpperCase();
-    if (m !== 'GET') {
-      const coll = (path.split('/')[1] || '').replace(/[?#].*/, '');
-      if (coll) window.HanniGuest?.firestore?.invalidate?.(coll);
     }
     return r.json();
   }
@@ -123,13 +102,12 @@
 
   window.HanniGuest = window.HanniGuest || {};
   window.HanniGuest.utils = { ctx, base, api, esc, can, rememberAuthor, recallAuthor };
-  // Exposed so the Firebase landing (which appends view-modules dynamically
-  // AFTER DOMContentLoaded) can trigger the initial render at the right time.
+  // Exposed so the landing page can trigger the initial render once all
+  // view-modules have registered (guest.html calls it at the very end).
   window.HanniGuest.renderShell = renderShell;
 
-  // Don't render until view-modules (recipes/products/etc) are registered.
-  // The Firebase landing script appends them dynamically AFTER guest.js, then
-  // explicitly calls window.HanniGuest.renderShell(). Auto-rendering here
-  // would race: at first call HanniGuest.recipes is still undefined and
-  // mountView() would flash "Внутренняя ошибка: модуль 'recipes' не загружен".
+  // Don't auto-render here: view-modules (recipes/products/etc) load via
+  // <script> tags AFTER guest.js and register on window.HanniGuest; guest.html
+  // calls window.HanniGuest.renderShell() once they're all in. Rendering now
+  // would flash "модуль не загружен" before they register.
 })();

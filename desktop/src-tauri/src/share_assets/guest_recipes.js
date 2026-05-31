@@ -45,55 +45,13 @@
     return (r.tags || '').split(/[,\s]+/).map(t => t.trim()).filter(t => MEAL_LABELS[t]);
   }
 
-  // Read priority: tunnel-first (axum on the host) when reachable, Firestore
-  // only when host is offline. Cuts Firestore reads to zero whenever the Mac
-  // is on — keeps us under the 50k/day free quota.
-  const fs = (window.HanniGuest || {}).firestore;
-  const tunnel = (window.__SHARE__ || {}).tunnel_url || '';
-  const haveTunnel = !!tunnel;
-
-  async function fetchFromFirestore() {
-    if (!fs) throw new Error('Firestore не настроен');
-    const [recipes, catalog] = await Promise.all([
-      fs.list('recipes'),
-      fs.list('ingredient_catalog'),
-    ]);
-    return {
-      recipes: (recipes || []).sort((a, b) =>
-        String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 200),
-      catalog: (catalog || []).map(c => ({ name: c.name || '', category: c.category || 'other' })),
-    };
-  }
-
+  // All reads go through the shared axum helper on the host.
   async function fetchListAndCatalog() {
-    if (haveTunnel) {
-      try { return await api('/recipes'); }
-      catch (e) {
-        // Revoked/expired/forbidden links bubble up — falling back to
-        // Firestore would just render stale data the host already killed.
-        if (e?.code === 'LINK_REVOKED' || e?.code === 'LINK_EXPIRED' || e?.code === 'LINK_FORBIDDEN') throw e;
-        console.warn('[guest_recipes] tunnel failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    return await fetchFromFirestore();
+    return await api('/recipes');
   }
 
   async function fetchRecipe(id) {
-    if (haveTunnel) {
-      try { return await api(`/recipes/${id}`); }
-      catch (e) {
-        if (e?.code === 'LINK_REVOKED' || e?.code === 'LINK_EXPIRED' || e?.code === 'LINK_FORBIDDEN') throw e;
-        console.warn('[guest_recipes] tunnel detail failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    if (!fs) throw new Error('Firestore не настроен');
-    const recipe = state.recipes.find(r => Number(r.id) === Number(id))
-                   || await fs.get('recipes', id);
-    if (!recipe) throw new Error('Recipe not found');
-    const allIngr = await fs.list('recipe_ingredients');
-    recipe.ingredient_items = (allIngr || [])
-      .filter(i => Number(i.recipe_id) === Number(id));
-    return recipe;
+    return await api(`/recipes/${id}`);
   }
 
   async function load() {
@@ -212,8 +170,7 @@
   async function openDetail(id) {
     try {
       state.current = await fetchRecipe(id);
-      // Comments still flow through axum (no Firestore mirror in C-1) — soft-fail
-      // so the recipe still opens when Hanni is offline.
+      // Soft-fail comments so the recipe still opens if the comments read errors.
       state.comments = (await api(`/recipes/${id}/comments`).catch(() => ({ comments: [] }))).comments || [];
       state.view = 'detail';
       render();

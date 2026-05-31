@@ -4,36 +4,12 @@
   if (!u) return;
   const { api, can, recallAuthor } = u;
 
-  // Tunnel-first read; Firestore only when host is offline.
-  const fs = (window.HanniGuest || {}).firestore;
-  const haveTunnel = !!((window.__SHARE__ || {}).tunnel_url);
-
   async function loadCatalog() {
-    if (haveTunnel) {
-      try { return (await api('/recipes')).catalog || []; }
-      catch (e) {
-        console.warn('[guest_fridge] tunnel catalog failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    if (!fs) return [];
-    try {
-      const cat = await fs.list('ingredient_catalog');
-      return (cat || []).map(c => ({
-        name: c.name || '', category: c.category || 'other', tags: c.tags || '',
-      }));
-    } catch { return []; }
+    return (await api('/recipes')).catalog || [];
   }
 
   async function loadFridgeItems() {
-    if (haveTunnel) {
-      try { return (await api('/fridge')).items || []; }
-      catch (e) {
-        console.warn('[guest_fridge] tunnel fridge failed, falling back to Firestore:', e?.message || e);
-      }
-    }
-    if (!fs) throw new Error('Firestore не настроен');
-    const all = await fs.list('products');
-    return (all || []).filter(p => (p.location || 'fridge') === 'fridge');
+    return (await api('/fridge')).items || [];
   }
 
   const backend = {
