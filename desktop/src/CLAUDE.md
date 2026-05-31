@@ -8,6 +8,6 @@
 - **Settings UI**: layout `settings-row` / `settings-label` / toggle — никаких сырых `<select>`
 
 ## Pre-commit
-- [ ] `node --check` на каждом изменённом JS-файле — ловит SyntaxError до рантайма
+- `node --check` — авто после правок JS (PostToolUse hook, блокирует при SyntaxError)
 - [ ] Нет хардкод-цветов/размеров (использовать CSS-переменные)
 - [ ] Нет дублей `const`/`let` в одном scope

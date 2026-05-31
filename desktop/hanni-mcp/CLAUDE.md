@@ -19,4 +19,4 @@
 - Изменения схемы (новые колонки/таблицы) — это Rust-миграции в `src-tauri/`, НЕ здесь
 
 ## Verify
-- После правок: `python3 -m py_compile server.py`
+- Синтаксис `.py` — авто после правок (PostToolUse hook)

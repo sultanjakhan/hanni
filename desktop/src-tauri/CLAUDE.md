@@ -14,6 +14,6 @@
 - Tauri/Rust API — проверять docs.rs или context7 перед использованием, не угадывать сигнатуры
 
 ## Pre-commit
-- [ ] `UPDATER_GITHUB_TOKEN=dummy cargo check` проходит
+- `cargo check` — авто после правок `.rs` (PostToolUse hook, нотификация при ошибке)
 - [ ] Новые команды зарегистрированы в `invoke_handler`
 - [ ] Не осталось `dbg!()`

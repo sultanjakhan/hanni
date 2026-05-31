@@ -1,7 +1,14 @@
 #!/bin/bash
-# PostToolUse hook: async syntax/build check after Claude edits files.
-# Receives JSON on stdin, fires fire-and-forget checks based on extension.
-# Errors surface via macOS notifications, not stderr — non-blocking.
+# PostToolUse hook: syntax/build checks after Claude edits files.
+# Receives JSON on stdin. Two channels by cost:
+#   - JS/Python syntax: synchronous, fed back to Claude via exit 2 + stderr.
+#     Must run before auto-reload.mjs reloads the WebView with broken JS
+#     (white-screen failure mode). Zero false positives, so blocking is safe.
+#   - cargo check: slow → async, deduped by mkdir-lock, surfaces via macOS
+#     notification (does not block Claude).
+# Debug-leftover / file-length are intentionally NOT checked here: too many
+# false positives in this repo (lib.rs ~8k lines, legit console logging) would
+# train Claude to ignore hook output. Those stay as CLAUDE.md judgment rules.
 
 set +e
 
@@ -26,30 +33,38 @@ esac
 
 NAME=$(basename "$FILE")
 
-run_js_check() {
-  if ! node --check "$FILE" 2>/tmp/hanni-jscheck.log; then
-    osascript -e "display notification \"JS syntax error: ${NAME//\"/\\\"}\" with title \"Hanni hook\" subtitle \"see /tmp/hanni-jscheck.log\"" 2>/dev/null
-  fi
-}
-
-run_cargo_check() {
-  local lock=/tmp/hanni-cargo-check.lock
-  if mkdir "$lock" 2>/dev/null; then
-    trap "rmdir $lock 2>/dev/null" EXIT
-    cd /Users/sultanbekjakhanov/hanni/desktop/src-tauri || exit 0
-    if ! UPDATER_GITHUB_TOKEN=dummy cargo check 2>/tmp/hanni-cargo-check.log; then
-      osascript -e 'display notification "cargo check failed" with title "Hanni hook" subtitle "see /tmp/hanni-cargo-check.log"' 2>/dev/null
-    fi
-  fi
-}
-
+# --- Synchronous, blocking syntax checks (exit 2 → fed back to Claude) ---
 case "$FILE" in
   *.js|*.mjs|*.cjs)
-    (run_js_check) > /dev/null 2>&1 &
-    disown 2>/dev/null
+    if ! ERR=$(node --check "$FILE" 2>&1); then
+      echo "JS syntax error in $NAME (fix before continuing — auto-reload will white-screen the WebView):" >&2
+      echo "$ERR" >&2
+      exit 2
+    fi
     ;;
+  *.py)
+    # ast.parse instead of py_compile: checks syntax without writing __pycache__
+    if ! ERR=$(python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])" "$FILE" 2>&1); then
+      echo "Python syntax error in $NAME:" >&2
+      echo "$ERR" >&2
+      exit 2
+    fi
+    ;;
+esac
+
+# --- Async heavy check: cargo (slow) → macOS notification only ---
+case "$FILE" in
   /Users/sultanbekjakhanov/hanni/desktop/src-tauri/*.rs)
-    (run_cargo_check) > /dev/null 2>&1 &
+    (
+      lock=/tmp/hanni-cargo-check.lock
+      if mkdir "$lock" 2>/dev/null; then
+        trap "rmdir $lock 2>/dev/null" EXIT
+        cd /Users/sultanbekjakhanov/hanni/desktop/src-tauri || exit 0
+        if ! UPDATER_GITHUB_TOKEN=dummy cargo check 2>/tmp/hanni-cargo-check.log; then
+          osascript -e 'display notification "cargo check failed" with title "Hanni hook" subtitle "see /tmp/hanni-cargo-check.log"' 2>/dev/null
+        fi
+      fi
+    ) > /dev/null 2>&1 &
     disown 2>/dev/null
     ;;
 esac
