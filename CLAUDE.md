@@ -77,6 +77,7 @@ Skip clarification only for trivial/obvious tasks (typo fix, one-line change).
 ### Size Limits
 - **No file/component longer than 230 lines.** If it exceeds — split automatically
 - **UI separated from logic** — always
+- **Известные pre-existing нарушения** (commands_data.rs, db.rs, tab-data.js и др.) трекаются в `hanni-tasks#20` — это долг, НЕ флагай их как баг. Новые нарушения не вводить.
 
 ### Style
 - **Only change what was requested.** No drive-by refactors, no "improvements" to adjacent code
@@ -96,6 +97,8 @@ Stack-specific pre-commit checks (`cargo check`, `node --check`, command registr
 
 ### Prefer native tools
 Use Read/Edit/Grep/Glob/Bash for all code tasks. They are faster and more reliable.
+
+**When to use what (priority):** native (Read/Edit/Grep) → `context7`/Nia для незнакомого API/сигнатур → web search только для не-библиотечного/свежего (то, чего нет в docs) → `hanni-mcp` для запросов к SQLite (facts/events/run_sql) → `serena` find_symbol для навигации по Rust-символам. claude.ai-хостед Notion/Gmail/Calendar/Drive к кодингу Hanni **нерелевантны** — не трогай.
 
 ### MCP / tools
 - **playwright** — only for external web pages, never for Hanni itself
@@ -123,6 +126,8 @@ When a task is non-trivial, consider which skill fits during the clarification s
 
 For architectural decisions or large features, use `architect` or the Plan agent first.
 
+**Overlap & combos:** `code-review` ловит баги в диффе; `improve` — экспертный ревью-совет (до/после кода); `architect` — стратегический рестракт + границы модулей, `refactor` — тактическое безопасное извлечение/переименование. Частые связки: новый таб → `add-tab` + `design`; «тормозит» → `perf` (профиль) → `architect`/`refactor` если причина структурная; крупный сплит файла → `architect` (план) → `refactor` (правки). Не уверен какой скилл — спроси, не угадывай.
+
 ### Hanni app interaction
 - **Screenshots**: `desktop/tools/screenshot.sh /tmp/out.png [port]` → Read tool. Silent (`-x`), works minimized (html2canvas). Port 8235 prod / 8236 dev
 - **DOM operations**: HTTP API at `127.0.0.1:8235` (prod) or `127.0.0.1:8236` (dev), endpoint `POST /auto/eval` with `{"script": "..."}`. Use python3 urllib for complex scripts with quotes
@@ -147,6 +152,15 @@ For architectural decisions or large features, use `architect` or the Plan agent
 - **Voice**: `voice_server.py` — background LaunchAgent for speech
 - **Build**: `UPDATER_GITHUB_TOKEN=dummy cargo check` for dev
 - **Graceful quit**: `osascript -e 'tell application "Hanni" to quit'`. Re-open — попросить пользователя (никогда не `open -a Hanni` / activate, см. `feedback_safety.md`). Never kill/pkill/killall
+
+## Verification
+
+**Юнит-тестов в проекте нет** (ни `cargo test`, ни JS-сьюта). Что считается проверкой:
+- **Rust**: `UPDATER_GITHUB_TOKEN=dummy cargo check` — компиляция + регистрация команд. PostToolUse-хук гоняет это автоматически после правки `.rs`.
+- **JS**: `node --check <file>` — синтаксис ОДНОГО файла. НЕ резолвит ES-импорты → при переносе/переключении импортов отдельно проверь Grep/Glob, что все `import from` существуют (битый импорт = белый экран, см. `feedback_split_files.md`).
+- **Python (hanni-mcp)**: `python3 -m py_compile server.py`.
+- **Поведение**: smoke через `/auto/eval` :8236 (dev) — выполни команду / проверь стейт. UI — `screenshot.sh` + показать юзеру.
+- **Свежая БД** (после правок миграций в `db.rs`): `cargo check` НЕ проверяет порядок миграций — запусти dev и убедись, что они прошли.
 
 ## Safety & Rollback
 
