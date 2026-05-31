@@ -427,8 +427,8 @@ sync:
     - desktop/src-tauri/src/sync_commands.rs
     - desktop/src-tauri/src/sync_owner.rs
     - desktop/src-tauri/src/sync_owner_auto.rs
+    - desktop/src-tauri/src/sync_crypto.rs
     - desktop/src-tauri/src/sync_share.rs
-    - desktop/src-tauri/src/sync_share_auto.rs
     - desktop/src-tauri/src/lan_sync.rs
   tables: [sync_tombstones]
   subprojects:

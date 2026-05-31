@@ -142,6 +142,10 @@ cutover, не раньше.)
 
 ## 11. Открытые вопросы (нужны ДО кода)
 
+**РЕШЕНО 2026-05-31:** (1) `device_key` → **app_settings** (v1, паритет с `service_account_json`; Keychain — follow-up);
+(2) Google sign-in → **удалить после успешного cutover** (§8); (3) имена файлов → **HMAC-хеш**; (4) рост истории →
+**принять, squash отложить**. Первый инкремент (E2E `sync_crypto.rs`) реализован.
+
 1. **Хранение `device_key`** — OS Keychain (Mac) / Keystore (Android) [секьюрнее, но доступ из Rust на
    Android нетривиален], ИЛИ `app_settings` SQLite [консистентно с тем, как СЕЙЧАС лежит
    `service_account_json` в `cloud_share_config`; проще; менее секьюрно]. Рекомендация для v1: app_settings

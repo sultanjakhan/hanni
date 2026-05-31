@@ -56,6 +56,7 @@ mod commands_shopping;
 mod sync_share;
 mod sync_owner;
 mod sync_owner_auto;
+mod sync_crypto;
 mod lan_sync;
 mod google_auth;
 #[cfg(not(target_os = "android"))]
