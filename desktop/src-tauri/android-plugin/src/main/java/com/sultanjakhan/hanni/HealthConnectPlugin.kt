@@ -33,6 +33,14 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
     )
 
+    // Android 14+ requires this to read Health Connect data from a background
+    // context (our WorkManager HanniHealthWorker). Declared in the manifest;
+    // must also be granted at runtime. Raw string (not a client constant) to
+    // stay version-proof — getGrantedPermissions() returns these as plain
+    // strings, so set membership comparisons work either way.
+    private val backgroundPermission =
+        "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
+
     override fun load(webView: WebView) {
         try {
             val status = HealthConnectClient.getSdkStatus(activity)
@@ -111,7 +119,33 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
         if (launcher == null) { invoke.reject("Permission launcher not available"); return }
         if (pendingPermInvoke != null) { invoke.reject("Permission request already in progress"); return }
         pendingPermInvoke = invoke
-        activity.runOnUiThread { launcher.launch(requiredPermissions) }
+        // Request background read alongside the foreground reads. On Android 14
+        // the HC system UI surfaces it as an extra "all the time" choice; on
+        // platforms/HC versions that don't support it the string is simply not
+        // granted (no crash). Without it the WorkManager worker can't read in
+        // the background, so HC only ever sees foreground access and eventually
+        // auto-revokes everything — the sleep-permission-resets bug.
+        activity.runOnUiThread { launcher.launch(requiredPermissions + backgroundPermission) }
+    }
+
+    @Command
+    fun backgroundStatus(invoke: Invoke) {
+        val client = healthClient
+        if (client == null) {
+            val ret = JSObject(); ret.put("granted", false); ret.put("available", false)
+            invoke.resolve(ret); return
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val granted = client.permissionController.getGrantedPermissions()
+                val ret = JSObject()
+                ret.put("granted", granted.contains(backgroundPermission))
+                ret.put("available", true)
+                invoke.resolve(ret)
+            } catch (e: Exception) {
+                invoke.reject("Health Connect error: ${e.message}")
+            }
+        }
     }
 
     @Command

@@ -63,6 +63,32 @@ export async function autoImportHealth(opts = {}) {
   return inflight;
 }
 
+const BG_ASKED_KEY = 'hc_bg_asked';
+/**
+ * One-time nudge for READ_HEALTH_DATA_IN_BACKGROUND. The 15-min WorkManager
+ * sync (HanniHealthWorker) can only read Health Connect in the background with
+ * this permission on Android 14+. Without it HC only ever sees foreground
+ * access and eventually auto-revokes sleep/steps — the "permission resets"
+ * complaint. Foreground access is unaffected, so we only ask when foreground
+ * is already granted; asked at most once (the Sleep-tab button stays the manual
+ * path afterwards).
+ */
+export async function maybeRequestHealthBackground() {
+  if (!IS_MOBILE) return;
+  if (localStorage.getItem(BG_ASKED_KEY)) return;
+  // If foreground isn't granted yet, the normal grant flow already bundles the
+  // background permission — nothing extra to do here.
+  const fg = await invoke('health_has_permissions').catch(() => false);
+  if (!fg) return;
+  const st = await invoke('health_background_status').catch(() => null);
+  if (st && st.granted) { localStorage.setItem(BG_ASKED_KEY, '1'); return; }
+  // Pop the HC system UI. Mark "asked" only once the dialog has actually
+  // returned, so an interrupted/never-shown prompt retries next launch
+  // instead of silently never asking again.
+  const res = await invoke('health_request_permissions').catch(() => null);
+  if (res !== null) localStorage.setItem(BG_ASKED_KEY, '1');
+}
+
 /**
  * Periodic background poll. Health Connect doesn't push, so we poll every
  * 3 min while the app is in the foreground. Combined with the

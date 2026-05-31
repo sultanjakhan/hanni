@@ -162,64 +162,87 @@ fn init_database() -> HanniDb {
 
     load_crsqlite(&conn);
 
+    // Base schema + cheap seeds — always run. init_db is CREATE TABLE IF NOT
+    // EXISTS (idempotent, fast) and the seeds are insert-if-empty; both must
+    // run so the recurring data-ops below always have their tables.
     init_db(&conn).expect("Cannot initialize database");
     seed_ingredient_catalog(&conn);
     seed_default_cuisines(&conn);
-    migrate_memory_json(&conn);
-    migrate_events_source(&conn);
-    migrate_facts_decay(&conn);
-    migrate_conversations_category(&conn);
-    migrate_proactive_history_v2(&conn);
-    migrate_proactive_messages_rating(&conn);
-    migrate_recipe_difficulty(&conn);
-    migrate_recipe_extra(&conn);
-    migrate_recipe_extra2(&conn);
-    migrate_recipe_media(&conn);
-    migrate_ingredient_alternatives(&conn);
-    migrate_cooking_log(&conn);
-    migrate_clear_seed_recipes(&conn);
-    migrate_reseed_ingredient_catalog(&conn);
-    migrate_catalog_tags_v3(&conn);
-    migrate_notes_v2(&conn);
-    migrate_content_blocks(&conn);
-    migrate_activity_tracking(&conn);
-    migrate_schedules(&conn);
-    migrate_routine_engine(&conn);
-    migrate_custom_projects(&conn);
-    migrate_body_records(&conn);
-    migrate_job_search(&conn);
-    migrate_dashboard_widgets(&conn);
-    migrate_timeline(&conn);
-    db::migrate_timeline_today(&conn);
+
+    // One-time schema migrations. Each is idempotent but probes the schema
+    // (PRAGMA table_info / SELECT) on every call — ~1.3s of pure waste on
+    // Android once already applied. Gate the whole block behind PRAGMA
+    // user_version so an already-migrated DB skips it and starts fast.
+    // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
+    const SCHEMA_VERSION: i64 = 1;
+    let schema_ver: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap_or(0);
+    if schema_ver < SCHEMA_VERSION {
+        migrate_memory_json(&conn);
+        migrate_events_source(&conn);
+        migrate_facts_decay(&conn);
+        migrate_conversations_category(&conn);
+        migrate_proactive_history_v2(&conn);
+        migrate_proactive_messages_rating(&conn);
+        migrate_recipe_difficulty(&conn);
+        migrate_recipe_extra(&conn);
+        migrate_recipe_extra2(&conn);
+        migrate_recipe_media(&conn);
+        migrate_ingredient_alternatives(&conn);
+        migrate_cooking_log(&conn);
+        migrate_clear_seed_recipes(&conn);
+        migrate_reseed_ingredient_catalog(&conn);
+        migrate_catalog_tags_v3(&conn);
+        migrate_notes_v2(&conn);
+        migrate_content_blocks(&conn);
+        migrate_activity_tracking(&conn);
+        migrate_schedules(&conn);
+        migrate_routine_engine(&conn);
+        migrate_custom_projects(&conn);
+        migrate_body_records(&conn);
+        migrate_job_search(&conn);
+        migrate_dashboard_widgets(&conn);
+        migrate_timeline(&conn);
+        db::migrate_timeline_today(&conn);
+        db::migrate_sleep(&conn);
+        db::migrate_recipe_tags_separator(&conn);
+        db::migrate_sports_catalog(&conn);
+        db::migrate_food_blacklist(&conn);
+        db::migrate_catalog_subgroup(&conn);
+        db::migrate_catalog_parent(&conn);
+        db::migrate_catalog_links(&conn);
+        db::migrate_food_blacklist_love(&conn);
+        db::migrate_food_blacklist_recipe(&conn);
+        db::migrate_share_links(&conn);
+        db::migrate_automation_log(&conn);
+        db::migrate_priority(&conn);
+        db::migrate_schedule_priority(&conn);
+        db::migrate_event_linked_tab(&conn);
+        db::migrate_task_pins(&conn);
+        db::migrate_event_categories(&conn);
+        db::migrate_drop_mindset(&conn);
+        db::migrate_dev_matrix(&conn);
+        db::migrate_sync_meta(&conn);
+        db::migrate_health_log_start_time(&conn);
+        db::migrate_shopping_list(&conn);
+        db::migrate_sleep_to_uuid_pk(&conn); // Phase 1: UUID PK for sleep_*
+        db::migrate_health_to_uuid_pk(&conn); // Phase 2: UUID PK for health_log + heart_rate_samples
+        db::migrate_schedules_to_uuid_pk(&conn); // Phase 3: UUID PK for schedules + schedule_completions
+        let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
+    }
+
+    // Recurring data-ops — MUST run every launch (time/sync/state dependent,
+    // NOT safe to gate): close prior-day open blocks, collapse duplicates that
+    // Health Connect imports and LAN sync keep re-creating, heal routine-node
+    // references re-dirtied by sync.
     commands_timeline_today::auto_close_orphan_blocks(&conn);
-    db::migrate_sleep(&conn);
-    db::migrate_recipe_tags_separator(&conn);
-    db::migrate_sports_catalog(&conn);
-    db::migrate_food_blacklist(&conn);
-    db::migrate_catalog_subgroup(&conn);
-    db::migrate_catalog_parent(&conn);
-    db::migrate_catalog_links(&conn);
-    db::migrate_food_blacklist_love(&conn);
-    db::migrate_food_blacklist_recipe(&conn);
-    db::migrate_share_links(&conn);
-    db::migrate_automation_log(&conn);
-    db::migrate_priority(&conn);
-    db::migrate_schedule_priority(&conn);
-    db::migrate_event_linked_tab(&conn);
-    db::migrate_task_pins(&conn);
-    db::migrate_event_categories(&conn);
-    db::migrate_drop_mindset(&conn);
-    db::migrate_dev_matrix(&conn);
-    db::migrate_sync_meta(&conn);
-    db::migrate_health_log_start_time(&conn);
     db::migrate_dedup_health_exercise(&conn);
     db::migrate_dedup_auto_health_events(&conn);
-    db::migrate_shopping_list(&conn);
-    db::migrate_sleep_to_uuid_pk(&conn); // Phase 1: UUID PK for sleep_*
-    db::migrate_health_to_uuid_pk(&conn); // Phase 2: UUID PK for health_log + heart_rate_samples
-    db::migrate_schedules_to_uuid_pk(&conn); // Phase 3: UUID PK for schedules + schedule_completions
-    db::backfill_routine_nodes_source_id(&conn); // Phase 3 follow-up: heal orphans on installs that ran the migration before the remap was added
-    db::dedup_schedules_by_title(&conn); // Phase 3 follow-up: collapse Mac/phone independent-UUID duplicates after LAN sync mixes them
+    db::backfill_routine_nodes_source_id(&conn);
+    db::dedup_schedules_by_title(&conn);
+
+    // cr-sqlite CRR setup — cheap (~10ms), internally guarded; run every launch.
     db::enable_crr_tables(&conn);
 
     // Load calendar toggle from DB into static flag
@@ -826,6 +849,7 @@ pub fn run() {
             health_import::get_health_summary,
             health_connect_plugin::health_has_permissions,
             health_connect_plugin::health_request_permissions,
+            health_connect_plugin::health_background_status,
             sleep_analysis::get_sleep_analysis,
             // Share links
             commands_share::create_share_link,

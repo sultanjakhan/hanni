@@ -146,7 +146,7 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
   min-width: 280px;
   z-index: 300;
   transform: translateX(-100%);
-  transition: transform 0.25s ease;
+  transition: transform 0.18s ease;
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
@@ -164,7 +164,7 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
   background: rgba(0, 0, 0, 0.4);
   z-index: 299;
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.18s ease;
   pointer-events: none;
 }
 .mobile .drawer-backdrop.visible {
