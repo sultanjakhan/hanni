@@ -1755,13 +1755,14 @@ dependencies = [
 
 [[package]]
 name = "hanni"
-version = "0.91.2"
+version = "0.91.3"
 dependencies = [
  "axum",
  "chrono",
  "chrono-tz",
  "cpal",
  "dirs",
+ "flate2",
  "futures-util",
  "hex",
  "hound",
@@ -1777,6 +1778,7 @@ dependencies = [
  "sha2",
  "sqlite-vec",
  "subtle",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-fs",
