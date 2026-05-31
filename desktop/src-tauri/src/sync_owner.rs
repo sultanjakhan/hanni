@@ -532,6 +532,10 @@ async fn pull_all(db: &HanniDb, client: &reqwest::Client,
 // ── Top-level push/pull ──────────────────────────────────────────────────
 
 pub(crate) async fn push_inner(db: &HanniDb) -> Result<Value, String> {
+    let backend = get_setting(&db.conn(), "cloud_owner_backend");
+    if backend.as_deref() == Some("github") {
+        return crate::sync_github::gh_push(db).await;
+    }
     let (token, owner_uid, project_id) = resolve_creds(db).await?;
     let client = reqwest::Client::new();
     let mut totals = serde_json::Map::new();
@@ -553,6 +557,10 @@ pub(crate) async fn push_inner(db: &HanniDb) -> Result<Value, String> {
 }
 
 pub(crate) async fn pull_inner(db: &HanniDb) -> Result<Value, String> {
+    let backend = get_setting(&db.conn(), "cloud_owner_backend");
+    if backend.as_deref() == Some("github") {
+        return crate::sync_github::gh_pull(db).await;
+    }
     let (token, owner_uid, project_id) = resolve_creds(db).await?;
     let client = reqwest::Client::new();
     let totals = pull_all(db, &client, &token, &project_id, &owner_uid).await

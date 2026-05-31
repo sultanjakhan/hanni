@@ -43,6 +43,7 @@ percent-encoding = "2"      # URL-encode OAuth params (Stage C.1 Google Auth)
 subtle = "2.5"              # constant-time byte comparison for API token (AUTO-001)
 chacha20poly1305 = "0.10"   # XChaCha20-Poly1305 AEAD for owner-sync E2E (Tier 3)
 hmac = "0.12"               # HMAC-SHA256 for opaque sync file names (Tier 3)
+base64 = "0.22"             # encode E2E blobs for GitHub Git Data API (Tier 3)
 tar = "0.4"                 # extract OTA web-asset bundle (Android, web_assets.rs)
 flate2 = "1"                # gunzip OTA web-asset bundle (Android, web_assets.rs)
 

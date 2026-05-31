@@ -7,7 +7,6 @@
 // path so a ciphertext can't be silently moved between document slots.
 // File names are HMAC-SHA256 of the logical doc key, so table names and row
 // ids never appear in plaintext in the store.
-#![allow(dead_code)] // public API wired up by the GitHub sync transport (next step)
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};

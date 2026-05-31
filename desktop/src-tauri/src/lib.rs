@@ -58,6 +58,9 @@ mod sync_share;
 mod sync_owner;
 mod sync_owner_auto;
 mod sync_crypto;
+mod sync_github_api;
+mod sync_github;
+mod sync_github_cmds;
 mod lan_sync;
 mod google_auth;
 #[cfg(not(target_os = "android"))]
@@ -882,6 +885,11 @@ pub fn run() {
             sync_share::cloud_owner_get_uid,
             sync_owner_auto::cloud_owner_set_auto,
             sync_owner_auto::cloud_owner_get_auto,
+            // GitHub owner-sync backend (Tier 3 — firebase-off)
+            sync_github_cmds::cloud_owner_gh_set_config,
+            sync_github_cmds::cloud_owner_gh_gen_key,
+            sync_github_cmds::cloud_owner_gh_set_key,
+            sync_github_cmds::cloud_owner_backend_set,
             // LAN sync (direct device↔device over Wi-Fi, no cloud)
             lan_sync::lan_sync_now,
             lan_sync::lan_sync_get_config,
