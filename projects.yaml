@@ -99,7 +99,7 @@ calendar:
         - desktop/src-tauri/src/routine.rs
         - desktop/src-tauri/src/routine_engine.rs
       tables: [routines, routine_nodes, routine_edges]
-  memory: [tech/project_calendar_tracking.md]
+  memory: [tech/project_calendar_tracking.md, tech/project_effective_priority.md, tech/project_instant_schedules.md]
   related: [schedule, sports, focus]
 
 focus:
@@ -698,10 +698,9 @@ _shared:
       - tech/project_updater_fragility.md
 
   security:
-    description: "Auth, OAuth (Google), Firestore admin SDK, security audit"
+    description: "Auth, OAuth (Google) sign-in, security audit"
     rust:
       - desktop/src-tauri/src/google_auth.rs
-      - desktop/src-tauri/src/firestore_admin.rs
     memory: [tech/project_security_audit.md]
 
   llm_voice:

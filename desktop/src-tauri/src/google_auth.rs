@@ -1,17 +1,16 @@
-// google_auth.rs — Sign in with Google → Firebase Auth (Stage C.1).
+// google_auth.rs — Sign in with Google (Stage C.1).
 //
-// Replaces the service-account JWT flow for owner-side cloud sync.
-// The user clicks "Sign in with Google" once per device; we open the
-// system browser with an OAuth URL pointing at our local HTTP server
+// Provides a stable per-user identity for owner-side cloud sync. The
+// user clicks "Sign in with Google" once per device; we open the system
+// browser with an OAuth URL pointing at our local HTTP server
 // (`/oauth/google/callback` on 8235 prod / 8236 dev). After Google
 // redirects back with an auth code, we:
 //   1. exchange code → Google id_token (oauth2.googleapis.com/token)
-//   2. exchange Google id_token → Firebase id_token (identitytoolkit signInWithIdp)
-//   3. persist {id_token, refresh_token, uid, email, expires_at}
+//   2. resolve a stable localId/email from it (identitytoolkit signInWithIdp)
+//   3. persist {uid, email, expires_at}
 //
-// `get_firebase_id_token()` is the single entry point used by sync
-// code: it returns a valid id_token, refreshing transparently when
-// the cached one is within 60s of expiry.
+// sync_owner reads only `uid` (via load_session) + `project_id` (via
+// load_config) to scope its documents.
 
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
@@ -33,21 +32,9 @@ pub struct GoogleAuthConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoogleAuthSession {
-    pub firebase_id_token: String,
-    pub firebase_refresh_token: String,
     pub expires_at: i64,
     pub uid: String,
     pub email: String,
-    /// Google OAuth access token with `cloud-platform` scope — used for
-    /// Firestore Admin / Firebase Management REST APIs (database setup,
-    /// rules deployment). Distinct from `firebase_id_token` which is for
-    /// Firestore data access under Auth rules.
-    #[serde(default)]
-    pub google_access_token: String,
-    #[serde(default)]
-    pub google_refresh_token: String,
-    #[serde(default)]
-    pub google_expires_at: i64,
 }
 
 fn get_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
@@ -148,26 +135,7 @@ pub fn google_auth_set_config(
 }
 
 #[tauri::command]
-pub async fn google_auth_signout(db: State<'_, HanniDb>) -> Result<(), String> {
-    let session = { load_session(&db.conn()) };
-    // Best-effort revoke of the Google OAuth grant before wiping local
-    // state. If the network call fails we still clear locally — leaving
-    // valid refresh-tokens behind after a signout would be worse than a
-    // stale grant on Google's side.
-    if let Some(s) = session.as_ref() {
-        if !s.google_refresh_token.is_empty() {
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()
-                .unwrap_or_default();
-            let _ = client.post("https://oauth2.googleapis.com/revoke")
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(format!("token={}", enc(&s.google_refresh_token)))
-                .send()
-                .await;
-        }
-    }
-
+pub fn google_auth_signout(db: State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     del_setting(&conn, SETTING_SESSION);
     del_setting(&conn, SETTING_PENDING_STATE);
@@ -241,14 +209,8 @@ pub async fn handle_oauth_callback(
             eprintln!("[google_auth] code-exchange missing id_token: {}", google_resp);
             "Google sign-in failed — see app logs".to_string()
         })?;
-    let google_access_token = google_resp.get("access_token").and_then(|v| v.as_str())
-        .unwrap_or("").to_string();
-    let google_refresh_token = google_resp.get("refresh_token").and_then(|v| v.as_str())
-        .unwrap_or("").to_string();
-    let google_expires_in: i64 = google_resp.get("expires_in").and_then(|v| v.as_i64())
-        .unwrap_or(3600);
 
-    // 2. Exchange Google ID token → Firebase ID token via signInWithIdp
+    // 2. Resolve a stable localId/email via signInWithIdp
     let url = format!(
         "https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key={}",
         cfg.api_key
@@ -262,28 +224,19 @@ pub async fn handle_oauth_callback(
         .send().await.map_err(|e| format!("firebase signInWithIdp: {}", e))?
         .json().await.map_err(|e| format!("firebase parse: {}", e))?;
 
-    let id_token = fb_resp.get("idToken").and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            eprintln!("[google_auth] signInWithIdp missing idToken: {}", fb_resp);
-            "Firebase sign-in failed — see app logs".to_string()
-        })?;
-    let refresh_token = fb_resp.get("refreshToken").and_then(|v| v.as_str())
-        .ok_or_else(|| "no firebase refreshToken".to_string())?;
     let local_id = fb_resp.get("localId").and_then(|v| v.as_str())
-        .ok_or_else(|| "no localId in firebase response".to_string())?;
+        .ok_or_else(|| {
+            eprintln!("[google_auth] signInWithIdp missing localId: {}", fb_resp);
+            "Google sign-in failed — see app logs".to_string()
+        })?;
     let email = fb_resp.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let expires_in: i64 = fb_resp.get("expiresIn").and_then(|v| v.as_str())
         .and_then(|s| s.parse().ok()).unwrap_or(3600);
 
     let session = GoogleAuthSession {
-        firebase_id_token: id_token.to_string(),
-        firebase_refresh_token: refresh_token.to_string(),
         expires_at: now_secs() + expires_in,
         uid: local_id.to_string(),
         email: email.clone(),
-        google_access_token,
-        google_refresh_token,
-        google_expires_at: now_secs() + google_expires_in,
     };
 
     {
@@ -303,86 +256,4 @@ pub async fn handle_oauth_callback(
         "authenticated": true, "email": email, "uid": local_id,
     }));
     Ok(())
-}
-
-// ── Used by sync_owner ────────────────────────────────────────────────────
-
-/// Returns a valid Google OAuth access token (cloud-platform scope),
-/// refreshing via refresh_token if necessary. Used for Firestore Admin /
-/// Firebase Management REST APIs.
-pub async fn get_google_access_token(db: &HanniDb) -> Result<String, String> {
-    let (cfg, mut session) = {
-        let conn = db.conn();
-        let cfg = load_config(&conn).ok_or_else(|| "Google Auth not configured".to_string())?;
-        let session = load_session(&conn).ok_or_else(|| "Not signed in with Google".to_string())?;
-        (cfg, session)
-    };
-    if session.google_access_token.is_empty() || session.google_refresh_token.is_empty() {
-        return Err("Google access token missing — sign in again to grant cloud-platform scope".into());
-    }
-    if session.google_expires_at > now_secs() + 60 {
-        return Ok(session.google_access_token);
-    }
-    let body = format!(
-        "client_id={}&client_secret={}&refresh_token={}&grant_type=refresh_token",
-        enc(&cfg.client_id), enc(&cfg.client_secret), enc(&session.google_refresh_token),
-    );
-    let client = http_client();
-    let resp: serde_json::Value = client.post("https://oauth2.googleapis.com/token")
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send().await.map_err(|e| format!("google refresh: {}", e))?
-        .json().await.map_err(|e| format!("google refresh parse: {}", e))?;
-    let new_token = resp.get("access_token").and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            eprintln!("[google_auth] refresh missing access_token: {}", resp);
-            "Google token refresh failed — see app logs".to_string()
-        })?;
-    let expires_in: i64 = resp.get("expires_in").and_then(|v| v.as_i64()).unwrap_or(3600);
-    session.google_access_token = new_token.to_string();
-    session.google_expires_at = now_secs() + expires_in;
-    save_session(&db.conn(), &session)?;
-    Ok(session.google_access_token)
-}
-
-/// Returns (firebase_id_token, uid, project_id), refreshing the token
-/// transparently if it's within 60 seconds of expiry.
-pub async fn get_firebase_id_token(db: &HanniDb) -> Result<(String, String, String), String> {
-    let (cfg, mut session) = {
-        let conn = db.conn();
-        let cfg = load_config(&conn).ok_or_else(|| "Google Auth not configured".to_string())?;
-        let session = load_session(&conn).ok_or_else(|| "Not signed in with Google".to_string())?;
-        (cfg, session)
-    };
-
-    if session.expires_at <= now_secs() + 60 {
-        let url = format!("https://securetoken.googleapis.com/v1/token?key={}", cfg.api_key);
-        let client = http_client();
-        let body = format!("grant_type=refresh_token&refresh_token={}",
-                           enc(&session.firebase_refresh_token));
-        let resp: serde_json::Value = client.post(&url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send().await.map_err(|e| format!("token refresh: {}", e))?
-            .json().await.map_err(|e| format!("refresh parse: {}", e))?;
-
-        let new_id = resp.get("id_token").and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                eprintln!("[google_auth] Firebase token refresh missing id_token: {}", resp);
-                "Firebase token refresh failed — see app logs".to_string()
-            })?;
-        let new_refresh = resp.get("refresh_token").and_then(|v| v.as_str())
-            .unwrap_or(&session.firebase_refresh_token).to_string();
-        let expires_in: i64 = resp.get("expires_in").and_then(|v| v.as_str())
-            .and_then(|s| s.parse().ok()).unwrap_or(3600);
-
-        session.firebase_id_token = new_id.to_string();
-        session.firebase_refresh_token = new_refresh;
-        session.expires_at = now_secs() + expires_in;
-
-        let conn = db.conn();
-        save_session(&conn, &session)?;
-    }
-
-    Ok((session.firebase_id_token, session.uid, cfg.project_id))
 }

@@ -54,12 +54,10 @@ mod share_tunnel;
 mod commands_share;
 mod commands_shopping;
 mod sync_share;
-mod sync_share_auto;
 mod sync_owner;
 mod sync_owner_auto;
 mod lan_sync;
 mod google_auth;
-mod firestore_admin;
 #[cfg(not(target_os = "android"))]
 mod window_state;
 
@@ -858,7 +856,6 @@ pub fn run() {
             google_auth::google_auth_set_config,
             google_auth::google_auth_signout,
             google_auth::google_auth_start_signin,
-            firestore_admin::firestore_setup,
         ])
         .setup(move |app| {
             // Android: resolve data dir from Tauri, then init DB
@@ -920,11 +917,6 @@ pub fn run() {
             // toggling from UI takes effect on the next cycle without a
             // restart. No-op when not configured.
             sync_owner_auto::start_auto_sync_loop(app.handle().clone());
-
-            // Stage C-1 share-link mirror loop. Pushes any dirty tables to
-            // Firestore for all active share-links every few seconds. Lets
-            // guests read /s/<token> URLs even when Hanni is closed.
-            sync_share_auto::start_mirror_loop(app.handle().clone());
 
             // Save system prompt for nightly training script
             let prompt_path = hanni_data_dir().join("system_prompt.txt");
