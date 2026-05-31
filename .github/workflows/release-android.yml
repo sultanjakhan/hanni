@@ -33,7 +33,10 @@ jobs:
       - name: Setup Rust + Android targets
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          # arm64 only — every target phone (and ~all modern Android) is arm64.
+          # A universal APK bundles 4 ABIs' native .so, ~doubling download size
+          # for no benefit on these devices. See build step's --target aarch64.
+          targets: aarch64-linux-android
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -60,7 +63,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-        run: npx tauri android build --apk
+        run: npx tauri android build --apk --target aarch64
 
       - name: Wait for release to exist (release.yml creates it)
         env:

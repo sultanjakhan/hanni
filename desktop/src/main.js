@@ -35,7 +35,7 @@ import {
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
 import './js/tab-timeline.js';
-import { autoImportHealth, startHealthPolling } from './js/health-auto-sync.js';
+import { autoImportHealth, startHealthPolling, maybeRequestHealthBackground } from './js/health-auto-sync.js';
 import { checkAndroidUpdate } from './js/android-update.js';
 
 // ── One-time migration: work → jobs tab rename ──
@@ -261,6 +261,19 @@ document.addEventListener('keydown', (e) => {
     if (IS_MOBILE) updateMobileTitle();
   } catch (e) { console.warn('[hanni] early paint skipped', e); }
 
+  // Right-side floating widgets — create them NOW, before the DB-ready await
+  // below. On Android init_database() blocks invoke() for ~1.3s; if these run
+  // after `await dbReady(...)` the +/music/bell buttons don't exist for the
+  // first ~2s and early taps are lost. Each widget builds its DOM + click
+  // handler synchronously and fetches its data fire-and-forget (.catch), so
+  // it's interactive immediately and fills in once the DB is up.
+  try {
+    initQuotesWidget();
+    initTaskControlWidget();
+    initMusicWidget();
+    initNotificationWidget();
+  } catch (e) { console.warn('[hanni] widget init skipped', e); }
+
   // First paint is up — fade out the boot splash. Done in a microtask so
   // the browser has a chance to lay out renderTabBar's nodes first.
   queueMicrotask(() => {
@@ -345,22 +358,11 @@ document.addEventListener('keydown', (e) => {
   }
   saveTabCustom();
 
-  // Render tab bar
+  // Render tab bar (re-render now that custom pages are registered).
+  // Widgets were already initialised up top, before the DB-ready await.
   renderTabBar();
   activateView();
   if (IS_MOBILE) updateMobileTitle();
-
-  // Quotes widget (above music)
-  initQuotesWidget();
-
-  // Task-control widget (above quotes)
-  initTaskControlWidget();
-
-  // Music widget (above notifications)
-  initMusicWidget();
-
-  // Notification widget (above focus)
-  initNotificationWidget();
 
   // Focus floating widget — disabled while MLX is offline
   // TODO: re-enable when MLX is back
@@ -404,6 +406,9 @@ document.addEventListener('keydown', (e) => {
     // Mac path keeps flowing even when this WebView/Rust process is dead.
     // Android caps the interval at 15 min; we ask for the minimum.
     invoke('bg_sync_enable', { intervalMinutes: 15 }).catch(() => {});
+    // One-time: ensure background HC read permission so the worker above can
+    // actually read in the background (else HC auto-revokes sleep access).
+    maybeRequestHealthBackground();
     checkAndroidUpdate(); // GitHub Releases → APK update banner (no-op on desktop)
   }
 

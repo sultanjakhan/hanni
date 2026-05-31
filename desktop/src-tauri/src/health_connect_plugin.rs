@@ -79,3 +79,22 @@ pub async fn health_request_permissions<R: Runtime>(app: tauri::AppHandle<R>) ->
     #[cfg(not(target_os = "android"))]
     { let _ = app; Err("Health Connect is only available on Android".into()) }
 }
+
+/// Whether READ_HEALTH_DATA_IN_BACKGROUND is granted — required on Android 14+
+/// for the WorkManager worker to read HC. Returns {granted: bool}. The JS layer
+/// uses this to nudge the user for background access exactly once, so the
+/// periodic background sync keeps HC permissions "in use" (else HC auto-revokes
+/// sleep/steps access — the "permission resets" bug).
+#[tauri::command]
+pub async fn health_background_status<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "android")]
+    {
+        let handle = app.state::<HealthConnectHandle<R>>();
+        match handle.0.run_mobile_plugin::<serde_json::Value>("backgroundStatus", &()) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(format!("{e}")),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Ok(serde_json::json!({"granted": false})) }
+}

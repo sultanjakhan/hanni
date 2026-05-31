@@ -64,6 +64,16 @@ pub fn backup_db() {
     if !db_path.exists() { return; }
     let backup_dir = data_dir.join("backups");
     let _ = std::fs::create_dir_all(&backup_dir);
+    // Throttle to at most one backup per day. Copying the (ever-growing) DB on
+    // every launch sat on the Android cold-start hot path for little value.
+    let today = chrono::Local::now().format("%Y%m%d").to_string();
+    if let Ok(rd) = std::fs::read_dir(&backup_dir) {
+        let prefix = format!("hanni_{}_", today);
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(&prefix) && n.ends_with(".db") { return; }
+        }
+    }
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let dest = backup_dir.join(format!("hanni_{}.db", ts));
     if let Err(e) = std::fs::copy(&db_path, &dest) {

@@ -101,6 +101,13 @@ class HanniHealthWorker(
             }
             Log.i(TAG, "doWork ok: sleep=${sleep.length()} exercise=${exercise.length()} steps=${steps.length()}")
             Result.success()
+        } catch (se: SecurityException) {
+            // Background read not permitted — READ_HEALTH_DATA_IN_BACKGROUND not
+            // granted (required on Android 14+ for HC reads off the foreground).
+            // Don't retry-storm: the app re-requests it on next foreground open;
+            // succeed quietly until then so we don't churn WorkManager backoff.
+            Log.w(TAG, "background read not permitted yet: ${se.message}")
+            Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "doWork failed", e)
             // retry with WorkManager's default backoff
