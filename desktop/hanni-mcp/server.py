@@ -917,14 +917,14 @@ TOOLS = {
 def send_response(id, result):
     response = {"jsonrpc": "2.0", "id": id, "result": result}
     msg = json.dumps(response)
-    sys.stdout.write(f"Content-Length: {len(msg.encode())}\r\n\r\n{msg}")
+    sys.stdout.write(msg + "\n")  # MCP stdio = newline-delimited JSON (not LSP Content-Length)
     sys.stdout.flush()
 
 
 def send_error(id, code, message):
     response = {"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}
     msg = json.dumps(response)
-    sys.stdout.write(f"Content-Length: {len(msg.encode())}\r\n\r\n{msg}")
+    sys.stdout.write(msg + "\n")  # MCP stdio = newline-delimited JSON (not LSP Content-Length)
     sys.stdout.flush()
 
 
