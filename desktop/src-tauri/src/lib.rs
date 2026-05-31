@@ -13,6 +13,7 @@ mod voice;
 mod proactive;
 mod macos;
 mod android_update;
+mod web_assets;
 mod calendar;
 mod event_categories;
 mod notes;
@@ -355,6 +356,11 @@ pub fn run() {
         .plugin(health_connect_plugin::init())
         .plugin(android_update::install_apk_plugin())
         .plugin(bg_sync::init());
+
+    // OTA web-assets protocol (Android only). Registered but not yet the main
+    // window's source — first we validate it serves the embedded fallback.
+    #[cfg(target_os = "android")]
+    let builder = web_assets::register(builder);
 
     // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
     // POSITION/SIZE are handled in window_state.rs (sync atomic write to a
@@ -851,6 +857,10 @@ pub fn run() {
             health_connect_plugin::health_has_permissions,
             health_connect_plugin::health_request_permissions,
             health_connect_plugin::health_background_status,
+            web_assets::web_ota_status,
+            web_assets::web_ota_check,
+            web_assets::web_ota_apply,
+            web_assets::web_ota_boot_ok,
             sleep_analysis::get_sleep_analysis,
             // Share links
             commands_share::create_share_link,
@@ -904,6 +914,25 @@ pub fn run() {
                 let hanni_db = init_database();
                 app.manage(hanni_db);
                 eprintln!("[hanni] init_database DONE + managed in {:?}", t0.elapsed());
+
+                // OTA web-assets: serve the frontend through the custom protocol
+                // (app_data_dir/web/ when a bundle is present, else embedded APK
+                // assets) so JS/CSS updates don't need a full APK reinstall.
+                // First, revert a trial bundle that failed to boot last launch.
+                web_assets::verify_trial_on_boot(app.handle());
+                if let Some(win) = app.get_webview_window("main") {
+                    let url = format!("http://{}.localhost/index.html", web_assets::SCHEME);
+                    match url.parse::<tauri::Url>() {
+                        Ok(u) => {
+                            if let Err(e) = win.navigate(u) {
+                                eprintln!("[hanni] web_assets navigate failed: {e}");
+                            } else {
+                                eprintln!("[hanni] web_assets: main window -> {url}");
+                            }
+                        }
+                        Err(e) => eprintln!("[hanni] web_assets bad url: {e}"),
+                    }
+                }
             }
 
             // Restore main-window logical position/size from disk before any

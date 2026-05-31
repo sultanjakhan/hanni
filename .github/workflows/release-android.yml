@@ -93,3 +93,21 @@ jobs:
           fi
           ls -la "$APK"
           gh release upload "$TAG" "$APK#hanni-${VERSION}-android.apk" --clobber
+
+      # OTA web-asset bundle: HTML/JS/CSS only (excludes the big rarely-changing
+      # sounds/ + assets/, which fall back to the APK-embedded copies per-file).
+      # Lets JS/CSS-only updates ship as a few-MB bundle instead of the full APK
+      # (see web_assets.rs + scripts/publish-web-update.sh for web-only pushes).
+      - name: Build + upload web-asset bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          BUNDLE="web-${VERSION}.tar.gz"
+          tar czf "$BUNDLE" -C desktop/src --exclude=./sounds --exclude=./assets .
+          SHA=$(sha256sum "$BUNDLE" | cut -d' ' -f1)
+          printf '{"web_version":"%s","min_native_version":"0.91.2","sha256":"%s","asset":"%s"}\n' \
+            "$VERSION" "$SHA" "$BUNDLE" > web-manifest.json
+          ls -la "$BUNDLE" web-manifest.json
+          gh release upload "$TAG" "$BUNDLE" web-manifest.json --clobber

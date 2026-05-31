@@ -18,6 +18,33 @@ export async function checkAndroidUpdate() {
   if (info?.available) showUpdateBanner(info);
 }
 
+// Silently pull a newer web-asset bundle (HTML/JS/CSS) in the background so
+// JS/CSS-only changes don't need a full ~106MB APK reinstall. Downloaded +
+// verified + applied to app_data_dir/web/current; the custom protocol serves
+// it on the next launch. Gated by min_native_version (the bundle must be
+// compatible with the installed native shell). No-op until CI ships a
+// web-manifest.json in the release, and harmless if anything fails (the
+// protocol falls back to the APK-embedded assets).
+export async function checkWebUpdate() {
+  if (!IS_ANDROID) return;
+  try {
+    const u = await invoke('web_ota_check');
+    if (!u?.available) return;
+    await invoke('web_ota_apply', { url: u.url, webVersion: u.web_version, sha256: u.sha256 });
+    // Applied — the custom protocol serves the new bundle on next launch.
+  } catch (e) {
+    console.warn('[hanni] web ota failed', e);
+  }
+}
+
+// Reaching app init means the currently-served bundle loaded fine. Confirm it so
+// verify_trial_on_boot keeps it instead of reverting to embedded next launch.
+// No-op when there's no trial bundle pending.
+export async function confirmWebBoot() {
+  if (!IS_ANDROID) return;
+  try { await invoke('web_ota_boot_ok'); } catch {}
+}
+
 function showUpdateBanner(info) {
   if (document.getElementById('apk-update-banner')) return;
   const bar = document.createElement('div');
