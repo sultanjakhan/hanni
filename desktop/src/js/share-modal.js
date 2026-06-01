@@ -22,7 +22,7 @@ export function openShareModal(tabId) {
   overlay.innerHTML = `<div class="modal share-modal">
     <div class="modal-title" style="display:flex;align-items:center;gap:8px;justify-content:space-between">
       <span>Общий доступ · ${escapeHtml(tabId)} <span id="share-tunnel-status" class="share-tunnel-dot" title="Статус туннеля"></span></span>
-      <button class="share-icon-btn" id="share-cloud-cfg" title="Облачный share (Firebase)" style="font-size:16px">☁</button>
+      <button class="share-icon-btn" id="share-cloud-cfg" title="Синхронизация устройств" style="font-size:16px">☁</button>
     </div>
     <div id="share-body"><div style="color:var(--text-muted);padding:12px 0;">Загрузка…</div></div>
     <div class="modal-actions">
@@ -140,7 +140,7 @@ function renderList(links, tabId) {
       </div>
       <div class="share-qr" id="share-qr-${l.id}" style="display:none"></div>` : ''}
       <div class="share-row-actions">
-        ${isActive ? `<button class="btn-link" data-cloud-push="${l.id}" title="Залить snapshot в Firebase">☁ Push</button>` : ''}
+        ${isActive ? `<button class="btn-link" data-cloud-push="${l.id}" title="Залить snapshot в облако">☁ Push</button>` : ''}
         ${isActive ? `<button class="btn-link-danger" data-revoke="${l.id}">Отозвать</button>` : ''}
         <button class="btn-link-danger" data-delete="${l.id}">Удалить навсегда</button>
       </div>
@@ -243,10 +243,10 @@ async function submitCreate(overlay, tabId) {
   msg.innerHTML = '<div style="color:var(--text-muted);">Создаём ссылку, поднимаем туннель…</div>';
   try {
     await invoke('create_share_link', { tab: tabId, scope, permissions, label, lifetime, expiresAt: expires_at });
-    // Backend always returns a static cloud URL (Firebase Hosting), so a
-    // missing link.url cannot signal a failed tunnel. Ask the tunnel state
-    // directly: if it didn't come up, writes from the guest will fail —
-    // show a non-fatal warning so the host knows.
+    // Backend always returns a cloud URL (Tailscale Funnel, or the legacy
+    // Firebase Hosting form), so a missing link.url cannot signal a failed
+    // tunnel. Ask the tunnel state directly: if it didn't come up, the guest
+    // can't reach axum — show a non-fatal warning so the host knows.
     const status = await invoke('tunnel_status').catch(() => null);
     const tunnelUp = !!(status && status.running && status.url);
     resetFooter(overlay, tabId);
@@ -258,11 +258,11 @@ async function submitCreate(overlay, tabId) {
       // else is a generic "tunnel down" with the raw error for debugging.
       let cause;
       if (/429|Too Many|RESOURCE_EXHAUSTED|trycloudflare/i.test(err)) {
-        cause = `Cloudflare временно <b>ограничивает</b> trycloudflare с этого IP (HTTP 429). Туннель встанет сам через 15–30 минут — пока что гости смогут <b>читать</b> через Firebase, но <b>писать</b> не получится.`;
+        cause = `Cloudflare временно <b>ограничивает</b> trycloudflare с этого IP (HTTP 429). Туннель встанет сам через 15–30 минут — пока что гости <b>не смогут открыть</b> ссылку. Стабильно решает Tailscale Funnel.`;
       } else if (/not installed|brew install/i.test(err)) {
-        cause = `cloudflared не найден. Поставь: <code>brew install cloudflared</code>`;
+        cause = `cloudflared не найден. Поставь: <code>brew install cloudflared</code> (или используй Tailscale Funnel).`;
       } else {
-        cause = `Ссылка создана, но туннель не поднят — гости смогут <b>читать</b>, но <b>писать</b> не получится.`;
+        cause = `Ссылка создана, но туннель не поднят — гости пока <b>не смогут её открыть</b>.`;
       }
       const errLine = err ? `<br><span style="opacity:.7">${escapeHtml(err)}</span>` : '';
       const body = overlay.querySelector('#share-body');

@@ -33,23 +33,34 @@ pub struct ShareLinkRow {
     pub url: Option<String>,
 }
 
-// Static cloud URL — works 24/7 even when Hanni is closed (read from
-// Firestore via Firebase Hosting). When a Cloudflare tunnel is live we
-// append `?t=<tunnel>` so the guest can bypass Firestore on first visit
-// (covers the 50k/day free quota blowing up).
-fn cloud_url(token: &str) -> String {
-    format!("https://hanni-2e5d0.web.app/s/{}", token)
-}
-
+// Build the guest-facing URL for a share token.
+//
+// Prefer a user-configured Tailscale Funnel (or any public https tunnel) as
+// the entry point: axum serves the guest frontend itself, so the link needs
+// neither Firebase Hosting nor a `?t=` param — nothing in the path can go
+// stale or depend on Firestore.
+//
+// Fall back to the legacy Firebase Hosting form only when no public funnel is
+// set. There `?t=<tunnel>` lets the guest reach axum directly; without it the
+// guest hits the dead Firestore read-path (Firestore is off post firebase-off).
 fn cloud_url_with_tunnel(conn: &rusqlite::Connection, token: &str) -> String {
-    let base = cloud_url(token);
-    let tunnel: Option<String> = conn.query_row(
-        "SELECT value FROM app_settings WHERE key='share_tunnel_url'",
-        [], |r| r.get(0),
-    ).ok();
-    match tunnel.filter(|s| !s.is_empty()) {
-        Some(t) => format!("{}?t={}", base, utf8_percent_encode(&t, NON_ALPHANUMERIC)),
-        None => base,
+    let setting = |key: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key=?1",
+            rusqlite::params![key], |r| r.get::<_, String>(0),
+        ).ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+    };
+
+    if let Some(base) = setting("share_funnel_url").filter(|s| s.starts_with("https://")) {
+        return format!("{}/s/{}", base, token);
+    }
+
+    let legacy = format!("https://hanni-2e5d0.web.app/s/{}", token);
+    match setting("share_tunnel_url") {
+        Some(t) => format!("{}?t={}", legacy, utf8_percent_encode(&t, NON_ALPHANUMERIC)),
+        None => legacy,
     }
 }
 
