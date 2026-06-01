@@ -165,6 +165,14 @@ fn init_database() -> HanniDb {
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
 
+    // Harden secrets-at-rest: hanni.db holds plaintext tokens/keys (until the
+    // keychain migration). Lock the data dir to owner-only and the DB + WAL/SHM
+    // sidecars to 0600 so backups / shared-machine users can't read them.
+    if let Some(parent) = db_path.parent() { db::restrict_dir(parent); }
+    db::restrict_file(&db_path);
+    db::restrict_file(&db_path.with_extension("db-wal"));
+    db::restrict_file(&db_path.with_extension("db-shm"));
+
     load_crsqlite(&conn);
 
     // Base schema + cheap seeds — always run. init_db is CREATE TABLE IF NOT

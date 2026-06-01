@@ -110,6 +110,19 @@ const CHAT_LITE: ChatModeConfig = ChatModeConfig { memory_limit: 8, history_limi
 pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _call_mode: bool, conversation_id: Option<&str>) -> Result<ChatResult, String> {
     let client = &app.state::<HttpClient>().0;
 
+    // OpenClaw gateway bearer token. Read from app_settings, NOT hardcoded —
+    // the `hanni` repo is public, so a committed token would leak. The user who
+    // enables `use_openclaw` sets `openclaw_token` once.
+    let openclaw_token: String = {
+        let db = app.state::<HanniDb>();
+        let conn = db.conn();
+        conn.query_row("SELECT value FROM app_settings WHERE key='openclaw_token'", [], |r| r.get(0))
+            .unwrap_or_default()
+    };
+    if openclaw_token.is_empty() {
+        return Err("OpenClaw token not set. Add it to app_settings key 'openclaw_token'.".into());
+    }
+
     // Gather lightweight macOS context (fast: ~1-2s via osascript)
     // This gives OpenClaw awareness of what the user is doing
     let context = tokio::task::spawn_blocking(|| {
@@ -230,7 +243,7 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
     // OpenClaw agent may do multiple tool-call round-trips before responding (~30-60s),
     // so use a generous timeout. The 'break stream on [DONE] ensures we don't wait after completion.
     let response = client.post(OPENCLAW_URL)
-        .header("Authorization", format!("Bearer {}", OPENCLAW_TOKEN))
+        .header("Authorization", format!("Bearer {}", openclaw_token))
         .header("Content-Type", "application/json")
         .header("x-openclaw-agent-id", "main")
         .json(&request_body)

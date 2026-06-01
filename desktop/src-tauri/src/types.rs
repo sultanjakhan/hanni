@@ -11,9 +11,8 @@ pub const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
 pub const MODEL: &str = "NexVeridian/Qwen3.5-35B-A3B-4bit";
 pub const VOICE_SERVER_URL: &str = "http://127.0.0.1:8237";
 
-// OpenClaw Gateway
+// OpenClaw Gateway (token lives in app_settings 'openclaw_token', not in source)
 pub const OPENCLAW_URL: &str = "http://127.0.0.1:18789/v1/chat/completions";
-pub const OPENCLAW_TOKEN: &str = "b948b1e8eebab8c447035ad7b0c0c61e6242861f90f32e5e";
 
 // ── Static atomics ──
 

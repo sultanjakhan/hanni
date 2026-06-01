@@ -57,6 +57,34 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
     Ok(())
 }
 
+/// Restrict a file to owner read/write only (0600) on Unix. No-op elsewhere.
+/// hanni.db and its backups hold plaintext secrets, so they must not be
+/// world/group-readable (Time Machine / shared-machine leak vector).
+pub fn restrict_file(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if path.exists() {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    #[cfg(not(unix))]
+    { let _ = path; }
+}
+
+/// Restrict a directory to owner-only (0700) on Unix. No-op elsewhere.
+pub fn restrict_dir(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if path.exists() {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    #[cfg(not(unix))]
+    { let _ = path; }
+}
+
 /// Create a timestamped backup of hanni.db, keep last 5
 pub fn backup_db() {
     let data_dir = hanni_data_dir();
@@ -64,6 +92,7 @@ pub fn backup_db() {
     if !db_path.exists() { return; }
     let backup_dir = data_dir.join("backups");
     let _ = std::fs::create_dir_all(&backup_dir);
+    restrict_dir(&backup_dir);
     // Throttle to at most one backup per day. Copying the (ever-growing) DB on
     // every launch sat on the Android cold-start hot path for little value.
     let today = chrono::Local::now().format("%Y%m%d").to_string();
@@ -80,10 +109,13 @@ pub fn backup_db() {
         eprintln!("Backup failed: {}", e);
         return;
     }
+    restrict_file(&dest);
     // Also copy WAL if present
     let wal = data_dir.join("hanni.db-wal");
     if wal.exists() {
-        let _ = std::fs::copy(&wal, backup_dir.join(format!("hanni_{}.db-wal", ts)));
+        let wal_dest = backup_dir.join(format!("hanni_{}.db-wal", ts));
+        let _ = std::fs::copy(&wal, &wal_dest);
+        restrict_file(&wal_dest);
     }
     // Keep only last 5 backups
     let mut backups: Vec<_> = std::fs::read_dir(&backup_dir)
