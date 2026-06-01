@@ -20,7 +20,7 @@ markedInstance.use({
       const highlighted = lang && hljs.getLanguage(lang)
         ? hljs.highlight(text, { language: lang }).value
         : hljs.highlightAuto(text).value;
-      const langLabel = lang || 'code';
+      const langLabel = escapeHtml(lang || 'code');
       return `<div class="code-block"><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent)">Копировать</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
     },
     link({ href, text }) {

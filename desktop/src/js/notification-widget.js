@@ -1,6 +1,10 @@
 // ── notification-widget.js — Bell icon with live notification feed ──
 import { invoke, listen } from './state.js';
 
+// Escape untrusted DB text (event/task titles) before innerHTML interpolation.
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 let nwPanel = null;
 let nwBadge = null;
 let nwList = null;
@@ -26,7 +30,7 @@ function renderItems(data) {
     const countdown = timeUntil(ev.time, data.now);
     items.push(`<div class="nw-item nw-event">
       <span class="nw-icon">📅</span>
-      <span class="nw-text">${ev.title}</span>
+      <span class="nw-text">${esc(ev.title)}</span>
       <span class="nw-time">${countdown}</span>
     </div>`);
   }
@@ -35,8 +39,8 @@ function renderItems(data) {
   for (const t of data.overdue || []) {
     items.push(`<div class="nw-item nw-overdue">
       <span class="nw-icon">⚠️</span>
-      <span class="nw-text">${t.title}</span>
-      <span class="nw-time">${t.due_date}</span>
+      <span class="nw-text">${esc(t.title)}</span>
+      <span class="nw-time">${esc(t.due_date)}</span>
     </div>`);
   }
 
