@@ -62,11 +62,15 @@ pub fn require_perm(ctx: &LinkCtx, needed: &str) -> Result<(), (StatusCode, Stri
 pub fn rate_limit_check(state: &ShareServerState, token: &str) -> Result<(), (StatusCode, String)> {
     let now = chrono::Local::now().timestamp();
     let mut map = state.rate_limit.lock().unwrap();
-    // Bound map growth: attacker spamming distinct random tokens otherwise
-    // makes this HashMap a memory-exhaustion vector. Stale entries (window
-    // already expired) carry no information, drop them when map gets big.
-    if map.len() > 10_000 {
-        map.retain(|_, (_, started)| now - *started < 60);
+    // rate_limit_check runs BEFORE token validation, so an internet attacker
+    // spamming distinct random tokens could otherwise grow this HashMap without
+    // bound (memory-exhaustion DoS). Prune expired entries on every call — the
+    // map holds at most a minute's worth of active tokens, so retain() is cheap.
+    map.retain(|_, (_, started)| now - *started < 60);
+    // Hard cap: if still saturated with fresh distinct tokens, shed new ones
+    // rather than grow. 5_000 active tokens/min dwarfs any real multi-guest use.
+    if map.len() >= 5_000 && !map.contains_key(token) {
+        return Err((StatusCode::TOO_MANY_REQUESTS, "Server busy".into()));
     }
     let entry = map.entry(token.to_string()).or_insert((0, now));
     if now - entry.1 >= 60 { *entry = (0, now); }
@@ -97,20 +101,25 @@ pub fn log_activity(conn: &rusqlite::Connection, link_id: i64, action: &str, pay
 
 pub fn ua_ip(headers: &HeaderMap, addr: &SocketAddr) -> (String, String) {
     let ua = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    // Behind Cloudflare Tunnel the TCP peer is always 127.0.0.1. The real
-    // guest IP travels in CF-Connecting-IP (set by Cloudflare; the server
-    // only binds to 127.0.0.1 so untrusted senders can't reach it directly).
-    // Fall back to X-Forwarded-For first hop, then the TCP peer for local dev.
-    let ip = headers.get("cf-connecting-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| headers.get("x-forwarded-for")
+    // Trust forwarded-IP headers ONLY when the TCP peer is loopback — i.e. the
+    // request came through the local Cloudflare Tunnel, which sets CF-Connecting-IP.
+    // The server now binds 0.0.0.0 (Tailnet reach), so a direct (non-loopback)
+    // peer could otherwise spoof CF-Connecting-IP / X-Forwarded-For to poison
+    // share_activity.guest_ip. For direct peers, use the real TCP source.
+    let ip = if addr.ip().is_loopback() {
+        headers.get("cf-connecting-ip")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split(',').next())
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()))
-        .unwrap_or_else(|| addr.ip().to_string());
+            .filter(|s| !s.is_empty())
+            .or_else(|| headers.get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| addr.ip().to_string())
+    } else {
+        addr.ip().to_string()
+    };
     (ua, ip)
 }
 
