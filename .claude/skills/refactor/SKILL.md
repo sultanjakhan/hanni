@@ -1,6 +1,6 @@
 ---
 name: refactor
-description: Safe refactoring with dependency tracking — rename, extract, move, simplify code with confidence.
+description: Mechanical, behavior-preserving code transformation with dependency tracking — rename, extract, move, inline, simplify. EXECUTES a restructuring (often after architect plans it). Not for deciding architecture (use architect) or finding bugs (use debug/qa).
 allowed-tools: Read, Write, Edit, Grep, Glob, Task, Bash
 argument-hint: <operation> [target]
 user-invocable: true

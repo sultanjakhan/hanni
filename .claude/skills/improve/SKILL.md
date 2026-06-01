@@ -1,6 +1,6 @@
 ---
 name: improve
-description: Analyze the Hanni codebase from a specific expert perspective (security, architect, product, designer, performance, etc.) and suggest concrete improvements. Use when the user wants a code/product review.
+description: Read-only expert review (no edits) — analyze Hanni from a chosen lens (security/architect/product/designer/performance) and report concrete suggestions. Use for a review or second opinion. To APPLY fixes, invoke the matching role skill (security/perf/design/architect).
 allowed-tools: Read, Grep, Glob, Bash, Task
 argument-hint: [role] [scope]
 user-invocable: true

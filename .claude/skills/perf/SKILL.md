@@ -1,6 +1,6 @@
 ---
 name: perf
-description: Performance Engineer role — actively profile, benchmark, and optimize latency, memory, prompt size, and throughput.
+description: Performance Engineer — actively profiles, benchmarks and OPTIMIZES (makes edits): latency, memory, prompt size, throughput. For a read-only performance review with no edits, use improve (performance lens).
 allowed-tools: Read, Write, Edit, Grep, Glob, Task, Bash
 argument-hint: [task] [scope]
 user-invocable: true

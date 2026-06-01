@@ -1,6 +1,6 @@
 ---
 name: debug
-description: Universal Debugger — systematically investigate any bug from reproduction to root cause to fix.
+description: Universal Debugger — REACTIVE: a concrete symptom or failure already exists; reproduce, trace to root cause, fix. Use when something is broken. To proactively hunt unknown bugs/edge cases, use qa.
 allowed-tools: Read, Write, Edit, Grep, Glob, Task, Bash
 argument-hint: <description of the bug>
 user-invocable: true

@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Software Architect role — actively modularize code, maintain module boundaries, create/update documentation, manage technical debt.
+description: Software Architect — decide module boundaries, plan how to restructure or split oversized/tangled code, manage tech debt, update architecture docs. Owns the what/why of structure; hand the mechanical how (rename/extract/move) to refactor. Read projects.yaml first.
 allowed-tools: Read, Write, Edit, Grep, Glob, Task, Bash
 argument-hint: [task] [scope]
 user-invocable: true

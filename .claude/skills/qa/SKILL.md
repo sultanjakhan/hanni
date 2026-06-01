@@ -1,6 +1,6 @@
 ---
 name: qa
-description: QA Engineer role — find bugs, edge cases, write test scenarios, verify error handling, stress-test flows.
+description: QA Engineer — PROACTIVE: hunt not-yet-reported bugs, edge cases, and missing error handling; write test scenarios; stress-test flows. Use before problems surface. For a specific known failure, use debug.
 allowed-tools: Read, Grep, Glob, Task, Bash, Write, Edit
 argument-hint: [task] [scope]
 user-invocable: true

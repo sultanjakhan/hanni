@@ -1,6 +1,6 @@
 ---
 name: design
-description: UI/UX Designer role — improve visual design, accessibility, consistency, animations, and user experience.
+description: UI/UX Designer — actively improves (makes edits; CSS variables only): visual design, accessibility, consistency, animations, UX. For a read-only design critique with no edits, use improve (designer lens).
 allowed-tools: Read, Write, Edit, Grep, Glob, Task
 argument-hint: [task] [scope]
 user-invocable: true

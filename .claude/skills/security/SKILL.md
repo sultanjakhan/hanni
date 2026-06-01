@@ -1,6 +1,6 @@
 ---
 name: security
-description: Security Engineer role — actively harden code, fix vulnerabilities, audit inputs, secure shell/SQL/file operations.
+description: Security Engineer — actively HARDENS code (makes edits): fix vulnerabilities, validate inputs, secure shell/SQL/file operations. For a read-only security review with no edits, use improve (security lens).
 allowed-tools: Read, Write, Edit, Grep, Glob, Task, Bash
 argument-hint: [task] [scope]
 user-invocable: true
