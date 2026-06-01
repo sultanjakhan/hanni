@@ -77,35 +77,6 @@ async function refreshList(overlay, tabId) {
       await invoke('delete_share_link', { id });
       refreshList(overlay, tabId);
     }));
-    body.querySelectorAll('[data-cloud-push]').forEach(btn => btn.addEventListener('click', async () => {
-      const id = parseInt(btn.dataset.cloudPush);
-      const orig = btn.textContent;
-      btn.textContent = '↑ Пушим…'; btn.disabled = true;
-      try {
-        const out = await invoke('cloud_share_push', { shareId: id });
-        const w = out.written || {};
-        const total = Object.values(w).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
-        btn.textContent = `✓ ${total} строк`;
-        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
-      } catch (e) {
-        btn.textContent = orig; btn.disabled = false;
-        alert('Облачный push не удался: ' + (e?.message || e) + '\n\nНастрой через ☁ в шапке.');
-      }
-    }));
-    body.querySelectorAll('[data-qr]').forEach(btn => btn.addEventListener('click', () => {
-      const row = btn.dataset.row;
-      const qrBox = body.querySelector(`#share-qr-${row}`);
-      if (!qrBox) return;
-      if (qrBox.style.display === 'none') {
-        const url = btn.dataset.qr;
-        const src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=1&data=${encodeURIComponent(url)}`;
-        qrBox.innerHTML = `<img alt="QR" width="180" height="180" src="${src}">`;
-        qrBox.style.display = '';
-      } else {
-        qrBox.style.display = 'none';
-        qrBox.innerHTML = '';
-      }
-    }));
   } catch (err) {
     body.innerHTML = `<div class="share-err">Ошибка: ${escapeHtml(String(err))}</div>`;
   }
@@ -136,11 +107,8 @@ function renderList(links, tabId) {
       ${url ? `<div class="share-row-url">
         <input class="share-url-input" readonly value="${escapeHtml(url)}">
         <button class="share-icon-btn" data-copy="${escapeHtml(url)}" title="Скопировать">📋</button>
-        <button class="share-icon-btn" data-qr="${escapeHtml(url)}" data-row="${l.id}" title="QR-код">▦</button>
-      </div>
-      <div class="share-qr" id="share-qr-${l.id}" style="display:none"></div>` : ''}
+      </div>` : ''}
       <div class="share-row-actions">
-        ${isActive ? `<button class="btn-link" data-cloud-push="${l.id}" title="Залить snapshot в облако">☁ Push</button>` : ''}
         ${isActive ? `<button class="btn-link-danger" data-revoke="${l.id}">Отозвать</button>` : ''}
         <button class="btn-link-danger" data-delete="${l.id}">Удалить навсегда</button>
       </div>
