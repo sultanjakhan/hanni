@@ -999,6 +999,25 @@ pub fn api_token_path() -> PathBuf {
     hanni_data_dir().join("api_token.txt")
 }
 
+/// Write a secret to `path` with owner-only perms applied atomically at
+/// creation (mode 0600), closing the brief world-readable window the old
+/// write-then-chmod sequence left. set_permissions still runs to repair any
+/// pre-existing file created before this change.
+fn write_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true).create(true).truncate(true).mode(0o600).open(path)?;
+        f.write_all(contents.as_bytes())?;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    { std::fs::write(path, contents) }
+}
+
 /// Replace the API token file with a fresh UUID. The running server keeps
 /// the old token in memory, so a process restart is required for the new
 /// one to take effect. Returns the new token so the UI can show it once.
@@ -1009,12 +1028,7 @@ pub fn rotate_api_token() -> Result<String, String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {}", e))?;
     }
-    std::fs::write(&path, &token).map_err(|e| format!("write: {}", e))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    write_secret_file(&path, &token).map_err(|e| format!("write: {}", e))?;
     Ok(token)
 }
 
@@ -1076,13 +1090,7 @@ pub fn get_or_create_api_token() -> String {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(&path, &token);
-    // Restrict token file to owner-only (0600)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    let _ = write_secret_file(&path, &token);
     token
 }
 
