@@ -4,9 +4,11 @@
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 
-export function showCookingLogModal(date, onSaved) {
+export function showCookingLogModal(date, onSaved, preRecipe) {
   const today = date || new Date().toISOString().slice(0, 10);
-  let selectedId = null, selectedName = '', rating = 0, allRecipes = [];
+  let selectedId = preRecipe ? preRecipe.id : null;
+  let selectedName = preRecipe ? preRecipe.name : '';
+  let rating = 0, allRecipes = [], deductMatches = [];
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -17,6 +19,7 @@ export function showCookingLogModal(date, onSaved) {
     <div class="form-group"><label class="form-label">Рецепт</label>
       <input class="form-input" id="cl-search" placeholder="Поиск рецепта...">
       <div id="cl-list" class="mp-recipe-list" style="max-height:180px;overflow-y:auto;margin-top:6px;"></div></div>
+    <div id="cl-deduct"></div>
     <div class="form-group"><label class="form-label">Оценка вкуса</label>
       <div class="rd-stars" id="cl-stars">${[1, 2, 3, 4, 5].map(n => `<span class="rd-star" data-n="${n}">★</span>`).join('')}</div></div>
     <div class="form-group"><label class="form-label">Заметка</label>
@@ -38,7 +41,11 @@ export function showCookingLogModal(date, onSaved) {
 
   const search = overlay.querySelector('#cl-search');
   search.oninput = () => renderList(search.value.trim().toLowerCase());
-  (async () => { allRecipes = await invoke('get_recipes', { search: null }).catch(() => []); renderList(''); })();
+  (async () => {
+    allRecipes = await invoke('get_recipes', { search: null }).catch(() => []);
+    renderList('');
+    if (selectedId) { overlay.querySelector('#cl-save').disabled = false; loadDeduct(); } // preselected recipe → ready
+  })();
 
   function renderList(q) {
     const list = overlay.querySelector('#cl-list');
@@ -51,7 +58,34 @@ export function showCookingLogModal(date, onSaved) {
       selectedName = allRecipes.find(r => r.id === selectedId)?.name || '';
       list.querySelectorAll('.mp-recipe-option').forEach(o => o.classList.toggle('selected', o === opt));
       overlay.querySelector('#cl-save').disabled = false;
+      loadDeduct();
     });
+  }
+
+  // Match the selected recipe's ingredients to fridge products so we can offer
+  // to deduct them on save (units rarely line up, so it's an opt-in checklist).
+  const clNorm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+  async function loadDeduct() {
+    const box = overlay.querySelector('#cl-deduct');
+    if (!selectedId) { box.innerHTML = ''; deductMatches = []; return; }
+    box.innerHTML = '<div style="color:var(--text-muted);font-size:12px">Проверяю холодильник…</div>';
+    const [rec, products] = await Promise.all([
+      invoke('get_recipe', { id: selectedId }).catch(() => null),
+      invoke('get_products', {}).catch(() => []),
+    ]);
+    const ings = (rec && rec.ingredient_items) || [];
+    deductMatches = [];
+    for (const ing of ings) {
+      const p = products.find(x =>
+        (ing.catalog_id && x.catalog_id && x.catalog_id === ing.catalog_id) || clNorm(x.name) === clNorm(ing.name));
+      if (p) deductMatches.push({ ing, p });
+    }
+    if (!deductMatches.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="form-group"><label class="form-label">Списать из холодильника</label>
+      ${deductMatches.map((m, i) => `<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:2px 0">
+        <input type="checkbox" class="cl-deduct-cb" data-i="${i}" checked>
+        ${escapeHtml(m.p.name)} <span style="color:var(--text-muted)">(есть ${m.p.quantity ?? 1} ${escapeHtml(m.p.unit || 'шт')})</span>
+      </label>`).join('')}</div>`;
   }
 
   overlay.querySelector('#cl-save').onclick = async () => {
@@ -68,8 +102,98 @@ export function showCookingLogModal(date, onSaved) {
         durationMinutes: 30, category: 'Готовка', color, priority: null,
       }).catch(() => null);
       await invoke('log_cooking', { recipeId: selectedId, date: d, tasteRating: rating, cookNote: note, eventId });
+      // Deduct the checked fridge items: by amount when units match, else one unit.
+      for (const cb of overlay.querySelectorAll('.cl-deduct-cb:checked')) {
+        const m = deductMatches[parseInt(cb.dataset.i)]; if (!m) continue;
+        const sameUnit = clNorm(m.ing.unit) === clNorm(m.p.unit);
+        const dec = (sameUnit && m.ing.amount) ? m.ing.amount : 1;
+        const next = Math.round(((parseFloat(m.p.quantity) || 0) - dec) * 100) / 100;
+        try {
+          if (next <= 0) await invoke('delete_product', { id: m.p.id });
+          else {
+            const args = { id: m.p.id, name: m.p.name, quantity: next, expiryDate: m.p.expiry_date, location: m.p.location, notes: m.p.notes };
+            if (m.p.catalog_id != null) args.catalogId = m.p.catalog_id;
+            await invoke('update_product', args);
+          }
+        } catch (_) { /* best-effort deduction */ }
+      }
       close();
       if (onSaved) await onSaved();
     } catch (e) { alert('Ошибка: ' + (e.message || e)); }
   };
+}
+
+// ── "Что приготовить" — rank recipes by what's in the fridge, filter by
+// ingredient name or category. Opened from the calendar templates; picking a
+// recipe hands off to the cooking-log modal with it preselected. ──
+const CW_CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', fruit: 'Фрукты',
+  grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи', spice: 'Специи',
+  oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', sweet: 'Сладости', frozen: 'Заморозка', other: 'Другое' };
+const cwNorm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+const cwIngredients = (str) => String(str || '').split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+
+export async function showCookWhatModal(date, onSaved) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
+    <div class="modal-title">🍲 Что приготовить</div>
+    <input class="form-input" id="cw-search" placeholder="Поиск по рецепту или ингредиенту…" style="margin-bottom:8px">
+    <div id="cw-cats" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+    <div id="cw-list"><div class="muted">Загрузка…</div></div>
+    <div class="modal-actions"><button class="btn-secondary" id="cw-close">Закрыть</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#cw-close').onclick = close;
+
+  const [recipes, products, catalog] = await Promise.all([
+    invoke('get_recipes', { search: null }).catch(() => []),
+    invoke('get_products', {}).catch(() => []),
+    invoke('get_ingredient_catalog').catch(() => []),
+  ]);
+  const catByName = new Map(catalog.map(c => [cwNorm(c.name), c.category]));
+  const have = new Set(products.map(p => cwNorm(p.name)));
+
+  // Per-recipe: which of its ingredients are missing from the fridge + the
+  // catalog categories its ingredients span (for the category filter).
+  const rows = recipes.map(r => {
+    const ings = cwIngredients(r.ingredients);
+    const missing = ings.filter(n => !have.has(cwNorm(n)));
+    const cats = new Set(ings.map(n => catByName.get(cwNorm(n))).filter(Boolean));
+    return { r, ings, missing, total: ings.length, cats };
+  });
+  const usedCats = [...new Set(rows.flatMap(x => [...x.cats]))];
+  let q = '', cat = 'all';
+
+  function renderCats() {
+    overlay.querySelector('#cw-cats').innerHTML = ['all', ...usedCats].map(c =>
+      `<button type="button" class="rf-chip ${cat === c ? 'active' : ''}" data-cw-cat="${c}">${c === 'all' ? 'Все' : escapeHtml(CW_CAT_LABELS[c] || c)}</button>`).join('');
+    overlay.querySelectorAll('[data-cw-cat]').forEach(b => b.onclick = () => { cat = b.dataset.cwCat; renderCats(); renderList(); });
+  }
+  function renderList() {
+    const ql = cwNorm(q);
+    const filtered = rows.filter(x => {
+      if (cat !== 'all' && !x.cats.has(cat)) return false;
+      if (!ql) return true;
+      return cwNorm(x.r.name).includes(ql) || x.ings.some(n => cwNorm(n).includes(ql));
+    }).sort((a, b) => (a.missing.length - b.missing.length) || ((b.r.cook_count || 0) - (a.r.cook_count || 0)));
+    const list = overlay.querySelector('#cw-list');
+    if (!filtered.length) { list.innerHTML = '<div class="empty">Ничего не нашлось.</div>'; return; }
+    list.innerHTML = filtered.map(x => {
+      const badge = x.missing.length === 0
+        ? '<span class="badge badge-green">✓ есть всё</span>'
+        : `<span class="badge badge-gray">не хватает ${x.missing.length}: ${escapeHtml(x.missing.slice(0, 3).join(', '))}${x.missing.length > 3 ? '…' : ''}</span>`;
+      return `<div class="cw-row" data-rid="${x.r.id}" data-rname="${escapeHtml(x.r.name)}" style="padding:10px;border:1px solid var(--border-subtle);border-radius:8px;margin-bottom:6px;cursor:pointer">
+        <div style="font-weight:600">${escapeHtml(x.r.name)}</div>
+        <div style="margin-top:4px;font-size:12px">${badge} <span class="muted">· ${x.total - x.missing.length}/${x.total} ингр.</span></div>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.cw-row').forEach(row => row.onclick = () => {
+      close();
+      showCookingLogModal(date, onSaved, { id: parseInt(row.dataset.rid), name: row.dataset.rname });
+    });
+  }
+  renderCats(); renderList();
+  overlay.querySelector('#cw-search').oninput = (e) => { q = e.target.value; renderList(); };
 }

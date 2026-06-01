@@ -5,7 +5,7 @@
 
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
-import { showCookingLogModal } from './food-cooking-log.js';
+import { showCookingLogModal, showCookWhatModal } from './food-cooking-log.js';
 import { showShoppingPicker } from './shopping-list-modal.js';
 import { itemsToDescription } from './shopping-list.js';
 
@@ -14,6 +14,7 @@ import { itemsToDescription } from './shopping-list.js';
 // user data; CRUD on them doesn't belong in the catalogue tables.
 const TEMPLATES = [
   { id: 'cook',    icon: '🍳', label: 'Готовка',     title: 'Готовка',          dur: 30, cat: 'Готовка', tab: 'food',    handoff: 'cook' },
+  { id: 'cookwhat',icon: '🍲', label: 'Что приготовить', title: 'Готовка',      dur: 30, cat: 'Готовка', tab: 'food',    handoff: 'cookwhat' },
   { id: 'workout', icon: '🏋️', label: 'Тренировка',  title: 'Тренировка',       dur: 60, cat: 'Спорт',   tab: 'sports' },
   { id: 'shower',  icon: '🚿', label: 'Душ',         title: 'Душ',              dur: 15, cat: 'Быт' },
   { id: 'toilet',  icon: '🚽', label: 'Туалет',      title: 'Туалет',           dur: 5,  cat: 'Быт' },
@@ -85,6 +86,13 @@ function handleTemplate(tpl, overlay, specEl, ctx) {
     const date = overlay.querySelector('#evm-date')?.value;
     overlay.remove();
     showCookingLogModal(date, () =>
+      window.dispatchEvent(new CustomEvent('hanni:calendar-refresh')));
+    return;
+  }
+  if (tpl.handoff === 'cookwhat') {
+    const date = overlay.querySelector('#evm-date')?.value;
+    overlay.remove();
+    showCookWhatModal(date, () =>
       window.dispatchEvent(new CustomEvent('hanni:calendar-refresh')));
     return;
   }

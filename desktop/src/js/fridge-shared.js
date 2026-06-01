@@ -35,7 +35,7 @@
   }
 
   async function mountInventory({ el, backend }) {
-    const state = { items: [], loc: 'all', catalog: null };
+    const state = { items: [], loc: 'all', catalog: null, q: '' };
     const canAdd = !!backend.add, canEdit = !!backend.update, canDelete = !!backend.remove;
 
     async function load() {
@@ -60,22 +60,71 @@
 
     function locFilter(p) { return state.loc === 'all' || p.location === state.loc; }
 
+    // Quantity pill: a −/＋ stepper when the backend allows edits (so you can
+    // "use one up" without opening the modal), else a static tag.
+    function qtyControl(p) {
+      const txt = esc(`${p.quantity ?? 1} ${p.unit || 'шт'}`.trim());
+      if (!canEdit) return `<span class="product-card-tag">${txt}</span>`;
+      const btn = 'border:none;background:none;cursor:pointer;font-size:15px;line-height:1;color:var(--text-secondary);padding:0 2px';
+      return `<span class="product-card-tag" style="display:inline-flex;align-items:center;gap:6px">
+        <button type="button" data-dec="${p.id}" title="Меньше" style="${btn}">−</button>
+        <span>${txt}</span>
+        <button type="button" data-inc="${p.id}" title="Больше" style="${btn}">＋</button>
+      </span>`;
+    }
+
     function cardHtml(p) {
       const cls = CAT_COLORS[p.category] || 'gray';
       const label = CAT_LABELS[p.category] || p.category;
-      const qty = `${p.quantity ?? 1} ${p.unit || 'шт'}`.trim();
       const loc = LOC_LABELS[p.location] || p.location;
       const exp = expiryBadge(p.expiry_date);
+      const done = canDelete
+        ? `<button type="button" data-done="${p.id}" title="Закончилось — убрать" style="border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:12px;margin-left:auto;padding:0 2px">✓ закончилось</button>`
+        : '';
       return `<div class="product-card" data-id="${p.id}">
-        <div class="product-card-name">${esc(p.name)}</div>
+        <div class="product-card-name" style="display:flex;align-items:center;gap:6px">${esc(p.name)}${done}</div>
         <div class="product-card-tags">
           <span class="product-card-cat product-cat-${cls}">${esc(label)}</span>
-          <span class="product-card-tag">${esc(qty)}</span>
+          ${qtyControl(p)}
           <span class="product-card-tag">${esc(loc)}</span>
           ${exp}
         </div>
         ${p.notes ? `<div style="margin-top:6px;font-size:12px;color:var(--text-muted);font-style:italic">${esc(p.notes)}</div>` : ''}
       </div>`;
+    }
+
+    // Days-to-expiry summary across the whole inventory (not just the filtered
+    // location) — the fridge's main job is to stop food rotting unseen.
+    function expiryAlert() {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      let overdue = 0, soon = 0;
+      for (const p of state.items) {
+        if (!p.expiry_date) continue;
+        const d = Math.round((new Date(p.expiry_date) - today) / 86400000);
+        if (isNaN(d)) continue;
+        if (d < 0) overdue++; else if (d <= 3) soon++;
+      }
+      if (!overdue && !soon) return '';
+      const parts = [];
+      if (overdue) parts.push(`<b style="color:var(--color-red)">${overdue} просрочено</b>`);
+      if (soon) parts.push(`<b style="color:var(--color-yellow)">${soon} скоро испортится</b>`);
+      return `<div style="background:var(--bg-hover);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:13px">⚠️ ${parts.join(' · ')}</div>`;
+    }
+
+    async function adjustQty(id, delta) {
+      const p = state.items.find(x => x.id === id); if (!p || !canEdit) return;
+      const next = Math.round(((parseFloat(p.quantity) || 0) + delta) * 100) / 100;
+      if (next <= 0) return finishItem(id);
+      try {
+        await backend.update(id, { name: p.name, category: p.category, quantity: next, unit: p.unit,
+          expiry_date: p.expiry_date, location: p.location, notes: p.notes, catalog_id: p.catalog_id });
+        load();
+      } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+    }
+    async function finishItem(id) {
+      if (!canDelete) return;
+      try { await backend.remove(id); load(); }
+      catch (e) { alert('Ошибка: ' + (e.message || e)); }
     }
 
     function locChips() {
@@ -85,23 +134,53 @@
       ).join('');
     }
 
+    // Build the static shell (search + location chips + expiry banner) once;
+    // the grid repaints on its own so typing in search keeps focus.
     function render() {
-      const filtered = state.items.filter(locFilter);
-      const grid = filtered.length
-        ? `<div class="product-grid">${filtered.map(cardHtml).join('')}</div>`
-        : '<div class="empty">Холодильник пуст.</div>';
       const addBtn = canAdd ? `<button class="btn-primary" id="fr-add">+ Продукт</button>` : '';
       el.innerHTML = `
-        <div class="recipe-filter-bar" style="position:static;padding:0;margin:0 0 12px">
+        <div class="recipe-filter-bar" style="position:static;padding:0;margin:0 0 12px;align-items:center;gap:8px">
+          <input class="form-input" id="fr-search" placeholder="Поиск…" value="${esc(state.q)}" style="max-width:180px">
           <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">${locChips()}</div>
           ${addBtn}
         </div>
-        <h2>Холодильник (${filtered.length})</h2>
-        ${grid}`;
-      el.querySelectorAll('[data-loc]').forEach(b => b.onclick = () => { state.loc = b.dataset.loc; render(); });
-      el.querySelectorAll('.product-card').forEach(c =>
-        c.onclick = () => openEditModal(state.items.find(p => p.id === parseInt(c.dataset.id))));
+        ${expiryAlert()}
+        <div id="fr-grid-wrap"></div>`;
+      el.querySelectorAll('[data-loc]').forEach(b => b.onclick = () => {
+        state.loc = b.dataset.loc;
+        el.querySelectorAll('[data-loc]').forEach(x => x.classList.toggle('active', x === b));
+        paintGrid();
+      });
+      const s = el.querySelector('#fr-search'); if (s) s.oninput = () => { state.q = s.value; paintGrid(); };
       const a = el.querySelector('#fr-add'); if (a) a.onclick = () => openAddModal();
+      paintGrid();
+    }
+
+    function paintGrid() {
+      const q = (state.q || '').trim().toLowerCase();
+      // Soonest-to-expire first (items with no date sink to the bottom).
+      const filtered = state.items.filter(locFilter)
+        .filter(p => !q || String(p.name).toLowerCase().includes(q))
+        .slice().sort((a, b) => {
+          const ea = a.expiry_date ? new Date(a.expiry_date).getTime() : Infinity;
+          const eb = b.expiry_date ? new Date(b.expiry_date).getTime() : Infinity;
+          return ea - eb;
+        });
+      const empty = (q || state.loc !== 'all')
+        ? 'Ничего не найдено.'
+        : `Холодильник пуст.${canAdd ? ' Добавь первый продукт кнопкой «+ Продукт».' : ''}`;
+      const grid = filtered.length
+        ? `<div class="product-grid">${filtered.map(cardHtml).join('')}</div>`
+        : `<div class="empty">${empty}</div>`;
+      const wrap = el.querySelector('#fr-grid-wrap');
+      if (!wrap) return;
+      wrap.innerHTML = `<h2>Холодильник (${filtered.length})</h2>${grid}`;
+      wrap.querySelectorAll('.product-card').forEach(c =>
+        c.onclick = () => openEditModal(state.items.find(p => p.id === parseInt(c.dataset.id))));
+      // Quick controls — stop propagation so they don't open the edit modal.
+      wrap.querySelectorAll('[data-inc]').forEach(b => b.onclick = (e) => { e.stopPropagation(); adjustQty(parseInt(b.dataset.inc), 1); });
+      wrap.querySelectorAll('[data-dec]').forEach(b => b.onclick = (e) => { e.stopPropagation(); adjustQty(parseInt(b.dataset.dec), -1); });
+      wrap.querySelectorAll('[data-done]').forEach(b => b.onclick = (e) => { e.stopPropagation(); finishItem(parseInt(b.dataset.done)); });
     }
 
     function openAddModal() { openModal(null); }
