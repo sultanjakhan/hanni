@@ -24,6 +24,9 @@ export function renderCard(r, onIngrClick, onDuplicate) {
     return `<span class="ingr-tag${cls}" data-ingr="${escapeHtml(n)}">${escapeHtml(n)}</span>`;
   }).join('') + (ingrNames.length > 5 ? `<span class="ingr-tag ingr-more">+${ingrNames.length - 5}</span>` : '');
 
+  const fridge = (r._missing == null) ? ''
+    : (r._missing === 0 ? '<span class="badge badge-green">✓ есть всё</span>'
+       : `<span class="badge badge-gray">не хватает ${r._missing}</span>`);
   const div = document.createElement('div');
   div.className = 'recipe-card' + (r.favorite === 1 ? ' recipe-fav' : '');
   div.dataset.id = r.id;
@@ -42,7 +45,7 @@ export function renderCard(r, onIngrClick, onDuplicate) {
       <span class="recipe-diff recipe-diff-${r.difficulty || 'easy'}">${diffLabel}</span>
       <span>❤${r.health_score || 5}</span><span>💰${r.price_score || 5}</span>
     </div>
-    <div class="recipe-card-tags">${badgesHtml}</div>
+    <div class="recipe-card-tags">${fridge}${badgesHtml}</div>
     <div class="recipe-card-ingr">${ingrHtml}</div>`;
   div.querySelectorAll('.ingr-tag[data-ingr]').forEach(tag => {
     tag.addEventListener('click', (e) => { e.stopPropagation(); onIngrClick(tag.dataset.ingr); });

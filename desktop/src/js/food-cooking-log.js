@@ -4,6 +4,21 @@
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 
+// Convert `amount` between units of the same family (mass: г/кг, volume: мл/л).
+// Returns null when units are incompatible (e.g. г vs шт) so the caller can fall
+// back to deducting a single unit.
+function convertAmount(amount, fromUnit, toUnit) {
+  const u = (x) => String(x || '').trim().toLowerCase().replace(/\.$/, '');
+  const f = u(fromUnit), t = u(toUnit);
+  if (f === t) return amount;
+  const MASS = { 'г': 1, 'гр': 1, 'кг': 1000 };
+  const VOL = { 'мл': 1, 'л': 1000 };
+  for (const fam of [MASS, VOL]) {
+    if (f in fam && t in fam) return amount * fam[f] / fam[t];
+  }
+  return null;
+}
+
 export function showCookingLogModal(date, onSaved, preRecipe) {
   const today = date || new Date().toISOString().slice(0, 10);
   let selectedId = preRecipe ? preRecipe.id : null;
@@ -34,10 +49,12 @@ export function showCookingLogModal(date, onSaved, preRecipe) {
   overlay.querySelector('#cl-cancel').onclick = close;
 
   const stars = overlay.querySelectorAll('.rd-star');
-  stars.forEach(s => s.onclick = () => {
-    rating = parseInt(s.dataset.n);
-    stars.forEach(x => x.classList.toggle('on', parseInt(x.dataset.n) <= rating));
+  const paintStars = (n) => stars.forEach(x => x.classList.toggle('on', parseInt(x.dataset.n) <= n));
+  stars.forEach(s => {
+    s.onclick = () => { rating = parseInt(s.dataset.n); paintStars(rating); };
+    s.onmouseenter = () => paintStars(parseInt(s.dataset.n)); // hover preview
   });
+  overlay.querySelector('#cl-stars').onmouseleave = () => paintStars(rating); // restore actual
 
   const search = overlay.querySelector('#cl-search');
   search.oninput = () => renderList(search.value.trim().toLowerCase());
@@ -82,10 +99,15 @@ export function showCookingLogModal(date, onSaved, preRecipe) {
     }
     if (!deductMatches.length) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="form-group"><label class="form-label">Списать из холодильника</label>
-      ${deductMatches.map((m, i) => `<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:2px 0">
+      ${deductMatches.map((m, i) => {
+        const conv = m.ing.amount ? convertAmount(m.ing.amount, m.ing.unit, m.p.unit) : null;
+        const dec = (conv != null) ? Math.round(conv * 100) / 100 : 1;
+        const un = escapeHtml(m.p.unit || 'шт');
+        return `<label style="display:flex;gap:8px;align-items:center;font-size:13px;padding:2px 0">
         <input type="checkbox" class="cl-deduct-cb" data-i="${i}" checked>
-        ${escapeHtml(m.p.name)} <span style="color:var(--text-muted)">(есть ${m.p.quantity ?? 1} ${escapeHtml(m.p.unit || 'шт')})</span>
-      </label>`).join('')}</div>`;
+        ${escapeHtml(m.p.name)} <span style="color:var(--text-muted)">(есть ${m.p.quantity ?? 1} ${un} → спишется ${dec} ${un})</span>
+      </label>`;
+      }).join('')}</div>`;
   }
 
   overlay.querySelector('#cl-save').onclick = async () => {
@@ -105,8 +127,8 @@ export function showCookingLogModal(date, onSaved, preRecipe) {
       // Deduct the checked fridge items: by amount when units match, else one unit.
       for (const cb of overlay.querySelectorAll('.cl-deduct-cb:checked')) {
         const m = deductMatches[parseInt(cb.dataset.i)]; if (!m) continue;
-        const sameUnit = clNorm(m.ing.unit) === clNorm(m.p.unit);
-        const dec = (sameUnit && m.ing.amount) ? m.ing.amount : 1;
+        const conv = m.ing.amount ? convertAmount(m.ing.amount, m.ing.unit, m.p.unit) : null;
+        const dec = (conv != null) ? conv : 1; // convert across compatible units, else one unit
         const next = Math.round(((parseFloat(m.p.quantity) || 0) - dec) * 100) / 100;
         try {
           if (next <= 0) await invoke('delete_product', { id: m.p.id });

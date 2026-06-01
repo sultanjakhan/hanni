@@ -7,9 +7,17 @@
 // bought_at when the event is saved upstream.
 
 import { escapeHtml } from './utils.js';
+import { invoke } from './state.js';
 import {
-  listShoppingItems, addShoppingItem, deleteShoppingItem,
+  listShoppingItems, addShoppingItem, deleteShoppingItem, markBought,
 } from './shopping-list.js';
+
+// "2 шт" / "500 г" → { quantity, unit } for the fridge product.
+function parseQty(qtyStr) {
+  const m = String(qtyStr || '').trim().match(/^([\d.,]+)\s*(.*)$/);
+  if (m) return { quantity: parseFloat(m[1].replace(',', '.')) || 1, unit: (m[2] || '').trim() || 'шт' };
+  return { quantity: 1, unit: 'шт' };
+}
 
 function rowHtml(item, mode, selected) {
   const checked = selected ? ' checked' : '';
@@ -17,6 +25,9 @@ function rowHtml(item, mode, selected) {
   const note = item.note ? `<span class="sl-note">${escapeHtml(item.note)}</span>` : '';
   const picker = mode === 'picker'
     ? `<label class="sl-check"><input type="checkbox" data-id="${item.id}"${checked}></label>`
+    : '';
+  const buy = mode === 'manage'
+    ? `<button class="sl-buy" data-buy="${item.id}" title="Куплено → в холодильник" style="font-size:12px;color:var(--color-green);background:none;border:none;cursor:pointer;white-space:nowrap">✓ в холодильник</button>`
     : '';
   const del = mode === 'manage'
     ? `<button class="sl-del" data-del="${item.id}" title="Удалить">×</button>`
@@ -27,7 +38,7 @@ function rowHtml(item, mode, selected) {
       <div class="sl-name">${escapeHtml(item.name)}</div>
       ${(qty || note) ? `<div class="sl-meta">${qty}${note}</div>` : ''}
     </div>
-    ${del}
+    ${buy}${del}
   </div>`;
 }
 
@@ -39,6 +50,21 @@ async function renderList(container, mode, preselectedIds = new Set()) {
   }
   container.innerHTML = items.map(i => rowHtml(i, mode, preselectedIds.has(i.id))).join('');
   if (mode === 'manage') {
+    container.querySelectorAll('[data-buy]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const id = Number(b.dataset.buy);
+        const item = items.find(i => i.id === id);
+        if (item) {
+          const { quantity, unit } = parseQty(item.qty);
+          try {
+            await invoke('add_product', { name: item.name, category: null, quantity, unit,
+              expiryDate: null, location: 'fridge', notes: '', catalogId: null });
+          } catch (e) { console.warn('[hanni] shopping→fridge failed', e); }
+        }
+        await markBought([id]); // bought items drop off the active list
+        await renderList(container, mode, preselectedIds);
+      });
+    });
     container.querySelectorAll('[data-del]').forEach(b => {
       b.addEventListener('click', async () => {
         const id = Number(b.dataset.del);

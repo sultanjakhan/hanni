@@ -1,7 +1,7 @@
 // ── tab-food-recipes.js — Recipe book pane for Food tab ──
 import { invoke } from './state.js';
 import { escapeHtml, chips } from './utils.js';
-import { renderCard } from './food-recipe-card.js';
+import { renderCard, getIngrNames } from './food-recipe-card.js';
 import { showBlacklistContextMenu } from './food-blacklist-menu.js';
 import {
   MEALS, DIFFS, SORTS, CAT_LABELS, CAT_ORDER, getCuisineChips, loadCatalog,
@@ -20,21 +20,28 @@ function accordionRow(title, group, content, activeCount) {
 }
 
 export async function renderRecipesPane(el) {
-  const F = { meal: 'all', cuisine: 'all', diff: 'all', fav: false, q: '', sort: 'name', minRating: 0, maxTime: 0 };
+  const F = { meal: 'all', cuisine: 'all', diff: 'all', fav: false, cookable: false, q: '', sort: 'name', minRating: 0, maxTime: 0 };
   const selIngr = new Set();
   let allRecipes = [], blacklist = [], cuisineChips = [], panelOpen = false, built = false;
 
   async function loadData() {
-    [allRecipes, blacklist] = await Promise.all([
+    let products;
+    [allRecipes, blacklist, , products] = await Promise.all([
       invoke('get_recipes', { search: null }).catch(() => []), getBlacklist(), loadCatalog(),
+      invoke('get_products', {}).catch(() => []),
     ]);
+    // Tag each recipe with how many of its ingredients are NOT in the fridge,
+    // so cards can show "есть всё / не хватает N" and the "cookable" filter works.
+    const have = new Set((products || []).map(p => String(p.name || '').trim().toLowerCase()));
+    for (const r of allRecipes) r._missing = getIngrNames(r).filter(n => !have.has(n.trim().toLowerCase())).length;
   }
 
   function getFiltered() {
     let list = allRecipes.filter(r => !matchBL(r, blacklist) && matchMeal(r, F.meal)
       && matchCuisine(r, F.cuisine) && matchDiff(r, F.diff)
       && matchSearch(r, F.q) && (!F.fav || r.favorite === 1)
-      && matchIngr(r, selIngr) && matchRating(r, F.minRating) && matchTime(r, F.maxTime));
+      && matchIngr(r, selIngr) && matchRating(r, F.minRating) && matchTime(r, F.maxTime)
+      && (!F.cookable || r._missing === 0));
     const sorted = sortRecipes(list, F.sort);
     // soft-blocked recipes ("не люблю") sink to the bottom of the list.
     const soft = [], normal = [];
@@ -90,6 +97,7 @@ export async function renderRecipesPane(el) {
       ${accordionRow('Оценка и время', 'extra', `${chips(RATINGS, F.minRating, 'rating')}${chips(TIMES, F.maxTime, 'time')}`, (F.minRating ? 1 : 0) + (F.maxTime ? 1 : 0))}
       <div class="rf-acc-fav">
         <button class="rf-chip${F.fav ? ' active' : ''}" data-group="fav" data-val="toggle">★ Избранное</button>
+        <button class="rf-chip${F.cookable ? ' active' : ''}" data-group="cookable" data-val="toggle">🍲 Могу приготовить</button>
         <button class="rf-reset" data-group="reset">Сбросить</button>
       </div>`;
     // Accordion toggle
@@ -104,11 +112,12 @@ export async function renderRecipesPane(el) {
     panel.querySelectorAll('.rf-chip, .rf-reset').forEach(btn => btn.onclick = async () => {
       const g = btn.dataset.group, v = btn.dataset.val;
       if (g === 'fav') F.fav = !F.fav;
+      else if (g === 'cookable') F.cookable = !F.cookable;
       else if (g === 'ingr') { selIngr.has(v) ? selIngr.delete(v) : selIngr.add(v); }
       else if (g === 'rating') F.minRating = (F.minRating === +v ? 0 : +v);
       else if (g === 'time') F.maxTime = (F.maxTime === +v ? 0 : +v);
       else if (g === 'sort') F.sort = v;
-      else if (g === 'reset') { F.meal = 'all'; F.cuisine = 'all'; F.diff = 'all'; F.fav = false; F.minRating = 0; F.maxTime = 0; F.sort = 'name'; selIngr.clear(); }
+      else if (g === 'reset') { F.meal = 'all'; F.cuisine = 'all'; F.diff = 'all'; F.fav = false; F.cookable = false; F.minRating = 0; F.maxTime = 0; F.sort = 'name'; selIngr.clear(); }
       else F[g] = v;
       await updatePanel(); updateGrid(); updateBadge(); updateActive();
     });
@@ -125,6 +134,7 @@ export async function renderRecipesPane(el) {
     if (F.minRating) items.push(['rating', `★${F.minRating}+`]);
     if (F.maxTime) items.push(['time', `≤${F.maxTime} мин`]);
     if (F.fav) items.push(['fav', '★ Избранное']);
+    if (F.cookable) items.push(['cookable', '🍲 Могу приготовить']);
     for (const ingr of selIngr) items.push([`ingr:${ingr}`, ingr]);
     bar.innerHTML = items.map(([k, label]) => `<button class="rf-active-chip" data-k="${escapeHtml(k)}">${escapeHtml(label)} ×</button>`).join('');
     bar.querySelectorAll('.rf-active-chip').forEach(c => c.onclick = async () => {
@@ -132,13 +142,13 @@ export async function renderRecipesPane(el) {
       if (k.startsWith('ingr:')) selIngr.delete(k.slice(5));
       else if (k === 'meal') F.meal = 'all'; else if (k === 'cuisine') F.cuisine = 'all';
       else if (k === 'diff') F.diff = 'all'; else if (k === 'rating') F.minRating = 0;
-      else if (k === 'time') F.maxTime = 0; else if (k === 'fav') F.fav = false;
+      else if (k === 'time') F.maxTime = 0; else if (k === 'fav') F.fav = false; else if (k === 'cookable') F.cookable = false;
       await updatePanel(); updateGrid(); updateBadge(); updateActive();
     });
   }
 
   function updateBadge() {
-    const ac = [F.meal !== 'all', F.cuisine !== 'all', F.diff !== 'all', F.fav, selIngr.size > 0, F.minRating > 0, F.maxTime > 0].filter(Boolean).length;
+    const ac = [F.meal !== 'all', F.cuisine !== 'all', F.diff !== 'all', F.fav, F.cookable, selIngr.size > 0, F.minRating > 0, F.maxTime > 0].filter(Boolean).length;
     const badge = el.querySelector('.rf-badge'), toggle = el.querySelector('.rf-toggle');
     badge.textContent = ac; badge.style.display = ac ? '' : 'none';
     toggle.classList.toggle('rf-active', ac > 0);

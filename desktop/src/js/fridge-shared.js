@@ -138,11 +138,13 @@
     // the grid repaints on its own so typing in search keeps focus.
     function render() {
       const addBtn = canAdd ? `<button class="btn-primary" id="fr-add">+ Продукт</button>` : '';
+      // "Что приготовить" uses Hanni's recipe/catalog commands → Tauri-only (hidden for guests).
+      const cookBtn = window.__TAURI__?.core?.invoke ? `<button class="btn-secondary" id="fr-cook-what" style="white-space:nowrap">🍲 Что приготовить</button>` : '';
       el.innerHTML = `
         <div class="recipe-filter-bar" style="position:static;padding:0;margin:0 0 12px;align-items:center;gap:8px">
           <input class="form-input" id="fr-search" placeholder="Поиск…" value="${esc(state.q)}" style="max-width:180px">
           <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">${locChips()}</div>
-          ${addBtn}
+          ${cookBtn}${addBtn}
         </div>
         ${expiryAlert()}
         <div id="fr-grid-wrap"></div>`;
@@ -153,6 +155,11 @@
       });
       const s = el.querySelector('#fr-search'); if (s) s.oninput = () => { state.q = s.value; paintGrid(); };
       const a = el.querySelector('#fr-add'); if (a) a.onclick = () => openAddModal();
+      const cw = el.querySelector('#fr-cook-what');
+      if (cw) cw.onclick = async () => {
+        const { showCookWhatModal } = await import('./food-cooking-log.js');
+        showCookWhatModal(new Date().toISOString().slice(0, 10), () => load());
+      };
       paintGrid();
     }
 
