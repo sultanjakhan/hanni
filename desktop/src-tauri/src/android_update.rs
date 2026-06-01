@@ -40,6 +40,10 @@ pub struct ApkUpdate {
     version: String,
     apk_url: String,
     notes: String,
+    /// SHA-256 hex of the APK asset, from GitHub's trusted `digest` field.
+    /// Empty when the release predates digest support; download proceeds
+    /// unverified in that case (logged).
+    sha256: String,
 }
 
 /// True if `latest` is strictly newer than `current`, comparing numeric
@@ -92,7 +96,7 @@ pub async fn check_apk_update(app: AppHandle) -> Result<ApkUpdate, String> {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let apk_url = json
+    let apk_asset = json
         .get("assets")
         .and_then(|a| a.as_array())
         .and_then(|arr| {
@@ -103,13 +107,22 @@ pub async fn check_apk_update(app: AppHandle) -> Result<ApkUpdate, String> {
                     .map(|n| n.to_ascii_lowercase().ends_with(".apk"))
                     .unwrap_or(false)
             })
-        })
+        });
+    let apk_url = apk_asset
         .and_then(|asset| asset.get("browser_download_url").and_then(|u| u.as_str()))
         .unwrap_or("")
         .to_string();
+    // GitHub populates `digest` ("sha256:<hex>") for uploaded assets. It comes
+    // from the trusted HTTPS API, so verifying the downloaded APK against it
+    // detects a tampered/MITM'd download.
+    let sha256 = apk_asset
+        .and_then(|asset| asset.get("digest").and_then(|d| d.as_str()))
+        .unwrap_or("")
+        .trim_start_matches("sha256:")
+        .to_string();
 
     let available = !latest.is_empty() && !apk_url.is_empty() && is_newer(&latest, &current);
-    Ok(ApkUpdate { available, version: latest, apk_url, notes })
+    Ok(ApkUpdate { available, version: latest, apk_url, notes, sha256 })
 }
 
 /// Opens an APK download URL in the system browser (fallback path; the
@@ -128,10 +141,11 @@ pub async fn open_apk_url(app: AppHandle, url: String) -> Result<(), String> {
 /// events with `{loaded, total}` so the banner can show progress. Returns the
 /// absolute file path on success.
 #[tauri::command]
-pub async fn download_apk(app: AppHandle, url: String, version: String) -> Result<String, String> {
+pub async fn download_apk(app: AppHandle, url: String, version: String, sha256: Option<String>) -> Result<String, String> {
     if !url.starts_with("https://") {
         return Err("Only https URLs allowed".into());
     }
+    let expected_sha = sha256.unwrap_or_default();
     let cache_dir: PathBuf = app.path().app_cache_dir()
         .map_err(|e| format!("no cache dir: {e}"))?;
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("mkdir: {e}"))?;
@@ -153,13 +167,16 @@ pub async fn download_apk(app: AppHandle, url: String, version: String) -> Resul
 
     use std::io::Write;
     use futures_util::StreamExt;
+    use sha2::{Digest, Sha256};
     let mut file = std::fs::File::create(&dest).map_err(|e| format!("create: {e}"))?;
+    let mut hasher = Sha256::new();
     let mut loaded: u64 = 0;
     let mut last_emit: u64 = 0;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let bytes = chunk.map_err(|e| format!("chunk: {e}"))?;
         file.write_all(&bytes).map_err(|e| format!("write: {e}"))?;
+        hasher.update(&bytes);
         loaded += bytes.len() as u64;
         // Emit at most every ~256KB to avoid event spam.
         if loaded - last_emit > 256_000 || loaded == total {
@@ -169,6 +186,19 @@ pub async fn download_apk(app: AppHandle, url: String, version: String) -> Resul
         }
     }
     file.sync_all().ok();
+
+    // Integrity: refuse to install an APK whose hash doesn't match the value
+    // from the trusted GitHub API (MITM / tampered-download defense). If the
+    // release carried no digest, proceed but log — can't verify older builds.
+    if !expected_sha.is_empty() {
+        let got = hex::encode(hasher.finalize());
+        if !got.eq_ignore_ascii_case(&expected_sha) {
+            let _ = std::fs::remove_file(&dest);
+            return Err(format!("APK sha256 mismatch (got {got}, want {expected_sha}) — refusing"));
+        }
+    } else {
+        eprintln!("[android_update] release has no digest — installing unverified APK");
+    }
     Ok(dest.to_string_lossy().into_owned())
 }
 
@@ -177,6 +207,13 @@ pub async fn download_apk(app: AppHandle, url: String, version: String) -> Resul
 pub async fn install_apk<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
+        // Only ever install an APK we downloaded into our own cache dir — never
+        // an arbitrary caller-supplied path handed to the OS package installer.
+        let cache_dir = app.path().app_cache_dir().map_err(|e| format!("no cache dir: {e}"))?;
+        let p = std::path::Path::new(&path);
+        if !(p.starts_with(&cache_dir) && path.to_ascii_lowercase().ends_with(".apk")) {
+            return Err("Refusing to install APK outside the app cache dir".into());
+        }
         let handle = app.state::<InstallApkHandle<R>>();
         handle.0.run_mobile_plugin::<serde_json::Value>(
             "installApk",

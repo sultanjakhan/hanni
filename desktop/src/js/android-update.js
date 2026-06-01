@@ -154,7 +154,7 @@ function showUpdateBanner(info) {
         return;
       }
       // 2. Download APK to app cache (Rust emits progress events).
-      const path = await invoke('download_apk', { url: info.apk_url, version: info.version });
+      const path = await invoke('download_apk', { url: info.apk_url, version: info.version, sha256: info.sha256 });
       // 3. Hand the file to the OS installer.
       action.textContent = 'Установка…';
       await invoke('install_apk', { path });
