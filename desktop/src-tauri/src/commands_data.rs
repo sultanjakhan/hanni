@@ -2235,13 +2235,13 @@ pub fn get_recipes(search: Option<String>, db: tauri::State<'_, HanniDb>) -> Res
     if let Some(q) = search {
         let like = format!("%{}%", q);
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked, (SELECT COALESCE(AVG(taste_rating),0) FROM cooking_log WHERE recipe_id=recipes.id AND taste_rating>0) AS avg_rating, (SELECT COUNT(*) FROM cooking_log WHERE recipe_id=recipes.id) AS cook_count FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked, (SELECT COALESCE(AVG(taste_rating),0) FROM cooking_log WHERE recipe_id=recipes.id AND taste_rating>0) AS avg_rating, (SELECT COUNT(*) FROM cooking_log WHERE recipe_id=recipes.id) AS cook_count, image FROM recipes WHERE name LIKE ?1 OR tags LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![like], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked, (SELECT COALESCE(AVG(taste_rating),0) FROM cooking_log WHERE recipe_id=recipes.id AND taste_rating>0) AS avg_rating, (SELECT COUNT(*) FROM cooking_log WHERE recipe_id=recipes.id) AS cook_count FROM recipes ORDER BY updated_at DESC LIMIT 50"
+            "SELECT id, name, description, prep_time, cook_time, servings, calories, tags, ingredients, difficulty, cuisine, health_score, price_score, protein, fat, carbs, favorite, last_cooked, (SELECT COALESCE(AVG(taste_rating),0) FROM cooking_log WHERE recipe_id=recipes.id AND taste_rating>0) AS avg_rating, (SELECT COUNT(*) FROM cooking_log WHERE recipe_id=recipes.id) AS cook_count, image FROM recipes ORDER BY updated_at DESC LIMIT 50"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows: Vec<serde_json::Value> = stmt.query_map([], |row| recipe_from_row(row)).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
@@ -2266,6 +2266,7 @@ pub fn recipe_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, rusqlit
         "last_cooked": row.get::<_, Option<String>>(17).unwrap_or(None),
         "avg_rating": row.get::<_, f64>(18).unwrap_or(0.0),
         "cook_count": row.get::<_, i64>(19).unwrap_or(0),
+        "image": row.get::<_, String>(20).unwrap_or_default(),
     }))
 }
 

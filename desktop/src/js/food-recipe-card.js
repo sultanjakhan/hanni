@@ -34,6 +34,7 @@ export function renderCard(r, onIngrClick, onDuplicate) {
     ? `<button class="recipe-card-dup-btn" title="Дублировать рецепт" aria-label="Дублировать">⧉</button>`
     : '';
   div.innerHTML = `
+    ${r.image ? `<img class="recipe-card-thumb" src="${escapeHtml(r.image)}" alt="">` : ''}
     <div class="recipe-card-header">
       <span class="recipe-card-name">${r.favorite === 1 ? '★ ' : ''}${escapeHtml(r.name)}</span>
       <span class="recipe-card-cal">${r.calories || '—'} kcal</span>

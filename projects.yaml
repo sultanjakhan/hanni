@@ -286,6 +286,7 @@ food:
     - desktop/src/js/food-cooking-log.js
     - desktop/src/js/shopping-list.js
     - desktop/src/js/shopping-list-modal.js
+    - desktop/src/js/fridge-multiadd.js
   rust: []  # commands_data.rs + commands_shopping.rs
   tables: [food_log, recipes, recipe_ingredients, products, ingredient_catalog, meal_plan, food_blacklist, shopping_list]
   subprojects:

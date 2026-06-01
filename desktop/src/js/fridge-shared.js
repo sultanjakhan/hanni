@@ -111,6 +111,28 @@
       return `<div style="background:var(--bg-hover);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:13px">⚠️ ${parts.join(' · ')}</div>`;
     }
 
+    // Compact table of items expiring within 3 days (or overdue), pinned above
+    // the grid so what needs eating is impossible to miss.
+    function expiringTable() {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const rows = state.items.filter(p => {
+        if (!p.expiry_date) return false;
+        const d = Math.round((new Date(p.expiry_date) - today) / 86400000);
+        return !isNaN(d) && d <= 3;
+      }).slice().sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date));
+      if (!rows.length) return '';
+      return `<div style="margin-bottom:14px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px">⏰ Скоро испортится (${rows.length})</div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          ${rows.map(p => `<tr style="border-bottom:1px solid var(--border-subtle)">
+            <td style="padding:5px 8px">${esc(p.name)}</td>
+            <td style="padding:5px 8px;color:var(--text-muted)">${esc(`${p.quantity ?? 1} ${p.unit || 'шт'}`.trim())}</td>
+            <td style="padding:5px 8px;text-align:right">${expiryBadge(p.expiry_date)}</td>
+          </tr>`).join('')}
+        </table>
+      </div>`;
+    }
+
     async function adjustQty(id, delta) {
       const p = state.items.find(x => x.id === id); if (!p || !canEdit) return;
       const next = Math.round(((parseFloat(p.quantity) || 0) + delta) * 100) / 100;
@@ -140,13 +162,16 @@
       const addBtn = canAdd ? `<button class="btn-primary" id="fr-add">+ Продукт</button>` : '';
       // "Что приготовить" uses Hanni's recipe/catalog commands → Tauri-only (hidden for guests).
       const cookBtn = window.__TAURI__?.core?.invoke ? `<button class="btn-secondary" id="fr-cook-what" style="white-space:nowrap">🍲 Что приготовить</button>` : '';
+      // Bulk quick-fill — Hanni-only (loads fridge-multiadd.js on demand).
+      const fastBtn = (canAdd && window.__TAURI__?.core?.invoke) ? `<button class="btn-secondary" id="fr-fast" style="white-space:nowrap">📋 Быстро</button>` : '';
       el.innerHTML = `
         <div class="recipe-filter-bar" style="position:static;padding:0;margin:0 0 12px;align-items:center;gap:8px">
           <input class="form-input" id="fr-search" placeholder="Поиск…" value="${esc(state.q)}" style="max-width:180px">
           <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">${locChips()}</div>
-          ${cookBtn}${addBtn}
+          ${cookBtn}${fastBtn}${addBtn}
         </div>
         ${expiryAlert()}
+        ${expiringTable()}
         <div id="fr-grid-wrap"></div>`;
       el.querySelectorAll('[data-loc]').forEach(b => b.onclick = () => {
         state.loc = b.dataset.loc;
@@ -159,6 +184,11 @@
       if (cw) cw.onclick = async () => {
         const { showCookWhatModal } = await import('./food-cooking-log.js');
         showCookWhatModal(new Date().toISOString().slice(0, 10), () => load());
+      };
+      const fast = el.querySelector('#fr-fast');
+      if (fast) fast.onclick = async () => {
+        const { showMultiAddModal } = await import('./fridge-multiadd.js');
+        showMultiAddModal({ backend, location: state.loc === 'all' ? 'fridge' : state.loc, onAdded: () => load() });
       };
       paintGrid();
     }
