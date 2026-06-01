@@ -179,7 +179,7 @@ fn init_database() -> HanniDb {
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
     // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 1;
+    const SCHEMA_VERSION: i64 = 3;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -234,6 +234,7 @@ fn init_database() -> HanniDb {
         db::migrate_sleep_to_uuid_pk(&conn); // Phase 1: UUID PK for sleep_*
         db::migrate_health_to_uuid_pk(&conn); // Phase 2: UUID PK for health_log + heart_rate_samples
         db::migrate_schedules_to_uuid_pk(&conn); // Phase 3: UUID PK for schedules + schedule_completions
+        db::migrate_schedule_auto_source(&conn); // v0.92: auto_source link (after uuid_pk rebuild)
         let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
     }
 

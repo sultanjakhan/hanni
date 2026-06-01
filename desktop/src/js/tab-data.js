@@ -1848,6 +1848,10 @@ const SCHEDULE_CATEGORIES = { health: 'Здоровье', sport: 'Спорт', h
 const SCH_CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', growth: 'yellow', work: 'orange', home: 'orange', other: 'gray' };
 const SCHEDULE_FREQ = { daily: 'Ежедневно', weekly: 'Еженедельно', custom: 'По дням' };
 const DAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+// Auto-complete sources — keys mirror source_key_for_event_title in
+// calendar_health.rs. A schedule with auto_source set is marked done from real
+// data (Health exercise minutes / cooking log) instead of by hand.
+const AUTO_SOURCES = { '': 'Нет', steps: '👣 Шаги', sleep: '😴 Сон', walking: '🚶 Ходьба', running: '🏃 Пробежка', cycling: '🚴 Велосипед', swimming: '🏊 Плавание', strength: '🏋 Силовая', yoga: '🧘 Йога', hiking: '🥾 Поход', workout: '💪 Тренировка', cooking: '🍳 Готовка' };
 
 function getScheduleUntil(s) {
   if (!s.until_date) return null;
@@ -2170,6 +2174,18 @@ async function loadSchedule(subTab) {
               return `<div class="habit-check${isTrack ? ' checked' : ''}" data-trackmode-id="${r.id}" style="cursor:pointer;" title="${title}">${isTrack ? '&#10003;' : ''}</div>`;
             }
           },
+          { key: 'marks_previous_day', label: 'Рефлексия', dataType: 'checkbox',
+            headerTooltip: 'Вкл = «отметка за вчера»: задача спрашивает про прошлый день (✓ / ✗), а отметка пишется на вчерашнюю дату.',
+            render: r => `<div class="habit-check${r.marks_previous_day ? ' checked' : ''}" data-refl-id="${r.id}" style="cursor:pointer;" title="${r.marks_previous_day ? 'Рефлексия за вчера' : 'Обычная задача на сегодня'}">${r.marks_previous_day ? '&#10003;' : ''}</div>` },
+          { key: 'auto_source', label: 'Авто', editable: true, editType: 'select',
+            headerTooltip: 'Авто-отметка из реальных данных: шаги/сон/тренировки из Health, готовка из лога. «Нет» = отмечаешь вручную.',
+            editOptions: Object.entries(AUTO_SOURCES).map(([k, v]) => ({ value: k, label: v })),
+            rawValue: r => r.auto_source || '',
+            render: r => r.auto_source ? `<span style="font-size:12px;color:var(--text-secondary);">${AUTO_SOURCES[r.auto_source] || r.auto_source}</span>` : '<span class="text-faint">—</span>' },
+          { key: 'visible_from', label: 'Видим с', editable: true, editType: 'text',
+            headerTooltip: 'Показывать в таскере (Список/«+») только с этого времени сегодня (HH:MM). Пусто = всегда. Чтобы вечерние задачи не мусорили утром.',
+            rawValue: r => r.visible_from || '',
+            render: r => r.visible_from ? `<span class="cell-minutes">${escapeHtml(r.visible_from)}</span>` : '<span class="text-faint">—</span>' },
         ],
         idField: 'id',
         addButton: '+ Расписание',
@@ -2198,7 +2214,7 @@ async function loadSchedule(subTab) {
             const n = parseInt(value);
             await invoke('update_schedule', { id: recordId, targetMinutes: isNaN(n) || n <= 0 ? 0 : n });
           } else {
-            const keyMap = { title: 'title', category: 'category', details: 'details' };
+            const keyMap = { title: 'title', category: 'category', details: 'details', auto_source: 'autoSource', visible_from: 'visibleFrom' };
             const params = { id: recordId };
             const paramKey = keyMap[key];
             if (paramKey) params[paramKey] = value;
@@ -2228,9 +2244,10 @@ async function loadSchedule(subTab) {
         }
       }
       paneEl.addEventListener('click', async (e) => {
+        // schedules.id is a UUID string — never parseInt it (yields garbage).
         const chk = e.target.closest('[data-schid]');
         if (chk) {
-          const id = parseInt(chk.dataset.schid);
+          const id = chk.dataset.schid;
           await invoke('toggle_schedule_completion', { scheduleId: id, date: today });
           const wasChecked = chk.classList.contains('checked');
           chk.classList.toggle('checked', !wasChecked);
@@ -2239,7 +2256,7 @@ async function loadSchedule(subTab) {
         }
         const ov = e.target.closest('[data-overdue-id]');
         if (ov) {
-          const id = parseInt(ov.dataset.overdueId);
+          const id = ov.dataset.overdueId;
           const wasOn = ov.classList.contains('checked');
           await invoke('update_schedule', { id, trackOverdue: !wasOn });
           ov.classList.toggle('checked', !wasOn);
@@ -2248,16 +2265,25 @@ async function loadSchedule(subTab) {
         }
         const tm = e.target.closest('[data-trackmode-id]');
         if (tm) {
-          const id = parseInt(tm.dataset.trackmodeId);
+          const id = tm.dataset.trackmodeId;
           const wasOn = tm.classList.contains('checked');
           await invoke('update_schedule', { id, trackingMode: wasOn ? 'check' : 'track' });
           tm.classList.toggle('checked', !wasOn);
           tm.innerHTML = wasOn ? '' : '&#10003;';
           return;
         }
+        const rf = e.target.closest('[data-refl-id]');
+        if (rf) {
+          const id = rf.dataset.reflId;
+          const wasOn = rf.classList.contains('checked');
+          await invoke('update_schedule', { id, marksPreviousDay: !wasOn });
+          rf.classList.toggle('checked', !wasOn);
+          rf.innerHTML = wasOn ? '' : '&#10003;';
+          return;
+        }
         const tog = e.target.closest('[data-toggle-id]');
         if (tog) {
-          const id = parseInt(tog.dataset.toggleId);
+          const id = tog.dataset.toggleId;
           const isOn = tog.classList.contains('on');
           await invoke('update_schedule', { id, isActive: !isOn });
           reloadTable();
@@ -2289,8 +2315,18 @@ function showScheduleModal() {
     <div class="form-group" style="display:flex;align-items:center;gap:10px;">
       <label class="form-label" style="margin:0;flex:1;">Трекинг времени</label>
       <label class="toggle"><input type="checkbox" id="sch-tracking" checked><span class="toggle-track"></span></label>
-      <span style="font-size:11px;color:var(--text-muted);">off = простая отметка</span>
+      <span style="font-size:11px;color:var(--text-muted);">off = мгновенная (⚡ молния)</span>
     </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+      <label class="form-label" style="margin:0;flex:1;">Рефлексия (отметка за вчера)</label>
+      <label class="toggle"><input type="checkbox" id="sch-reflection"><span class="toggle-track"></span></label>
+    </div>
+    <div class="form-group"><label class="form-label">Авто-источник (отметка из данных)</label>
+      <select class="form-select" id="sch-autosrc" style="width:100%;">
+        ${Object.entries(AUTO_SOURCES).map(([k,v]) => `<option value="${k}">${v}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label class="form-label">Показывать с (HH:MM, чтобы не мусорить таскер)</label>
+      <input class="form-input" id="sch-visfrom" type="time"></div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
       <button class="btn-primary" id="sch-save">Сохранить</button>
@@ -2306,6 +2342,7 @@ function showScheduleModal() {
     if (!title) return;
     const freqDays = [...overlay.querySelectorAll('.sch-day-cb:checked')].map(cb => cb.value).join(',') || null;
     const trackingOn = document.getElementById('sch-tracking')?.checked !== false;
+    const reflectionOn = document.getElementById('sch-reflection')?.checked === true;
     try {
       await invoke('create_schedule', {
         title,
@@ -2315,6 +2352,9 @@ function showScheduleModal() {
         timeOfDay: document.getElementById('sch-time')?.value || null,
         details: document.getElementById('sch-details')?.value || null,
         trackingMode: trackingOn ? 'track' : 'check',
+        marksPreviousDay: reflectionOn,
+        autoSource: document.getElementById('sch-autosrc')?.value || null,
+        visibleFrom: document.getElementById('sch-visfrom')?.value || null,
       });
       overlay.remove();
       loadSchedule();

@@ -6,7 +6,6 @@ import { renderTableView } from './db-table.js';
 import { renderKanbanView } from './db-kanban.js';
 import { renderListView } from './db-list.js';
 import { renderGalleryView } from './db-gallery.js';
-import { renderTimelineView } from './db-timeline.js';
 import { renderCalendarView } from './db-calendar.js';
 import { showFilterDropdown, renderFilterBar } from './db-filters.js';
 import { showSortDropdown, getSortRules, applySortRules } from './db-sort.js';
@@ -88,7 +87,7 @@ export class DatabaseView {
       onSort: () => this._handleSort(),
       onDrop: s.onDrop, onCellEdit: s.onCellEdit, onDelete: s.onDelete, onDuplicate: s.onDuplicate, onFreeze: s.onFreeze,
     };
-    const views = { kanban: renderKanbanView, list: renderListView, gallery: renderGalleryView, timeline: renderTimelineView, calendar: renderCalendarView };
+    const views = { kanban: renderKanbanView, list: renderListView, gallery: renderGalleryView, calendar: renderCalendarView };
     const fn = views[this._currentView];
     if (fn) fn(contentEl, ctx); else await renderTableView(contentEl, ctx);
     renderFilterBar(contentEl, s.tabId, allFields || this._buildFields(), () => this.render());
@@ -180,7 +179,7 @@ export class DatabaseView {
 
 export { registerSchema, getSchema, getSchemaIds } from './db-config.js'; export { renderTableView } from './db-table.js';
 export { renderKanbanView } from './db-kanban.js'; export { renderListView } from './db-list.js';
-export { renderGalleryView } from './db-gallery.js'; export { renderTimelineView } from './db-timeline.js';
+export { renderGalleryView } from './db-gallery.js';
 export { renderCalendarView } from './db-calendar.js'; export { formatPropValue, startInlineEdit } from './db-cell-editors.js';
 export { renderFilterBar, applyFilters, showFilterDropdown } from './db-filters.js'; export { renderToolbar } from './db-toolbar.js';
 export { showAddPropertyPopover, showColumnMenu, showFixedColumnMenu, getHiddenFixedCols, getDeletedFixedCols, getFixedColName, getColumnOrder, setColumnOrder } from './db-properties.js';

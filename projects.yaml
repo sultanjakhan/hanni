@@ -150,7 +150,6 @@ projects-tab:
     - desktop/src/js/db-view/db-gallery.js
     - desktop/src/js/db-view/db-kanban.js
     - desktop/src/js/db-view/db-calendar.js
-    - desktop/src/js/db-view/db-timeline.js
     - desktop/src/js/db-view/db-toolbar.js
     - desktop/src/js/db-view/db-filters.js
     - desktop/src/js/db-view/db-filter-logic.js
@@ -316,14 +315,6 @@ people:
 schedule:
   description: "Центральный hub трекинга — daily completions, timeline, dashboards, task pins"
   files:
-    - desktop/src/js/tab-timeline.js
-    - desktop/src/js/timeline-today.js
-    - desktop/src/js/timeline-month.js
-    - desktop/src/js/timeline-dayweek.js
-    - desktop/src/js/timeline-grid.js
-    - desktop/src/js/timeline-blocks.js
-    - desktop/src/js/timeline-types.js
-    - desktop/src/js/timeline-dash.js
     - desktop/src/js/schedule-templates.js
     - desktop/src/css/timeline.css
   rust:
@@ -506,7 +497,7 @@ android:
     - desktop/src-tauri/gen/android/app/src/main/res/values/themes.xml
     - desktop/src-tauri/gen/android/app/src/main/res/xml/file_paths.xml
   tables: []
-  memory: [tech/project_android_build_test.md]
+  memory: [tech/project_android_build_test.md, tech/project_ota_web_assets.md]
   related: [sync, health]
 
 # ════════════════════════════════════════════════════════════════════

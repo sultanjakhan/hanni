@@ -127,22 +127,22 @@
 .cal-panel-badge { font-size: 11px; }
 .cal-panel-empty { font-size: 12px; color: var(--text-faint); padding: 8px 0; }
 
-/* Skip button — visible on hover, dim by default to avoid noise. */
+/* "Не выполнено" — red ✗ box, always visible (paired with the ✓ check). */
 .cal-panel-skip, .day-event-skip {
   flex-shrink: 0;
   width: 18px; height: 18px; border-radius: 4px;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; border: 1px solid transparent;
-  color: var(--text-muted); font-size: 14px; font-weight: 700;
-  cursor: pointer; opacity: 0;
-  transition: opacity 0.1s, background 0.1s;
+  background: transparent; border: 1.5px solid var(--color-red, #dc2626);
+  color: var(--color-red, #dc2626); font-size: 11px; font-weight: 700;
+  cursor: pointer; opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 .cal-panel-item:hover .cal-panel-skip,
-.day-event:hover .day-event-skip { opacity: 0.7; }
-.cal-panel-skip:hover, .day-event-skip:hover {
-  opacity: 1 !important;
-  background: var(--bg-hover); border-color: var(--border-subtle);
-  color: var(--text-primary);
+.day-event:hover .day-event-skip { opacity: 0.85; }
+.cal-panel-skip:hover, .day-event-skip:hover { opacity: 1; }
+.cal-panel-skip.on {
+  opacity: 1; background: var(--color-red, #dc2626);
+  border-color: var(--color-red, #dc2626); color: #fff;
 }
 .btn-sm {
   font-size: 12px; padding: 2px 8px; border-radius: var(--radius-sm);
@@ -261,6 +261,16 @@
 .ctl-track.ctl-finish { background: #16a34a; color: #fff; }
 .ctl-track.ctl-finish:hover { background: #15803d; }
 .ctl-track:disabled { opacity: 0.5; cursor: wait; }
+/* "Не выполнено" — red ✗ box paired with the ✓ check (mirrors .ctl-check). */
+.ctl-skip-box {
+  width: 18px; height: 18px; border: 1.5px solid var(--color-red, #dc2626);
+  border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--color-red, #dc2626); opacity: 0.5; cursor: pointer;
+  flex-shrink: 0; transition: all 0.15s;
+}
+.ctl-skip-box:hover { opacity: 1; }
+.ctl-skip-box.on { background: var(--color-red, #dc2626); border-color: var(--color-red, #dc2626); color: #fff; opacity: 1; }
+.ctl-row.ctl-skipped .ctl-title { color: var(--text-muted); text-decoration: line-through; opacity: 0.55; }
 /* Overdue section + row badge */
 .ctl-section-overdue { border-color: rgba(220, 38, 38, 0.4); }
 .ctl-section-overdue .ctl-section-title { color: #dc2626; }

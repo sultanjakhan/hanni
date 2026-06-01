@@ -20,6 +20,16 @@ function isPastTimeToday(timeStr, done, isToday, enabled = true) {
 
 const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
 
+// visible_from ("HH:MM"): on today, hide the schedule from the tasker until that
+// time so evening items don't clutter the morning. Past/future days ignore it.
+function hiddenUntilLater(visibleFrom, isToday) {
+  if (!isToday || !visibleFrom) return false;
+  const t = timeToMin(visibleFrom);
+  if (t === null) return false;
+  const now = new Date();
+  return (now.getHours() * 60 + now.getMinutes()) < t;
+}
+
 const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const todayStr = () => fmtDate(new Date());
 function shiftDate(dateStr, days) {
@@ -51,7 +61,10 @@ async function loadDayItems(date) {
     yesterday ? invoke('get_schedule_completions', { date: yesterday }).catch(() => []) : Promise.resolve([]),
   ]);
   const completedIds = new Set((completions || []).filter(c => c.completed).map(c => c.schedule_id));
-  const yCompletedIds = new Set((yCompletions || []).filter(c => c.completed).map(c => c.schedule_id));
+  const skippedIds = new Set((completions || []).filter(c => c.status === 'skipped').map(c => c.schedule_id));
+  // Closed yesterday = done OR explicitly "не выполнено" (skipped). Either way a
+  // reflection / overdue schedule drops out of the tasker — it's been answered.
+  const yClosedIds = new Set((yCompletions || []).filter(c => c.completed || c.status === 'skipped').map(c => c.schedule_id));
   // Group all blocks by source: each source can have multiple blocks per day (target_minutes feature)
   const blocksBySrc = new Map();
   for (const b of (blocks || [])) {
@@ -68,30 +81,40 @@ async function loadDayItems(date) {
   };
 
   const groups = { overdue: [], schedule: [], event: [], note: [] };
-  // Overdue (only on today): notes with due_date<today + schedules with track_overdue missed yesterday
+  // Overdue (only on today): overdue notes, reflections about yesterday, and
+  // track_overdue schedules missed yesterday. Reflections + missed schedules use
+  // yesterday as the completion date and drop out once closed (done OR "не выполнено").
   if (isViewingToday) {
     for (const t of (tasks || []).filter(t => t.status === 'task' && t.due_date && t.due_date < date)) {
       const bi = blockInfo('note', t.id);
-      groups.overdue.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: t.due_date, icon: '⚠️', done: false, priority: t.priority || 0, overdueDate: t.due_date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
+      groups.overdue.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: t.due_date, icon: '⚠️', done: false, priority: t.priority || 0, overdueDate: t.due_date, completionDate: t.due_date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
     }
-    for (const s of (scheds || []).filter(s => s.track_overdue && scheduleMatchesDate(s, yesterday) && !yCompletedIds.has(s.id))) {
+    // Reflections ("за вчера"): shown until answered (✓/✗), independent of track_overdue.
+    for (const s of (scheds || []).filter(s => s.marks_previous_day && scheduleMatchesDate(s, yesterday) && !yClosedIds.has(s.id))) {
       const bi = blockInfo('schedule', s.id);
-      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
+      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, completionDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: true, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
+    }
+    for (const s of (scheds || []).filter(s => !s.marks_previous_day && s.track_overdue && scheduleMatchesDate(s, yesterday) && !yClosedIds.has(s.id))) {
+      const bi = blockInfo('schedule', s.id);
+      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, completionDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: false, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
     }
   }
-  for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date))) {
+  // Today's schedules — reflections are handled above when viewing today;
+  // visible_from hides not-yet-due evening items from today's tasker.
+  for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date) && !(isViewingToday && s.marks_previous_day) && !hiddenUntilLater(s.visible_from, isViewingToday))) {
     const bi = blockInfo('schedule', s.id);
     const done = completedIds.has(s.id);
-    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, priority: 0, category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done, isViewingToday, !!s.track_overdue) });
+    const skipped = skippedIds.has(s.id);
+    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, skipped, priority: 0, category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, completionDate: date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done || skipped, isViewingToday, !!s.track_overdue) });
   }
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
     const done = !!e.completed;
-    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, category: e.category, planned_time: e.time, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
+    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, category: e.category, planned_time: e.time, completionDate: e.date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
   }
   for (const t of (tasks || []).filter(t => t.due_date === date)) {
     const bi = blockInfo('note', t.id);
-    groups.note.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: '99:99', icon: '📝', done: t.status === 'done', priority: t.priority || 0, category: 'task', block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
+    groups.note.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: '99:99', icon: '📝', done: t.status === 'done', priority: t.priority || 0, category: 'task', completionDate: t.due_date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
   }
   for (const k of Object.keys(groups)) {
     groups[k].sort((a, b) => (b.priority - a.priority) || a.sortKey.localeCompare(b.sortKey));
@@ -228,13 +251,22 @@ function wire(el) {
   el.querySelectorAll('.ctl-row').forEach(row => {
     const kind = row.dataset.kind;
     const id = parseInt(row.dataset.id);
-    const date = row.dataset.date || S.calDayDate || todayStr();
+    // completionDate differs from the view date for reflections (writes to yesterday).
+    const cdate = row.dataset.completionDate || row.dataset.date || S.calDayDate || todayStr();
     row.querySelector('[data-ctl-check]')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      try { await toggleDone(kind, id, date, !row.classList.contains('ctl-done')); }
+      try { await toggleDone(kind, id, cdate, !row.classList.contains('ctl-done')); }
       catch (err) { console.error('ctl toggle:', err); }
       renderCalendarTaskList(el);
       // Tell the Day-view to redraw its overlay too — completion just changed.
+      window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
+    });
+    // "Не выполнено" — schedule-only; toggles skipped/planned on the completion date.
+    row.querySelector('[data-ctl-skip]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await invoke('skip_schedule_completion', { scheduleId: id, date: cdate }); }
+      catch (err) { console.error('ctl skip:', err); }
+      renderCalendarTaskList(el);
       window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
     });
     row.querySelector('[data-ctl-start]')?.addEventListener('click', async (e) => {
@@ -249,7 +281,7 @@ function wire(el) {
       e.currentTarget.disabled = true;
       try {
         await invoke('pause_task_block', { blockId });
-        if (kind === 'schedule') await maybeAutoCheckSchedule(id, date);
+        if (kind === 'schedule') await maybeAutoCheckSchedule(id, cdate);
       } catch (err) { console.error('ctl pause:', err); }
       renderCalendarTaskList(el);
     });
@@ -259,7 +291,7 @@ function wire(el) {
       const title = row.querySelector('.ctl-title')?.textContent || '';
       const { showFinishModal } = await import('./calendar-task-list-finish-modal.js');
       showFinishModal(blockId, title, async () => {
-        if (kind === 'schedule') await maybeAutoCheckSchedule(id, date);
+        if (kind === 'schedule') await maybeAutoCheckSchedule(id, cdate);
         renderCalendarTaskList(el);
       });
     });

@@ -54,17 +54,22 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
 
     // ── 2. Schedules matching today + completion status
     let dow = day_of_week(&date)?;
+    // Reflections ("за вчера") are answered about the previous day, so their
+    // completion status is read from yesterday, not today.
+    let refl_date = shift_date(&date, -1).unwrap_or_else(|_| date.clone());
     let mut s_stmt = conn.prepare(
         "SELECT s.id, s.title, s.category, s.frequency, s.frequency_days, s.time_of_day, s.until_date,
                 COALESCE(sc.completed, 0), COALESCE(sc.status, 'planned'),
                 COALESCE(s.tracking_mode, 'track'), s.priority,
-                COALESCE(s.track_overdue, 0)
+                COALESCE(s.track_overdue, 0), COALESCE(s.marks_previous_day, 0),
+                COALESCE(s.visible_from, '')
          FROM schedules s
-         LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
+         LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id
+            AND sc.date = CASE WHEN COALESCE(s.marks_previous_day, 0) = 1 THEN ?2 ELSE ?1 END
          WHERE s.is_active = 1"
     ).map_err(|e| format!("DB error: {}", e))?;
     // schedules.id is TEXT after cr-sqlite CRR conversion — read as String.
-    let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone()], |row| {
+    let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone(), refl_date.clone()], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -78,11 +83,13 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             row.get::<_, String>(9)?,
             row.get::<_, i64>(10)?,
             row.get::<_, i64>(11)?,
+            row.get::<_, i64>(12)?,
+            row.get::<_, String>(13)?,
         ))
     }).map_err(|e| format!("Query error: {}", e))?;
 
     for tup in schedules_iter.flatten() {
-        let (id, title, category, frequency, frequency_days, time_of_day, until_date, completed, sc_status, tracking_mode, priority, track_overdue) = tup;
+        let (id, title, category, frequency, frequency_days, time_of_day, until_date, completed, sc_status, tracking_mode, priority, track_overdue, marks_previous_day, visible_from) = tup;
         // until_date filter
         if let Some(ref ud) = until_date {
             if !ud.is_empty() && date.as_str() > ud.as_str() { continue; }
@@ -98,6 +105,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         };
         if !matches { continue; }
 
+        let completion_date = if marks_previous_day == 1 { refl_date.clone() } else { date.clone() };
         items.push(serde_json::json!({
             "source_type": "schedule",
             "source_id": id,
@@ -111,6 +119,9 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
             "tracking_mode": tracking_mode,
             "priority": priority,
             "track_overdue": track_overdue == 1,
+            "marks_previous_day": marks_previous_day == 1,
+            "completion_date": completion_date,
+            "visible_from": visible_from,
         }));
     }
 
@@ -169,7 +180,9 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
                 "tracking_mode": tracking_mode,
                 "priority": priority,
                 "track_overdue": true,
-                "overdue_date": yesterday,
+                "overdue_date": yesterday.clone(),
+                "marks_previous_day": false,
+                "completion_date": yesterday.clone(),
             }));
         }
     }

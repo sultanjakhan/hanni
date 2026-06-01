@@ -79,11 +79,20 @@ export async function buildPickerBody({ startable, weights, pins, avgDur = {}, r
     const isRec = p === recItem;
     const cls = isRec ? 'tw-item--recommended' : `${groupCls}${p._pinned ? ' tw-item--pinned' : ''}`;
     const recTitle = isRec ? ' title="Рекомендация: сделать сейчас"' : '';
+    // ✓/✗ pair — for schedules answered by a single tap (instant/reflection):
+    // ✓ marks done, ✗ marks "не выполнено". Both stopPropagation so they don't
+    // trigger the row's start/toggle.
+    const showPair = p.source_type === 'schedule' && (p.tracking_mode === 'check' || p.marks_previous_day);
+    const pairHtml = showPair
+      ? `<span class="tw-check" data-check-idx="${idx}" title="Сделал">✓</span>` +
+        `<span class="tw-skip" data-skip-idx="${idx}" title="Не выполнено">✗</span>`
+      : '';
     return `
     <button class="tw-item ${cls}" data-idx="${idx}"${recTitle}>
       <span class="tw-item-icon">${taskIcon(p)}</span>
       <span class="tw-item-title">${escapeHtml(p.title)}</span>
       ${priorityDots(p)}${metaText(p, nowMin, avgDur)}${isRec ? '<span class="tw-now">сейчас</span>' : ''}
+      ${pairHtml}
       <span class="tw-pin ${p._pinned ? 'tw-pin--on' : ''}" data-pin-idx="${idx}"
             title="${p._pinned ? 'Открепить' : 'Закрепить'}">${p._pinned ? '★' : '☆'}</span>
     </button>`;

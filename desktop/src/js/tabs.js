@@ -103,6 +103,39 @@ function renderTabBar() {
       if (IS_MOBILE) closeDrawer();
     });
 
+    // Mobile: swipe a tab left to close it (the desktop right-click menu isn't
+    // reachable on touch). Only closable tabs; pure taps still switch.
+    if (IS_MOBILE && reg.closable) {
+      let startX = 0, startY = 0, dx = 0, swiping = false;
+      item.addEventListener('touchstart', (e) => {
+        const t = e.touches[0];
+        startX = t.clientX; startY = t.clientY; dx = 0; swiping = false;
+        item.style.transition = '';
+      }, { passive: true });
+      item.addEventListener('touchmove', (e) => {
+        const t = e.touches[0];
+        const mx = t.clientX - startX, my = t.clientY - startY;
+        if (!swiping && Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(my)) swiping = true;
+        if (!swiping) return;
+        dx = Math.min(0, mx); // left only
+        item.style.transform = `translateX(${dx}px)`;
+        item.style.opacity = String(Math.max(0.3, 1 + dx / 220));
+      }, { passive: true });
+      item.addEventListener('touchend', () => {
+        if (!swiping) return; // pure tap → let the click handler switch tabs
+        item.dataset.wasDragged = '1'; // suppress the trailing click
+        item.style.transition = 'transform 0.18s ease, opacity 0.18s ease';
+        if (dx < -80) {
+          item.style.transform = 'translateX(-100%)';
+          item.style.opacity = '0';
+          setTimeout(() => closeTab(tabId), 150); // re-renders the bar
+        } else {
+          item.style.transform = '';
+          item.style.opacity = '';
+        }
+      });
+    }
+
     if (!IS_MOBILE) {
       // Drag-to-reorder (desktop only)
       item.addEventListener('mousedown', (e) => {
@@ -678,7 +711,6 @@ function loadSubTabContent(tabId, subTab) {
     case 'people': tabLoaders.loadPeople?.(subTab); break;
     case 'schedule': tabLoaders.loadSchedule?.(subTab); break;
     case 'dankoe': tabLoaders.loadDanKoe?.(subTab); break;
-    case 'timeline': tabLoaders.loadTimeline?.(subTab); break;
     default:
       if (tabId.startsWith('page_')) tabLoaders.loadCustomPage?.(tabId, subTab);
       break;
@@ -760,25 +792,44 @@ document.getElementById('tab-add')?.addEventListener('click', (e) => {
     item.addEventListener('click', () => { dropdown.classList.add('hidden'); openTab(id); });
     list.appendChild(item);
   }
-  // Position dropdown near + button (vertical tab bar).
-  // Choose direction (down/up) by where there is more free space, so the
-  // popup never gets clipped by the viewport.
-  const rect = btn.getBoundingClientRect();
-  const margin = 16;
-  const spaceBelow = window.innerHeight - rect.top - margin;
-  const spaceAbove = rect.bottom - margin;
-  dropdown.style.left = (rect.right + 4) + 'px';
-  if (spaceBelow >= spaceAbove) {
-    dropdown.style.top = Math.max(8, rect.top) + 'px';
-    dropdown.style.bottom = 'auto';
-    dropdown.style.maxHeight = Math.max(120, spaceBelow) + 'px';
+  if (IS_MOBILE) {
+    // Mobile: full-screen sheet (see `.mobile #tab-dropdown` in mobile.css).
+    // The desktop popup positioned itself at `btn.right + 4`, which on a 360px
+    // screen pushed most of the list off-screen — clear those inline styles so
+    // the CSS full-screen rule actually applies. A full-screen sheet has no
+    // "outside" to tap, so inject a × close button.
+    dropdown.style.left = dropdown.style.top = dropdown.style.bottom = dropdown.style.maxHeight = '';
+    if (!document.getElementById('tab-dropdown-close')) {
+      const close = document.createElement('button');
+      close.id = 'tab-dropdown-close';
+      close.type = 'button';
+      close.setAttribute('aria-label', 'Закрыть');
+      close.textContent = '×';
+      close.addEventListener('click', (ev) => { ev.stopPropagation(); dropdown.classList.add('hidden'); });
+      dropdown.insertBefore(close, dropdown.firstChild);
+    }
   } else {
-    dropdown.style.top = 'auto';
-    dropdown.style.bottom = Math.max(8, window.innerHeight - rect.bottom) + 'px';
-    dropdown.style.maxHeight = Math.max(120, spaceAbove) + 'px';
+    // Desktop: position near the + button (vertical tab bar), choosing
+    // down/up by free space so the popup never gets clipped.
+    const rect = btn.getBoundingClientRect();
+    const margin = 16;
+    const spaceBelow = window.innerHeight - rect.top - margin;
+    const spaceAbove = rect.bottom - margin;
+    dropdown.style.left = (rect.right + 4) + 'px';
+    if (spaceBelow >= spaceAbove) {
+      dropdown.style.top = Math.max(8, rect.top) + 'px';
+      dropdown.style.bottom = 'auto';
+      dropdown.style.maxHeight = Math.max(120, spaceBelow) + 'px';
+    } else {
+      dropdown.style.top = 'auto';
+      dropdown.style.bottom = Math.max(8, window.innerHeight - rect.bottom) + 'px';
+      dropdown.style.maxHeight = Math.max(120, spaceAbove) + 'px';
+    }
   }
   dropdown.classList.toggle('hidden');
-  if (search && !dropdown.classList.contains('hidden')) {
+  // Desktop only: focus search. On mobile we skip it so the keyboard doesn't
+  // immediately cover the list — the user taps the search field if they want it.
+  if (!IS_MOBILE && search && !dropdown.classList.contains('hidden')) {
     search.focus();
   }
 });

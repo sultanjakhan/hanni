@@ -376,11 +376,11 @@ async function renderCalendar(el, events, tasks) {
       const icon = SCH_CAT_ICONS[s.category] || '◽';
       const stateCls = done ? ' done' : skipped ? ' skipped' : '';
       return `<div class="cal-panel-item${stateCls}" data-sch-toggle="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}">
-        <div class="cal-panel-check${stateCls}">${done ? '✓' : skipped ? '−' : ''}</div>
+        <div class="cal-panel-check${done ? ' done' : ''}">${done ? '✓' : ''}</div>
+        <button type="button" class="cal-panel-skip${skipped ? ' on' : ''}" data-sch-skip="${s.id}" title="Не выполнено (закрыть задачу)">✗</button>
         <span class="cal-panel-time">${s.time_of_day || ''}</span>
         <span class="cal-panel-icon">${icon}</span>
         <span class="cal-panel-title${stateCls}">${escapeHtml(s.title)}</span>
-        <button type="button" class="cal-panel-skip" data-sch-skip="${s.id}" title="Пропустить (закрыть задачу)">−</button>
       </div>`;
     }).join('');
 
@@ -770,12 +770,12 @@ async function renderDayCalendar(el, events) {
     const skipped = s.marks_previous_day ? challengeSkippedIds.has(s.id) : skippedIds.has(s.id);
     const icon = SCH_CAT_ICONS[s.category] || '◽';
     const dim = done || skipped;
-    const mark = done ? '✅' : skipped ? '➖' : '⬜';
+    const mark = done ? '✅' : skipped ? '❌' : '⬜';
     return `<div class="day-event" data-day-sch="${s.id}" data-sch-cat="${s.category || ''}" data-sch-prev="${s.marks_previous_day ? '1' : ''}" style="border-left:3px solid var(--color-purple);cursor:pointer;${dim ? 'opacity:0.5;' : ''}">
       <span class="day-event-time">${icon}</span>
       <span class="day-event-title" style="${dim ? 'text-decoration:line-through;' : ''}">${escapeHtml(s.title)}</span>
       <span style="font-size:13px;">${mark}</span>
-      <button type="button" class="day-event-skip" data-day-skip="${s.id}" title="Пропустить">−</button>
+      <button type="button" class="day-event-skip" data-day-skip="${s.id}" title="Не выполнено">✗</button>
     </div>`;
   }).join('');
   const allDayEvts = allDay.map(e => `<div class="day-event" style="border-left:3px solid ${e.color || 'var(--text-secondary)'};"><span class="day-event-title">${escapeHtml(e.title)}</span></div>`).join('');

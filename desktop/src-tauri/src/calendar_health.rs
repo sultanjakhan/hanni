@@ -182,81 +182,113 @@ pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> R
     Ok(count)
 }
 
-/// Activity keywords we look for in schedule titles, given the auto_health
-/// event title (e.g. "🚶 Прогулка"). Keys here are the words present in
-/// `exercise_title`'s outputs so we can reverse-map straight from the
-/// already-imported event row without needing health_log's raw type.
-fn keywords_for_event_title(title: &str) -> &'static [&'static str] {
+/// Map an auto_health event title (e.g. "🚶 Прогулка") to its auto_source key.
+/// Mirrors `exercise_title`'s outputs so we can reverse-map straight from the
+/// already-imported event row. Keys match the AUTO_SOURCES set in tab-data.js.
+fn source_key_for_event_title(title: &str) -> Option<&'static str> {
     let t = title.to_lowercase();
-    if t.contains("прогул")      { return &["прогул", "ходьб", "walking"]; }
-    if t.contains("пробеж")      { return &["пробеж", "бег", "running"]; }
-    if t.contains("велосипед")   { return &["вело", "cycling", "biking"]; }
-    if t.contains("плавание")    { return &["плава", "swim"]; }
-    if t.contains("силов")       { return &["силов", "штанг", "качал", "strength"]; }
-    if t.contains("йог")         { return &["йог", "yoga"]; }
-    if t.contains("поход")       { return &["поход", "hiking"]; }
-    if t.contains("тренир")      { return &["тренир", "workout"]; }
-    &[]
+    if t.contains("прогул")    { Some("walking") }
+    else if t.contains("пробеж")    { Some("running") }
+    else if t.contains("велосипед") { Some("cycling") }
+    else if t.contains("плавание")  { Some("swimming") }
+    else if t.contains("силов")     { Some("strength") }
+    else if t.contains("йог")       { Some("yoga") }
+    else if t.contains("поход")     { Some("hiking") }
+    else if t.contains("тренир")    { Some("workout") }
+    else { None }
 }
 
-/// Sum auto_health event minutes per title on `date`; for each title with
-/// total ≥15, find active schedules whose title matches the keyword set and
-/// mark them done in schedule_completions. Reads events (not health_log)
-/// because that's where the import normalises titles consistently.
-/// Idempotent — re-running keeps the existing completed_at on conflict.
+/// Upsert a schedule's completion for a date as done. Idempotent — keeps the
+/// original completed_at on conflict so re-syncs don't churn the timestamp.
+fn mark_schedule_done(conn: &rusqlite::Connection, schedule_id: &str, date: &str, now: &str) {
+    let new_id = crate::types::new_uuid_v7();
+    let _ = conn.execute(
+        "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
+         VALUES (?1, ?2, ?3, 1, ?4, 'done')
+         ON CONFLICT(schedule_id, date) DO UPDATE
+           SET completed=1, completed_at=COALESCE(schedule_completions.completed_at, ?4), status='done'",
+        rusqlite::params![new_id, schedule_id, date, now],
+    );
+}
+
+/// Auto-complete schedules from Samsung Health (Health Connect) data on `date`:
+///   • exercise minutes per source-key (walking/running/…) from auto_health events
+///   • 'steps'  — total step count from health_log (default threshold 8000)
+///   • 'sleep'  — total sleep minutes from sleep_sessions (default threshold 420 = 7h)
+/// A schedule's `target_minutes` overrides the threshold (interpreted as the raw
+/// number: minutes for activity/sleep, step count for steps). 'cooking' is handled
+/// separately by auto_complete_from_cooking. Idempotent (keeps completed_at on conflict).
 fn auto_complete_from_health(conn: &rusqlite::Connection, date: &str, now: &str) -> rusqlite::Result<()> {
     use std::collections::HashMap;
-    const THRESHOLD_MIN: i64 = 15;
+    const DEFAULT_ACTIVITY_MIN: i64 = 15;
+    const DEFAULT_STEPS: i64 = 8000;
+    const DEFAULT_SLEEP_MIN: i64 = 420; // 7h
 
-    let mut totals: HashMap<String, i64> = HashMap::new();
+    // Exercise minutes per source-key from normalised auto_health events.
+    let mut ex: HashMap<&'static str, i64> = HashMap::new();
     {
         let mut stmt = conn.prepare(
             "SELECT title, duration_minutes FROM events
              WHERE date=?1 AND source='auto_health' AND title NOT LIKE 'Сон%'"
         )?;
         let rows = stmt.query_map(rusqlite::params![date], |row| {
-            let title: String = row.get(0)?;
-            let dur: i64 = row.get(1)?;
-            Ok((title, dur))
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         for r in rows {
             if let Ok((title, dur)) = r {
-                *totals.entry(title).or_insert(0) += dur;
+                if let Some(key) = source_key_for_event_title(&title) {
+                    *ex.entry(key).or_insert(0) += dur;
+                }
             }
         }
     }
+    // Steps (REAL) and sleep minutes for the date.
+    let steps: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(value),0) FROM health_log WHERE date=?1 AND type='steps'",
+        rusqlite::params![date], |r| r.get::<_, f64>(0),
+    ).unwrap_or(0.0) as i64;
+    let sleep_min: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(duration_minutes),0) FROM sleep_sessions WHERE date=?1 AND source='health_connect'",
+        rusqlite::params![date], |r| r.get(0),
+    ).unwrap_or(0);
 
-    // SQLite's LOWER() is ASCII-only — "Прогулка" would stay "Прогулка" and
-    // never match a cyrillic keyword. Lowercase in Rust (Unicode-aware).
-    let mut scheds: Vec<(String, String)> = Vec::new();
-    {
+    // Collect linked schedules first so the prepared stmt is dropped before we write.
+    let scheds: Vec<(String, String, i64)> = {
         let mut stmt = conn.prepare(
-            "SELECT id, title FROM schedules WHERE is_active = 1"
+            "SELECT id, auto_source, COALESCE(target_minutes, 0) FROM schedules
+             WHERE is_active = 1 AND auto_source IS NOT NULL AND auto_source != ''"
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?.to_lowercase()))
-        })?;
-        for r in rows {
-            if let Ok(v) = r { scheds.push(v); }
-        }
-    }
-
-    for (event_title, total) in &totals {
-        if *total < THRESHOLD_MIN { continue; }
-        let keys = keywords_for_event_title(event_title);
-        if keys.is_empty() { continue; }
-        for (sid, title) in &scheds {
-            if keys.iter().any(|k| title.contains(k)) {
-                let new_id = crate::types::new_uuid_v7();
-                let _ = conn.execute(
-                    "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
-                     VALUES (?1, ?2, ?3, 1, ?4, 'done')
-                     ON CONFLICT(schedule_id, date) DO UPDATE
-                       SET completed=1, completed_at=COALESCE(schedule_completions.completed_at, ?4), status='done'",
-                    rusqlite::params![new_id, sid, date, now],
-                );
-            }
-        }
+        let rows: Vec<(String, String, i64)> = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+        })?.filter_map(Result::ok).collect();
+        rows
+    };
+    for (sid, src, target) in scheds {
+        let (value, default) = match src.as_str() {
+            "steps" => (steps, DEFAULT_STEPS),
+            "sleep" => (sleep_min, DEFAULT_SLEEP_MIN),
+            "cooking" => continue, // handled by auto_complete_from_cooking
+            other => (ex.get(other).copied().unwrap_or(0), DEFAULT_ACTIVITY_MIN),
+        };
+        let threshold = if target > 0 { target } else { default };
+        if value >= threshold { mark_schedule_done(conn, &sid, date, now); }
     }
     Ok(())
+}
+
+/// Mark schedules with auto_source='cooking' done for `date` when the cooking
+/// log has at least one entry that day. Called from log_cooking.
+pub(crate) fn auto_complete_from_cooking(conn: &rusqlite::Connection, date: &str, now: &str) {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM cooking_log WHERE date=?1", rusqlite::params![date], |r| r.get(0),
+    ).unwrap_or(0);
+    if count < 1 { return; }
+    let ids: Vec<String> = {
+        let mut stmt = match conn.prepare(
+            "SELECT id FROM schedules WHERE is_active = 1 AND auto_source = 'cooking'"
+        ) { Ok(s) => s, Err(_) => return };
+        let mapped = match stmt.query_map([], |row| row.get::<_, String>(0)) { Ok(m) => m, Err(_) => return };
+        mapped.filter_map(Result::ok).collect()
+    };
+    for sid in ids { mark_schedule_done(conn, &sid, date, now); }
 }

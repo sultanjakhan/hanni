@@ -4,7 +4,7 @@
 import { invoke } from './state.js';
 import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
 import { buildPickerBody, loadCategoryWeights } from './task-picker-view.js';
-import { pickRecommendedTaskId, pickStartChainId } from './task-picker-sort.js';
+import { pickRecommendedTaskId, pickStartChainId, timeToMin } from './task-picker-sort.js';
 import { isDanKoePractice, openDanKoeModal } from './dankoe-quick-modal.js';
 
 let widget = null;
@@ -62,7 +62,13 @@ async function openStartDropdown(preserveScroll = false) {
   const savedScroll = preserveScroll && panel ? panel.scrollTop : 0;
   closeDropdown();
   const planned = await invoke('get_today_planned', { date: localDate() }).catch(() => []);
-  const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done');
+  // visible_from hides not-yet-due evening items from the picker (today only).
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const notYetVisible = (p) => {
+    const t = p.visible_from ? timeToMin(p.visible_from) : null;
+    return t != null && nowMin < t;
+  };
+  const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done' && p.status_extra !== 'skipped' && !notYetVisible(p));
 
   const weights = await loadCategoryWeights();
   const pins = await invoke('get_task_pins').catch(() => []);
@@ -114,6 +120,26 @@ async function openStartDropdown(preserveScroll = false) {
     });
   });
 
+  // ✓/✗ pair for reflections / instant schedules — mark done / "не выполнено".
+  panel.querySelectorAll('.tw-check[data-check-idx]').forEach(x => {
+    x.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const p = orderedItems[parseInt(x.dataset.checkIdx)];
+      await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(() => {});
+      window.dispatchEvent(new Event('task-state-changed'));
+      await openStartDropdown(true);
+    });
+  });
+  panel.querySelectorAll('.tw-skip[data-skip-idx]').forEach(x => {
+    x.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const p = orderedItems[parseInt(x.dataset.skipIdx)];
+      await invoke('skip_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(() => {});
+      window.dispatchEvent(new Event('task-state-changed'));
+      await openStartDropdown(true);
+    });
+  });
+
   wireRoutineSection(panel, () => openStartDropdown(true));
 
   panel.querySelectorAll('.tw-item[data-idx]').forEach(btn => {
@@ -130,7 +156,8 @@ async function openStartDropdown(preserveScroll = false) {
       const isCheck = p.tracking_mode === 'check';
       try {
         if (isCheck && p.source_type === 'schedule') {
-          await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: localDate() });
+          // Reflections write to yesterday (completion_date), not today.
+          await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() });
         } else {
           await invoke('start_task_block', { sourceType: p.source_type, sourceId: p.source_id });
         }

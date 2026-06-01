@@ -34,7 +34,6 @@ import {
   loadHobbies, loadSports, loadHealth, loadCustomPage,
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
-import './js/tab-timeline.js';
 import { autoImportHealth, startHealthPolling, maybeRequestHealthBackground } from './js/health-auto-sync.js';
 import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot } from './js/android-update.js';
 

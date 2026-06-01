@@ -1094,14 +1094,17 @@ pub fn create_workout_from_template(template_id: i64, db: tauri::State<'_, Hanni
 // ── Schedules commands ──
 
 #[tauri::command]
-pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
+pub fn create_schedule(title: String, category: String, frequency: String, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, marks_previous_day: Option<bool>, auto_source: Option<String>, visible_from: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
     let to = track_overdue.unwrap_or(false) as i64;
     let mode = tracking_mode.unwrap_or_else(|| "track".to_string());
+    let mpd = marks_previous_day.unwrap_or(false) as i64;
+    let src = auto_source.filter(|s| !s.is_empty());
+    let vis = visible_from.filter(|s| !s.is_empty());
     let new_id = crate::types::new_uuid_v7();
     conn.execute(
-        "INSERT INTO schedules (id, title, category, frequency, frequency_days, time_of_day, details, track_overdue, target_minutes, tracking_mode, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        rusqlite::params![new_id, title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), to, target_minutes, mode, chrono::Local::now().to_rfc3339()],
+        "INSERT INTO schedules (id, title, category, frequency, frequency_days, time_of_day, details, track_overdue, target_minutes, tracking_mode, marks_previous_day, auto_source, visible_from, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        rusqlite::params![new_id, title, category, frequency, frequency_days, time_of_day, details.unwrap_or_default(), to, target_minutes, mode, mpd, src, vis, chrono::Local::now().to_rfc3339()],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(new_id)
 }
@@ -1110,9 +1113,9 @@ pub fn create_schedule(title: String, category: String, frequency: String, frequ
 pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let sql = if category.is_some() {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes, COALESCE(tracking_mode,'track') FROM schedules WHERE category=?1 ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes, COALESCE(tracking_mode,'track'), COALESCE(auto_source,''), COALESCE(visible_from,'') FROM schedules WHERE category=?1 ORDER BY title"
     } else {
-        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes, COALESCE(tracking_mode,'track') FROM schedules ORDER BY title"
+        "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes, COALESCE(tracking_mode,'track'), COALESCE(auto_source,''), COALESCE(visible_from,'') FROM schedules ORDER BY title"
     };
     let mut stmt = conn.prepare(sql).map_err(|e| format!("DB error: {}", e))?;
     let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cat) = category {
@@ -1134,13 +1137,15 @@ pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) ->
             "track_overdue": row.get::<_, i64>(11).unwrap_or(0) == 1,
             "target_minutes": row.get::<_, Option<i64>>(12).unwrap_or(None),
             "tracking_mode": row.get::<_, String>(13).unwrap_or_else(|_| "track".to_string()),
+            "auto_source": row.get::<_, String>(14).unwrap_or_default(),
+            "visible_from": row.get::<_, String>(15).unwrap_or_default(),
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)
 }
 
 #[tauri::command]
-pub fn update_schedule(id: String, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
+pub fn update_schedule(id: String, title: Option<String>, category: Option<String>, frequency: Option<String>, frequency_days: Option<String>, time_of_day: Option<String>, details: Option<String>, is_active: Option<bool>, marks_previous_day: Option<bool>, until_date: Option<String>, track_overdue: Option<bool>, target_minutes: Option<i64>, tracking_mode: Option<String>, auto_source: Option<String>, visible_from: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
     if let Some(v) = title { conn.execute("UPDATE schedules SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(v) = category { conn.execute("UPDATE schedules SET category=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
@@ -1159,6 +1164,14 @@ pub fn update_schedule(id: String, title: Option<String>, category: Option<Strin
     if let Some(v) = tracking_mode {
         let val = if v == "check" { "check" } else { "track" };
         conn.execute("UPDATE schedules SET tracking_mode=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
+    }
+    if let Some(v) = auto_source {
+        let val: Option<String> = if v.is_empty() { None } else { Some(v) };
+        conn.execute("UPDATE schedules SET auto_source=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
+    }
+    if let Some(v) = visible_from {
+        let val: Option<String> = if v.is_empty() { None } else { Some(v) };
+        conn.execute("UPDATE schedules SET visible_from=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
     }
     Ok(())
 }
@@ -2387,6 +2400,8 @@ pub fn log_cooking(
     ).ok();
     crate::sync_share::mark_dirty(&conn, "cooking_log");
     crate::sync_share::mark_dirty(&conn, "recipes");
+    // Auto-complete any schedule linked to cooking (auto_source='cooking').
+    crate::calendar_health::auto_complete_from_cooking(&conn, &date, &now);
     Ok(id)
 }
 

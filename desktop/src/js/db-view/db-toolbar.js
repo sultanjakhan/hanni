@@ -8,11 +8,10 @@ const VIEW_ICONS = {
   kanban: _s('<rect x="1" y="1.5" width="4" height="13" rx="1"/><rect x="6" y="1.5" width="4" height="9" rx="1"/><rect x="11" y="1.5" width="4" height="11" rx="1"/>'),
   list: _s('<line x1="4.5" y1="3" x2="14" y2="3"/><line x1="4.5" y1="8" x2="14" y2="8"/><line x1="4.5" y1="13" x2="14" y2="13"/><circle cx="2" cy="3" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="8" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="13" r="0.8" fill="currentColor" stroke="none"/>'),
   gallery: _s('<rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/>'),
-  timeline: _s('<line x1="1" y1="8" x2="15" y2="8"/><rect x="3" y="4" width="4" height="3" rx="1"/><rect x="8" y="9" width="5" height="3" rx="1"/>'),
   calendar: _s('<rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><path d="M1.5 6.5h13M5 1v3M11 1v3"/><circle cx="5" cy="10" r="1" fill="currentColor" stroke="none"/>'),
 };
-const VIEW_LABELS = { table: 'Таблица', kanban: 'Канбан', list: 'Список', gallery: 'Галерея', timeline: 'Таймлайн', calendar: 'Календарь' };
-const ALL_VIEWS = ['table', 'kanban', 'list', 'gallery', 'timeline', 'calendar'];
+const VIEW_LABELS = { table: 'Таблица', kanban: 'Канбан', list: 'Список', gallery: 'Галерея', calendar: 'Календарь' };
+const ALL_VIEWS = ['table', 'kanban', 'list', 'gallery', 'calendar'];
 
 export function renderToolbar(container, availableViews, activeView, onViewChange, actions = {}) {
   const toolbar = document.createElement('div');

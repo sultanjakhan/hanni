@@ -1190,6 +1190,19 @@ pub fn migrate_schedules(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE timeline_blocks ADD COLUMN mood TEXT", []).ok();
 }
 
+/// v0.92: extra schedule columns added AFTER migrate_schedules_to_uuid_pk
+/// (which recreates the table from a fixed column set and would otherwise drop
+/// columns added earlier in migrate_schedules):
+///   • auto_source  — links a schedule to a real data source so its daily
+///     completion fills automatically ('steps'/'sleep'/'walking'/'cooking'…).
+///   • visible_from — "HH:MM"; when set, the schedule is hidden from the
+///     tasker (Список + picker) on the current day until that time, so evening
+///     items don't clutter the morning. NULL/'' = always visible.
+pub fn migrate_schedule_auto_source(conn: &rusqlite::Connection) {
+    conn.execute("ALTER TABLE schedules ADD COLUMN auto_source TEXT", []).ok();
+    conn.execute("ALTER TABLE schedules ADD COLUMN visible_from TEXT", []).ok();
+}
+
 /// Next-action engine — graph model: a chain is a canvas, a node is a task
 /// (referencing a schedule/note/event, or a start trigger), an edge is an arrow
 /// with a transition trigger. routine_node_status tracks a node's state inside

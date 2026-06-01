@@ -685,6 +685,19 @@ body.qw-popover-open #task-control-widget {
 .tw-item:hover .tw-pin { opacity: 0.55; }
 .tw-pin:hover { opacity: 1; }
 .tw-pin--on { opacity: 1; color: var(--color-green); }
+/* ✓/✗ pair — blue "сделал" + red "не выполнено" boxes (mirrors the list pair). */
+.tw-check, .tw-skip {
+  flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.1s, background 0.1s;
+}
+.tw-check { border: 1.5px solid var(--accent-blue); color: var(--accent-blue); }
+.tw-skip { border: 1.5px solid var(--color-red); color: var(--color-red); }
+.tw-item:hover .tw-check, .tw-item:hover .tw-skip { opacity: 0.85; }
+.tw-check:hover, .tw-skip:hover { opacity: 1; }
 /* Routine cancel: subtle, not a task-like row */
 .tw-rt-cancel { padding: 4px 10px; opacity: 0.55; }
 .tw-rt-cancel:hover { opacity: 1; }
