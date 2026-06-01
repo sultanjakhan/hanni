@@ -1420,9 +1420,12 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
             <script>setTimeout(()=>window.close(),1500)</script></body></html>";
         let ct = (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
 
+        // Escape reflected values — `error` comes straight from the redirect
+        // query string (attacker-controllable), so raw interpolation is XSS.
+        let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
         if let Some(err) = q.error {
             return (StatusCode::BAD_REQUEST, [ct],
-                format!("<h2>OAuth error</h2><pre>{}</pre>", err));
+                format!("<h2>OAuth error</h2><pre>{}</pre>", esc(&err)));
         }
         let (code, st) = match (q.code, q.state) {
             (Some(c), Some(s)) => (c, s),
@@ -1433,7 +1436,7 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         match crate::google_auth::handle_oauth_callback(&db, &state.app, &code, &st).await {
             Ok(_) => (StatusCode::OK, [ct], html_ok.into()),
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [ct],
-                format!("<h2>Sign-in failed</h2><pre>{}</pre>", e)),
+                format!("<h2>Sign-in failed</h2><pre>{}</pre>", esc(&e))),
         }
     }
 
