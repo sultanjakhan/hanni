@@ -9,6 +9,10 @@ mod memory;
 mod memory_embed;
 #[cfg(not(target_os = "android"))]
 mod voice;
+#[cfg(not(target_os = "android"))]
+mod voice_call_loop;
+#[cfg(not(target_os = "android"))]
+mod voice_tts;
 #[cfg(target_os = "android")]
 #[path = "voice_stubs.rs"]
 mod voice;

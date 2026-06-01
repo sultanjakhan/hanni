@@ -53,6 +53,8 @@ chat:
   rust:
     - desktop/src-tauri/src/chat.rs
     - desktop/src-tauri/src/voice.rs
+    - desktop/src-tauri/src/voice_call_loop.rs
+    - desktop/src-tauri/src/voice_tts.rs
     - desktop/src-tauri/src/voice_stubs.rs
     - desktop/src-tauri/src/memory.rs
     - desktop/src-tauri/src/memory_embed.rs
