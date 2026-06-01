@@ -331,12 +331,14 @@ pub fn get_home_items(category: Option<String>, needed_only: bool, db: tauri::St
     let conn = db.conn();
     let mut sql = "SELECT id,name,category,quantity,unit,location,needed,notes,created_at FROM home_items".to_string();
     let mut conditions = Vec::new();
-    if let Some(ref c) = category { conditions.push(format!("category='{}'", c)); }
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if let Some(c) = category { conditions.push("category=?1".to_string()); params.push(Box::new(c)); }
     if needed_only { conditions.push("needed=1".to_string()); }
     if !conditions.is_empty() { sql += &format!(" WHERE {}", conditions.join(" AND ")); }
     sql += " ORDER BY needed DESC, name ASC";
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let rows: Vec<serde_json::Value> = stmt.query_map(param_refs.as_slice(), |row| {
         Ok(serde_json::json!({
             "id": row.get::<_,i64>(0)?, "name": row.get::<_,String>(1)?,
             "category": row.get::<_,String>(2)?, "quantity": row.get::<_,Option<f64>>(3)?,
@@ -352,13 +354,18 @@ pub fn get_home_items(category: Option<String>, needed_only: bool, db: tauri::St
 pub fn update_home_item(id: i64, name: Option<String>, category: Option<String>, quantity: Option<f64>, location: Option<String>, notes: Option<String>, needed: Option<bool>, db: tauri::State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
     let mut updates = vec!["updated_at=datetime('now')".to_string()];
-    if let Some(v) = &name { updates.push(format!("name='{}'", v)); }
-    if let Some(v) = &category { updates.push(format!("category='{}'", v)); }
-    if let Some(v) = quantity { updates.push(format!("quantity={}", v)); }
-    if let Some(v) = &location { updates.push(format!("location='{}'", v)); }
-    if let Some(v) = &notes { updates.push(format!("notes='{}'", v)); }
-    if let Some(v) = needed { updates.push(format!("needed={}", if v { 1 } else { 0 })); }
-    conn.execute(&format!("UPDATE home_items SET {} WHERE id=?1", updates.join(",")), rusqlite::params![id]).map_err(|e| e.to_string())?;
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+    if let Some(v) = name { updates.push(format!("name=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = category { updates.push(format!("category=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = quantity { updates.push(format!("quantity=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = location { updates.push(format!("location=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = notes { updates.push(format!("notes=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = needed { updates.push(format!("needed=?{}", idx)); params.push(Box::new(if v { 1 } else { 0 })); idx += 1; }
+    params.push(Box::new(id));
+    let sql = format!("UPDATE home_items SET {} WHERE id=?{}", updates.join(","), idx);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
     Ok("updated".into())
 }
 
