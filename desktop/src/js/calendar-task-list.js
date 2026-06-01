@@ -81,31 +81,33 @@ async function loadDayItems(date) {
   };
 
   const groups = { overdue: [], schedule: [], event: [], note: [] };
-  // Overdue (only on today): overdue notes, reflections about yesterday, and
-  // track_overdue schedules missed yesterday. Reflections + missed schedules use
-  // yesterday as the completion date and drop out once closed (done OR "не выполнено").
+  // Overdue (only on today): overdue notes + track_overdue schedules missed
+  // yesterday. Reflections are NOT overdue — they sit in today's normal list
+  // (below) and only ever ask about yesterday, never older days.
   if (isViewingToday) {
     for (const t of (tasks || []).filter(t => t.status === 'task' && t.due_date && t.due_date < date)) {
       const bi = blockInfo('note', t.id);
       groups.overdue.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: t.due_date, icon: '⚠️', done: false, priority: t.priority || 0, overdueDate: t.due_date, completionDate: t.due_date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
-    }
-    // Reflections ("за вчера"): shown until answered (✓/✗), independent of track_overdue.
-    for (const s of (scheds || []).filter(s => s.marks_previous_day && scheduleMatchesDate(s, yesterday) && !yClosedIds.has(s.id))) {
-      const bi = blockInfo('schedule', s.id);
-      groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, completionDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: true, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
     }
     for (const s of (scheds || []).filter(s => !s.marks_previous_day && s.track_overdue && scheduleMatchesDate(s, yesterday) && !yClosedIds.has(s.id))) {
       const bi = blockInfo('schedule', s.id);
       groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, completionDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: false, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
     }
   }
-  // Today's schedules — reflections are handled above when viewing today;
-  // visible_from hides not-yet-due evening items from today's tasker.
-  for (const s of (scheds || []).filter(s => scheduleMatchesDate(s, date) && !(isViewingToday && s.marks_previous_day) && !hiddenUntilLater(s.visible_from, isViewingToday))) {
+  // Today's list = normal schedules for `date` + reflections (за вчера). A
+  // reflection marks yesterday, drops once answered (✓/✗), and only ever asks
+  // about yesterday — never accumulates older days. visible_from hides not-yet-
+  // due evening items from today's tasker.
+  for (const s of (scheds || [])) {
+    const isRefl = isViewingToday && !!s.marks_previous_day;
+    const cdate = isRefl ? yesterday : date;          // reflection completion is yesterday's
+    if (!scheduleMatchesDate(s, cdate)) continue;
+    if (hiddenUntilLater(s.visible_from, isViewingToday)) continue;
+    if (isRefl && yClosedIds.has(s.id)) continue;     // answered yesterday → gone
     const bi = blockInfo('schedule', s.id);
-    const done = completedIds.has(s.id);
-    const skipped = skippedIds.has(s.id);
-    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, skipped, priority: 0, category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, completionDate: date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done || skipped, isViewingToday, !!s.track_overdue) });
+    const done = isRefl ? false : completedIds.has(s.id);
+    const skipped = isRefl ? false : skippedIds.has(s.id);
+    groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, skipped, priority: 0, category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, completionDate: cdate, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done || skipped, isViewingToday, !!s.track_overdue) });
   }
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
@@ -130,7 +132,8 @@ function renderToolbar(dayLabel, isToday) {
       <div class="calendar-month-label">${escapeHtml(dayLabel)}</div>
       <button class="calendar-nav-btn" id="ctl-next">&gt;</button>
       ${!isToday ? `<button class="cal-today-btn" id="ctl-today">Сегодня</button>` : ''}
-      <div class="ctl-add-wrap" style="margin-left:auto;">
+      <button class="ctl-hide-btn${S.calHideDone ? ' ctl-hide-on' : ''}" id="ctl-hide-done" style="margin-left:auto;" title="Показывать только невыполненные">${S.calHideDone ? '☑ Готовые скрыты' : '☐ Скрыть готовые'}</button>
+      <div class="ctl-add-wrap">
         <button class="btn-primary" id="ctl-add">+ Добавить</button>
         <div class="ctl-add-menu" id="ctl-add-menu" hidden>
           <button class="ctl-add-menu-item" data-add-kind="event">📅 Событие</button>
@@ -184,6 +187,11 @@ function setDayViewMode(mode) {
   try { localStorage.setItem('hanni_calendar_view_mode_day', mode); } catch {}
 }
 
+function setHideDone(v) {
+  S.calHideDone = v;
+  try { localStorage.setItem('hanni_cal_hide_done', v ? '1' : '0'); } catch {}
+}
+
 function wire(el) {
   el.querySelectorAll('[data-view-toggle="day"] [data-view-mode]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -195,6 +203,7 @@ function wire(el) {
   el.querySelector('#ctl-prev')?.addEventListener('click', () => { S.calDayDate = shiftDate(S.calDayDate || todayStr(), -1); renderCalendarTaskList(el); });
   el.querySelector('#ctl-next')?.addEventListener('click', () => { S.calDayDate = shiftDate(S.calDayDate || todayStr(), 1); renderCalendarTaskList(el); });
   el.querySelector('#ctl-today')?.addEventListener('click', () => { S.calDayDate = todayStr(); renderCalendarTaskList(el); });
+  el.querySelector('#ctl-hide-done')?.addEventListener('click', () => { setHideDone(!S.calHideDone); renderCalendarTaskList(el); });
 
   const date = () => S.calDayDate || todayStr();
   const openEvent = () => { S.selectedCalendarDate = date(); tabLoaders.openCalendarAddEvent?.(); };
@@ -250,7 +259,8 @@ function wire(el) {
 
   el.querySelectorAll('.ctl-row').forEach(row => {
     const kind = row.dataset.kind;
-    const id = parseInt(row.dataset.id);
+    // Schedules use UUIDv7 string ids — never parseInt (yields garbage like 19).
+    const id = kind === 'schedule' ? row.dataset.id : parseInt(row.dataset.id);
     // completionDate differs from the view date for reflections (writes to yesterday).
     const cdate = row.dataset.completionDate || row.dataset.date || S.calDayDate || todayStr();
     row.querySelector('[data-ctl-check]')?.addEventListener('click', async (e) => {
@@ -271,7 +281,7 @@ function wire(el) {
     });
     row.querySelector('[data-ctl-start]')?.addEventListener('click', async (e) => {
       e.stopPropagation(); e.currentTarget.disabled = true;
-      try { await invoke('start_task_block', { sourceType: kind, sourceId: id }); }
+      try { await invoke('start_task_block', { sourceType: kind, sourceId: String(id) }); }
       catch (err) { console.error('ctl start:', err); }
       renderCalendarTaskList(el);
     });
@@ -312,6 +322,7 @@ export async function renderCalendarTaskList(el, opts) {
     return renderPeriodMode(el, opts);
   }
   if (!S.calDayDate) S.calDayDate = todayStr();
+  if (S.calHideDone === undefined) { try { S.calHideDone = localStorage.getItem('hanni_cal_hide_done') === '1'; } catch { S.calHideDone = false; } }
   const date = S.calDayDate;
   const d = new Date(date + 'T12:00:00');
   const monthsGen = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -344,12 +355,21 @@ export async function renderCalendarTaskList(el, opts) {
     });
   }
 
-  const bodyHtml = totalCount
-    ? SECTION_DEFS.map(def => renderSection(def, groups[def.key], date)).join('')
-    : `<div class="ctl-empty">
+  // Hide-completed filter: show only unanswered (not done, not skipped).
+  if (S.calHideDone) {
+    for (const key of ['overdue', 'schedule', 'event', 'note']) {
+      groups[key] = groups[key].filter(it => !it.done && !it.skipped);
+    }
+  }
+  const remaining = groups.overdue.length + groups.schedule.length + groups.event.length + groups.note.length;
+  const bodyHtml = !totalCount
+    ? `<div class="ctl-empty">
         <div class="ctl-empty-title">${isToday ? 'Сегодня свободно' : 'На этот день ничего не запланировано'}</div>
         <button class="btn-primary" id="ctl-add-empty">+ Запланировать</button>
-      </div>`;
+      </div>`
+    : (S.calHideDone && !remaining
+        ? `<div class="ctl-empty"><div class="ctl-empty-title">Всё выполнено 🎉</div></div>`
+        : SECTION_DEFS.map(def => renderSection(def, groups[def.key], date)).join(''));
   el.innerHTML = renderToolbar(dayLabel, isToday) + `<div class="ctl-body">${bodyHtml}</div>`;
   wire(el);
 }

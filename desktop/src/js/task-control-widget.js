@@ -77,11 +77,39 @@ async function openStartDropdown(preserveScroll = false) {
   const chains = await invoke('get_routine_chains').catch(() => []);
   const now = await invoke('get_routine_now', { date: localDate() }).catch(() => []);
   const completedChainIds = await invoke('get_completed_routine_chains', { date: localDate() }).catch(() => []);
+  // Time/day-gate chains: a chain's "— начать" shows only when its FIRST step's
+  // schedule is "к месту" now — day matches (frequency) AND now ≥ visible_from.
+  // Derived from the schedules (no chain-level fields). Autonomous first step or
+  // unknown → always shown. Active runs ignore this (handled in renderRoutineSection).
+  const allScheds = await invoke('get_schedules', { category: null }).catch(() => []);
+  const schedById = Object.fromEntries(allScheds.map(s => [String(s.id), s]));
+  const dow = (new Date().getDay()) || 7;
+  const schedDueNow = (s) => {
+    if (!s || !s.is_active) return false;
+    let dayOk;
+    if (s.frequency === 'daily') dayOk = true;
+    else if (s.frequency === 'weekly' || s.frequency === 'custom') dayOk = (s.frequency_days || '').split(',').map(Number).includes(dow);
+    else dayOk = false;
+    if (!dayOk) return false;
+    const vf = s.visible_from ? timeToMin(s.visible_from) : null;
+    return !(vf != null && nowMin < vf);
+  };
+  const chainDueNow = (c) => {
+    const start = (c.nodes || []).find(n => n.is_start);
+    const startId = start ? start.id : null;
+    const incoming = {};
+    (c.edges || []).forEach(e => { (incoming[e.to_node_id] = incoming[e.to_node_id] || []).push(e.from_node_id); });
+    const entries = (c.nodes || []).filter(n => !n.is_start &&
+      ((incoming[n.id] || []).length === 0 || (incoming[n.id] || []).every(f => f === startId)));
+    if (!entries.length) return true;
+    return entries.some(n => !n.source_id || schedDueNow(schedById[String(n.source_id)]));
+  };
+  const dueChainIds = new Set((chains || []).filter(chainDueNow).map(c => c.id));
   // Recommendation precedence: active routine step → start an auto-trigger chain
   // (wake first; skip completed-today) → top regular task.
   const routineRecId = pickRecommendedTaskId(now);
   const chainRecId = routineRecId == null ? pickStartChainId(chains, now, completedChainIds) : null;
-  const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId, completedChainIds);
+  const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId, completedChainIds, dueChainIds);
   const { bodyHtml, orderedItems } = await buildPickerBody({
     startable, weights, pins, avgDur, routineHtml,
     routineHasRec: routineRecId != null || chainRecId != null,
@@ -159,7 +187,7 @@ async function openStartDropdown(preserveScroll = false) {
           // Reflections write to yesterday (completion_date), not today.
           await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() });
         } else {
-          await invoke('start_task_block', { sourceType: p.source_type, sourceId: p.source_id });
+          await invoke('start_task_block', { sourceType: p.source_type, sourceId: String(p.source_id) });
         }
       } catch (err) { console.error('tw item click:', err); }
       window.dispatchEvent(new Event('task-state-changed'));

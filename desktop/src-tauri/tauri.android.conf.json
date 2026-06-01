@@ -1,6 +1,6 @@
 {
   "app": {
-    "windows": [{}]
+    "windows": [{ "backgroundColor": "#FFFFFF" }]
   },
   "bundle": {
     "createUpdaterArtifacts": false,

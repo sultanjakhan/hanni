@@ -32,6 +32,17 @@
 }
 .cal-today-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+/* Hide-completed toggle — sized to pair with the "+ Добавить" button. */
+.ctl-hide-btn {
+  font-size: 13px; padding: 7px 14px; border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-default); background: transparent;
+  color: var(--text-secondary); cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 6px; margin-right: var(--space-2);
+  transition: all var(--transition-fast); white-space: nowrap;
+}
+.ctl-hide-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ctl-hide-btn.ctl-hide-on { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+
 /* Weekday headers */
 .cal-weekdays {
   display: grid; grid-template-columns: repeat(7, 1fr);
@@ -600,6 +611,15 @@
 }
 .day-event-block-head { display: flex; align-items: center; gap: 4px; }
 .day-event-block .day-event-title { font-size: 13px; line-height: 1.2; flex: none; }
+/* ✓ done-toggle on event blocks (and reused conceptually in the month panel). */
+.day-event-check { margin-left: auto; border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1; color: var(--text-muted); padding: 0 2px; }
+.day-event-check:hover { color: var(--accent-blue); }
+.day-event-done .day-event-check { color: var(--accent-blue); }
+/* Compact single-row layout for short events — keeps the title readable. */
+.day-event-compact { flex-direction: row; align-items: center; gap: 6px; padding: 2px 8px; }
+.day-event-compact .day-event-time { flex: none; font-size: 12px; }
+.day-event-compact .day-event-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.day-event-compact .day-event-check { flex: none; }
 
 /* Event modal — category picker, priority pills */
 .evm-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }

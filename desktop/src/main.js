@@ -396,9 +396,19 @@ document.addEventListener('keydown', (e) => {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
       autoImportHealth();
-      // Re-paint the active tab so the user sees fresh events (sleep/walks
-      // just imported, or anything Mac pushed while we were backgrounded).
-      try { activateView(); } catch (_) {}
+      // Returning to foreground: pull the latest from whichever transport is
+      // active so we see what the Mac changed while we were backgrounded
+      // (e.g. a task it started). lan_sync_now is bidirectional (one POST =
+      // full exchange); cloud_owner_pull covers the async backend. Re-paint
+      // (and refresh the task widget) after each settles so fresh rows show
+      // without waiting for a poll.
+      const repaint = () => {
+        try { activateView(); } catch (_) {}
+        try { window.dispatchEvent(new Event('task-state-changed')); } catch (_) {}
+      };
+      repaint();
+      invoke('lan_sync_now').then(repaint, () => {});
+      invoke('cloud_owner_pull').then(repaint, () => {});
     });
     startHealthPolling(); // 3-min poll while foregrounded
     // Schedule WorkManager-driven periodic HC pull so the watch → Hanni →

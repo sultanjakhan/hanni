@@ -384,11 +384,15 @@ async function renderCalendar(el, events, tasks) {
       </div>`;
     }).join('');
 
-    const evtHtml = dayEvts.map(e => `<div class="cal-panel-item">
+    const evtHtml = dayEvts.map(e => {
+      const done = !!e.completed;
+      return `<div class="cal-panel-item${done ? ' done' : ''}" data-evt-id="${e.id}">
+      <div class="cal-panel-check${done ? ' done' : ''}" data-evt-toggle="${e.id}">${done ? '✓' : ''}</div>
       <span class="cal-panel-time">${e.time || ''}</span>
-      <span class="cal-panel-title">${escapeHtml(e.title)}</span>
+      <span class="cal-panel-title${done ? ' done' : ''}">${escapeHtml(e.title)}</span>
       ${e.source && e.source !== 'manual' ? `<span class="cal-panel-badge">${e.source === 'apple' ? '🍎' : '📅'}</span>` : ''}
-    </div>`).join('');
+    </div>`;
+    }).join('');
 
     const taskHtml = dayTasks.map(t => {
       const done = t.status === 'done';
@@ -458,7 +462,7 @@ async function renderCalendar(el, events, tasks) {
     item.addEventListener('click', async (e) => {
       // Inner skip button has its own handler — don't double-fire.
       if (e.target.closest('[data-sch-skip]')) return;
-      const schId = parseInt(item.dataset.schToggle);
+      const schId = item.dataset.schToggle;  // UUIDv7 string — no parseInt
       let date = selDate;
       if (item.dataset.schPrev === '1') {
         const prev = new Date(selDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
@@ -472,7 +476,7 @@ async function renderCalendar(el, events, tasks) {
   el.querySelectorAll('[data-sch-skip]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const schId = parseInt(btn.dataset.schSkip);
+      const schId = btn.dataset.schSkip;  // UUIDv7 string — no parseInt
       const item = btn.closest('[data-sch-toggle]');
       let date = selDate;
       if (item?.dataset.schPrev === '1') {
@@ -480,6 +484,17 @@ async function renderCalendar(el, events, tasks) {
         date = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
       }
       await invoke('skip_schedule_completion', { scheduleId: schId, date }).catch(err => console.error('skip schedule:', err));
+      refreshCalendarInner();
+    });
+  });
+
+  // Event completion toggles (manual + auto_health) — mark done / undone.
+  el.querySelectorAll('[data-evt-toggle]').forEach(chk => {
+    chk.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(chk.dataset.evtToggle);
+      const ev = (events || []).find(x => x.id === id);
+      await invoke('update_event', { id, title: null, description: null, date: null, time: null, durationMinutes: null, category: null, color: null, completed: !(ev && ev.completed) }).catch(err => console.error('toggle event:', err));
       refreshCalendarInner();
     });
   });
@@ -727,16 +742,28 @@ async function renderDayCalendar(el, events) {
   const eventBlock = (e, top, height, label, continued) => {
     const isManual = !e.source || e.source === 'manual';
     const pri = Number(e.priority || 0);
+    const done = !!e.completed;
     const priBar = pri > 0 ? `<span class="day-event-pri" style="background:${priorityHex(pri)}" title="Важность ${pri}/5"></span>` : '';
     // auto_health events already carry their own emoji in the title
     // (🚶/🏃/Сон…), so the generic 📅 badge would just be noise.
     const srcBadge = (!isManual && e.source !== 'auto_health')
       ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
     const idAttr = isManual ? `data-event-id="${e.id}"` : '';
-    return `<div class="day-event day-event-block" ${idAttr}
-      style="top:${Math.round(top)}px;height:${Math.max(Math.round(height), 22)}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};${isManual ? 'cursor:pointer;' : ''}">
-      <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}</div>
-      <span class="day-event-title">${escapeHtml(e.title)}</span>
+    const h = Math.max(Math.round(height), 22);
+    const titleStyle = done ? ' style="text-decoration:line-through;"' : '';
+    const checkBtn = `<button type="button" class="day-event-check" data-evt-toggle="${e.id}" title="Выполнено">${done ? '✓' : '○'}</button>`;
+    const baseStyle = `top:${Math.round(top)}px;height:${h}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};${isManual ? 'cursor:pointer;' : ''}${done ? 'opacity:0.55;' : ''}`;
+    // Short events can't fit head+title+duration (≥50px); render a compact single
+    // row instead — time · title (ellipsis) · ✓ — so the title stays readable.
+    if (h < 50) {
+      return `<div class="day-event day-event-block day-event-compact${done ? ' day-event-done' : ''}" ${idAttr} style="${baseStyle}">
+        ${priBar}<span class="day-event-time">${label}</span>
+        <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>${checkBtn}
+      </div>`;
+    }
+    return `<div class="day-event day-event-block${done ? ' day-event-done' : ''}" ${idAttr} style="${baseStyle}">
+      <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}${checkBtn}</div>
+      <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>
       <span class="day-event-dur">${continued ? '↳ ' : ''}${e.duration_minutes || 60} мин</span>
     </div>`;
   };
@@ -865,8 +892,19 @@ async function renderDayCalendar(el, events) {
   // Proportional event blocks live in their own layer, not inside hour cells.
   el.querySelectorAll('.day-event-block[data-event-id]').forEach(blk => {
     blk.addEventListener('click', (e) => {
+      if (e.target.closest('[data-evt-toggle]')) return;  // ✓ has its own handler
       e.stopPropagation();
       showEventModal(Number(blk.dataset.eventId));
+    });
+  });
+  // Event completion toggle (manual + auto_health) in day grid.
+  el.querySelectorAll('.day-event-check[data-evt-toggle]').forEach(chk => {
+    chk.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(chk.dataset.evtToggle);
+      const ev = (events || []).find(x => x.id === id);
+      await invoke('update_event', { id, title: null, description: null, date: null, time: null, durationMinutes: null, category: null, color: null, completed: !(ev && ev.completed) }).catch(err => console.error('toggle event:', err));
+      refreshCalendarInner();
     });
   });
   // Schedule completion toggles in day view
@@ -874,7 +912,7 @@ async function renderDayCalendar(el, events) {
     item.addEventListener('click', async (e) => {
       if (e.target.closest('[data-day-skip]')) return;
       e.stopPropagation();
-      const schId = parseInt(item.dataset.daySch);
+      const schId = item.dataset.daySch;  // UUIDv7 string — no parseInt
       let date = S.calDayDate;
       if (item.dataset.schPrev === '1') {
         const prev = new Date(S.calDayDate + 'T12:00:00'); prev.setDate(prev.getDate() - 1);
@@ -887,7 +925,7 @@ async function renderDayCalendar(el, events) {
   el.querySelectorAll('[data-day-skip]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const schId = parseInt(btn.dataset.daySkip);
+      const schId = btn.dataset.daySkip;  // UUIDv7 string — no parseInt
       const item = btn.closest('[data-day-sch]');
       let date = S.calDayDate;
       if (item?.dataset.schPrev === '1') {

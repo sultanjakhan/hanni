@@ -165,11 +165,11 @@
       // Bulk quick-fill — Hanni-only (loads fridge-multiadd.js on demand).
       const fastBtn = (canAdd && window.__TAURI__?.core?.invoke) ? `<button class="btn-secondary" id="fr-fast" style="white-space:nowrap">📋 Быстро</button>` : '';
       el.innerHTML = `
-        <div class="recipe-filter-bar" style="position:static;padding:0;margin:0 0 12px;align-items:center;gap:8px">
-          <input class="form-input" id="fr-search" placeholder="Поиск…" value="${esc(state.q)}" style="max-width:180px">
-          <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">${locChips()}</div>
-          ${cookBtn}${fastBtn}${addBtn}
+        <div class="recipe-filter-bar" style="position:static;padding:0;margin:0 0 8px;flex-wrap:wrap;gap:8px">
+          <input class="form-input" id="fr-search" placeholder="Поиск…" value="${esc(state.q)}" style="flex:1 1 160px;max-width:220px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${cookBtn}${fastBtn}${addBtn}</div>
         </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px">${locChips()}</div>
         ${expiryAlert()}
         ${expiringTable()}
         <div id="fr-grid-wrap"></div>`;

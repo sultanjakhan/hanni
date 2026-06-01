@@ -7,7 +7,9 @@ use std::collections::HashMap;
 struct RNode {
     id: i64, is_start: bool, requirement: String,
     title: String, category: String, priority: i64,
-    source_type: String, source_id: Option<i64>,
+    // source_id: UUIDv7 string (post-CRR) or legacy int as text — never i64,
+    // or schedule-linked nodes silently drop out of load_nodes (InvalidColumnType).
+    source_type: String, source_id: Option<String>,
 }
 struct REdge { from: i64, to: i64, trigger: String, value: Option<i64> }
 
@@ -104,6 +106,17 @@ pub fn set_routine_node_status(
         if subs.len() == 1 { Some(subs.into_iter().next().unwrap()) } else { None }
     });
     if let (Some(sid), Some(d)) = (resolved_sid, date) {
+        // Reflections (marks_previous_day) record completion for the PREVIOUS day —
+        // same as Список/Месяц/День/picker — so a routine step ✓/✗ lands on yesterday.
+        let marks_prev: i64 = conn.query_row(
+            "SELECT COALESCE(marks_previous_day, 0) FROM schedules WHERE id=?1",
+            rusqlite::params![sid], |r| r.get(0),
+        ).unwrap_or(0);
+        let d = if marks_prev == 1 {
+            chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d")
+                .map(|nd| (nd - chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+                .unwrap_or(d)
+        } else { d };
         {
             if clearing {
                 let _ = conn.execute(
@@ -194,10 +207,17 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
             })
             .collect();
 
+        let has_required = nodes.values().any(|n| !n.is_start && n.requirement == "required");
         let all_required_closed = nodes.values()
             .filter(|n| !n.is_start && n.requirement == "required")
             .all(|n| closed(n.id));
-        if all_required_closed && nodes.values().any(|n| !n.is_start) {
+        // Done = nothing left to do. Chains WITH required steps finish once those
+        // are closed (optional bonus steps may remain). All-optional chains finish
+        // only when no step is still available/locked — otherwise the empty
+        // "required" set makes all() == true and the run auto-completes the instant
+        // it starts (e.g. the all-optional "Спорт" chain).
+        let done = if has_required { all_required_closed } else { avail.is_empty() && locked.is_empty() };
+        if done && nodes.values().any(|n| !n.is_start) {
             conn.execute("UPDATE routine_runs SET state='completed', completed_at=?1 WHERE id=?2",
                 rusqlite::params![chrono::Local::now().to_rfc3339(), run_id]).ok();
         }

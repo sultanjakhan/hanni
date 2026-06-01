@@ -14,9 +14,19 @@ const _SYNC_WRITE_PREFIXES = [
   'add_', 'create_', 'delete_', 'update_', 'save_', 'toggle_', 'archive_',
 ];
 
+// Tracking commands that mutate sync-eligible tables (timeline_blocks running
+// state, schedule completions) but whose start_/pause_/finish_/skip_ names
+// overlap non-DB commands like start_recording — match these exactly so they
+// also trigger an immediate push (the running-task indicator was the symptom).
+const _SYNC_WRITE_EXACT = new Set([
+  'start_task_block', 'complete_task_block', 'pause_task_block',
+  'finish_task_block', 'skip_schedule_completion',
+]);
+
 export function invoke(cmd, args) {
   const promise = _rawInvoke(cmd, args);
-  if (typeof cmd === 'string' && _SYNC_WRITE_PREFIXES.some(p => cmd.startsWith(p))) {
+  if (typeof cmd === 'string' &&
+      (_SYNC_WRITE_PREFIXES.some(p => cmd.startsWith(p)) || _SYNC_WRITE_EXACT.has(cmd))) {
     promise.then(() => requestPush(), () => {});
   }
   return promise;

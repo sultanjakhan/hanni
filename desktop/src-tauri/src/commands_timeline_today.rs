@@ -215,7 +215,9 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
 
     // ── 4. Merge actual blocks from timeline_blocks (by source_type, source_id)
     let mut b_stmt = conn.prepare(
-        "SELECT id, source_type, source_id, start_time, end_time, duration_minutes, is_active
+        // CAST to TEXT so UUIDv7 schedule ids read as String (else InvalidColumnType
+        // drops the row); numeric event/note ids come back as their text form.
+        "SELECT id, source_type, CAST(source_id AS TEXT), start_time, end_time, duration_minutes, is_active
          FROM timeline_blocks
          WHERE date = ?1 AND source_type IS NOT NULL AND source_id IS NOT NULL"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -223,18 +225,23 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, i64>(2)?,
+            row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, String>(4)?,
             row.get::<_, i64>(5)?,
             row.get::<_, i64>(6)?,
         ))
     }).map_err(|e| format!("Query error: {}", e))?;
-    let blocks: Vec<(i64, String, i64, String, String, i64, i64)> = blocks_iter.flatten().collect();
+    let blocks: Vec<(i64, String, String, String, String, i64, i64)> = blocks_iter.flatten().collect();
 
     for it in items.iter_mut() {
         let st = it.get("source_type").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let sid = it.get("source_id").and_then(|v| v.as_i64()).unwrap_or(0);
+        // source_id may be a JSON string (schedule UUID) or number (event/note) — normalize to string.
+        let sid = it.get("source_id").map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => String::new(),
+        }).unwrap_or_default();
         for (block_id, bst, bsid, start, end, dur, active) in &blocks {
             if bst == &st && *bsid == sid {
                 if let Some(obj) = it.as_object_mut() {
@@ -259,8 +266,10 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
 
 #[tauri::command]
 pub fn start_task_block(
+    // String, not i64 — schedules use UUIDv7 ids; events/notes pass numeric ids
+    // as strings (SQLite INTEGER affinity stores them as ints anyway).
     source_type: String,
-    source_id: i64,
+    source_id: String,
     type_id: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
@@ -311,8 +320,8 @@ pub fn complete_task_block(
     let now_rfc = now.to_rfc3339();
     let date_today = now.format("%Y-%m-%d").to_string();
 
-    let (start_time, source_type, source_id, block_date): (String, Option<String>, Option<i64>, String) = conn.query_row(
-        "SELECT start_time, source_type, source_id, date FROM timeline_blocks WHERE id=?1",
+    let (start_time, source_type, source_id, block_date): (String, Option<String>, Option<String>, String) = conn.query_row(
+        "SELECT start_time, source_type, CAST(source_id AS TEXT), date FROM timeline_blocks WHERE id=?1",
         rusqlite::params![block_id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
     ).map_err(|e| format!("Block not found: {}", e))?;
@@ -393,8 +402,8 @@ pub fn finish_task_block(
     let now_hm = now.format("%H:%M").to_string();
     let now_rfc = now.to_rfc3339();
     let date_today = now.format("%Y-%m-%d").to_string();
-    let (start_time, source_type, source_id, block_date): (String, Option<String>, Option<i64>, String) = conn.query_row(
-        "SELECT start_time, source_type, source_id, date FROM timeline_blocks WHERE id=?1",
+    let (start_time, source_type, source_id, block_date): (String, Option<String>, Option<String>, String) = conn.query_row(
+        "SELECT start_time, source_type, CAST(source_id AS TEXT), date FROM timeline_blocks WHERE id=?1",
         rusqlite::params![block_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
     ).map_err(|e| format!("Block not found: {}", e))?;
     let close_end = if block_date == date_today { now_hm } else { "23:59".to_string() };
@@ -426,7 +435,7 @@ pub fn finish_task_block(
 pub fn get_active_block(db: tauri::State<'_, HanniDb>) -> Result<Option<serde_json::Value>, String> {
     let conn = db.conn();
     let row = conn.query_row(
-        "SELECT b.id, b.date, b.start_time, b.source_type, b.source_id, t.name, t.color, t.icon
+        "SELECT b.id, b.date, b.start_time, b.source_type, CAST(b.source_id AS TEXT), t.name, t.color, t.icon
          FROM timeline_blocks b JOIN timeline_activity_types t ON t.id = b.type_id
          WHERE b.is_active = 1 LIMIT 1",
         [], |r| {
@@ -435,7 +444,7 @@ pub fn get_active_block(db: tauri::State<'_, HanniDb>) -> Result<Option<serde_js
                 "date": r.get::<_, String>(1)?,
                 "start_time": r.get::<_, String>(2)?,
                 "source_type": r.get::<_, Option<String>>(3)?,
-                "source_id": r.get::<_, Option<i64>>(4)?,
+                "source_id": r.get::<_, Option<String>>(4)?,
                 "type_name": r.get::<_, String>(5)?,
                 "type_color": r.get::<_, String>(6)?,
                 "type_icon": r.get::<_, String>(7)?,
@@ -451,7 +460,7 @@ pub fn get_active_block(db: tauri::State<'_, HanniDb>) -> Result<Option<serde_js
 pub fn get_task_avg_durations(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT source_type, source_id,
+        "SELECT source_type, CAST(source_id AS TEXT),
                 CAST(ROUND(AVG(duration_minutes)) AS INTEGER) AS avg_min, COUNT(*) AS n
          FROM timeline_blocks
          WHERE is_active = 0 AND source_type IS NOT NULL AND source_id IS NOT NULL
@@ -461,7 +470,7 @@ pub fn get_task_avg_durations(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde
     let rows = stmt.query_map([], |r| {
         Ok(serde_json::json!({
             "source_type": r.get::<_, String>(0)?,
-            "source_id": r.get::<_, i64>(1)?,
+            "source_id": r.get::<_, String>(1)?,
             "avg_minutes": r.get::<_, i64>(2)?,
             "samples": r.get::<_, i64>(3)?,
         }))

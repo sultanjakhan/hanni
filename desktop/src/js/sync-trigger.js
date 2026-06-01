@@ -16,19 +16,30 @@ let pushTimer = null;
 let inFlight = false;
 let pendingAfterFlight = false;
 
-function fire() {
+async function fire() {
   if (!_rawInvoke) return;
   if (inFlight) { pendingAfterFlight = true; return; }
   inFlight = true;
-  _rawInvoke('cloud_owner_push')
-    .catch(() => {})
-    .finally(() => {
-      inFlight = false;
-      if (pendingAfterFlight) {
-        pendingAfterFlight = false;
-        requestPush();
+  try {
+    // cloud_owner_push is backend-agnostic (Firestore OR GitHub — push_inner
+    // dispatches internally). The LAN transport is independent, so fan out to
+    // it too when configured: a local write then propagates over Wi-Fi/Tailscale
+    // within the debounce window instead of waiting for the 15s auto-loop.
+    const jobs = [_rawInvoke('cloud_owner_push').catch(() => {})];
+    try {
+      const lan = await _rawInvoke('lan_sync_get_config');
+      if (lan && lan.enabled && lan.peer) {
+        jobs.push(_rawInvoke('lan_sync_now').catch(() => {}));
       }
-    });
+    } catch (_) {}
+    await Promise.allSettled(jobs);
+  } finally {
+    inFlight = false;
+    if (pendingAfterFlight) {
+      pendingAfterFlight = false;
+      requestPush();
+    }
+  }
 }
 
 export function requestPush() {

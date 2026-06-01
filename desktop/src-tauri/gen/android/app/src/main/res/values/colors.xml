@@ -7,4 +7,8 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Native window background during native→webview handoff. White matches
+         the light default app theme (localStorage hanni_theme defaults to
+         'light') and the white boot-splash, so there is no black flash. -->
+    <color name="window_bg">#FFFFFFFF</color>
 </resources>

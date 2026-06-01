@@ -7,7 +7,8 @@ import { renderKanbanView } from './db-kanban.js';
 import { renderListView } from './db-list.js';
 import { renderGalleryView } from './db-gallery.js';
 import { renderCalendarView } from './db-calendar.js';
-import { showFilterDropdown, renderFilterBar } from './db-filters.js';
+import { showFilterDropdown, renderFilterBar, applyFilters, loadFiltersFromViewConfig } from './db-filters.js';
+import { applyQuickDateFilter } from './db-filter-logic.js';
 import { showSortDropdown, getSortRules, applySortRules } from './db-sort.js';
 import { resolveDataType } from './db-type-registry.js';
 import { exportToCsv } from './db-export.js';
@@ -29,6 +30,13 @@ export class DatabaseView {
     this._records = s.records || (s.fetchRecords ? await s.fetchRecords().catch(() => []) : []);
     try { this._customProps = await invoke('get_property_definitions', { tabId: s.tabId }); } catch { this._customProps = []; }
     await this._loadValues();
+    // Load persisted filters once so every view (not just table) can apply them.
+    if (!S.dbvFilters) S.dbvFilters = {};
+    if (!S.dbvFilters[s.tabId]) await loadFiltersFromViewConfig(s.tabId);
+    // Re-apply the active sort on every render so it survives re-renders/reloads
+    // (reloadFn replaces schema.records; without this the sort is lost). No-op when
+    // no rules are set, so default record order is preserved.
+    applySortRules(this._records, getSortRules(s.tabId), s.idField, this._valuesMap, (key) => this._getDataType(key));
     if (!this._currentView) this._currentView = await this._loadPersistedView() || s.defaultView;
 
     // Preserve scroll position and height across full re-renders
@@ -76,7 +84,11 @@ export class DatabaseView {
   }
 
   async _renderView(contentEl, allFields) {
-    const s = this.schema, records = this._applySearch(this._records);
+    const s = this.schema;
+    // Quick-date + column filters applied here so ALL views filter (not just table).
+    let records = this._applySearch(this._records);
+    records = applyQuickDateFilter(records, (S._dbvQuickFilter || {})[s.tabId] || null);
+    records = applyFilters(records, this._valuesMap, (S.dbvFilters || {})[s.tabId], s.idField, s.tabId);
     const ctx = {
       tabId: s.tabId, recordTable: s.recordTable, records,
       fixedColumns: s.fixedColumns || [], idField: s.idField,

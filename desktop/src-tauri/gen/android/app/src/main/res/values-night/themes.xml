@@ -1,6 +1,9 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.hanni" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- White even in night mode: the in-app theme is localStorage-driven
+             (defaults to light) and the boot-splash is white, so matching that
+             avoids a dark→white flash on handoff. -->
+        <item name="android:windowBackground">@color/window_bg</item>
     </style>
 </resources>

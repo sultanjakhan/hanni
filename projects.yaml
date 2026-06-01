@@ -98,7 +98,7 @@ calendar:
       rust:
         - desktop/src-tauri/src/routine.rs
         - desktop/src-tauri/src/routine_engine.rs
-      tables: [routines, routine_nodes, routine_edges]
+      tables: [routine_chains, routine_nodes, routine_edges, routine_runs, routine_node_status]
   memory: [tech/project_calendar_tracking.md, tech/project_effective_priority.md, tech/project_instant_schedules.md]
   related: [schedule, sports, focus]
 

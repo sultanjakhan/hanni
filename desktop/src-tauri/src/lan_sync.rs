@@ -228,11 +228,33 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
         tombs: mine.tombs,
     };
     let url = format!("http://{}/lan/sync", peer);
-    let resp = reqwest::Client::new()
-        .post(&url)
+    // Tailscale's direct path goes cold when idle, so the first connect can
+    // hang until the timeout. A short connect_timeout fails fast (~5s instead
+    // of the full 20s) and a bounded retry warms the path so the exchange
+    // succeeds within the same loop tick instead of erroring for ~36s. Only
+    // retry connect/timeout errors — an HTTP error status means the peer was
+    // reached, so retrying would be pointless.
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(20))
-        .json(&req)
-        .send().await.map_err(|e| format!("LAN peer unreachable: {}", e))?;
+        .build()
+        .map_err(|e| format!("LAN client build: {}", e))?;
+    let mut resp = None;
+    let mut last_err = String::new();
+    for attempt in 0..3 {
+        match client.post(&url).json(&req).send().await {
+            Ok(r) => { resp = Some(r); break; }
+            Err(e) => {
+                last_err = e.to_string();
+                if !(e.is_connect() || e.is_timeout()) { break; }
+                if attempt < 2 {
+                    let backoff = 800u64 * (attempt as u64 + 1);
+                    tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                }
+            }
+        }
+    }
+    let resp = resp.ok_or_else(|| format!("LAN peer unreachable: {}", last_err))?;
     if !resp.status().is_success() {
         return Err(format!("LAN sync {}: {}", resp.status(),
                             resp.text().await.unwrap_or_default()));
@@ -263,9 +285,12 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
     let mut adopted: Option<String> = None;
     if let Some(hint) = candidate_hint {
         let probe_url = format!("http://{}/lan/sync", hint);
-        let reachable = reqwest::Client::new()
-            .post(&probe_url)
+        let reachable = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(2))
             .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap_or_default()
+            .post(&probe_url)
             .json(&serde_json::json!({
                 "key": "", "cursors": {}, "tomb_cursor": "",
                 "rows": [], "tombs": []

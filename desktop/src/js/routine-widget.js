@@ -18,7 +18,7 @@ function localDate() {
 /// HTML for the routine section; '' when there are no chains. `now` is the
 /// get_routine_now payload; `recommendedId` is the active task to highlight blue;
 /// `chainRecId` is the chain whose start button to highlight as "сейчас".
-export async function renderRoutineSection(chains = [], now = [], recommendedId = null, chainRecId = null, completedChainIds = []) {
+export async function renderRoutineSection(chains = [], now = [], recommendedId = null, chainRecId = null, completedChainIds = [], dueChainIds = null) {
   if (!chains.length) return '';
 
   const completedSet = new Set(completedChainIds);
@@ -26,17 +26,21 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
   for (const c of chains) {
     if (completedSet.has(c.id) && !now.find(r => r.chain_id === c.id)) continue;
     const run = now.find(r => r.chain_id === c.id);
+    // Run with nothing left to do (last step just closed → completing): let the
+    // whole chain disappear instead of leaving a dead-end lone "Отменить".
+    if (run && !run.tasks.length && !(run.locked || []).length) continue;
     if (run) {
       for (const t of run.tasks) {
-        const cls = t.id === recommendedId ? 'tw-item tw-item--recommended' : 'tw-item';
-        rows += `<div class="tw-item-row">
-          <button class="${cls} tw-item--main" data-rt-task="${t.id}" data-rt-run="${run.run_id}">
-            <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
-            <span class="tw-item-title">${escapeHtml(t.title)}</span>
-          </button>
-          <button class="tw-item tw-rt-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Пропустить — не делал сегодня">
-            <span class="tw-item-icon">✕</span>
-          </button>
+        // Explicit ✓ (сделал) / ✗ (не выполнено) pair — same affordance as the
+        // schedule rows in Список/picker, so the choice is obvious instead of
+        // "tap the title = done, tiny ✕ = not done". The current step gets a
+        // subtle left-accent (not a full fill) so the boxes stay readable.
+        const now = t.id === recommendedId ? ' tw-rt-step--now' : '';
+        rows += `<div class="tw-item tw-rt-step${now}">
+          <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
+          <span class="tw-item-title">${escapeHtml(t.title)}</span>
+          <span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>
+          <span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>
         </div>`;
       }
       for (const t of (run.locked || [])) {
@@ -50,6 +54,8 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
         <span class="tw-item-title">Отменить «${escapeHtml(c.title)}»</span>
       </button>`;
     } else {
+      // Time/day-gate: hide an unstarted chain when its first step isn't "к месту" now.
+      if (dueChainIds && !dueChainIds.has(c.id)) continue;
       const isWake = c.trigger_type === 'sleep_end';
       const label = isWake ? `${escapeHtml(c.title)} — Я встал` : `${escapeHtml(c.title)} — начать`;
       const isRec = c.id === chainRecId;
