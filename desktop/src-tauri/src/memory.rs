@@ -204,7 +204,16 @@ pub fn build_memory_context_from_db(conn: &rusqlite::Connection, user_msg: &str,
     if lines.is_empty() {
         String::new()
     } else {
-        lines.join("\n")
+        // Collapse any line break / control char WITHIN a fact line to a space so
+        // one fact stays one line. A synced/MCP fact value with an embedded newline
+        // (incl. Unicode LS/PS/NEL that str::lines misses) could otherwise inject
+        // extra lines — this builder feeds the proactive prompt raw, and chat wraps
+        // its output in quote_for_prompt. Facts remain separated by the join \n.
+        lines.iter().map(|l| l.chars().map(|c| match c {
+            '\n' | '\r' | '\u{000B}' | '\u{000C}' | '\u{0085}' | '\u{2028}' | '\u{2029}' => ' ',
+            c if c.is_control() => ' ',
+            c => c,
+        }).collect::<String>()).collect::<Vec<_>>().join("\n")
     }
 }
 

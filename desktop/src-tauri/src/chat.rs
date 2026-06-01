@@ -15,7 +15,17 @@ use std::collections::HashMap;
 /// this defangs the basic "запомни что: \n\nIgnore previous instructions"
 /// indirect-prompt-injection vector through facts/profile/tasks.
 fn quote_for_prompt(s: &str) -> String {
-    s.lines().map(|l| format!("> {}", l)).collect::<Vec<_>>().join("\n")
+    // Normalize EVERY Unicode line break to \n first — str::lines() only splits
+    // \n and \r\n, so a fact containing U+2028/U+2029/NEL/VT/FF would otherwise
+    // slip a visually-new line past the "> " prefix and escape the data quote
+    // (indirect-prompt-injection via synced/MCP facts). Replace remaining
+    // control chars with spaces so nothing else can confuse the model.
+    let normalized: String = s.chars().map(|c| match c {
+        '\n' | '\r' | '\u{000B}' | '\u{000C}' | '\u{0085}' | '\u{2028}' | '\u{2029}' => '\n',
+        c if c.is_control() => ' ',
+        c => c,
+    }).collect();
+    normalized.lines().map(|l| format!("> {}", l)).collect::<Vec<_>>().join("\n")
 }
 
 // ── Chat command ──

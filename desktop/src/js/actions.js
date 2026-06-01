@@ -57,11 +57,15 @@ export async function executeAction(actionJson) {
     let result;
 
     // S5: Confirmation for dangerous actions
-    const DANGEROUS_ACTIONS = ['run_shell', 'close_app', 'quit_app', 'open_app', 'start_focus'];
+    // Confirm destructive/system actions before executing — guards against the
+    // LLM emitting them from a prompt-injected context (chat + voice paths).
+    const DANGEROUS_ACTIONS = ['run_shell', 'close_app', 'quit_app', 'open_app', 'start_focus', 'forget', 'delete_event'];
     if (DANGEROUS_ACTIONS.includes(actionType)) {
       const desc = actionType === 'run_shell' ? `Команда: ${action.command || action.cmd || '?'}`
         : actionType === 'start_focus' ? `Фокус: ${action.duration || '?'} мин`
         : actionType === 'open_app' ? `Открыть: ${action.name || action.app || '?'}`
+        : actionType === 'forget' ? `Забыть из памяти: ${action.key || '?'}`
+        : actionType === 'delete_event' ? `Удалить событие #${action.id || '?'}`
         : `Закрыть: ${action.name || action.app || '?'}`;
       const confirmed = await new Promise(resolve => {
         const overlay = document.createElement('div');
