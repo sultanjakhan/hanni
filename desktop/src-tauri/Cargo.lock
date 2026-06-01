@@ -1802,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "hanni"
-version = "0.91.4"
+version = "0.91.5"
 dependencies = [
  "axum",
  "base64 0.22.1",

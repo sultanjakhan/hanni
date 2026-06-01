@@ -23,9 +23,20 @@ pub const TRIAL_MARKER: &str = ".trial";
 /// boot the trial never confirmed (white-screened) → the bundle is reverted.
 const PENDING_MARKER: &str = ".trial_pending";
 
-/// Custom scheme. wry serves it at `http://hanniweb.localhost/...` on Android.
-#[cfg(target_os = "android")]
+/// Custom scheme for OTA-served frontend.
+#[cfg(any(target_os = "android", target_os = "macos"))]
 pub const SCHEME: &str = "hanniweb";
+
+/// The URL wry exposes our custom scheme at — the form differs per platform:
+/// Android/Linux serve it as `http://<scheme>.localhost/`, while macOS/iOS use
+/// `<scheme>://localhost/`. Navigating to the wrong form white-screens.
+#[cfg(any(target_os = "android", target_os = "macos"))]
+pub fn nav_url() -> String {
+    #[cfg(target_os = "macos")]
+    { format!("{}://localhost/index.html", SCHEME) }
+    #[cfg(not(target_os = "macos"))]
+    { format!("http://{}.localhost/index.html", SCHEME) }
+}
 
 fn web_base<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     app.path()
@@ -41,7 +52,7 @@ fn version_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app
 
 // ───────────────────────── protocol (Android only) ─────────────────────────
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 fn mime_for(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html",
@@ -65,7 +76,7 @@ fn mime_for(path: &str) -> &'static str {
 }
 
 /// URI → asset-relative path (no leading slash; "" → index.html; strips query).
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 fn rel_path(uri: &str) -> String {
     let after_scheme = uri.splitn(2, "://").nth(1).unwrap_or(uri);
     let path = after_scheme.splitn(2, '/').nth(1).unwrap_or("");
@@ -75,7 +86,7 @@ fn rel_path(uri: &str) -> String {
 
 /// Resolve to (bytes, mime, csp): OTA dir first (when ready + safe), else the
 /// APK-embedded assets. Rejects `..` traversal out of the bundle dir.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 fn resolve<R: Runtime>(app: &tauri::AppHandle<R>, rel: &str) -> Option<(Vec<u8>, String, Option<String>)> {
     let traversal = rel.split('/').any(|c| c == "..");
     if !traversal {
@@ -92,18 +103,18 @@ fn resolve<R: Runtime>(app: &tauri::AppHandle<R>, rel: &str) -> Option<(Vec<u8>,
 }
 
 /// CSP from the embedded index.html so OTA-served HTML carries the same policy.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 fn embedded_csp<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
     app.asset_resolver().get("index.html".to_string()).and_then(|a| a.csp_header)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 fn not_found() -> tauri::http::Response<Vec<u8>> {
     tauri::http::Response::builder().status(404).body(b"not found".to_vec()).unwrap()
 }
 
 /// Registers the OTA web-asset protocol on the builder (Android only).
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     use tauri::http::{Request, Response};
     use tauri::UriSchemeContext;
@@ -279,7 +290,7 @@ pub async fn web_ota_apply<R: Runtime>(
 /// attempt (the pending marker survived), it white-screened last launch → drop
 /// it so this launch falls back to embedded assets. version.txt keeps the
 /// version so we don't immediately re-download the same bad bundle.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "macos"))]
 pub fn verify_trial_on_boot<R: Runtime>(app: &tauri::AppHandle<R>) {
     let current = current_dir(app);
     if !current.join(TRIAL_MARKER).exists() {
@@ -299,5 +310,78 @@ pub fn web_ota_boot_ok<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), Strin
     let current = current_dir(&app);
     let _ = std::fs::remove_file(current.join(TRIAL_MARKER));
     let _ = std::fs::remove_file(current.join(PENDING_MARKER));
+    Ok(())
+}
+
+// ──────── origin migration (tauri://localhost → hanniweb://localhost) ────────
+//
+// Serving the frontend through the custom scheme changes the document origin,
+// which partitions localStorage. To carry the user's UI prefs across the switch
+// we stage it: launch 1 stays on the old origin and exports localStorage; from
+// launch 2 we navigate to the scheme and the frontend re-imports the dump.
+// A pending marker self-heals a bad switch: if the frontend never confirms the
+// boot (white screen), the next launch disables the switch and serves embedded.
+
+fn origin_stage_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("origin_stage") }
+fn ls_dump_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("ls_dump.json") }
+fn origin_pending_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("origin_pending") }
+
+fn read_origin_stage<R: Runtime>(app: &tauri::AppHandle<R>) -> String {
+    std::fs::read_to_string(origin_stage_file(app)).unwrap_or_default().trim().to_string()
+}
+fn write_origin_stage<R: Runtime>(app: &tauri::AppHandle<R>, stage: &str) {
+    let _ = std::fs::create_dir_all(web_base(app));
+    let _ = std::fs::write(origin_stage_file(app), stage.as_bytes());
+}
+
+/// Decide whether to navigate the main window to the custom scheme this launch.
+/// Drives the staged migration and self-heals a switch that white-screened.
+pub fn prepare_origin<R: Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    match read_origin_stage(app).as_str() {
+        // Ready to switch (or already switched). Navigate — but first detect a
+        // previous switch that never booted (pending marker survived) and stop,
+        // so a broken custom-scheme serve costs at most one bad launch.
+        "exported" | "live" => {
+            if origin_pending_file(app).exists() {
+                let _ = std::fs::remove_file(origin_pending_file(app));
+                write_origin_stage(app, "disabled");
+                eprintln!("[hanni] web_assets: previous switch never confirmed → embedded fallback");
+                false
+            } else {
+                let _ = std::fs::create_dir_all(web_base(app));
+                let _ = std::fs::write(origin_pending_file(app), b"");
+                true
+            }
+        }
+        // Pristine (first launch of an OTA-capable build) or permanently
+        // disabled after a failed switch: stay on the default origin.
+        _ => false,
+    }
+}
+
+/// Frontend (old origin) hands us its localStorage so the new origin can restore
+/// it. Advances the migration to "exported" so the next launch switches.
+#[tauri::command]
+pub fn web_ls_export<R: Runtime>(app: tauri::AppHandle<R>, json: String) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(web_base(&app));
+    std::fs::write(ls_dump_file(&app), json.as_bytes()).map_err(|e| e.to_string())?;
+    if read_origin_stage(&app).is_empty() {
+        write_origin_stage(&app, "exported");
+    }
+    Ok(())
+}
+
+/// Frontend (new origin) asks for the exported localStorage to repopulate it.
+#[tauri::command]
+pub fn web_ls_import<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Option<String>, String> {
+    Ok(std::fs::read_to_string(ls_dump_file(&app)).ok())
+}
+
+/// Frontend confirms it booted on the custom-scheme origin. Clears the pending
+/// marker so the switch is kept, and marks the migration "live".
+#[tauri::command]
+pub fn web_origin_ok<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let _ = std::fs::remove_file(origin_pending_file(&app));
+    write_origin_stage(&app, "live");
     Ok(())
 }

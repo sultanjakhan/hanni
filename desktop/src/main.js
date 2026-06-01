@@ -35,7 +35,7 @@ import {
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
 import { autoImportHealth, startHealthPolling, maybeRequestHealthBackground } from './js/health-auto-sync.js';
-import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot } from './js/android-update.js';
+import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot, desktopWebOTA } from './js/android-update.js';
 
 // ── One-time migration: work → jobs tab rename ──
 (() => {
@@ -411,6 +411,12 @@ document.addEventListener('keydown', (e) => {
     confirmWebBoot(); // current OTA bundle booted OK → keep it (no-op on desktop)
     checkAndroidUpdate(); // GitHub Releases → APK update banner (no-op on desktop)
     checkWebUpdate(); // OTA web-asset bundle → applied for next launch (no-op on desktop)
+  }
+
+  // macOS desktop OTA web-assets: localStorage migration across the origin
+  // switch + bundle check. No-op on dev (:1430) and non-macOS desktop.
+  if (!IS_MOBILE) {
+    desktopWebOTA();
   }
 
   // Android back button: close overlays, then go to previous tab

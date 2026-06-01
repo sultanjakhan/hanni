@@ -45,6 +45,56 @@ export async function confirmWebBoot() {
   try { await invoke('web_ota_boot_ok'); } catch {}
 }
 
+// macOS desktop OTA web-assets. The release build switches the main window from
+// tauri://localhost to hanniweb://localhost so JS/CSS can be swapped from an OTA
+// bundle without a full .app download. This carries the user's localStorage
+// across that origin change (it is partitioned per-origin) and, once switched,
+// confirms the boot + checks for a newer bundle. No-op on dev (http://…:1430)
+// and on non-macOS desktop (where the window stays on tauri://localhost).
+export async function desktopWebOTA() {
+  const proto = location.protocol;
+  if (proto === 'tauri:') {
+    // Old origin, pre-switch: hand our localStorage to Rust so the new origin
+    // can restore it. This also advances the migration so the next launch
+    // navigates to the custom scheme.
+    try {
+      const dump = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        dump[k] = localStorage.getItem(k);
+      }
+      await invoke('web_ls_export', { json: JSON.stringify(dump) });
+    } catch (e) { console.warn('[hanni] web ls export failed', e); }
+    return;
+  }
+  if (proto !== 'hanniweb:') return; // dev server / non-macOS → nothing to do
+
+  // New origin: reaching here means the custom-scheme serve booted. Confirm it
+  // (keeps the switch + any trial bundle) so a white screen self-reverts.
+  try { await invoke('web_origin_ok'); } catch {}
+  try { await invoke('web_ota_boot_ok'); } catch {}
+
+  // One-time: repopulate the localStorage exported under the old origin.
+  if (!localStorage.getItem('__ls_migrated')) {
+    try {
+      const dump = await invoke('web_ls_import');
+      if (dump) {
+        const obj = JSON.parse(dump);
+        for (const [k, v] of Object.entries(obj)) {
+          if (k !== '__ls_migrated' && typeof v === 'string') localStorage.setItem(k, v);
+        }
+      }
+      localStorage.setItem('__ls_migrated', '1');
+    } catch (e) { console.warn('[hanni] web ls import failed', e); }
+  }
+
+  // Pull a newer web bundle if one shipped (applied on next launch).
+  try {
+    const u = await invoke('web_ota_check');
+    if (u?.available) await invoke('web_ota_apply', { url: u.url, webVersion: u.web_version, sha256: u.sha256 });
+  } catch (e) { console.warn('[hanni] web ota failed', e); }
+}
+
 function showUpdateBanner(info) {
   if (document.getElementById('apk-update-banner')) return;
   const bar = document.createElement('div');

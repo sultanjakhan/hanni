@@ -361,9 +361,10 @@ pub fn run() {
         .plugin(android_update::install_apk_plugin())
         .plugin(bg_sync::init());
 
-    // OTA web-assets protocol (Android only). Registered but not yet the main
-    // window's source — first we validate it serves the embedded fallback.
-    #[cfg(target_os = "android")]
+    // OTA web-assets protocol (Android + macOS). Serves the frontend so JS/CSS
+    // updates land without a full app download. On macOS it becomes the main
+    // window's source only in release builds (dev keeps its :1430 hot-reload).
+    #[cfg(any(target_os = "android", target_os = "macos"))]
     let builder = web_assets::register(builder);
 
     // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
@@ -865,6 +866,9 @@ pub fn run() {
             web_assets::web_ota_check,
             web_assets::web_ota_apply,
             web_assets::web_ota_boot_ok,
+            web_assets::web_ls_export,
+            web_assets::web_ls_import,
+            web_assets::web_origin_ok,
             sleep_analysis::get_sleep_analysis,
             // Share links
             commands_share::create_share_link,
@@ -928,6 +932,13 @@ pub fn run() {
                 // (app_data_dir/web/ when a bundle is present, else embedded APK
                 // assets) so JS/CSS updates don't need a full APK reinstall.
                 // First, revert a trial bundle that failed to boot last launch.
+                //
+                // NOTE: the navigate must stay AFTER init_database. Navigating
+                // at the very start of setup() races the window's initial
+                // config-driven load and loses it — the webview ends up on the
+                // default tauri.localhost origin, bypassing the hanniweb scheme
+                // (breaks OTA serving). The black flash is handled by the white
+                // android:windowBackground (themes.xml), not by reordering this.
                 web_assets::verify_trial_on_boot(app.handle());
                 if let Some(win) = app.get_webview_window("main") {
                     let url = format!("http://{}.localhost/index.html", web_assets::SCHEME);
@@ -940,6 +951,30 @@ pub fn run() {
                             }
                         }
                         Err(e) => eprintln!("[hanni] web_assets bad url: {e}"),
+                    }
+                }
+            }
+
+            // macOS OTA web-assets: in release builds, serve the frontend via
+            // the custom scheme so JS/CSS updates land without a full ~128MB
+            // .app download — and without touching the Gatekeeper-signed bundle
+            // (full-app auto-update is best-effort without an Apple Dev ID).
+            // Dev keeps its :1430 hot-reload server. prepare_origin() runs the
+            // staged localStorage migration and self-heals a switch that fails
+            // to boot (serves embedded assets after one bad launch).
+            #[cfg(all(target_os = "macos", not(debug_assertions)))]
+            {
+                web_assets::verify_trial_on_boot(app.handle());
+                if web_assets::prepare_origin(app.handle()) {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let url = web_assets::nav_url();
+                        match url.parse::<tauri::Url>() {
+                            Ok(u) => match win.navigate(u) {
+                                Ok(()) => eprintln!("[hanni] web_assets: main window -> {url}"),
+                                Err(e) => eprintln!("[hanni] web_assets navigate failed: {e}"),
+                            },
+                            Err(e) => eprintln!("[hanni] web_assets bad url: {e}"),
+                        }
                     }
                 }
             }
