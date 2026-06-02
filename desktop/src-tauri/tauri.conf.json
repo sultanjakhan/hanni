@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Hanni",
-  "version": "0.91.11",
+  "version": "0.91.12",
   "identifier": "com.sultanjakhan.hanni",
   "build": {
     "frontendDist": "../src"
@@ -43,7 +43,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://gist.githubusercontent.com/sultanjakhan/19c45003936df5c74d7c0af5a86f8b9b/raw/latest.json"
+        "https://github.com/sultanjakhan/hanni/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ4OUM1QzNGQTI1QjZEMTgKUldRWWJWdWlQMXljMkdjQUNSMzBNbWVXeVYrZCtYekt0Y1V4dmg5UnVFSXBraUpoUUt5WURkWlMK"
     }

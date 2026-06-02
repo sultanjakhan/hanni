@@ -47,32 +47,7 @@ jobs:
           releaseDraft: false
           prerelease: false
           projectPath: desktop
-
-      - name: Update gist with latest.json
-        # GIST_PAT should live on a LOW-TRAFFIC account (not the one running
-        # github-sync) so the release isn't starved by the sync loop's 5000/hr.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GIST_PAT: ${{ secrets.GIST_PAT }}
-          GIST_ID: ${{ secrets.UPDATER_GIST_ID }}
-        run: |
-          TAG="${{ github.ref_name }}"
-
-          # Download original latest.json from release (has direct download URLs)
-          RELEASE=$(gh api repos/${{ github.repository }}/releases/tags/$TAG)
-          LATEST_ASSET_ID=$(echo "$RELEASE" | jq -r '.assets[] | select(.name=="latest.json") | .id')
-          gh api repos/${{ github.repository }}/releases/assets/$LATEST_ASSET_ID -H "Accept: application/octet-stream" > /tmp/latest.json
-
-          # Push to the updater gist with retry/backoff: the GIST_PAT account can
-          # transiently hit its API rate limit, which silently freezes prod
-          # auto-updates (the updater reads only this gist).
-          for i in 1 2 3 4 5; do
-            if GH_TOKEN="$GIST_PAT" gh gist edit "$GIST_ID" -f latest.json /tmp/latest.json; then
-              echo "gist updated to $TAG (attempt $i)"
-              exit 0
-            fi
-            echo "gist edit failed (attempt $i), retrying in $((10 * i))s..."
-            sleep $((10 * i))
-          done
-          echo "::error::gist update failed after 5 attempts — prod will not auto-update (GIST_PAT rate-limited?)"
-          exit 1
+        # tauri-action publishes the release with the latest.json asset; the
+        # updater reads it directly via .../releases/latest/download/latest.json
+        # (see tauri.conf.json). No gist mirror step — that separate API call was
+        # a silent single point of failure (rate-limit/PAT could freeze updates).
