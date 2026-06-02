@@ -3,6 +3,7 @@
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 import { showEventModal, priorityHex } from './calendar-event-modal.js';
+import { showEventPopover } from './calendar-event-popover.js';
 
 // Helper: check if a schedule should appear on a given date
 function scheduleMatchesDate(sch, dateStr) {
@@ -748,11 +749,13 @@ async function renderDayCalendar(el, events) {
     // (🚶/🏃/Сон…), so the generic 📅 badge would just be noise.
     const srcBadge = (!isManual && e.source !== 'auto_health')
       ? `<span class="badge badge-gray" style="margin-left:6px;">${e.source === 'apple' ? '🍎' : '📅'}</span>` : '';
-    const idAttr = isManual ? `data-event-id="${e.id}"` : '';
+    // data-evt-pop on every block opens the read-only details popover; manual
+    // events also keep data-event-id (edit lives behind the popover's button).
+    const idAttr = `data-evt-pop="${e.id}"${isManual ? ` data-event-id="${e.id}"` : ''}`;
     const h = Math.max(Math.round(height), 22);
     const titleStyle = done ? ' style="text-decoration:line-through;"' : '';
     const checkBtn = `<button type="button" class="day-event-check" data-evt-toggle="${e.id}" title="Выполнено">${done ? '✓' : '○'}</button>`;
-    const baseStyle = `top:${Math.round(top)}px;height:${h}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};${isManual ? 'cursor:pointer;' : ''}${done ? 'opacity:0.55;' : ''}`;
+    const baseStyle = `top:${Math.round(top)}px;height:${h}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};cursor:pointer;${done ? 'opacity:0.55;' : ''}`;
     // Short events can't fit head+title+duration (≥50px); render a compact single
     // row instead — time · title (ellipsis) · ✓ — so the title stays readable.
     if (h < 50) {
@@ -890,11 +893,21 @@ async function renderDayCalendar(el, events) {
     });
   });
   // Proportional event blocks live in their own layer, not inside hour cells.
-  el.querySelectorAll('.day-event-block[data-event-id]').forEach(blk => {
+  // Clicking any block opens a read-only details popover; for manual events the
+  // popover offers an explicit "Редактировать" button.
+  const evMap = new Map();
+  for (const e of dayEvents) evMap.set(String(e.id), e);
+  for (const e of events) if (e.date === prevDate && e.time) evMap.set(String(e.id), e);
+  el.querySelectorAll('.day-event-block[data-evt-pop]').forEach(blk => {
     blk.addEventListener('click', (e) => {
       if (e.target.closest('[data-evt-toggle]')) return;  // ✓ has its own handler
       e.stopPropagation();
-      showEventModal(Number(blk.dataset.eventId));
+      const ev = evMap.get(String(blk.dataset.evtPop));
+      if (!ev) return;
+      const isManual = !ev.source || ev.source === 'manual';
+      showEventPopover(ev, e.clientX, e.clientY, {
+        onEdit: isManual ? () => showEventModal(Number(ev.id)) : null,
+      });
     });
   });
   // Event completion toggle (manual + auto_health) in day grid.

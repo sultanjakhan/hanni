@@ -68,6 +68,7 @@ calendar:
   files:
     - desktop/src/js/tab-calendar.js
     - desktop/src/js/calendar-event-modal.js
+    - desktop/src/js/calendar-event-popover.js
     - desktop/src/js/calendar-event-templates.js
     - desktop/src/js/calendar-task-list.js
     - desktop/src/js/calendar-task-list-row.js

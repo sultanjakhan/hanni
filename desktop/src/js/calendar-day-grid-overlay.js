@@ -78,6 +78,13 @@ function gapHtml(startMin, endMin, minToPx) {
 export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], hourPx = DEFAULT_HOUR_PX) {
   if (!rootEl) return;
   const minToPx = (m) => Math.round(m * (hourPx / 60));
+
+  // Time context for "free" gaps and marker spacing. Past time isn't "free".
+  const now = new Date();
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  const dayIsPast = date < todayStr;
+  const nowMin = (date === todayStr) ? now.getHours() * 60 + now.getMinutes() : null;
   const blocks = await invoke('get_timeline_blocks', { date }).catch(() => []);
   const completed = (blocks || []).filter(b => !b.is_active && b.start_time && b.end_time && b.duration_minutes > 0);
   const titles = await loadSourceTitles(completed);
@@ -165,8 +172,14 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // Free-time gaps between planned events (if 2+ events with time exist)
   const sortedEvts = [...eventIntervals].sort((a, b) => a.startMin - b.startMin);
   for (let i = 0; i + 1 < sortedEvts.length; i++) {
-    const gapStart = sortedEvts[i].endMin;
+    let gapStart = sortedEvts[i].endMin;
     const gapEnd = sortedEvts[i + 1].startMin;
+    // "Свободно" means time still free to plan — skip gaps already in the past.
+    if (dayIsPast) continue;
+    if (nowMin != null) {
+      if (gapEnd <= nowMin) continue;            // gap fully elapsed
+      if (gapStart < nowMin) gapStart = nowMin;  // keep only the still-free part
+    }
     if (gapEnd - gapStart >= 60) {
       layer.insertAdjacentHTML('beforeend', gapHtml(gapStart, gapEnd, minToPx));
     }
@@ -210,12 +223,33 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     layer.appendChild(marker);
   };
 
-  for (const c of regulars) {
-    const hm = timestampToHM(c.completed_at);
-    const min = parseHM(hm);
-    if (min == null) continue;
-    renderMarker(minToPx(min), SCH_CAT_ICONS[c.category] || '◽', c.title, hm, `${c.title} · ${hm}`);
+  // Cluster check-completions that land within ~one marker-height of each other
+  // (e.g. 3 tasks all ticked at 13:56) so their markers don't stack on one row.
+  const markerGapMin = Math.max(10, Math.ceil(18 / (hourPx / 60)));
+  const regularPts = regulars
+    .map(c => ({ c, min: parseHM(timestampToHM(c.completed_at)) }))
+    .filter(p => p.min != null)
+    .sort((a, b) => a.min - b.min);
+  let rcur = [];
+  const flushRegCluster = () => {
+    if (rcur.length === 1) {
+      const { c, min } = rcur[0];
+      const hm = timestampToHM(c.completed_at);
+      renderMarker(minToPx(min), SCH_CAT_ICONS[c.category] || '◽', c.title, hm, `${c.title} · ${hm}`);
+    } else if (rcur.length > 1) {
+      const hmFirst = timestampToHM(rcur[0].c.completed_at);
+      const hmLast = timestampToHM(rcur[rcur.length - 1].c.completed_at);
+      const span = hmFirst === hmLast ? hmFirst : `${hmFirst}–${hmLast}`;
+      const tip = rcur.map(p => `• ${p.c.title} · ${timestampToHM(p.c.completed_at)}`).join('\n');
+      renderMarker(minToPx(rcur[0].min), '✓', `${rcur.length} задач`, span, tip);
+    }
+    rcur = [];
+  };
+  for (const p of regularPts) {
+    if (rcur.length && p.min - rcur[rcur.length - 1].min > markerGapMin) flushRegCluster();
+    rcur.push(p);
   }
+  flushRegCluster();
 
   if (reflections.length === 1) {
     const c = reflections[0];

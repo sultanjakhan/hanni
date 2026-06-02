@@ -7,7 +7,9 @@
   display: flex; align-items: center; gap: var(--space-2);
   position: sticky;
   top: 44px;
-  z-index: 2;
+  /* Above the day-view event/overlay layers (z-index 3/2) so scrolling event
+     blocks (e.g. a long sleep block) don't ride over the sticky date header. */
+  z-index: 5;
   background: var(--bg-primary);
   padding: var(--space-2) 0;
   margin-bottom: var(--space-2);
@@ -620,6 +622,21 @@
 .day-event-compact .day-event-time { flex: none; font-size: 12px; }
 .day-event-compact .day-event-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .day-event-compact .day-event-check { flex: none; }
+
+/* Read-only "what was done" popover (extends .inline-dropdown). */
+.cal-event-pop {
+  min-width: 200px; max-width: 280px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cal-pop-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+.cal-pop-row { font-size: 12px; color: var(--text-secondary); }
+.cal-pop-muted { color: var(--text-muted); }
+.cal-pop-done { color: var(--accent-blue); }
+.cal-pop-desc {
+  font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;
+  border-top: 1px solid var(--border-default); margin-top: 4px; padding-top: 4px;
+}
+.cal-pop-edit { margin-top: 6px; align-self: flex-start; }
 
 /* Event modal — category picker, priority pills */
 .evm-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
