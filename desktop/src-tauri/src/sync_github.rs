@@ -9,12 +9,12 @@
 
 use crate::db::SYNC_TABLES;
 use crate::sync_github_api::{
-    blob_entry, build_doc, fetch_doc, gh_get, gh_head, gh_post, gh_req, resolve_gh, GhCreds,
+    blob_entry, build_doc, fetch_doc, fetch_tarball, gh_get, gh_head, gh_post, gh_req, resolve_gh,
 };
 use crate::sync_owner::{get_setting, row_to_json, set_setting, upsert_row};
 use crate::types::HanniDb;
 use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 const PUSH_LIMIT: usize = 500;
 const EPOCH_TS: &str = "1970-01-01T00:00:00Z";
@@ -104,39 +104,45 @@ pub(crate) async fn gh_pull(db: &HanniDb) -> Result<Value, String> {
     let cursor = get_setting(&db.conn(), "cloud_owner_gh_pull_sha");
     if cursor.as_deref() == Some(head.as_str()) { return Ok(json!({ "applied": 0 })); }
 
-    let mut files: Vec<(String, String)> = match &cursor {
-        Some(cur) => parse_compare(
-            gh_get(&client, &c, &format!("compare/{}...{}", cur, head)).await?),
-        None => list_tree(&client, &c, &head).await?,
-    };
-    // `compare` returns at most 300 files on its first page; if we hit that the
-    // diff may be truncated and advancing the cursor would skip the rest. Fall
-    // back to a full-tree read (re-applying is LWW-idempotent) so nothing is lost.
-    if files.len() >= 300 {
-        files = list_tree(&client, &c, &head).await?;
-    }
-
     let own_prefix = format!("{}/", c.device_id);
     let mut applied = 0u64;
-    for (path, blob_sha) in &files {
-        if path.starts_with(&own_prefix) || !path.contains('/') { continue; }
-        let doc = match fetch_doc(&client, &c, path, blob_sha).await {
-            Ok(d) => d,
-            Err(e) => { eprintln!("[sync_github] {}: {}", path, e); continue; }
-        };
-        let conn = db.conn();
-        let table = doc.get("_table").and_then(|v| v.as_str()).unwrap_or("");
-        if table == "tombstones" {
-            let target = doc.get("_target_table").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(id) = doc.get("_row_id").and_then(|v| v.as_i64()) {
-                if SYNC_TABLES.contains(&target) {
-                    let _ = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", target),
-                                         rusqlite::params![id]);
-                    applied += 1;
+
+    // `compare` returns at most 300 files on its first page. With no cursor
+    // (first pull) or a truncated diff, read the whole repo in ONE tarball
+    // instead of a per-blob GET storm that would exhaust the account's rate
+    // limit and never let the cursor advance. Re-applying is LWW-idempotent.
+    let incremental = match &cursor {
+        Some(cur) => {
+            let files = parse_compare(
+                gh_get(&client, &c, &format!("compare/{}...{}", cur, head)).await?);
+            if files.len() >= 300 { None } else { Some(files) }
+        }
+        None => None,
+    };
+
+    match incremental {
+        Some(files) => {
+            for (path, blob_sha) in &files {
+                if path.starts_with(&own_prefix) || !path.contains('/') { continue; }
+                let doc = match fetch_doc(&client, &c, path, blob_sha).await {
+                    Ok(d) => d,
+                    Err(e) => { eprintln!("[sync_github] {}: {}", path, e); continue; }
+                };
+                match apply_doc(&db.conn(), &doc) {
+                    Ok(true) => applied += 1,
+                    Ok(false) => {}
+                    Err(e) => eprintln!("[sync_github] apply {}: {}", path, e),
                 }
             }
-        } else if SYNC_TABLES.contains(&table) {
-            if upsert_row(&conn, table, &doc)? { applied += 1; }
+        }
+        None => {
+            for (path, doc) in fetch_tarball(&client, &c, &head).await? {
+                match apply_doc(&db.conn(), &doc) {
+                    Ok(true) => applied += 1,
+                    Ok(false) => {}
+                    Err(e) => eprintln!("[sync_github] apply {}: {}", path, e),
+                }
+            }
         }
     }
 
@@ -148,6 +154,27 @@ pub(crate) async fn gh_pull(db: &HanniDb) -> Result<Value, String> {
     Ok(json!({ "applied": applied }))
 }
 
+/// Apply one decrypted doc: tombstone delete or LWW row upsert via the merge
+/// layer. Returns whether a row was changed.
+fn apply_doc(conn: &rusqlite::Connection, doc: &Map<String, Value>) -> Result<bool, String> {
+    let table = doc.get("_table").and_then(|v| v.as_str()).unwrap_or("");
+    if table == "tombstones" {
+        let target = doc.get("_target_table").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(id) = doc.get("_row_id").and_then(|v| v.as_i64()) {
+            if SYNC_TABLES.contains(&target) {
+                let _ = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", target),
+                                     rusqlite::params![id]);
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    } else if SYNC_TABLES.contains(&table) {
+        upsert_row(conn, table, doc)
+    } else {
+        Ok(false)
+    }
+}
+
 /// Changed/added blob paths (path, blob_sha) from a `compare` response; git
 /// deletions are ignored (our deletes are explicit tombstone blobs).
 fn parse_compare(cmp: Value) -> Vec<(String, String)> {
@@ -155,15 +182,4 @@ fn parse_compare(cmp: Value) -> Vec<(String, String)> {
         if f.get("status")?.as_str()? == "removed" { return None; }
         Some((f.get("filename")?.as_str()?.to_string(), f.get("sha")?.as_str()?.to_string()))
     }).collect()).unwrap_or_default()
-}
-
-/// Every blob (path, sha) in the tree at `head` — used for the first pull and
-/// as the truncation-safe fallback when a compare page is capped.
-async fn list_tree(client: &reqwest::Client, c: &GhCreds, head: &str)
-                   -> Result<Vec<(String, String)>, String> {
-    Ok(gh_get(client, c, &format!("git/trees/{}?recursive=1", head)).await?
-        .get("tree").and_then(|t| t.as_array()).map(|arr| arr.iter().filter_map(|e| {
-            if e.get("type")?.as_str()? != "blob" { return None; }
-            Some((e.get("path")?.as_str()?.to_string(), e.get("sha")?.as_str()?.to_string()))
-        }).collect()).unwrap_or_default())
 }

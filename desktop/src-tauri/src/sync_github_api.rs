@@ -9,6 +9,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use reqwest::Method;
 use serde_json::{json, Map, Value};
+use std::io::Read;
 
 pub(crate) const API: &str = "https://api.github.com";
 
@@ -98,6 +99,52 @@ pub(crate) async fn fetch_doc(client: &reqwest::Client, c: &GhCreds, path: &str,
     let blob = B64.decode(&file_bytes).map_err(|_| "inner base64")?;
     let plain = open(&c.key, path.as_bytes(), &blob)?;
     serde_json::from_slice(&plain).map_err(|e| format!("doc parse: {}", e))
+}
+
+/// Bulk read for the first/large pull: download the whole repo as ONE tarball
+/// and decrypt every foreign-device blob in-memory. Replaces thousands of
+/// per-blob `git/blobs/{sha}` GETs (which exhaust the account's 5000/hr rate
+/// limit so the pull never converges). Returns (path, decrypted doc) pairs;
+/// own-device and non-blob entries are skipped. The tarball endpoint 302s to a
+/// token-bearing codeload URL, so the redirect downloads even private repos
+/// without the (cross-host-stripped) Authorization header.
+pub(crate) async fn fetch_tarball(client: &reqwest::Client, c: &GhCreds, head: &str)
+                                  -> Result<Vec<(String, Map<String, Value>)>, String> {
+    let url = format!("{}/repos/{}/tarball/{}", API, c.repo, head);
+    let resp = client.get(&url)
+        .header("User-Agent", "Hanni")
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .bearer_auth(&c.pat)
+        .send().await.map_err(|e| format!("tarball: {}", e))?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) { return Err(format!("tarball -> {}", status)); }
+    let bytes = resp.bytes().await.map_err(|e| format!("tarball body: {}", e))?;
+
+    let own_prefix = format!("{}/", c.device_id);
+    let gz = flate2::read::GzDecoder::new(&bytes[..]);
+    let mut archive = tar::Archive::new(gz);
+    let mut out: Vec<(String, Map<String, Value>)> = Vec::new();
+    for entry in archive.entries().map_err(|e| format!("tar: {}", e))? {
+        let mut entry = entry.map_err(|e| format!("tar entry: {}", e))?;
+        if entry.header().entry_type() != tar::EntryType::Regular { continue; }
+        let raw = entry.path().map_err(|e| format!("tar path: {}", e))?
+            .to_string_lossy().into_owned();
+        // strip GitHub's "{owner}-{repo}-{sha}/" wrapper component
+        let path = match raw.split_once('/') { Some((_, rest)) => rest.to_string(), None => continue };
+        if !path.contains('/') || path.starts_with(&own_prefix) { continue; }
+        let mut file_b64 = Vec::new();
+        if entry.read_to_end(&mut file_b64).is_err() { continue; }
+        // tarball file bytes are our single base64 (git's API base64 wrapper is
+        // not present here, unlike fetch_doc's double-decode).
+        let blob = match B64.decode(&file_b64) { Ok(b) => b, Err(_) => continue };
+        if let Ok(plain) = open(&c.key, path.as_bytes(), &blob) {
+            if let Ok(doc) = serde_json::from_slice::<Map<String, Value>>(&plain) {
+                out.push((path, doc));
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
