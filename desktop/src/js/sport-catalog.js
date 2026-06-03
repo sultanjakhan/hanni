@@ -2,10 +2,10 @@
 import { invoke } from './state.js';
 import { chips } from './utils.js';
 import { renderExerciseCard } from './sport-catalog-card.js';
-import { MUSCLE_GROUPS, EXERCISE_TYPES, matchMuscle, matchType, matchSearch } from './sport-catalog-filters.js';
+import { MUSCLE_GROUPS, EXERCISE_TYPES, DIFFICULTIES, EQUIP_MODES, matchMuscle, matchType, matchDifficulty, matchEquipment, matchSearch } from './sport-catalog-filters.js';
 
 export async function renderCatalogPane(el) {
-  const F = { muscle: 'all', type: 'all', q: '' };
+  const F = { muscle: 'all', type: 'all', difficulty: 'all', equipMode: 'any', q: '' };
   let allExercises = [], panelOpen = false, built = false;
 
   async function loadData() {
@@ -13,7 +13,8 @@ export async function renderCatalogPane(el) {
   }
 
   function getFiltered() {
-    return allExercises.filter(ex => matchMuscle(ex, F.muscle) && matchType(ex, F.type) && matchSearch(ex, F.q));
+    return allExercises.filter(ex => matchMuscle(ex, F.muscle) && matchType(ex, F.type)
+      && matchDifficulty(ex, F.difficulty) && matchEquipment(ex, F.equipMode, null) && matchSearch(ex, F.q));
   }
 
   function buildShell() {
@@ -45,7 +46,9 @@ export async function renderCatalogPane(el) {
     const tActive = F.type !== 'all' ? 1 : 0;
     panel.innerHTML = `
       <div class="rf-section"><span class="rf-title">Группа мышц</span>${chips(MUSCLE_GROUPS, F.muscle, 'muscle')}</div>
-      <div class="rf-section"><span class="rf-title">Тип</span>${chips(EXERCISE_TYPES, F.type, 'type')}</div>`;
+      <div class="rf-section"><span class="rf-title">Тип</span>${chips(EXERCISE_TYPES, F.type, 'type')}</div>
+      <div class="rf-section"><span class="rf-title">Сложность</span>${chips(DIFFICULTIES, F.difficulty, 'difficulty')}</div>
+      <div class="rf-section"><span class="rf-title">Оборудование</span>${chips(EQUIP_MODES, F.equipMode, 'equipMode')}</div>`;
     panel.querySelectorAll('.rf-chip').forEach(btn => btn.onclick = () => {
       const g = btn.dataset.group, v = btn.dataset.val;
       F[g] = v;
@@ -55,7 +58,7 @@ export async function renderCatalogPane(el) {
   }
 
   function updateBadge() {
-    const ac = [F.muscle !== 'all', F.type !== 'all'].filter(Boolean).length;
+    const ac = [F.muscle !== 'all', F.type !== 'all', F.difficulty !== 'all', F.equipMode !== 'any'].filter(Boolean).length;
     const badge = el.querySelector('.rf-badge'), toggle = el.querySelector('.rf-toggle');
     badge.textContent = ac; badge.style.display = ac ? '' : 'none';
     toggle.classList.toggle('rf-active', ac > 0);

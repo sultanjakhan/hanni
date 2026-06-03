@@ -1,12 +1,13 @@
 // ── sport-catalog-modal.js — Add/edit exercise modal ──
 import { invoke } from './state.js';
 import { escapeHtml, chips } from './utils.js';
-import { MUSCLE_GROUPS, EXERCISE_TYPES, invalidateCatalogCache } from './sport-catalog-filters.js';
+import { MUSCLE_GROUPS, EXERCISE_TYPES, DIFFICULTIES, invalidateCatalogCache } from './sport-catalog-filters.js';
 
 export function showExerciseModal(onSaved, editData) {
   const isEdit = !!editData;
   const mg = editData?.muscle_group || 'full_body';
   const et = editData?.type || 'strength';
+  const df = editData?.difficulty || 'medium';
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal modal-compact">
@@ -16,6 +17,8 @@ export function showExerciseModal(onSaved, editData) {
     <div class="rf-chip-row" id="ex-muscle">${chips(MUSCLE_GROUPS, mg, 'muscle', true)}</div>
     <div class="form-label" style="margin-top:8px">Тип</div>
     <div class="rf-chip-row" id="ex-type">${chips(EXERCISE_TYPES, et, 'type', true)}</div>
+    <div class="form-label" style="margin-top:8px">Сложность</div>
+    <div class="rf-chip-row" id="ex-diff">${chips(DIFFICULTIES, df, 'difficulty', true)}</div>
     <input class="form-input" id="ex-equip" placeholder="Оборудование" value="${escapeHtml(editData?.equipment || '')}" style="margin-top:8px">
     <textarea class="form-textarea" id="ex-desc" placeholder="Описание (необязательно)" rows="2" style="margin-top:8px">${escapeHtml(editData?.description || '')}</textarea>
     <div class="modal-actions">
@@ -28,11 +31,12 @@ export function showExerciseModal(onSaved, editData) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   overlay.querySelector('#ex-cancel').onclick = () => overlay.remove();
 
-  let selMuscle = mg, selType = et;
+  let selMuscle = mg, selType = et, selDiff = df;
   overlay.querySelectorAll('.rf-chip').forEach(btn => btn.onclick = () => {
     const g = btn.dataset.group, v = btn.dataset.val;
     if (g === 'muscle') selMuscle = v;
-    else selType = v;
+    else if (g === 'type') selType = v;
+    else selDiff = v;
     const row = btn.parentElement;
     row.querySelectorAll('.rf-chip').forEach(b => b.classList.toggle('active', b.dataset.val === v));
   });
@@ -53,12 +57,12 @@ export function showExerciseModal(onSaved, editData) {
       if (isEdit) {
         await invoke('update_exercise_catalog', {
           id: editData.id, name, muscleGroup: selMuscle, equipment: overlay.querySelector('#ex-equip').value.trim(),
-          exerciseType: selType, description: overlay.querySelector('#ex-desc').value.trim(),
+          exerciseType: selType, description: overlay.querySelector('#ex-desc').value.trim(), difficulty: selDiff,
         });
       } else {
         await invoke('add_exercise_to_catalog', {
           name, muscleGroup: selMuscle, equipment: overlay.querySelector('#ex-equip').value.trim(),
-          exerciseType: selType, description: overlay.querySelector('#ex-desc').value.trim(),
+          exerciseType: selType, description: overlay.querySelector('#ex-desc').value.trim(), difficulty: selDiff,
         });
       }
       invalidateCatalogCache();

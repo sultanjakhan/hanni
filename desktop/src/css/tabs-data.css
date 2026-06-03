@@ -1967,6 +1967,10 @@
 .sport-card-muscles { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
 .sport-card.recipe-fav .sport-card-name { color: var(--color-yellow, #e8a100); }
 
+/* ── Sport guided picker ── */
+.sport-picker-steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.sport-picker-count { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; min-height: 14px; }
+
 /* Exercise rows in template add modal */
 .exercise-row { margin-bottom: 8px; }
 .exercise-row-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

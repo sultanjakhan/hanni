@@ -15,6 +15,16 @@ export const EXERCISE_TYPES = [
   { id: 'bodyweight', label: 'С весом тела' },
 ];
 
+export const DIFFICULTIES = [
+  { id: 'all', label: 'Любая' }, { id: 'easy', label: 'Лёгкий' },
+  { id: 'medium', label: 'Средний' }, { id: 'hard', label: 'Сложный' },
+];
+
+export const EQUIP_MODES = [
+  { id: 'any', label: 'Любое' }, { id: 'without', label: 'Без оборудования' },
+  { id: 'with', label: 'С оборудованием' },
+];
+
 let _catalogCache = null;
 export async function loadExerciseCatalog() {
   try { _catalogCache = await invoke('get_exercise_catalog', { search: null }); }
@@ -24,9 +34,28 @@ export async function loadExerciseCatalog() {
 export function getCatalogCache() { return _catalogCache || []; }
 export function invalidateCatalogCache() { _catalogCache = null; }
 
+let _facetsCache = null;
+export async function loadExerciseFacets() {
+  if (_facetsCache) return _facetsCache;
+  try { _facetsCache = await invoke('get_exercise_facets'); }
+  catch { _facetsCache = { equipment: [], categories: [] }; }
+  return _facetsCache;
+}
+
 export const matchMuscle = (ex, f) => f === 'all' || ex.muscle_group === f;
 export const matchType = (ex, f) => f === 'all' || ex.type === f;
+export const matchDifficulty = (ex, f) => f === 'all' || ex.difficulty === f;
 export const matchSearch = (ex, q) => !q || `${ex.name} ${ex.description || ''}`.toLowerCase().includes(q);
+
+// equipMode: 'any' | 'without' | 'with'. equipSet (optional) narrows 'with' to
+// specific equipment values; empty 'with' means "any real equipment".
+export const matchEquipment = (ex, mode, equipSet) => {
+  const eq = (ex.equipment || '').toLowerCase();
+  const bodyweight = eq === '' || eq === 'body only';
+  if (mode === 'without') return bodyweight;
+  if (mode === 'with') return (equipSet && equipSet.size) ? equipSet.has(eq) : !bodyweight;
+  return true;
+};
 
 export const MUSCLE_LABELS = {
   chest: 'Грудь', back: 'Спина', shoulders: 'Плечи', biceps: 'Бицепс',
@@ -42,3 +71,5 @@ export const MUSCLE_COLORS = {
 export const TYPE_COLORS = {
   strength: 'blue', cardio: 'red', stretch: 'green', bodyweight: 'purple',
 };
+export const DIFF_LABELS = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' };
+export const DIFF_COLORS = { easy: 'green', medium: 'yellow', hard: 'red' };

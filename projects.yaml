@@ -238,6 +238,7 @@ sports:
     - desktop/src/js/sport-template-filters.js
     - desktop/src/js/sport-template-modals.js
     - desktop/src/js/sport-template-exercises.js
+    - desktop/src/js/sport-picker.js
     - desktop/src/js/body-viewer.js
     - desktop/src/js/body-context-menu.js
     - desktop/src/js/body-recommendations.js
@@ -248,6 +249,8 @@ sports:
     - desktop/src/assets/draco/draco_decoder.wasm
   rust:
     - desktop/src-tauri/src/health_import.rs
+    - desktop/src-tauri/src/sports_seed.rs                  # one-time exercise-catalog seed
+    - desktop/src-tauri/src/sports_seed/exercises.json      # bundled public-domain dataset (Unlicense)
   tables: [workouts, exercises, body_records, sport_templates, sport_catalog]
   memory: [tech/project_sports_roadmap.md]
   related: [health, calendar]

@@ -1493,6 +1493,10 @@ async function loadSports(subTab) {
       const { loadBodyInline } = await import('./tab-body.js');
       await loadBodyInline(paneEl);
     },
+    renderPicker: async (paneEl) => {
+      const { renderPickerPane } = await import('./sport-picker.js');
+      await renderPickerPane(paneEl);
+    },
     renderCatalog: async (paneEl) => {
       const { renderCatalogPane } = await import('./sport-catalog.js');
       await renderCatalogPane(paneEl);

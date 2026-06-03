@@ -1,6 +1,6 @@
 // ── sport-catalog-card.js — Exercise catalog card rendering ──
 import { escapeHtml } from './utils.js';
-import { MUSCLE_LABELS, MUSCLE_COLORS, TYPE_LABELS, TYPE_COLORS } from './sport-catalog-filters.js';
+import { MUSCLE_LABELS, MUSCLE_COLORS, TYPE_LABELS, TYPE_COLORS, DIFF_LABELS, DIFF_COLORS } from './sport-catalog-filters.js';
 
 export function renderExerciseCard(ex) {
   const div = document.createElement('div');
@@ -10,6 +10,8 @@ export function renderExerciseCard(ex) {
   const mColor = MUSCLE_COLORS[ex.muscle_group] || 'gray';
   const tLabel = TYPE_LABELS[ex.type] || ex.type;
   const tColor = TYPE_COLORS[ex.type] || 'gray';
+  const dLabel = DIFF_LABELS[ex.difficulty];
+  const dColor = DIFF_COLORS[ex.difficulty] || 'gray';
   div.innerHTML = `
     <div class="sport-card-header">
       <span class="sport-card-name">${escapeHtml(ex.name)}</span>
@@ -17,6 +19,7 @@ export function renderExerciseCard(ex) {
     <div class="sport-card-meta">
       <span class="badge badge-${mColor}">${mLabel}</span>
       <span class="badge badge-${tColor}">${tLabel}</span>
+      ${dLabel ? `<span class="badge badge-${dColor}">${dLabel}</span>` : ''}
       ${ex.equipment ? `<span class="sport-card-equip">${escapeHtml(ex.equipment)}</span>` : ''}
     </div>
     ${ex.description ? `<div class="sport-card-desc">${escapeHtml(ex.description)}</div>` : ''}`;

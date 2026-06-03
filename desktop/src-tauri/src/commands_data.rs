@@ -872,14 +872,14 @@ pub fn get_exercise_catalog(search: Option<String>, db: tauri::State<'_, HanniDb
     if let Some(q) = search {
         let like = format!("%{}%", q);
         let mut stmt = conn.prepare(
-            "SELECT id, name, muscle_group, equipment, type, description FROM exercise_catalog WHERE name LIKE ?1 ORDER BY name"
+            "SELECT id, name, muscle_group, equipment, type, description, difficulty, primary_muscles, secondary_muscles, category, force FROM exercise_catalog WHERE name LIKE ?1 ORDER BY name"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows = stmt.query_map(rusqlite::params![like], |row| exercise_catalog_from_row(row))
             .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
         Ok(rows)
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, name, muscle_group, equipment, type, description FROM exercise_catalog ORDER BY name"
+            "SELECT id, name, muscle_group, equipment, type, description, difficulty, primary_muscles, secondary_muscles, category, force FROM exercise_catalog ORDER BY name"
         ).map_err(|e| format!("DB error: {}", e))?;
         let rows = stmt.query_map([], |row| exercise_catalog_from_row(row))
             .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
@@ -892,21 +892,26 @@ fn exercise_catalog_from_row(row: &rusqlite::Row) -> Result<serde_json::Value, r
         "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?,
         "muscle_group": row.get::<_, String>(2)?, "equipment": row.get::<_, String>(3)?,
         "type": row.get::<_, String>(4)?, "description": row.get::<_, String>(5)?,
+        "difficulty": row.get::<_, String>(6).unwrap_or_default(),
+        "primary_muscles": row.get::<_, String>(7).unwrap_or_default(),
+        "secondary_muscles": row.get::<_, String>(8).unwrap_or_default(),
+        "category": row.get::<_, String>(9).unwrap_or_default(),
+        "force": row.get::<_, String>(10).unwrap_or_default(),
     }))
 }
 
 #[tauri::command]
 pub fn add_exercise_to_catalog(
     name: String, muscle_group: Option<String>, equipment: Option<String>,
-    exercise_type: Option<String>, description: Option<String>,
+    exercise_type: Option<String>, description: Option<String>, difficulty: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
     conn.execute(
-        "INSERT OR IGNORE INTO exercise_catalog (name, muscle_group, equipment, type, description) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR IGNORE INTO exercise_catalog (name, muscle_group, equipment, type, description, difficulty) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![name, muscle_group.unwrap_or_else(|| "full_body".into()),
             equipment.unwrap_or_default(), exercise_type.unwrap_or_else(|| "strength".into()),
-            description.unwrap_or_default()],
+            description.unwrap_or_default(), difficulty.unwrap_or_else(|| "medium".into())],
     ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM exercise_catalog WHERE name=?1 COLLATE NOCASE",
         rusqlite::params![name], |r| r.get(0)).map_err(|e| format!("DB error: {}", e))?;
@@ -917,6 +922,7 @@ pub fn add_exercise_to_catalog(
 pub fn update_exercise_catalog(
     id: i64, name: Option<String>, muscle_group: Option<String>,
     equipment: Option<String>, exercise_type: Option<String>, description: Option<String>,
+    difficulty: Option<String>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
@@ -928,6 +934,7 @@ pub fn update_exercise_catalog(
     if let Some(v) = equipment { updates.push(format!("equipment=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = exercise_type { updates.push(format!("type=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if let Some(v) = description { updates.push(format!("description=?{}", idx)); params.push(Box::new(v)); idx += 1; }
+    if let Some(v) = difficulty { updates.push(format!("difficulty=?{}", idx)); params.push(Box::new(v)); idx += 1; }
     if updates.is_empty() { return Ok(()); }
     params.push(Box::new(id));
     let sql = format!("UPDATE exercise_catalog SET {} WHERE id=?{}", updates.join(","), idx);
@@ -941,6 +948,24 @@ pub fn delete_exercise_catalog(id: i64, db: tauri::State<'_, HanniDb>) -> Result
     db.conn().execute("DELETE FROM exercise_catalog WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())
+}
+
+// Distinct equipment + category values present in the catalog, so the UI builds
+// its filter chips from the DB instead of a hardcoded list.
+#[tauri::command]
+pub fn get_exercise_facets(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
+    let conn = db.conn();
+    let mut eq_stmt = conn.prepare(
+        "SELECT DISTINCT equipment FROM exercise_catalog WHERE equipment<>'' ORDER BY equipment"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let equipment: Vec<String> = eq_stmt.query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    let mut cat_stmt = conn.prepare(
+        "SELECT DISTINCT category FROM exercise_catalog WHERE category<>'' ORDER BY category"
+    ).map_err(|e| format!("DB error: {}", e))?;
+    let categories: Vec<String> = cat_stmt.query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(serde_json::json!({ "equipment": equipment, "categories": categories }))
 }
 
 // ── Workout Templates commands ──

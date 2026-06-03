@@ -3,6 +3,7 @@
 mod types;
 mod prompts;
 mod db;
+mod sports_seed;
 mod chat;
 mod memory;
 #[cfg(not(target_os = "android"))]
@@ -187,7 +188,7 @@ fn init_database() -> HanniDb {
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
     // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 5;
+    const SCHEMA_VERSION: i64 = 6;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -221,6 +222,7 @@ fn init_database() -> HanniDb {
         db::migrate_sleep(&conn);
         db::migrate_recipe_tags_separator(&conn);
         db::migrate_sports_catalog(&conn);
+        db::migrate_sports_catalog_v2(&conn); // v0.92: difficulty/equipment + catalog seed
         db::migrate_food_blacklist(&conn);
         db::migrate_catalog_subgroup(&conn);
         db::migrate_catalog_parent(&conn);
@@ -585,6 +587,7 @@ pub fn run() {
             commands_data::update_workout,
             // Exercise Catalog
             commands_data::get_exercise_catalog,
+            commands_data::get_exercise_facets,
             commands_data::add_exercise_to_catalog,
             commands_data::update_exercise_catalog,
             commands_data::delete_exercise_catalog,

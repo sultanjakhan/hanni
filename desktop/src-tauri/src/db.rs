@@ -2578,6 +2578,20 @@ pub fn migrate_sports_catalog(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE workouts ADD COLUMN template_id INTEGER", []).ok();
 }
 
+// v0.92: richer exercise catalog (difficulty + structured equipment/muscles)
+// and a one-time seed from the bundled public-domain dataset.
+pub fn migrate_sports_catalog_v2(conn: &rusqlite::Connection) {
+    if conn.prepare("SELECT difficulty FROM exercise_catalog LIMIT 1").is_err() {
+        let _ = conn.execute("ALTER TABLE exercise_catalog ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'medium'", []);
+        let _ = conn.execute("ALTER TABLE exercise_catalog ADD COLUMN primary_muscles TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE exercise_catalog ADD COLUMN secondary_muscles TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE exercise_catalog ADD COLUMN category TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE exercise_catalog ADD COLUMN force TEXT NOT NULL DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE exercise_catalog ADD COLUMN images TEXT NOT NULL DEFAULT ''", []);
+    }
+    crate::sports_seed::seed_exercise_catalog(conn);
+}
+
 pub fn migrate_share_links(conn: &rusqlite::Connection) {
     // v0.41: public share links exposed via Cloudflare Tunnel
     conn.execute_batch(
