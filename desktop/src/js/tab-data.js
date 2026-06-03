@@ -1983,7 +1983,7 @@ async function loadSchedule(subTab) {
       const numDays = mode === 'month' ? 30 : 7;
 
       const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
-      const active = schedules.filter(s => s.is_active && !isScheduleExpired(s));
+      const active = schedules.filter(s => s.is_active && !isScheduleExpired(s) && !s.chain_only);
       const days = [];
       for (let i = numDays - 1; i >= 0; i--) {
         const d = new Date(); d.setDate(d.getDate() - i);
@@ -2177,6 +2177,9 @@ async function loadSchedule(subTab) {
           { key: 'marks_previous_day', label: 'Рефлексия', dataType: 'checkbox',
             headerTooltip: 'Вкл = «отметка за вчера»: задача спрашивает про прошлый день (✓ / ✗), а отметка пишется на вчерашнюю дату.',
             render: r => `<div class="habit-check${r.marks_previous_day ? ' checked' : ''}" data-refl-id="${r.id}" style="cursor:pointer;" title="${r.marks_previous_day ? 'Рефлексия за вчера' : 'Обычная задача на сегодня'}">${r.marks_previous_day ? '&#10003;' : ''}</div>` },
+          { key: 'chain_only', label: 'В рутине', dataType: 'checkbox',
+            headerTooltip: 'Вкл = задача живёт только внутри прогона своей ветки рутины: не показывается в Списке и «+»-пикере.',
+            render: r => `<div class="habit-check${r.chain_only ? ' checked' : ''}" data-chainonly-id="${r.id}" style="cursor:pointer;" title="${r.chain_only ? 'Только в рутине' : 'Обычная задача'}">${r.chain_only ? '&#10003;' : ''}</div>` },
           { key: 'auto_source', label: 'Авто', editable: true, editType: 'select',
             headerTooltip: 'Авто-отметка из реальных данных: шаги/сон/тренировки из Health, готовка из лога. «Нет» = отмечаешь вручную.',
             editOptions: Object.entries(AUTO_SOURCES).map(([k, v]) => ({ value: k, label: v })),
@@ -2279,6 +2282,15 @@ async function loadSchedule(subTab) {
           await invoke('update_schedule', { id, marksPreviousDay: !wasOn });
           rf.classList.toggle('checked', !wasOn);
           rf.innerHTML = wasOn ? '' : '&#10003;';
+          return;
+        }
+        const co = e.target.closest('[data-chainonly-id]');
+        if (co) {
+          const id = co.dataset.chainonlyId;
+          const wasOn = co.classList.contains('checked');
+          await invoke('update_schedule', { id, chainOnly: !wasOn });
+          co.classList.toggle('checked', !wasOn);
+          co.innerHTML = wasOn ? '' : '&#10003;';
           return;
         }
         const tog = e.target.closest('[data-toggle-id]');

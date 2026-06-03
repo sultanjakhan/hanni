@@ -3,6 +3,7 @@
 // available tasks. This is the daily "player" of the routine engine.
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
+import { timeToMin } from './task-picker-sort.js';
 
 const CAT_ICONS = {
   health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡',
@@ -18,52 +19,84 @@ function localDate() {
 /// HTML for the routine section; '' when there are no chains. `now` is the
 /// get_routine_now payload; `recommendedId` is the active task to highlight blue;
 /// `chainRecId` is the chain whose start button to highlight as "сейчас".
+const MEAL3 = ['Завтрак', 'Обед', 'Ужин'];
+const parseTimes = (tt) => String(tt || '').split(',').map(s => s.trim()).filter(Boolean);
+
 export async function renderRoutineSection(chains = [], now = [], recommendedId = null, chainRecId = null, completedChainIds = [], dueChainIds = null) {
   if (!chains.length) return '';
 
-  const completedSet = new Set(completedChainIds);
+  // completedChainIds is now [{chain_id, slot}] — key by "chainId:slot".
+  const completedSet = new Set((completedChainIds || []).map(x => `${x.chain_id}:${x.slot || ''}`));
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+
+  // Active-run steps (✓/✗ + locked) and a cancel button.
+  const renderRun = (run, label) => {
+    let h = '';
+    for (const t of run.tasks) {
+      const cur = t.id === recommendedId ? ' tw-rt-step--now' : '';
+      h += `<div class="tw-item tw-rt-step${cur}">
+        <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
+        <span class="tw-item-title">${escapeHtml(t.title)}</span>
+        <span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>
+        <span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>
+      </div>`;
+    }
+    for (const t of (run.locked || [])) {
+      h += `<button class="tw-item tw-rt-locked" data-rt-unlock="${t.id}" data-rt-run="${run.run_id}">
+        <span class="tw-item-icon">🔒</span>
+        <span class="tw-item-title">Открыть «${escapeHtml(t.title)}»</span>
+      </button>`;
+    }
+    h += `<button class="tw-item tw-rt-cancel" data-rt-cancel="${run.run_id}">
+      <span class="tw-item-icon">✕</span>
+      <span class="tw-item-title">Отменить «${escapeHtml(label)}»</span>
+    </button>`;
+    return h;
+  };
+  const renderLaunch = (c, slot, label, isWake, isRec) => `
+    <button class="tw-item ${isRec ? 'tw-item--recommended' : ''}" data-rt-chain="${c.id}" data-rt-slot="${escapeHtml(slot)}">
+      <span class="tw-item-icon">${isWake ? '☀️' : '▶️'}</span>
+      <span class="tw-item-title">${escapeHtml(label)}</span>
+      ${isRec ? '<span class="tw-now">сейчас</span>' : ''}
+    </button>`;
+
   let rows = '';
   for (const c of chains) {
-    if (completedSet.has(c.id) && !now.find(r => r.chain_id === c.id)) continue;
+    const times = c.trigger_type === 'time' ? parseTimes(c.trigger_time) : [];
+    // Multi-slot chain (e.g. meals): a separate launch/run per time-of-day.
+    if (times.length > 1) {
+      const runsBySlot = {};
+      now.forEach(r => { if (r.chain_id === c.id) runsBySlot[r.slot] = r; });
+      times.forEach((t, i) => {
+        // Meal chains surface as their slot name (Завтрак/Обед/Ужин) — the chain
+        // itself ("Еда") never appears as a launch in the player.
+        const label = times.length === 3 ? MEAL3[i] : t;
+        const run = runsBySlot[t];
+        if (run) {
+          if (!run.tasks.length && !(run.locked || []).length) return;
+          rows += renderRun(run, label);
+        } else if (completedSet.has(`${c.id}:${t}`)) {
+          // this meal already done today
+        } else if (nowMin >= timeToMin(t)) {
+          rows += renderLaunch(c, t, `${label} — начать`, false, false);
+        }
+      });
+      continue;
+    }
+    // Normal chain — one run per day (slot='').
+    if (completedSet.has(`${c.id}:`) && !now.find(r => r.chain_id === c.id)) continue;
     const run = now.find(r => r.chain_id === c.id);
     // Run with nothing left to do (last step just closed → completing): let the
     // whole chain disappear instead of leaving a dead-end lone "Отменить".
     if (run && !run.tasks.length && !(run.locked || []).length) continue;
     if (run) {
-      for (const t of run.tasks) {
-        // Explicit ✓ (сделал) / ✗ (не выполнено) pair — same affordance as the
-        // schedule rows in Список/picker, so the choice is obvious instead of
-        // "tap the title = done, tiny ✕ = not done". The current step gets a
-        // subtle left-accent (not a full fill) so the boxes stay readable.
-        const now = t.id === recommendedId ? ' tw-rt-step--now' : '';
-        rows += `<div class="tw-item tw-rt-step${now}">
-          <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
-          <span class="tw-item-title">${escapeHtml(t.title)}</span>
-          <span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>
-          <span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>
-        </div>`;
-      }
-      for (const t of (run.locked || [])) {
-        rows += `<button class="tw-item tw-rt-locked" data-rt-unlock="${t.id}" data-rt-run="${run.run_id}">
-          <span class="tw-item-icon">🔒</span>
-          <span class="tw-item-title">Открыть «${escapeHtml(t.title)}»</span>
-        </button>`;
-      }
-      rows += `<button class="tw-item tw-rt-cancel" data-rt-cancel="${run.run_id}">
-        <span class="tw-item-icon">✕</span>
-        <span class="tw-item-title">Отменить «${escapeHtml(c.title)}»</span>
-      </button>`;
+      rows += renderRun(run, c.title);
     } else {
       // Time/day-gate: hide an unstarted chain when its first step isn't "к месту" now.
       if (dueChainIds && !dueChainIds.has(c.id)) continue;
       const isWake = c.trigger_type === 'sleep_end';
-      const label = isWake ? `${escapeHtml(c.title)} — Я встал` : `${escapeHtml(c.title)} — начать`;
-      const isRec = c.id === chainRecId;
-      rows += `<button class="tw-item ${isRec ? 'tw-item--recommended' : ''}" data-rt-chain="${c.id}">
-        <span class="tw-item-icon">${isWake ? '☀️' : '▶️'}</span>
-        <span class="tw-item-title">${label}</span>
-        ${isRec ? '<span class="tw-now">сейчас</span>' : ''}
-      </button>`;
+      const label = isWake ? `${c.title} — Я встал` : `${c.title} — начать`;
+      rows += renderLaunch(c, '', label, isWake, c.id === chainRecId);
     }
   }
   if (!rows) return '';
@@ -76,6 +109,7 @@ export function wireRoutineSection(panel, onChange) {
     btn.addEventListener('click', async () => {
       await invoke('start_routine_run', {
         chainId: parseInt(btn.dataset.rtChain), date: localDate(),
+        slot: btn.dataset.rtSlot || '',
       }).catch(() => {});
       onChange();
     });

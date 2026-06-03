@@ -209,6 +209,9 @@ fn mark_schedule_done(conn: &rusqlite::Connection, schedule_id: &str, date: &str
            SET completed=1, completed_at=COALESCE(schedule_completions.completed_at, ?4), status='done'",
         rusqlite::params![new_id, schedule_id, date, now],
     );
+    // Close the matching routine node too, so a watch-auto-completed task that
+    // sits in a chain doesn't stay open on the canvas.
+    crate::routine_engine::mirror_schedule_to_routine(conn, schedule_id, date, "done");
 }
 
 /// Auto-complete schedules from Samsung Health (Health Connect) data on `date`:

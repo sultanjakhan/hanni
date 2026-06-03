@@ -7,8 +7,9 @@
   display: flex; align-items: center; gap: var(--space-2);
   position: sticky;
   top: 44px;
-  /* Above the day-view event/overlay layers (z-index 3/2) so scrolling event
-     blocks (e.g. a long sleep block) don't ride over the sticky date header. */
+  /* Above the day-view event/overlay layers (z-index 3/2/4) so scrolling event
+     blocks (e.g. a long sleep block) don't ride over the sticky date header.
+     Sticks below the sub-view nav bar (.dev-filters, ~44px). */
   z-index: 5;
   background: var(--bg-primary);
   padding: var(--space-2) 0;
@@ -329,6 +330,13 @@
   pointer-events: none;
   z-index: 2;
 }
+/* Thin completion markers sit above event blocks (z:3) so they stay visible
+   and clickable when a tick lands at the same time as an event. */
+.day-tl-marker-layer {
+  position: absolute; top: 0; left: 56px; right: 0;
+  pointer-events: none;
+  z-index: 4;
+}
 .day-tl-block-wrap {
   position: absolute; left: 8px; right: 8px;
   pointer-events: auto;
@@ -350,7 +358,7 @@
   display: flex; flex-direction: column; gap: 2px;
   font-size: 12px; color: var(--text-secondary);
   overflow: hidden;
-  cursor: default;
+  cursor: pointer;
   transition: transform 0.12s, box-shadow 0.12s;
 }
 .day-tl-block:hover { transform: translateX(1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -367,29 +375,35 @@
   font-size: 10px; color: var(--text-muted);
 }
 
-/* Instant schedule marker — completed tracking_mode='check' tasks.
-   Slim 14px row pinned to completed_at; not a block, just a "happened here" tick. */
-.day-tl-instant {
+/* Completed-task box pinned to completed_at — a clear card (like an event):
+   icon + first task name + "+N" badge; click pages through the rest. */
+.day-tl-group {
   position: absolute; left: 4px; right: 4px;
-  height: 14px; line-height: 14px;
-  display: flex; align-items: center; gap: 4px;
-  padding: 0 6px;
-  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  height: 28px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  background: var(--bg-card); border: 1px solid var(--border-default);
   border-left: 3px solid #c084fc;
-  border-radius: 7px;
-  font-size: 10px; color: var(--text-secondary);
-  pointer-events: auto;
-  overflow: hidden;
-  z-index: 2;
+  border-radius: var(--radius-md);
+  font-size: 12px; color: var(--text-primary);
+  pointer-events: auto; cursor: pointer; overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.day-tl-instant-ico { font-size: 10px; flex-shrink: 0; }
-.day-tl-instant-label {
-  flex: 1; min-width: 0;
+.day-tl-group:hover { border-color: var(--accent-blue); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.day-tl-group-refl { border-left-color: #f59e0b; }
+.day-tl-group-ico { font-size: 13px; flex-shrink: 0; }
+.day-tl-group-title {
+  flex: 1; min-width: 0; font-weight: 500;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.day-tl-instant-time {
+.day-tl-group-count {
+  flex: none; font-size: 10px; font-weight: 600; line-height: 16px;
+  color: var(--text-muted); background: var(--bg-hover);
+  border-radius: 8px; padding: 0 7px;
+}
+.day-tl-group-time {
   font-variant-numeric: tabular-nums;
-  color: var(--text-muted); flex-shrink: 0;
+  color: var(--text-muted); flex-shrink: 0; font-size: 11px;
 }
 
 /* Free-time gap between events */
@@ -569,6 +583,9 @@
 /* ── Day view ── */
 .day-timeline {
   display: flex; flex-direction: column; gap: 0; position: relative;
+  /* Own stacking context: confines the event/overlay/marker layers (z 3/2/4)
+     below the sticky nav bars so scrolled blocks never bleed over the header. */
+  z-index: 0;
   --day-hour-px: 48px;
 }
 .day-hour-row {
@@ -611,32 +628,88 @@
   flex-direction: column; align-items: flex-start; justify-content: flex-start;
   gap: 1px; padding: 4px 8px; overflow: hidden; pointer-events: auto;
 }
+/* "✓ N" badge: N completed micro-tasks folded into this event (click to page). */
+.day-event-count {
+  margin-left: auto; flex: none;
+  font-size: 10px; font-weight: 600; line-height: 16px;
+  color: var(--text-muted); background: var(--bg-hover);
+  border-radius: 8px; padding: 0 6px; white-space: nowrap;
+}
 .day-event-block-head { display: flex; align-items: center; gap: 4px; }
 .day-event-block .day-event-title { font-size: 13px; line-height: 1.2; flex: none; }
-/* ✓ done-toggle on event blocks (and reused conceptually in the month panel). */
-.day-event-check { margin-left: auto; border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1; color: var(--text-muted); padding: 0 2px; }
-.day-event-check:hover { color: var(--accent-blue); }
-.day-event-done .day-event-check { color: var(--accent-blue); }
 /* Compact single-row layout for short events — keeps the title readable. */
 .day-event-compact { flex-direction: row; align-items: center; gap: 6px; padding: 2px 8px; }
 .day-event-compact .day-event-time { flex: none; font-size: 12px; }
 .day-event-compact .day-event-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.day-event-compact .day-event-check { flex: none; }
 
-/* Read-only "what was done" popover (extends .inline-dropdown). */
-.cal-event-pop {
-  min-width: 200px; max-width: 280px; padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 4px;
+/* Read-only "what was done" card — Notion-style. Compound selector beats the
+   base .inline-dropdown (padding:0 / 150px / overflow:hidden) that cramped it. */
+.inline-dropdown.cal-event-pop {
+  min-width: 248px; max-width: 340px;
+  padding: 15px 18px; gap: 9px;
+  font-size: 13px; line-height: 1.5;
+  overflow: visible;
+  border-radius: 14px;
+  border-left: 4px solid var(--cal-pop-accent, transparent);
+  box-shadow: 0 12px 34px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.06);
 }
-.cal-pop-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
-.cal-pop-row { font-size: 12px; color: var(--text-secondary); }
+.cal-pop-close {
+  position: absolute; top: 9px; right: 11px;
+  width: 22px; height: 22px; border: none; background: transparent;
+  color: var(--text-muted); font-size: 19px; line-height: 1; cursor: pointer;
+  border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+}
+.cal-pop-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+.cal-pop-title { font-size: 16px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; padding-right: 22px; }
+.cal-pop-row { font-size: 13px; color: var(--text-secondary); }
 .cal-pop-muted { color: var(--text-muted); }
-.cal-pop-done { color: var(--accent-blue); }
-.cal-pop-desc {
-  font-size: 12px; color: var(--text-secondary); white-space: pre-wrap;
-  border-top: 1px solid var(--border-default); margin-top: 4px; padding-top: 4px;
+.cal-pop-done { color: var(--color-green, var(--accent-blue)); font-weight: 500; }
+/* Checklist of folded-in / clustered completed tasks. */
+.cal-pop-list {
+  display: flex; flex-direction: column; gap: 1px;
+  border-top: 1px solid var(--border-default); margin-top: 8px; padding-top: 9px;
+  max-height: 260px; overflow-y: auto;
 }
-.cal-pop-edit { margin-top: 6px; align-self: flex-start; }
+.cal-pop-li {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-primary); padding: 3px 0;
+}
+.cal-pop-li-ico { flex: none; font-size: 12px; color: var(--color-green, var(--accent-blue)); }
+.cal-pop-li-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-pop-li-time { flex: none; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* Pager header (‹ 2 / 4 ›) — sits above the page with a divider below. */
+.cal-pop-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: -2px 0 5px; padding-bottom: 8px; padding-right: 26px;
+  border-bottom: 1px solid var(--border-default);
+}
+.cal-pop-nav {
+  width: 24px; height: 24px; flex: none; cursor: pointer;
+  border: 1px solid var(--border-default); background: var(--bg-card);
+  border-radius: var(--radius-sm); color: var(--text-secondary);
+  font-size: 15px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.cal-pop-nav:hover { background: var(--bg-hover); color: var(--text-primary); }
+.cal-pop-count { font-size: 12px; font-weight: 500; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.cal-pop-desc {
+  font-size: 13px; color: var(--text-secondary); white-space: pre-wrap;
+  border-top: 1px solid var(--border-default); margin-top: 6px; padding-top: 6px;
+}
+.cal-pop-edit { font-size: 13px; }
+.cal-pop-actions { display: flex; gap: 8px; margin-top: 10px; }
+.cal-pop-undo {
+  font-size: 13px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  background: var(--bg-card); color: var(--color-red, #d92d20); font-weight: 500;
+}
+.cal-pop-undo:hover { background: var(--color-red-bg, #fee4e2); border-color: var(--color-red, #d92d20); }
+.cal-pop-mark {
+  font-size: 13px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--color-green, #12b76a); border-radius: var(--radius-md);
+  background: var(--color-green, #12b76a); color: #fff; font-weight: 500;
+}
+.cal-pop-mark:hover { filter: brightness(1.05); }
 
 /* Event modal — category picker, priority pills */
 .evm-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }

@@ -89,7 +89,7 @@ async function loadDayItems(date) {
       const bi = blockInfo('note', t.id);
       groups.overdue.push({ kind: 'note', id: t.id, title: t.title || 'Без названия', sortKey: t.due_date, icon: '⚠️', done: false, priority: t.priority || 0, overdueDate: t.due_date, completionDate: t.due_date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null });
     }
-    for (const s of (scheds || []).filter(s => !s.marks_previous_day && s.track_overdue && scheduleMatchesDate(s, yesterday) && !yClosedIds.has(s.id))) {
+    for (const s of (scheds || []).filter(s => !s.chain_only && !s.marks_previous_day && s.track_overdue && scheduleMatchesDate(s, yesterday) && !yClosedIds.has(s.id))) {
       const bi = blockInfo('schedule', s.id);
       groups.overdue.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: yesterday, icon: SCH_CAT_ICONS[s.category] || '🔁', done: false, priority: 0, overdueDate: yesterday, completionDate: yesterday, status_extra: 'overdue', category: s.category, planned_time: s.time_of_day, marks_previous_day: false, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track' });
     }
@@ -99,6 +99,7 @@ async function loadDayItems(date) {
   // about yesterday — never accumulates older days. visible_from hides not-yet-
   // due evening items from today's tasker.
   for (const s of (scheds || [])) {
+    if (s.chain_only) continue;                       // lives only inside its chain run
     const isRefl = isViewingToday && !!s.marks_previous_day;
     const cdate = isRefl ? yesterday : date;          // reflection completion is yesterday's
     if (!scheduleMatchesDate(s, cdate)) continue;
@@ -169,6 +170,17 @@ async function maybeAutoCheckSchedule(scheduleId, date) {
       await invoke('toggle_schedule_completion', { scheduleId, date });
     }
   } catch (e) { console.error('auto-check:', e); }
+}
+
+// Full re-render rebuilds every row, so doing it after each tap drops fast
+// successive taps (the row is replaced mid-tap). Debounce it: the DB write fires
+// per tap, the disruptive rebuild waits until tapping settles.
+function scheduleCtlRefresh(el) {
+  clearTimeout(el.__ctlRefresh);
+  el.__ctlRefresh = setTimeout(() => {
+    renderCalendarTaskList(el);
+    window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
+  }, 450);
 }
 
 async function toggleDone(kind, id, date, willBeDone) {
@@ -265,11 +277,12 @@ function wire(el) {
     const cdate = row.dataset.completionDate || row.dataset.date || S.calDayDate || todayStr();
     row.querySelector('[data-ctl-check]')?.addEventListener('click', async (e) => {
       e.stopPropagation();
-      try { await toggleDone(kind, id, cdate, !row.classList.contains('ctl-done')); }
+      const willBeDone = !row.classList.contains('ctl-done');
+      row.classList.toggle('ctl-done', willBeDone);  // optimistic — no mid-tap rebuild
+      try { await toggleDone(kind, id, cdate, willBeDone); }
       catch (err) { console.error('ctl toggle:', err); }
-      renderCalendarTaskList(el);
-      // Tell the Day-view to redraw its overlay too — completion just changed.
-      window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
+      // Debounced rebuild so rapid successive taps aren't lost to a re-render.
+      scheduleCtlRefresh(el);
     });
     // "Не выполнено" — schedule-only; toggles skipped/planned on the completion date.
     row.querySelector('[data-ctl-skip]')?.addEventListener('click', async (e) => {

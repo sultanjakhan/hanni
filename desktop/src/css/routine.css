@@ -38,7 +38,21 @@
 }
 .rt-node:hover { border-color: var(--border-hover); }
 .rt-node.rt-done { opacity: .5; }
+.rt-node.rt-opt { opacity: .8; }
 .rt-node.rt-available { border-color: var(--accent-blue); box-shadow: 0 0 0 2px rgba(68,122,203,.3); }
+/* category accent stripe on the left edge (task nodes only) */
+.rt-node:not(.rt-start)::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg); background: var(--border-hover);
+}
+.rt-node[data-cat="health"]::before    { background: var(--color-green); }
+.rt-node[data-cat="sport"]::before     { background: var(--accent-orange, #c98b3c); }
+.rt-node[data-cat="hygiene"]::before   { background: var(--accent-blue-light); }
+.rt-node[data-cat="home"]::before      { background: var(--accent-purple); }
+.rt-node[data-cat="practice"]::before  { background: var(--accent-blue); }
+.rt-node[data-cat="challenge"]::before { background: var(--color-red); }
+.rt-node[data-cat="growth"]::before    { background: var(--color-green); }
+.rt-node[data-cat="work"]::before      { background: var(--text-muted); }
 .rt-start {
   width: auto; max-width: 240px; background: var(--bg-elevated);
   border-radius: var(--radius-lg); padding: 9px 14px;
@@ -50,11 +64,7 @@
 .rt-node-icon { font-size: 15px; }
 .rt-node-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
 .rt-node-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.rt-dots { display: flex; gap: 3px; cursor: pointer; }
-.rt-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-hover); }
-.rt-dot.on { background: var(--accent-orange, #c98b3c); }
 .rt-badge { font-size: 10px; padding: 2px 6px; border-radius: var(--radius-xs); cursor: pointer; }
-.rt-badge.required { background: rgba(68,122,203,.18); color: var(--accent-blue-light); }
 .rt-badge.optional { background: var(--bg-hover); color: var(--text-muted); }
 
 /* ports for drawing edges */
@@ -160,6 +170,20 @@
   background: var(--bg-card); border: 1px solid var(--border-default); color: var(--text-secondary);
 }
 .rt-nm-req-btn.active { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+.rt-nm-time {
+  padding: 5px 9px; border-radius: var(--radius-sm); font-size: 13px;
+  background: var(--bg-card); border: 1px solid var(--border-default); color: var(--text-primary);
+}
+.rt-nm-times { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rt-nm-time-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 6px 3px 9px; border-radius: var(--radius-sm); font-size: 12px;
+  background: var(--bg-card); border: 1px solid var(--border-default); color: var(--text-primary);
+}
+.rt-nm-time-chip button {
+  border: none; background: none; cursor: pointer; padding: 0;
+  color: var(--text-muted); font-size: 14px; line-height: 1;
+}
 .rt-nm-del { color: var(--accent-red, #d9534f); }
 
 /* trigger card (start node) */

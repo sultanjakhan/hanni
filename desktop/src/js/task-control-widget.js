@@ -95,6 +95,12 @@ async function openStartDropdown(preserveScroll = false) {
     return !(vf != null && nowMin < vf);
   };
   const chainDueNow = (c) => {
+    // Explicit time trigger gates on the chain's earliest time of day. Multi-time
+    // (meal) chains surface per-slot inside renderRoutineSection, not here.
+    if (c.trigger_type === 'time' && c.trigger_time) {
+      const ts = String(c.trigger_time).split(',').map(s => s.trim()).filter(Boolean).map(timeToMin);
+      return ts.length ? nowMin >= Math.min(...ts) : true;
+    }
     const start = (c.nodes || []).find(n => n.is_start);
     const startId = start ? start.id : null;
     const incoming = {};
@@ -108,7 +114,7 @@ async function openStartDropdown(preserveScroll = false) {
   // Recommendation precedence: active routine step → start an auto-trigger chain
   // (wake first; skip completed-today) → top regular task.
   const routineRecId = pickRecommendedTaskId(now);
-  const chainRecId = routineRecId == null ? pickStartChainId(chains, now, completedChainIds) : null;
+  const chainRecId = routineRecId == null ? pickStartChainId(chains, now, completedChainIds.map(x => x.chain_id)) : null;
   const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId, completedChainIds, dueChainIds);
   const { bodyHtml, orderedItems } = await buildPickerBody({
     startable, weights, pins, avgDur, routineHtml,

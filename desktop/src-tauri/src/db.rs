@@ -1235,6 +1235,56 @@ pub fn migrate_schedule_auto_source(conn: &rusqlite::Connection) {
     conn.execute("ALTER TABLE schedules ADD COLUMN visible_from TEXT", []).ok();
 }
 
+/// Per-chain time trigger. trigger_time = "HH:MM" or a comma-list "09:00,12:00,18:00"
+/// (one entry per launch slot) — drives the "due now" highlight and per-slot launch.
+pub fn migrate_routine_chain_trigger_time(conn: &rusqlite::Connection) {
+    conn.execute("ALTER TABLE routine_chains ADD COLUMN trigger_time TEXT", []).ok();
+}
+
+/// chain_only schedules live ONLY inside a routine run — hidden from the flat
+/// tasker (Список / picker / day-view) so chain steps don't double as loose tasks.
+pub fn migrate_schedule_chain_only(conn: &rusqlite::Connection) {
+    conn.execute("ALTER TABLE schedules ADD COLUMN chain_only INTEGER NOT NULL DEFAULT 0", []).ok();
+}
+
+/// Allow a chain to run several times a day (breakfast/lunch/dinner): add a
+/// `slot` to routine_runs and key uniqueness on (chain_id, date, slot) instead
+/// of (chain_id, date). SQLite can't drop an inline UNIQUE, so rebuild the table
+/// (ids preserved → routine_node_status FK stays valid). Idempotent.
+pub fn migrate_routine_run_slots(conn: &rusqlite::Connection) {
+    let has_slot: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('routine_runs') WHERE name='slot'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    if has_slot > 0 { return; }
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='routine_runs'",
+        [], |r| r.get(0),
+    ).unwrap_or(0);
+    if exists == 0 { return; }
+    // PRAGMA foreign_keys is a no-op inside a transaction → toggle outside.
+    let _ = conn.execute("PRAGMA foreign_keys=OFF", []);
+    let _ = conn.execute_batch(
+        "BEGIN;
+         CREATE TABLE routine_runs_new (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             chain_id INTEGER NOT NULL REFERENCES routine_chains(id) ON DELETE CASCADE,
+             date TEXT NOT NULL,
+             slot TEXT NOT NULL DEFAULT '',
+             state TEXT NOT NULL DEFAULT 'active',
+             started_at TEXT NOT NULL DEFAULT (datetime('now')),
+             completed_at TEXT,
+             UNIQUE(chain_id, date, slot)
+         );
+         INSERT INTO routine_runs_new (id, chain_id, date, slot, state, started_at, completed_at)
+             SELECT id, chain_id, date, '', state, started_at, completed_at FROM routine_runs;
+         DROP TABLE routine_runs;
+         ALTER TABLE routine_runs_new RENAME TO routine_runs;
+         COMMIT;"
+    );
+    let _ = conn.execute("PRAGMA foreign_keys=ON", []);
+}
+
 /// Next-action engine — graph model: a chain is a canvas, a node is a task
 /// (referencing a schedule/note/event, or a start trigger), an edge is an arrow
 /// with a transition trigger. routine_node_status tracks a node's state inside

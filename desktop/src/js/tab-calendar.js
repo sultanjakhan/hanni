@@ -3,7 +3,7 @@
 import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 import { showEventModal, priorityHex } from './calendar-event-modal.js';
-import { showEventPopover } from './calendar-event-popover.js';
+import { showEventPopover, showPagerPopover } from './calendar-event-popover.js';
 
 // Helper: check if a schedule should appear on a given date
 function scheduleMatchesDate(sch, dateStr) {
@@ -752,20 +752,19 @@ async function renderDayCalendar(el, events) {
     // data-evt-pop on every block opens the read-only details popover; manual
     // events also keep data-event-id (edit lives behind the popover's button).
     const idAttr = `data-evt-pop="${e.id}"${isManual ? ` data-event-id="${e.id}"` : ''}`;
-    const h = Math.max(Math.round(height), 22);
+    const h = Math.max(Math.round(height), 30);
     const titleStyle = done ? ' style="text-decoration:line-through;"' : '';
-    const checkBtn = `<button type="button" class="day-event-check" data-evt-toggle="${e.id}" title="Выполнено">${done ? '✓' : '○'}</button>`;
     const baseStyle = `top:${Math.round(top)}px;height:${h}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};cursor:pointer;${done ? 'opacity:0.55;' : ''}`;
     // Short events can't fit head+title+duration (≥50px); render a compact single
     // row instead — time · title (ellipsis) · ✓ — so the title stays readable.
     if (h < 50) {
       return `<div class="day-event day-event-block day-event-compact${done ? ' day-event-done' : ''}" ${idAttr} style="${baseStyle}">
         ${priBar}<span class="day-event-time">${label}</span>
-        <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>${checkBtn}
+        <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>
       </div>`;
     }
     return `<div class="day-event day-event-block${done ? ' day-event-done' : ''}" ${idAttr} style="${baseStyle}">
-      <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}${checkBtn}</div>
+      <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}</div>
       <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>
       <span class="day-event-dur">${continued ? '↳ ' : ''}${e.duration_minutes || 60} мин</span>
     </div>`;
@@ -900,24 +899,15 @@ async function renderDayCalendar(el, events) {
   for (const e of events) if (e.date === prevDate && e.time) evMap.set(String(e.id), e);
   el.querySelectorAll('.day-event-block[data-evt-pop]').forEach(blk => {
     blk.addEventListener('click', (e) => {
-      if (e.target.closest('[data-evt-toggle]')) return;  // ✓ has its own handler
       e.stopPropagation();
+      // Events with folded-in completions open a pager (event + each task).
+      if (blk.__evtGroup) { showPagerPopover(blk.__evtGroup, e.clientX, e.clientY); return; }
       const ev = evMap.get(String(blk.dataset.evtPop));
       if (!ev) return;
       const isManual = !ev.source || ev.source === 'manual';
       showEventPopover(ev, e.clientX, e.clientY, {
         onEdit: isManual ? () => showEventModal(Number(ev.id)) : null,
       });
-    });
-  });
-  // Event completion toggle (manual + auto_health) in day grid.
-  el.querySelectorAll('.day-event-check[data-evt-toggle]').forEach(chk => {
-    chk.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const id = parseInt(chk.dataset.evtToggle);
-      const ev = (events || []).find(x => x.id === id);
-      await invoke('update_event', { id, title: null, description: null, date: null, time: null, durationMinutes: null, category: null, color: null, completed: !(ev && ev.completed) }).catch(err => console.error('toggle event:', err));
-      refreshCalendarInner();
     });
   });
   // Schedule completion toggles in day view

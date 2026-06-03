@@ -187,7 +187,7 @@ fn init_database() -> HanniDb {
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
     // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 3;
+    const SCHEMA_VERSION: i64 = 5;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -243,6 +243,9 @@ fn init_database() -> HanniDb {
         db::migrate_health_to_uuid_pk(&conn); // Phase 2: UUID PK for health_log + heart_rate_samples
         db::migrate_schedules_to_uuid_pk(&conn); // Phase 3: UUID PK for schedules + schedule_completions
         db::migrate_schedule_auto_source(&conn); // v0.92: auto_source link (after uuid_pk rebuild)
+        db::migrate_routine_chain_trigger_time(&conn); // per-chain time trigger
+        db::migrate_schedule_chain_only(&conn); // schedules visible only inside a chain run
+        db::migrate_routine_run_slots(&conn); // multiple runs/day per chain (meal slots)
         let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
     }
 
@@ -603,6 +606,7 @@ pub fn run() {
             commands_data::get_schedule_stats,
             routine::get_routine_chains,
             routine::create_routine_chain,
+            routine::update_routine_chain,
             routine::create_routine_node,
             routine::update_routine_node,
             routine::delete_routine_node,

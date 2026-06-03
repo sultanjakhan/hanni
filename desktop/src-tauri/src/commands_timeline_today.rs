@@ -66,7 +66,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
          FROM schedules s
          LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id
             AND sc.date = CASE WHEN COALESCE(s.marks_previous_day, 0) = 1 THEN ?2 ELSE ?1 END
-         WHERE s.is_active = 1"
+         WHERE s.is_active = 1 AND COALESCE(s.chain_only, 0) = 0"
     ).map_err(|e| format!("DB error: {}", e))?;
     // schedules.id is TEXT after cr-sqlite CRR conversion — read as String.
     let schedules_iter = s_stmt.query_map(rusqlite::params![date.clone(), refl_date.clone()], |row| {
@@ -135,6 +135,7 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
              FROM schedules s
              LEFT JOIN schedule_completions sc ON sc.schedule_id = s.id AND sc.date = ?1
              WHERE s.is_active = 1 AND COALESCE(s.track_overdue, 0) = 1
+               AND COALESCE(s.chain_only, 0) = 0
                AND COALESCE(sc.completed, 0) = 0
                AND COALESCE(sc.status, 'planned') != 'skipped'"
         ).map_err(|e| format!("DB error: {}", e))?;

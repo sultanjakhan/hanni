@@ -31,14 +31,14 @@ const NODE_COLS: &str =
 pub fn get_routine_chains(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut cstmt = conn.prepare(
-        "SELECT id, title, trigger_type, is_active FROM routine_chains ORDER BY sort_order, id"
+        "SELECT id, title, trigger_type, trigger_time, is_active FROM routine_chains ORDER BY sort_order, id"
     ).map_err(|e| format!("DB error: {}", e))?;
-    let chains: Vec<(i64, String, String, bool)> = cstmt.query_map([], |r| {
-        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? == 1))
+    let chains: Vec<(i64, String, String, Option<String>, bool)> = cstmt.query_map([], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? == 1))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
 
     let mut out = Vec::new();
-    for (id, title, trigger_type, is_active) in chains {
+    for (id, title, trigger_type, trigger_time, is_active) in chains {
         let mut nstmt = conn.prepare(&format!(
             "SELECT {} FROM routine_nodes WHERE chain_id=?1 ORDER BY id", NODE_COLS
         )).map_err(|e| format!("DB error: {}", e))?;
@@ -61,6 +61,7 @@ pub fn get_routine_chains(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_jso
 
         out.push(serde_json::json!({
             "id": id, "title": title, "trigger_type": trigger_type,
+            "trigger_time": trigger_time,
             "is_active": is_active, "nodes": nodes, "edges": edges,
         }));
     }
@@ -174,4 +175,26 @@ pub fn create_routine_chain(title: String, db: tauri::State<'_, HanniDb>) -> Res
         rusqlite::params![chain_id],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(chain_id)
+}
+
+/// Patch a chain's trigger config (and title). trigger_type ∈ manual|time|sleep_end;
+/// trigger_time = "HH:MM" (used when 'time'), empty string clears it.
+#[tauri::command]
+pub fn update_routine_chain(
+    id: i64, title: Option<String>, trigger_type: Option<String>,
+    trigger_time: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<(), String> {
+    let conn = db.conn();
+    if let Some(v) = title {
+        conn.execute("UPDATE routine_chains SET title=?1 WHERE id=?2", rusqlite::params![v, id]).ok();
+    }
+    if let Some(v) = trigger_type {
+        let val = match v.as_str() { "time" => "time", "sleep_end" => "sleep_end", _ => "manual" };
+        conn.execute("UPDATE routine_chains SET trigger_type=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
+    }
+    if let Some(v) = trigger_time {
+        let val: Option<String> = if v.trim().is_empty() { None } else { Some(v) };
+        conn.execute("UPDATE routine_chains SET trigger_time=?1 WHERE id=?2", rusqlite::params![val, id]).ok();
+    }
+    Ok(())
 }

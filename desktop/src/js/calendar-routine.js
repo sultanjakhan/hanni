@@ -8,6 +8,12 @@ import { openAddTaskModal } from './routine-add-modal.js';
 
 let chains = [];
 
+// Multi-time "meal" chains (e.g. Еда: breakfast/lunch/dinner) are played per-slot
+// in the "+" widget as Завтрак/Обед/Ужин — they don't get a single chip here.
+const isMealChain = (c) => c.trigger_type === 'time' &&
+  String(c.trigger_time || '').split(',').map(s => s.trim()).filter(Boolean).length > 1;
+const TRIGGER_ICON = { sleep_end: '☀️', time: '🕐', manual: '▶️' };
+
 export async function renderCalendarRoutine(el) {
   await loadChains();
   if (chains.length === 0) {
@@ -44,8 +50,9 @@ export async function renderCalendarRoutine(el) {
 
 async function loadChains() {
   chains = await invoke('get_routine_chains').catch(() => []);
-  if (!S._routineChainId || !chains.some(c => c.id === S._routineChainId)) {
-    S._routineChainId = chains[0]?.id || null;
+  const visible = chains.filter(c => !isMealChain(c));
+  if (!S._routineChainId || !visible.some(c => c.id === S._routineChainId)) {
+    S._routineChainId = visible[0]?.id || null;
   }
 }
 
@@ -63,9 +70,9 @@ function chain() { return chains.find(c => c.id === S._routineChainId); }
 
 function renderChainChips(el) {
   const box = el.querySelector('#rt-chains');
-  box.innerHTML = chains.map(c =>
+  box.innerHTML = chains.filter(c => !isMealChain(c)).map(c =>
     `<button class="rt-chain-chip${c.id === S._routineChainId ? ' active' : ''}" data-cid="${c.id}">
-       ◆ ${escapeHtml(c.title)}
+       ${TRIGGER_ICON[c.trigger_type] || '▶️'} ${escapeHtml(c.title)}
      </button>`).join('');
   box.querySelectorAll('[data-cid]').forEach(btn => {
     btn.addEventListener('click', () => {

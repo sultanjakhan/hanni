@@ -40,6 +40,9 @@
 [data-theme="light"] {
   /* Backgrounds */
   --bg-page: #ffffff;
+  /* Alias used by sticky headers / overlays (calendar-nav, db-view, timeline,
+     chat). Follows the active theme via var(--bg-page) — no dark override needed. */
+  --bg-primary: var(--bg-page);
   --bg-sidebar: #f7f7f5;
   --bg-card: #ffffff;
   --bg-hover: #efefef;

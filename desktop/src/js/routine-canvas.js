@@ -16,45 +16,49 @@ const TRIGGER_SUB = {
   time: 'срабатывает в заданное время',
   manual: 'запускается вручную',
 };
+const TRIGGER_ICON = { sleep_end: '☀️', time: '🕐', manual: '▶️' };
 
 export function renderCanvas(canvas, chain, refresh) {
   canvas.querySelectorAll('.rt-node, .rt-edge-menu').forEach(n => n.remove());
-  for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain.trigger_type));
+  for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain));
   wireNodes(canvas, chain, refresh);
   renderEdges(canvas, chain, refresh, null);
 }
 
-function buildNode(n, triggerType) {
+function buildNode(n, chain) {
   const d = document.createElement('div');
   d.className = 'rt-node' + (n.is_start ? ' rt-start' : '');
   d.style.left = n.pos_x + 'px';
   d.style.top = n.pos_y + 'px';
   d.dataset.id = n.id;
   if (n.is_start) {
-    const sub = TRIGGER_SUB[triggerType] || 'триггер запуска';
-    d.innerHTML = `<span class="rt-node-icon">⏰</span>
+    let sub = TRIGGER_SUB[chain.trigger_type] || 'триггер запуска';
+    if (chain.trigger_type === 'time' && chain.trigger_time) {
+      const ts = String(chain.trigger_time).split(',').map(s => s.trim()).filter(Boolean).join(', ');
+      sub = `срабатывает в ${escapeHtml(ts)}`;
+    }
+    d.innerHTML = `<span class="rt-node-icon">${TRIGGER_ICON[chain.trigger_type] || '⏰'}</span>
       <div class="rt-start-text">
         <span class="rt-node-title">${escapeHtml(n.title)}</span>
         <span class="rt-start-sub">${sub}</span>
       </div>
       <div class="rt-port out" data-port="${n.id}"></div>`;
   } else {
-    const dots = [0, 1, 2, 3, 4]
-      .map(i => `<span class="rt-dot${i < n.priority ? ' on' : ''}"></span>`).join('');
-    const reqL = n.requirement === 'optional' ? 'опционально' : 'обязательно';
-    const reqTip = n.requirement === 'optional'
-      ? 'Опциональная: можно пропустить, переход по графу не блокирует'
-      : 'Обязательная: пока не выполнена, следующие узлы графа не откроются';
+    // Required is the default → unlabelled; only optional carries a chip (+ dim).
+    const isOpt = n.requirement === 'optional';
+    if (isOpt) d.className += ' rt-opt';
+    d.dataset.cat = n.category || 'other';
+    const meta = isOpt
+      ? `<div class="rt-node-meta"><span class="rt-badge optional" data-req="${n.id}"
+           title="Опциональная: можно пропустить · клик — сделать обязательной">опц.</span></div>`
+      : '';
     d.innerHTML = `
       <div class="rt-node-del" data-del="${n.id}" title="Удалить узел">✕</div>
       <div class="rt-node-top">
         <span class="rt-node-icon">${CAT_ICONS[n.category] || CAT_ICONS.other}</span>
         <span class="rt-node-title">${escapeHtml(n.title)}</span>
       </div>
-      <div class="rt-node-meta">
-        <span class="rt-dots" data-pri="${n.id}" title="Важность ${n.priority}/5 · клик — изменить">${dots}</span>
-        <span class="rt-badge ${n.requirement}" data-req="${n.id}" title="${reqTip} · клик — переключить">${reqL}</span>
-      </div>
+      ${meta}
       <div class="rt-port in"></div>
       <div class="rt-port out" data-port="${n.id}"></div>`;
   }
@@ -66,7 +70,7 @@ function wireNodes(canvas, chain, refresh) {
   canvas.querySelectorAll('.rt-node').forEach(el => {
     const n = find(parseInt(el.dataset.id));
     el.addEventListener('mousedown', (e) => {
-      if (e.target.closest('[data-port],[data-del],[data-pri],[data-req]')) return;
+      if (e.target.closest('[data-port],[data-del],[data-req]')) return;
       startDrag(canvas, chain, refresh, el, n, e);
     });
   });
@@ -79,13 +83,6 @@ function wireNodes(canvas, chain, refresh) {
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
       await invoke('delete_routine_node', { id: parseInt(b.dataset.del) }).catch(() => {});
-      refresh();
-    }));
-  canvas.querySelectorAll('[data-pri]').forEach(d =>
-    d.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const n = find(parseInt(d.dataset.pri));
-      await invoke('update_routine_node', { id: n.id, priority: n.priority % 5 + 1 }).catch(() => {});
       refresh();
     }));
   canvas.querySelectorAll('[data-req]').forEach(b =>

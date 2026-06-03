@@ -18,16 +18,20 @@ struct REdge { from: i64, to: i64, trigger: String, value: Option<i64> }
 /// its step statuses cleared, so re-clicking "Я встал" restarts the routine
 /// instead of silently doing nothing.
 #[tauri::command]
-pub fn start_routine_run(chain_id: i64, date: String, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+pub fn start_routine_run(
+    chain_id: i64, date: String, slot: Option<String>, db: tauri::State<'_, HanniDb>,
+) -> Result<i64, String> {
     let conn = db.conn();
+    // slot='' = the usual one-run-per-day chain; non-empty = a meal/launch slot.
+    let slot = slot.unwrap_or_default();
     conn.execute(
-        "INSERT INTO routine_runs (chain_id, date, state) VALUES (?1, ?2, 'active')
-         ON CONFLICT(chain_id, date) DO UPDATE SET state='active', completed_at=NULL",
-        rusqlite::params![chain_id, date],
+        "INSERT INTO routine_runs (chain_id, date, slot, state) VALUES (?1, ?2, ?3, 'active')
+         ON CONFLICT(chain_id, date, slot) DO UPDATE SET state='active', completed_at=NULL",
+        rusqlite::params![chain_id, date, slot],
     ).map_err(|e| format!("DB error: {}", e))?;
     let run_id: i64 = conn.query_row(
-        "SELECT id FROM routine_runs WHERE chain_id=?1 AND date=?2",
-        rusqlite::params![chain_id, date], |r| r.get(0),
+        "SELECT id FROM routine_runs WHERE chain_id=?1 AND date=?2 AND slot=?3",
+        rusqlite::params![chain_id, date, slot], |r| r.get(0),
     ).map_err(|e| format!("DB error: {}", e))?;
     conn.execute("DELETE FROM routine_node_status WHERE run_id=?1", rusqlite::params![run_id])
         .map_err(|e| format!("DB error: {}", e))?;
@@ -149,16 +153,64 @@ pub fn set_routine_node_status(
     Ok(())
 }
 
+/// Reverse of set_routine_node_status's schedule mirror: when a schedule is
+/// completed/skipped/cleared elsewhere (Health auto-complete, Список ✓/✗ toggle),
+/// reflect that into any active routine run whose node wraps this schedule, so the
+/// routine canvas/widget stays in sync. `state` ∈ done | skipped | clear.
+pub(crate) fn mirror_schedule_to_routine(
+    conn: &rusqlite::Connection, schedule_id: &str, comp_date: &str, state: &str,
+) {
+    // Reflection schedules (marks_previous_day) record completion for the PREVIOUS
+    // day while their routine run lives on the following day — invert to find the run.
+    let marks_prev: i64 = conn.query_row(
+        "SELECT COALESCE(marks_previous_day, 0) FROM schedules WHERE id=?1",
+        rusqlite::params![schedule_id], |r| r.get(0),
+    ).unwrap_or(0);
+    let run_date = if marks_prev == 1 {
+        chrono::NaiveDate::parse_from_str(comp_date, "%Y-%m-%d")
+            .map(|nd| (nd + chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|_| comp_date.to_string())
+    } else { comp_date.to_string() };
+
+    // One schedule can sit in several chains — mirror into every active run on run_date.
+    let pairs: Vec<(i64, i64)> = {
+        let mut stmt = match conn.prepare(
+            "SELECT rr.id, rn.id FROM routine_runs rr
+             JOIN routine_nodes rn ON rn.chain_id = rr.chain_id
+             WHERE rr.date=?1 AND rr.state='active'
+               AND rn.source_type='schedule' AND rn.source_id=?2"
+        ) { Ok(s) => s, Err(_) => return };
+        let rows = match stmt.query_map(rusqlite::params![run_date, schedule_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        }) { Ok(r) => r, Err(_) => return };
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    for (run_id, node_id) in pairs {
+        if state == "clear" {
+            let _ = conn.execute(
+                "DELETE FROM routine_node_status WHERE run_id=?1 AND node_id=?2",
+                rusqlite::params![run_id, node_id]);
+        } else {
+            let _ = conn.execute(
+                "INSERT INTO routine_node_status (run_id, node_id, state, updated_at)
+                 VALUES (?1, ?2, ?3, datetime('now'))
+                 ON CONFLICT(run_id, node_id) DO UPDATE SET state=excluded.state, updated_at=datetime('now')",
+                rusqlite::params![run_id, node_id, state]);
+        }
+    }
+}
+
 /// Chain ids whose run for `date` is completed — the picker hides these so a
 /// finished chain doesn't keep showing "Я встал".
 #[tauri::command]
-pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<i64>, String> {
+pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut stmt = conn.prepare(
-        "SELECT chain_id FROM routine_runs WHERE date=?1 AND state='completed'"
+        "SELECT chain_id, slot FROM routine_runs WHERE date=?1 AND state='completed'"
     ).map_err(|e| format!("DB error: {}", e))?;
-    let rows = stmt.query_map(rusqlite::params![date], |r| r.get::<_, i64>(0))
-        .map_err(|e| format!("Query error: {}", e))?;
+    let rows = stmt.query_map(rusqlite::params![date], |r| {
+        Ok(serde_json::json!({ "chain_id": r.get::<_, i64>(0)?, "slot": r.get::<_, String>(1)? }))
+    }).map_err(|e| format!("Query error: {}", e))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -169,16 +221,16 @@ pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>)
 pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
     let mut rstmt = conn.prepare(
-        "SELECT r.id, r.chain_id, c.title FROM routine_runs r
+        "SELECT r.id, r.chain_id, c.title, r.slot FROM routine_runs r
          JOIN routine_chains c ON c.id = r.chain_id
          WHERE r.date=?1 AND r.state='active'"
     ).map_err(|e| format!("DB error: {}", e))?;
-    let runs: Vec<(i64, i64, String)> = rstmt.query_map(rusqlite::params![date], |r| {
-        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    let runs: Vec<(i64, i64, String, String)> = rstmt.query_map(rusqlite::params![date], |r| {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
 
     let mut out = Vec::new();
-    for (run_id, chain_id, chain_title) in runs {
+    for (run_id, chain_id, chain_title, slot) in runs {
         let nodes = load_nodes(&conn, chain_id)?;
         let edges = load_edges(&conn, chain_id)?;
         let status = load_status(&conn, run_id)?;          // node_id → (state, updated_at)
@@ -228,7 +280,7 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
         let tasks: Vec<serde_json::Value> = avail.iter().map(to_json).collect();
         let locked_tasks: Vec<serde_json::Value> = locked.iter().map(to_json).collect();
         out.push(serde_json::json!({
-            "run_id": run_id, "chain_id": chain_id, "chain_title": chain_title,
+            "run_id": run_id, "chain_id": chain_id, "chain_title": chain_title, "slot": slot,
             "tasks": tasks, "locked": locked_tasks,
         }));
     }

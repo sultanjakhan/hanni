@@ -4,12 +4,14 @@
 
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
+import { showTimelinePopover, showPagerPopover } from './calendar-event-popover.js';
 
 // Hour height defaults to 48px; caller passes the current zoom value.
 const DEFAULT_HOUR_PX = 48;
 
 const SOURCE_COLOR = { event: '#60a5fa', schedule: '#c084fc', note: '#4ade80', manual: '#94a3b8' };
 const SOURCE_BG    = { event: '#dbeafe', schedule: '#f3e8ff', note: '#dcfce7', manual: '#f1f5f9' };
+const SOURCE_NAME  = { event: 'Событие', schedule: 'Расписание', note: 'Заметка', manual: 'Вручную' };
 const SCH_CAT_ICONS = { health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡', practice: '🎯', challenge: '⚡', growth: '🌱', work: '⚙️', other: '◽' };
 
 // Extract HH:MM from a stored timestamp. completed_at is RFC3339 from
@@ -103,10 +105,50 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     return eventIntervals.some(iv => s < iv.endMin && en > iv.startMin);
   };
 
+  // Event pixel boxes (+ the event obj) so a completion that lands on a planned
+  // event folds into it as a "+N" badge and a click-through pager, instead of
+  // being drawn as its own marker competing for the same row.
+  const EV_SOURCE = { manual: 'Вручную', apple: 'Apple Calendar', auto_health: 'Apple Health', google: 'Google Calendar' };
+  const toHM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const MARKER_PX = 16;
+  const evBoxes = (plannedEvents || [])
+    .filter(e => e.time && e.id != null)
+    .map(e => {
+      const s = parseHM(e.time); if (s == null) return null;
+      const top = minToPx(s);
+      return { id: e.id, ev: e, top, bottom: top + Math.max(minToPx(e.duration_minutes || 60), 22) };
+    })
+    .filter(Boolean);
+  const groups = new Map();  // event id -> [{ title, time, isReflection }]
+  // Fold a completion at `min` into the event it overlaps (if any). Returns true
+  // when folded — caller then skips drawing it as a standalone marker.
+  const foldInto = (min, item) => {
+    const top = minToPx(min);
+    const hit = evBoxes.find(b => top < b.bottom && top + MARKER_PX > b.top);
+    if (!hit) return false;
+    if (!groups.has(hit.id)) groups.set(hit.id, []);
+    groups.get(hit.id).push(item);
+    return true;
+  };
+  const eventPagerItem = (e) => {
+    const s = parseHM(e.time);
+    const dur = e.duration_minutes || 0;
+    const rows = [];
+    if (dur) rows.push({ text: `⏱ ${e.source === 'auto_health' ? 'Факт' : 'Длительность'}: ${fmtDur(dur)}` });
+    rows.push({ text: EV_SOURCE[e.source] || 'Вручную', muted: true });
+    rows.push(e.completed ? { text: '✓ Выполнено', done: true } : { text: '○ Не отмечено', muted: true });
+    return { title: e.title || 'Событие', subtitle: s != null ? `${e.time} – ${toHM(s + dur)}` : (e.time || ''), rows };
+  };
+
   // Container fills the full day height of .day-timeline (24 * hourPx).
   const layer = document.createElement('div');
   layer.className = 'day-tl-layer';
   layer.style.height = `${24 * hourPx}px`;
+  // Thin completion markers live in a separate layer above event blocks (z:4)
+  // so a tick at the same time as an event stays visible and clickable.
+  const markerLayer = document.createElement('div');
+  markerLayer.className = 'day-tl-marker-layer';
+  markerLayer.style.height = `${24 * hourPx}px`;
 
   // A tracked block that exactly matches a planned event (same start + end) is
   // the same activity drawn twice — keep the planned event, drop the overlay.
@@ -165,7 +207,21 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     } else {
       wrap.style.cssText = `top:${top}px; height:${height}px;`;
     }
-    wrap.innerHTML = blockHtml(p.block, label, isConflict(p.block));
+    const conflict = isConflict(p.block);
+    wrap.innerHTML = blockHtml(p.block, label, conflict);
+    wrap.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const start = p.block.start_time.slice(0, 5);
+      const end = p.block.end_time.slice(0, 5);
+      const rows = [
+        { text: `🕐 ${start} – ${end}` },
+        { text: `⏱ Факт: ${fmtDur(p.block.duration_minutes || 0)}` },
+        { text: SOURCE_NAME[p.block.source_type] || p.block.type_name || 'Активность', muted: true },
+        { text: '✓ Выполнено', done: true },
+      ];
+      if (conflict) rows.push({ text: '⚠️ конфликт с встречей', muted: true });
+      showTimelinePopover(ev.clientX, ev.clientY, { title: label || p.block.type_name || 'Активность', rows });
+    });
     layer.appendChild(wrap);
   }
 
@@ -189,84 +245,142 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // at completed_at, height ~14px, never a full block. tracking_mode='check'
   // means the schedule never opens a timeline_block, so they need their own
   // representation here.
-  const [completions, allSchedules] = await Promise.all([
+  const prevD = new Date(date + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
+  const prevDate = `${prevD.getFullYear()}-${pad2(prevD.getMonth() + 1)}-${pad2(prevD.getDate())}`;
+  const [completions, prevCompletions, allSchedules] = await Promise.all([
     invoke('get_schedule_completions', { date }).catch(() => []),
+    invoke('get_schedule_completions', { date: prevDate }).catch(() => []),
     invoke('get_schedules', { category: null }).catch(() => []),
   ]);
   // Schedules whose completion comes from a timeline_block (timer) are
   // already drawn as proper blocks above — skip them here to avoid double.
-  // What we DO want as markers: check-mode tasks + any track-mode task
-  // that got marked done without a block (auto-from-Health, manual ✓).
   const blockedSchedIds = new Set(
     (blocks || [])
       .filter(b => b.source_type === 'schedule' && b.source_id != null)
       .map(b => b.source_id)
   );
-  const doneChecks = (completions || []).filter(c =>
-    c.completed && c.completed_at && !blockedSchedIds.has(c.schedule_id)
-  );
+  // Show what was actually DONE on this calendar day, keyed by completed_at:
+  // regular ticks live under `date`; "marks previous day" reflections done today
+  // live under yesterday's date. Merge both, keep only ones completed on `date`,
+  // dedup by schedule (a re-tick can leave a row under each date).
+  const byId = new Map();
+  for (const c of [...(completions || []), ...(prevCompletions || [])]) {
+    if (!c.completed || !c.completed_at || !c.completed_at.startsWith(date)) continue;
+    if (blockedSchedIds.has(c.schedule_id)) continue;
+    const prev = byId.get(c.schedule_id);
+    if (!prev || c.completed_at > prev.completed_at) byId.set(c.schedule_id, c);
+  }
+  const doneChecks = [...byId.values()];
 
-  // Split: previous-day reflections cluster into one "📝 Рефлексия" marker
-  // when there are 2+ of them — single ones stay individual.
   const reflections = doneChecks.filter(c => c.marks_previous_day);
   const regulars    = doneChecks.filter(c => !c.marks_previous_day);
-  const totalReflections = (allSchedules || []).filter(s =>
-    s.marks_previous_day && s.is_active !== false
-  ).length;
+  const reflSchedules = (allSchedules || []).filter(s => s.marks_previous_day && s.is_active !== false);
 
-  const renderMarker = (top, icon, label, hm, tip) => {
-    const marker = document.createElement('div');
-    marker.className = 'day-tl-instant';
-    marker.style.cssText = `top:${top}px;`;
-    marker.title = tip;
-    marker.innerHTML = `<span class="day-tl-instant-ico">${icon}</span><span class="day-tl-instant-label">${escapeHtml(label)}</span><span class="day-tl-instant-time">${hm}</span>`;
-    layer.appendChild(marker);
-  };
-
-  // Cluster check-completions that land within ~one marker-height of each other
-  // (e.g. 3 tasks all ticked at 13:56) so their markers don't stack on one row.
+  // Each completion-group is drawn as a clear box (like an event): the first
+  // task's name + a "+N" badge for the rest; clicking pages through them with
+  // arrows. Event-coincident ticks fold into the event instead (foldInto).
   const markerGapMin = Math.max(10, Math.ceil(18 / (hourPx / 60)));
-  const regularPts = regulars
+  const pendingGroups = [];
+  const buildTaskGroups = (list) => {
+    const pts = list
+      .map(c => ({ c, min: parseHM(timestampToHM(c.completed_at)) }))
+      .filter(p => p.min != null)
+      .filter(p => !foldInto(p.min, { title: p.c.title, time: timestampToHM(p.c.completed_at), scheduleId: p.c.schedule_id, undoDate: date }))
+      .sort((a, b) => a.min - b.min);
+    let grp = [];
+    const flush = () => {
+      if (!grp.length) return;
+      const first = grp[0];
+      pendingGroups.push({
+        top: minToPx(first.min),
+        icon: SCH_CAT_ICONS[first.c.category] || '◽',
+        title: first.c.title,
+        badge: grp.length > 1 ? `+${grp.length - 1}` : '',
+        hm: timestampToHM(first.c.completed_at),
+        items: grp.map(p => ({
+          title: p.c.title, subtitle: timestampToHM(p.c.completed_at), accent: '#c084fc',
+          rows: [{ text: '✓ Выполнено', done: true }],
+          toggle: { scheduleId: p.c.schedule_id, date, done: true },
+        })),
+      });
+      grp = [];
+    };
+    for (const p of pts) {
+      if (grp.length && p.min - grp[grp.length - 1].min > markerGapMin) flush();
+      grp.push(p);
+    }
+    flush();
+  };
+  buildTaskGroups(regulars);
+
+  // Reflections → one box for the "yesterday" set. The badge shows done/total
+  // (e.g. 12/29); the pager browses the completed ones (the rest are managed in
+  // the schedule list, not on the "what I did" timeline).
+  const doneRefl = reflections
     .map(c => ({ c, min: parseHM(timestampToHM(c.completed_at)) }))
     .filter(p => p.min != null)
+    .filter(p => !foldInto(p.min, { title: p.c.title, time: timestampToHM(p.c.completed_at), isReflection: true, scheduleId: p.c.schedule_id, undoDate: prevDate }))
     .sort((a, b) => a.min - b.min);
-  let rcur = [];
-  const flushRegCluster = () => {
-    if (rcur.length === 1) {
-      const { c, min } = rcur[0];
-      const hm = timestampToHM(c.completed_at);
-      renderMarker(minToPx(min), SCH_CAT_ICONS[c.category] || '◽', c.title, hm, `${c.title} · ${hm}`);
-    } else if (rcur.length > 1) {
-      const hmFirst = timestampToHM(rcur[0].c.completed_at);
-      const hmLast = timestampToHM(rcur[rcur.length - 1].c.completed_at);
-      const span = hmFirst === hmLast ? hmFirst : `${hmFirst}–${hmLast}`;
-      const tip = rcur.map(p => `• ${p.c.title} · ${timestampToHM(p.c.completed_at)}`).join('\n');
-      renderMarker(minToPx(rcur[0].min), '✓', `${rcur.length} задач`, span, tip);
-    }
-    rcur = [];
-  };
-  for (const p of regularPts) {
-    if (rcur.length && p.min - rcur[rcur.length - 1].min > markerGapMin) flushRegCluster();
-    rcur.push(p);
+  if (doneRefl.length) {
+    const doneIds = new Set(doneRefl.map(p => p.c.schedule_id));
+    const items = [
+      ...doneRefl.map(p => ({
+        title: p.c.title, subtitle: timestampToHM(p.c.completed_at), accent: '#f59e0b',
+        rows: [{ text: '📝 Рефлексия за вчера', muted: true }, { text: '✓ Выполнено', done: true }],
+        toggle: { scheduleId: p.c.schedule_id, date: prevDate, done: true },
+      })),
+      ...reflSchedules.filter(s => !doneIds.has(s.id)).map(s => ({
+        title: s.title, subtitle: 'не отмечено', accent: '#f59e0b',
+        rows: [{ text: '📝 Рефлексия за вчера', muted: true }, { text: '○ Не отмечено', muted: true }],
+        toggle: { scheduleId: s.id, date: prevDate, done: false },
+      })),
+    ];
+    pendingGroups.push({
+      top: minToPx(doneRefl[0].min),
+      icon: '📝',
+      title: 'Рефлексия за вчера',
+      badge: `${doneRefl.length}/${Math.max(reflSchedules.length, doneRefl.length)}`,
+      hm: timestampToHM(doneRefl[0].c.completed_at),
+      items,
+      reflection: true,
+    });
   }
-  flushRegCluster();
 
-  if (reflections.length === 1) {
-    const c = reflections[0];
-    const hm = timestampToHM(c.completed_at);
-    const min = parseHM(hm);
-    if (min != null) renderMarker(minToPx(min), '📝', `Рефлексия: ${c.title}`, hm, `${c.title} · ${hm}`);
-  } else if (reflections.length >= 2) {
-    // Cluster: pin to the latest completed_at, summarise N/total.
-    const latest = reflections.reduce((a, b) =>
-      (a.completed_at > b.completed_at) ? a : b
-    );
-    const hm = timestampToHM(latest.completed_at);
-    const min = parseHM(hm);
-    const total = Math.max(totalReflections, reflections.length);
-    const titles = reflections.map(r => `• ${r.title}`).join('\n');
-    if (min != null) renderMarker(minToPx(min), '📝', `Рефлексия за вчера (${reflections.length}/${total})`, hm, `Рефлексия за вчера:\n${titles}`);
+  // Place group boxes top-down, nudging overlaps downward so none sits on another.
+  pendingGroups.sort((a, b) => a.top - b.top);
+  let lastBottom = -Infinity;
+  for (const g of pendingGroups) {
+    const top = Math.max(g.top, lastBottom + 3);
+    lastBottom = top + 28;
+    const box = document.createElement('div');
+    box.className = 'day-tl-group' + (g.reflection ? ' day-tl-group-refl' : '');
+    box.style.cssText = `top:${top}px;`;
+    box.title = g.items.map(it => `• ${it.title}`).join('\n');
+    box.innerHTML = `<span class="day-tl-group-ico">${g.icon}</span><span class="day-tl-group-title">${escapeHtml(g.title)}</span>${g.badge ? `<span class="day-tl-group-count">${g.badge}</span>` : ''}<span class="day-tl-group-time">${g.hm}</span>`;
+    box.addEventListener('click', (ev) => { ev.stopPropagation(); showPagerPopover(g.items, ev.clientX, ev.clientY); });
+    markerLayer.appendChild(box);
   }
 
   rootEl.appendChild(layer);
+  rootEl.appendChild(markerLayer);
+
+  // Fold overlapping completions into their event: a "✓ N" badge on the block
+  // and a click-through pager (page 1 = event, then each completed task).
+  for (const [id, items] of groups) {
+    const box = evBoxes.find(b => b.id === id);
+    const blk = rootEl.querySelector(`.day-event-block[data-evt-pop="${id}"]`);
+    if (!box || !blk) continue;
+    blk.__evtGroup = [{ ...eventPagerItem(box.ev), accent: box.ev.color }, ...items.map(it => ({
+      title: it.title,
+      subtitle: it.time,
+      accent: it.isReflection ? '#f59e0b' : '#c084fc',
+      rows: [it.isReflection ? { text: '📝 Рефлексия за вчера', muted: true } : null, { text: '✓ Выполнено', done: true }].filter(Boolean),
+      toggle: { scheduleId: it.scheduleId, date: it.undoDate, done: true },
+    }))];
+    const badge = document.createElement('span');
+    badge.className = 'day-event-count';
+    badge.textContent = `✓ ${items.length}`;
+    badge.title = `${items.length} выполненных задач рядом — нажмите, чтобы листать`;
+    (blk.querySelector('.day-event-block-head') || blk).appendChild(badge);
+  }
 }

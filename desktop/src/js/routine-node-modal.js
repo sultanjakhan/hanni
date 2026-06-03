@@ -15,9 +15,12 @@ const TRIGGER_INFO = {
   manual: { name: 'Вручную', desc: 'Цепочку ты запускаешь сам — кнопкой.' },
 };
 
-// Start node = a trigger, not a task — show a trigger info card.
-function openTriggerModal(node, chain) {
-  const info = TRIGGER_INFO[chain.trigger_type] || { name: 'Триггер запуска', desc: '' };
+// Start node = the chain's launch trigger. Edit type (manual/time/sleep_end)
+// and, for 'time', the time of day — persisted on the chain via update_routine_chain.
+function openTriggerModal(node, chain, refresh) {
+  let trigger = chain.trigger_type || 'manual';
+  // Multiple times = multiple launch slots (e.g. breakfast/lunch/dinner).
+  let times = String(chain.trigger_time || '').split(',').map(s => s.trim()).filter(Boolean);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal rt-node-modal">
@@ -26,17 +29,61 @@ function openTriggerModal(node, chain) {
       <div class="rt-nm-title-static">${escapeHtml(node.title)}</div>
     </div>
     <div class="rt-nm-trigger">
-      <div class="rt-nm-row"><span class="rt-nm-label">Тип</span><span>${info.name}</span></div>
-      <div class="rt-nm-row"><span class="rt-nm-label">Источник</span><span class="rt-nm-src-tag">Health Connect</span></div>
-      <div class="rt-nm-trigger-desc">${info.desc}</div>
+      <div class="rt-nm-row">
+        <span class="rt-nm-label">Запуск</span>
+        <span class="rt-nm-req" id="rt-nm-trig"></span>
+      </div>
+      <div class="rt-nm-row" id="rt-nm-time-row" style="display:none">
+        <span class="rt-nm-label">Время</span>
+        <span class="rt-nm-times" id="rt-nm-times"></span>
+      </div>
+      <div class="rt-nm-trigger-desc" id="rt-nm-trig-desc"></div>
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="rt-nm-close">Закрыть</button>
+      <button class="btn-primary" id="rt-nm-save">Сохранить</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const trigEl = overlay.querySelector('#rt-nm-trig');
+  const descEl = overlay.querySelector('#rt-nm-trig-desc');
+  const timeRow = overlay.querySelector('#rt-nm-time-row');
+  const draw = () => {
+    trigEl.innerHTML = ['manual', 'time', 'sleep_end'].map(v =>
+      `<button class="rt-nm-req-btn${v === trigger ? ' active' : ''}" data-t="${v}">${TRIGGER_INFO[v].name}</button>`).join('');
+    trigEl.querySelectorAll('[data-t]').forEach(b =>
+      b.addEventListener('click', () => { trigger = b.dataset.t; draw(); }));
+    descEl.textContent = TRIGGER_INFO[trigger].desc;
+    timeRow.style.display = trigger === 'time' ? '' : 'none';
+  };
+  const timesEl = overlay.querySelector('#rt-nm-times');
+  const drawTimes = () => {
+    timesEl.innerHTML = times.map((t, i) =>
+      `<span class="rt-nm-time-chip">${escapeHtml(t)}<button data-rm="${i}" title="Убрать">×</button></span>`).join('')
+      + `<input type="time" class="rt-nm-time" id="rt-nm-time-add">
+         <button class="rt-nm-req-btn" id="rt-nm-time-add-btn">＋</button>`;
+    timesEl.querySelectorAll('[data-rm]').forEach(b =>
+      b.addEventListener('click', () => { times.splice(parseInt(b.dataset.rm), 1); drawTimes(); }));
+    timesEl.querySelector('#rt-nm-time-add-btn').addEventListener('click', () => {
+      const v = timesEl.querySelector('#rt-nm-time-add').value;
+      if (v && !times.includes(v)) { times.push(v); times.sort(); }
+      drawTimes();
+    });
+  };
+  drawTimes();
+  draw();
+
   overlay.querySelector('#rt-nm-close').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#rt-nm-save').addEventListener('click', async () => {
+    await invoke('update_routine_chain', {
+      id: chain.id, triggerType: trigger,
+      triggerTime: trigger === 'time' ? times.join(',') : '',
+    }).catch(() => {});
+    overlay.remove();
+    if (refresh) refresh();
+  });
 }
 
 // Pull human-readable info about the node's linked source.
@@ -61,7 +108,7 @@ async function fetchSourceInfo(sourceType, sourceId) {
 }
 
 export async function openNodeModal(node, chain, refresh) {
-  if (node.is_start) { openTriggerModal(node, chain); return; }
+  if (node.is_start) { openTriggerModal(node, chain, refresh); return; }
   let priority = node.priority;
   let requirement = node.requirement;
 
