@@ -1505,6 +1505,10 @@ async function loadSports(subTab) {
       const { renderTemplatesPane } = await import('./sport-templates.js');
       await renderTemplatesPane(paneEl);
     },
+    renderPrograms: async (paneEl) => {
+      const { renderProgramsPane } = await import('./sport-programs.js');
+      await renderProgramsPane(paneEl);
+    },
     renderTable: async (paneEl) => {
       const workouts = await invoke('get_workouts', { dateRange: null }).catch(() => []);
       const stats = await invoke('get_workout_stats').catch(() => ({ count: 0, total_minutes: 0, total_calories: 0 }));

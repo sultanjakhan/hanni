@@ -77,6 +77,7 @@ export async function renderUnifiedLayout(el, tabId, config) {
   if (config.renderPicker) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'picker', icon: '🎯', label: 'Подбор' });
   if (config.renderCatalog) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'catalog', icon: '📚', label: 'Каталог' });
   if (config.renderTemplates) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'templates', icon: '📋', label: 'Шаблоны' });
+  if (config.renderPrograms) panes.splice(panes.findIndex(p => p.id === 'table'), 0, { id: 'programs', icon: '🗓️', label: 'Программы' });
 
   // Fall back if the persisted pane was removed (e.g. memory hidden for this tab).
   if (!panes.some(p => p.id === activePane)) { activePane = panes[0].id; S._unifiedPane[tabId] = activePane; }
@@ -192,6 +193,9 @@ export async function renderUnifiedLayout(el, tabId, config) {
       break;
     case 'templates':
       if (config.renderTemplates) await config.renderTemplates(paneEl);
+      break;
+    case 'programs':
+      if (config.renderPrograms) await config.renderPrograms(paneEl);
       break;
     case 'goals':
       await renderGoalsPane(paneEl, tabId, config);

@@ -239,6 +239,11 @@ sports:
     - desktop/src/js/sport-template-modals.js
     - desktop/src/js/sport-template-exercises.js
     - desktop/src/js/sport-picker.js
+    - desktop/src/js/sport-program-filters.js
+    - desktop/src/js/sport-program-card.js
+    - desktop/src/js/sport-programs.js
+    - desktop/src/js/sport-program-builder.js
+    - desktop/src/js/sport-program-modals.js
     - desktop/src/js/body-viewer.js
     - desktop/src/js/body-context-menu.js
     - desktop/src/js/body-recommendations.js
@@ -251,7 +256,8 @@ sports:
     - desktop/src-tauri/src/health_import.rs
     - desktop/src-tauri/src/sports_seed.rs                  # one-time exercise-catalog seed
     - desktop/src-tauri/src/sports_seed/exercises.json      # bundled public-domain dataset (Unlicense)
-  tables: [workouts, exercises, body_records, sport_templates, sport_catalog]
+    - desktop/src-tauri/src/commands_programs.rs            # multi-day workout programs
+  tables: [workouts, exercises, body_records, exercise_catalog, workout_templates, template_exercises, workout_programs, program_days, program_runs]
   memory: [tech/project_sports_roadmap.md]
   related: [health, calendar]
 

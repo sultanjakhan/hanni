@@ -1971,6 +1971,45 @@
 .sport-picker-steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
 .sport-picker-count { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; min-height: 14px; }
 
+/* ── Workout programs ── */
+.sport-card.program-active { border-color: var(--color-blue, #3b82f6); }
+.program-today { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; margin-bottom: 12px; border-radius: var(--radius-lg);
+  background: var(--bg-hover); border: 1px solid var(--border-default); }
+.program-today-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.program-today-name { font-weight: 600; font-size: 14px; color: var(--text-primary); }
+.program-today-day { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Balance bar */
+.balance-bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; margin: 4px 0 6px; }
+.balance-seg { border-radius: 2px; min-width: 3px; }
+.balance-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.balance-leg { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); }
+.balance-leg i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.balance-empty-note { font-size: 12px; color: var(--text-muted); margin: 4px 0 8px; }
+/* Day rows in builder */
+.program-builder-nums { display: flex; gap: 12px; margin-top: 8px; }
+.program-builder-nums .form-label { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.program-day-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.program-day-idx { width: 18px; text-align: center; font-size: 12px; color: var(--text-muted); flex: none; }
+.program-day-label { flex: 1; min-width: 60px; }
+.program-day-template { flex: 1.4; min-width: 80px; }
+.program-day-rest.rf-chip { flex: none; }
+.program-day-remove { flex: none; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 4px; }
+.program-day-remove:hover { color: var(--color-red, #ef4444); }
+/* Day list in detail */
+.program-days-list { display: flex; flex-direction: column; gap: 4px; }
+.program-day-view { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-md);
+  background: var(--bg-card); border: 1px solid var(--border-default); }
+.program-day-view.program-day-current { border-color: var(--color-blue, #3b82f6); background: var(--bg-hover); }
+.program-day-view.program-day-rest-row { opacity: 0.6; }
+.program-day-name { flex: 1; font-size: 13px; color: var(--text-primary); }
+.program-day-tmpl { font-size: 12px; color: var(--text-secondary); }
+/* Run box + progress */
+.program-run-box { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; margin-bottom: 10px;
+  border-radius: var(--radius-md); background: var(--bg-hover); font-size: 13px; color: var(--text-primary); }
+.program-progress { height: 6px; border-radius: 3px; background: var(--border-default); overflow: hidden; }
+.program-progress-fill { height: 100%; background: var(--color-blue, #3b82f6); border-radius: 3px; }
+
 /* Exercise rows in template add modal */
 .exercise-row { margin-bottom: 8px; }
 .exercise-row-main { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

@@ -1086,9 +1086,9 @@ pub fn toggle_favorite_template(id: i64, db: tauri::State<'_, HanniDb>) -> Resul
     Ok(next)
 }
 
-#[tauri::command]
-pub fn create_workout_from_template(template_id: i64, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
-    let conn = db.conn();
+// Materialize a logged workout (+ its exercises) from a template. Shared by the
+// manual "start template" command and program-day completion.
+pub(crate) fn make_workout_from_template(conn: &rusqlite::Connection, template_id: i64) -> Result<i64, String> {
     let (tmpl_type, tmpl_name): (String, String) = conn.query_row(
         "SELECT type, name FROM workout_templates WHERE id=?1",
         rusqlite::params![template_id],
@@ -1114,6 +1114,11 @@ pub fn create_workout_from_template(template_id: i64, db: tauri::State<'_, Hanni
         ).map_err(|e| format!("DB error: {}", e))?;
     }
     Ok(workout_id)
+}
+
+#[tauri::command]
+pub fn create_workout_from_template(template_id: i64, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    make_workout_from_template(&db.conn(), template_id)
 }
 
 // ── Schedules commands ──

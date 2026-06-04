@@ -19,6 +19,7 @@ mod calendar;
 mod event_categories;
 mod notes;
 mod commands_data;
+mod commands_programs;
 mod commands_meta;
 mod pm_matrix;
 mod routine;
@@ -188,7 +189,7 @@ fn init_database() -> HanniDb {
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
     // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 6;
+    const SCHEMA_VERSION: i64 = 7;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -223,6 +224,7 @@ fn init_database() -> HanniDb {
         db::migrate_recipe_tags_separator(&conn);
         db::migrate_sports_catalog(&conn);
         db::migrate_sports_catalog_v2(&conn); // v0.92: difficulty/equipment + catalog seed
+        db::migrate_workout_programs(&conn); // v0.93: multi-day workout programs
         db::migrate_food_blacklist(&conn);
         db::migrate_catalog_subgroup(&conn);
         db::migrate_catalog_parent(&conn);
@@ -598,6 +600,17 @@ pub fn run() {
             commands_data::delete_workout_template,
             commands_data::toggle_favorite_template,
             commands_data::create_workout_from_template,
+            // Workout Programs
+            commands_programs::create_workout_program,
+            commands_programs::update_workout_program,
+            commands_programs::get_workout_programs,
+            commands_programs::get_workout_program,
+            commands_programs::delete_workout_program,
+            commands_programs::toggle_favorite_program,
+            commands_programs::start_program,
+            commands_programs::stop_program,
+            commands_programs::complete_program_day,
+            commands_programs::get_today_program_workout,
             // Schedules
             commands_data::create_schedule,
             commands_data::get_schedules,

@@ -2592,6 +2592,50 @@ pub fn migrate_sports_catalog_v2(conn: &rusqlite::Connection) {
     crate::sports_seed::seed_exercise_catalog(conn);
 }
 
+// v0.93: multi-day workout programs (monthly / split / muscle-focus / warmup).
+// A program references existing workout_templates per day; a run tracks progress.
+pub fn migrate_workout_programs(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS workout_programs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'custom',
+            cycle_length_days INTEGER NOT NULL DEFAULT 7,
+            duration_weeks INTEGER NOT NULL DEFAULT 0,
+            target_muscle_groups TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            favorite INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS program_days (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            program_id INTEGER NOT NULL,
+            day_index INTEGER NOT NULL DEFAULT 0,
+            label TEXT NOT NULL DEFAULT '',
+            template_id INTEGER,
+            is_rest INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            order_index INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (program_id) REFERENCES workout_programs(id) ON DELETE CASCADE,
+            FOREIGN KEY (template_id) REFERENCES workout_templates(id)
+        );
+        CREATE TABLE IF NOT EXISTS program_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            program_id INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            current_day INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active',
+            completed_days INTEGER NOT NULL DEFAULT 0,
+            finished_at TEXT,
+            FOREIGN KEY (program_id) REFERENCES workout_programs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_program_days_program ON program_days(program_id, day_index, order_index);
+        CREATE INDEX IF NOT EXISTS idx_program_runs_active ON program_runs(program_id, status);"
+    ).ok();
+}
+
 pub fn migrate_share_links(conn: &rusqlite::Connection) {
     // v0.41: public share links exposed via Cloudflare Tunnel
     conn.execute_batch(
