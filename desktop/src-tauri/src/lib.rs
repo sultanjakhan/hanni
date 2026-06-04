@@ -841,6 +841,7 @@ pub fn run() {
             commands_data::get_body_records,
             commands_data::delete_body_record,
             commands_data::get_body_zones_summary,
+            commands_data::get_exercises_by_body_zone,
             // Dashboard Widgets
             dashboard::get_dashboard_widgets,
             dashboard::save_dashboard_widgets,

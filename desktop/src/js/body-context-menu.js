@@ -8,6 +8,7 @@ const RECORD_TYPES = [
   { id: 'treatment',   icon: '💊', label: 'Лечение',     for: ['bone', 'muscle', 'organ'] },
   { id: 'measurement', icon: '📏', label: 'Замер',       for: ['bone', 'muscle', 'organ'] },
   { id: 'note',        icon: '📝', label: 'Заметка',     for: ['bone', 'muscle', 'organ'] },
+  { id: 'recommend',   icon: '🏋️', label: 'Упражнения',  for: ['muscle'] },
   { id: 'history',     icon: '📋', label: 'История',     for: ['bone', 'muscle', 'organ'] },
 ];
 
@@ -38,6 +39,8 @@ export function showBodyContextMenu(x, y, zone, zoneLabel, callbacks, partType =
       menu.remove();
       if (rt.id === 'history') {
         callbacks.onHistory?.(zone, zoneLabel);
+      } else if (rt.id === 'recommend') {
+        callbacks.onRecommend?.(zone, zoneLabel);
       } else {
         showRecordModal(rt.id, zone, zoneLabel, callbacks.onSaved);
       }

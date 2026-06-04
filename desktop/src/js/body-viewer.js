@@ -3,6 +3,8 @@
 
 let scene, camera, renderer, controls, raycaster, mouse;
 let clickableObjects = [];
+let boneMeshes = [], muscleMeshes = [];
+let currentLayer = 'bone';
 let highlightedObject = null;
 let originalMaterials = new Map();
 let zoneHighlights = new Map();
@@ -119,24 +121,28 @@ function loadModel(T) {
     model.traverse((child) => {
       if (!child.isMesh) return;
       const type = child.userData?.type;
-      if (type && type !== 'bone') { child.visible = false; return; }
-      clickableObjects.push(child);
       originalMaterials.set(child.uuid, child.material);
+      if (type === 'muscle') muscleMeshes.push(child);
+      else if (!type || type === 'bone') boneMeshes.push(child);
+      else child.visible = false; // organs etc. — hidden until that layer ships
     });
-
-    applyZoneHighlights();
+    applyLayer();
   }, null, (err) => console.error('GLB load error:', err));
 }
 
 function setupEvents(container, onSelect, onContextMenu) {
   let hoveredObj = null;
   let rightDownPos = null;
+  let lastMove = 0;
 
   container.addEventListener('mousedown', (e) => {
     if (e.button === 2) rightDownPos = { x: e.clientX, y: e.clientY };
   });
 
   container.addEventListener('mousemove', (e) => {
+    const t = performance.now();
+    if (t - lastMove < 32) return; // ~30Hz raycast throttle (hundreds of meshes)
+    lastMove = t;
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -220,6 +226,33 @@ function applyZoneHighlights() {
   });
 }
 
+// Layer toggle: 'bone' | 'muscle' | 'both'. Muscles already live in the GLB —
+// we just flip visibility and rebuild the raycast set from what's shown.
+export function setLayer(layer) {
+  currentLayer = layer;
+  applyLayer();
+}
+
+function applyLayer() {
+  const showBone = currentLayer === 'bone' || currentLayer === 'both';
+  const showMuscle = currentLayer === 'muscle' || currentLayer === 'both';
+  boneMeshes.forEach(m => { m.visible = showBone; });
+  muscleMeshes.forEach(m => {
+    m.visible = showMuscle;
+    const orig = originalMaterials.get(m.uuid);
+    if (orig && !m._bodyCloned) {
+      const overlay = currentLayer === 'both'; // muscles translucent over bones
+      orig.transparent = overlay;
+      orig.opacity = overlay ? 0.55 : 1;
+      orig.depthWrite = !overlay;
+    }
+  });
+  clickableObjects = [];
+  if (showBone) clickableObjects.push(...boneMeshes);
+  if (showMuscle) clickableObjects.push(...muscleMeshes);
+  applyZoneHighlights();
+}
+
 function onResize(container) {
   if (!camera || !renderer) return;
   camera.aspect = container.clientWidth / container.clientHeight;
@@ -246,6 +279,9 @@ export function disposeViewer() {
     if (obj.isMesh) { obj.geometry?.dispose(); obj.material?.dispose?.(); }
   });
   clickableObjects = [];
+  boneMeshes = [];
+  muscleMeshes = [];
+  currentLayer = 'bone';
   originalMaterials.clear();
   zoneHighlights.clear();
   highlightedObject = null;

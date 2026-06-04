@@ -968,6 +968,62 @@ pub fn get_exercise_facets(db: tauri::State<'_, HanniDb>) -> Result<serde_json::
     Ok(serde_json::json!({ "equipment": equipment, "categories": categories }))
 }
 
+// Map a clicked 3D body zone (GLB mesh name) to one of the catalog's 8 muscle
+// groups. Substring match on the lowercased name; leg-specific names are tested
+// before the bare "biceps" fallback so "Biceps Femoris" resolves to legs.
+fn body_zone_to_muscle_group(zone: &str) -> Option<&'static str> {
+    let z = zone.to_lowercase();
+    if z.contains("biceps femoris") || z.contains("semitendinosus") || z.contains("semimembranosus")
+        || z.contains("quadriceps") || z.contains("femoris") || z.contains("vastus")
+        || z.contains("gluteus") || z.contains("gastrocnemius") || z.contains("soleus")
+        || z.contains("tibialis") || z.contains("peroneus") || z.contains("fibularis")
+        || z.contains("adductor") || z.contains("gracilis") || z.contains("pectineus")
+        || z.contains("sartorius") || z.contains("iliacus") || z.contains("psoas")
+        || z.contains("popliteus") || z.contains("tensor fasc") {
+        return Some("legs");
+    }
+    if z.contains("pectoralis") { return Some("chest"); }
+    if z.contains("deltoid") { return Some("shoulders"); }
+    if z.contains("triceps") || z.contains("anconeus") { return Some("triceps"); }
+    if z.contains("biceps") || z.contains("brachialis") || z.contains("brachioradialis") || z.contains("coracobrachialis") {
+        return Some("biceps");
+    }
+    if z.contains("rectus abdominis") || z.contains("oblique") || z.contains("transvers") || z.contains("quadratus lumborum") {
+        return Some("core");
+    }
+    if z.contains("latissimus") || z.contains("trapezius") || z.contains("rhomboid") || z.contains("teres")
+        || z.contains("infraspinatus") || z.contains("supraspinatus") || z.contains("erector")
+        || z.contains("serratus") || z.contains("subscapularis") || z.contains("levator scap") {
+        return Some("back");
+    }
+    None
+}
+
+// Exercises for a clicked muscle zone. Pain recorded on the zone biases the list
+// toward stretch/mobility; otherwise strength-first. Empty when the zone has no
+// training mapping (face/hand/foot detail) — the UI shows a hint.
+#[tauri::command]
+pub fn get_exercises_by_body_zone(zone: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
+    let conn = db.conn();
+    let group = match body_zone_to_muscle_group(&zone) { Some(g) => g, None => return Ok(vec![]) };
+    let has_pain: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM body_records WHERE zone=?1 AND record_type='pain')",
+        rusqlite::params![zone], |r| r.get(0),
+    ).unwrap_or(false);
+    let order = if has_pain {
+        "CASE type WHEN 'stretch' THEN 0 WHEN 'cardio' THEN 1 WHEN 'bodyweight' THEN 2 ELSE 3 END, name"
+    } else {
+        "CASE type WHEN 'strength' THEN 0 WHEN 'bodyweight' THEN 1 ELSE 2 END, name"
+    };
+    let sql = format!(
+        "SELECT id, name, muscle_group, equipment, type, description, difficulty, primary_muscles, secondary_muscles, category, force \
+         FROM exercise_catalog WHERE muscle_group=?1 ORDER BY {} LIMIT 50", order);
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("DB error: {}", e))?;
+    let rows: Vec<serde_json::Value> = stmt.query_map(rusqlite::params![group], |row| exercise_catalog_from_row(row))
+        .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
+    Ok(rows)
+}
+
 // ── Workout Templates commands ──
 
 #[tauri::command]
