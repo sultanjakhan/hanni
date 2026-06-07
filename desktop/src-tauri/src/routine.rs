@@ -76,13 +76,14 @@ pub fn create_routine_node(
     category: Option<String>, pos_x: i64, pos_y: i64, db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
+    let nid = crate::types::deterministic_id(&crate::types::new_uuid_v7());
     conn.execute(
-        "INSERT INTO routine_nodes (chain_id, source_type, source_id, title, category, pos_x, pos_y)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![chain_id, source_type, source_id, title,
+        "INSERT INTO routine_nodes (id, chain_id, source_type, source_id, title, category, pos_x, pos_y)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![nid, chain_id, source_type, source_id, title,
                           category.unwrap_or_else(|| "other".into()), pos_x, pos_y],
     ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
+    Ok(nid)
 }
 
 /// Patch any subset of a node's editable fields.
@@ -126,12 +127,13 @@ pub fn create_routine_edge(
 ) -> Result<i64, String> {
     let conn = db.conn();
     let trg = trigger_type.unwrap_or_else(|| "after_completion".into());
+    let eid = crate::types::deterministic_id(&crate::types::new_uuid_v7());
     conn.execute(
-        "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id, trigger_type, trigger_value)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![chain_id, from_node_id, to_node_id, trg, trigger_value],
+        "INSERT INTO routine_edges (id, chain_id, from_node_id, to_node_id, trigger_type, trigger_value)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![eid, chain_id, from_node_id, to_node_id, trg, trigger_value],
     ).map_err(|e| format!("DB error: {}", e))?;
-    Ok(conn.last_insert_rowid())
+    Ok(eid)
 }
 
 /// Change an edge's trigger type / value.
@@ -164,15 +166,16 @@ pub fn create_routine_chain(title: String, db: tauri::State<'_, HanniDb>) -> Res
     let sort: i64 = conn.query_row(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM routine_chains", [], |r| r.get(0),
     ).unwrap_or(0);
+    let chain_id = crate::types::deterministic_id(&crate::types::new_uuid_v7());
     conn.execute(
-        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES (?1, 'manual', ?2)",
-        rusqlite::params![title, sort],
+        "INSERT INTO routine_chains (id, title, trigger_type, sort_order) VALUES (?1, ?2, 'manual', ?3)",
+        rusqlite::params![chain_id, title, sort],
     ).map_err(|e| format!("DB error: {}", e))?;
-    let chain_id = conn.last_insert_rowid();
+    let snid = crate::types::deterministic_id(&crate::types::new_uuid_v7());
     conn.execute(
-        "INSERT INTO routine_nodes (chain_id, source_type, title, category, pos_x, pos_y, is_start)
-         VALUES (?1, 'start', 'Старт', 'other', 30, 200, 1)",
-        rusqlite::params![chain_id],
+        "INSERT INTO routine_nodes (id, chain_id, source_type, title, category, pos_x, pos_y, is_start)
+         VALUES (?1, ?2, 'start', 'Старт', 'other', 30, 200, 1)",
+        rusqlite::params![snid, chain_id],
     ).map_err(|e| format!("DB error: {}", e))?;
     Ok(chain_id)
 }

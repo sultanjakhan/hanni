@@ -24,14 +24,14 @@ pub fn start_routine_run(
     let conn = db.conn();
     // slot='' = the usual one-run-per-day chain; non-empty = a meal/launch slot.
     let slot = slot.unwrap_or_default();
+    // Deterministic run id (chain_id|date|slot): both devices compute the same id
+    // for one daily pass, so a pulled run UPSERTs onto the same row instead of
+    // violating UNIQUE(chain_id,date,slot).
+    let run_id = crate::types::routine_run_id(chain_id, &date, &slot);
     conn.execute(
-        "INSERT INTO routine_runs (chain_id, date, slot, state) VALUES (?1, ?2, ?3, 'active')
+        "INSERT INTO routine_runs (id, chain_id, date, slot, state) VALUES (?1, ?2, ?3, ?4, 'active')
          ON CONFLICT(chain_id, date, slot) DO UPDATE SET state='active', completed_at=NULL",
-        rusqlite::params![chain_id, date, slot],
-    ).map_err(|e| format!("DB error: {}", e))?;
-    let run_id: i64 = conn.query_row(
-        "SELECT id FROM routine_runs WHERE chain_id=?1 AND date=?2 AND slot=?3",
-        rusqlite::params![chain_id, date, slot], |r| r.get(0),
+        rusqlite::params![run_id, chain_id, date, slot],
     ).map_err(|e| format!("DB error: {}", e))?;
     conn.execute("DELETE FROM routine_node_status WHERE run_id=?1", rusqlite::params![run_id])
         .map_err(|e| format!("DB error: {}", e))?;
@@ -62,11 +62,15 @@ pub fn set_routine_node_status(
         conn.execute("DELETE FROM routine_node_status WHERE run_id=?1 AND node_id=?2",
             rusqlite::params![run_id, node_id]).map_err(|e| format!("DB error: {}", e))?;
     } else {
+        // Deterministic status id (run_id|node_id); updated_at='' so the AFTER
+        // INSERT/UPDATE sync triggers stamp the RFC3339-'T' form (a literal
+        // datetime('now') would be space-separated and sort below the cursor).
+        let nstat_id = crate::types::routine_node_status_id(run_id, node_id);
         conn.execute(
-            "INSERT INTO routine_node_status (run_id, node_id, state, updated_at)
-             VALUES (?1, ?2, ?3, datetime('now'))
-             ON CONFLICT(run_id, node_id) DO UPDATE SET state=excluded.state, updated_at=datetime('now')",
-            rusqlite::params![run_id, node_id, state],
+            "INSERT INTO routine_node_status (id, run_id, node_id, state, updated_at)
+             VALUES (?1, ?2, ?3, ?4, '')
+             ON CONFLICT(run_id, node_id) DO UPDATE SET state=excluded.state",
+            rusqlite::params![nstat_id, run_id, node_id, state],
         ).map_err(|e| format!("DB error: {}", e))?;
     }
 
@@ -191,11 +195,12 @@ pub(crate) fn mirror_schedule_to_routine(
                 "DELETE FROM routine_node_status WHERE run_id=?1 AND node_id=?2",
                 rusqlite::params![run_id, node_id]);
         } else {
+            let nstat_id = crate::types::routine_node_status_id(run_id, node_id);
             let _ = conn.execute(
-                "INSERT INTO routine_node_status (run_id, node_id, state, updated_at)
-                 VALUES (?1, ?2, ?3, datetime('now'))
-                 ON CONFLICT(run_id, node_id) DO UPDATE SET state=excluded.state, updated_at=datetime('now')",
-                rusqlite::params![run_id, node_id, state]);
+                "INSERT INTO routine_node_status (id, run_id, node_id, state, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, '')
+                 ON CONFLICT(run_id, node_id) DO UPDATE SET state=excluded.state",
+                rusqlite::params![nstat_id, run_id, node_id, state]);
         }
     }
 }

@@ -189,7 +189,7 @@ fn init_database() -> HanniDb {
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
     // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 7;
+    const SCHEMA_VERSION: i64 = 8;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -250,6 +250,8 @@ fn init_database() -> HanniDb {
         db::migrate_routine_chain_trigger_time(&conn); // per-chain time trigger
         db::migrate_schedule_chain_only(&conn); // schedules visible only inside a chain run
         db::migrate_routine_run_slots(&conn); // multiple runs/day per chain (meal slots)
+        db::migrate_routine_ids_deterministic(&conn); // deterministic ids so routines sync (v0.95)
+        db::migrate_sync_meta(&conn); // re-run: bind updated_at/tombstone triggers to the rebuilt routine tables
         let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
     }
 

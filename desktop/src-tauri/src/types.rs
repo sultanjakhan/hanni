@@ -213,6 +213,36 @@ pub fn new_uuid_v7() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+/// Fixed namespace for deterministic routine ids — NEVER change it, or every
+/// device would recompute different ids and routines would duplicate.
+const ROUTINE_NS: uuid::Uuid = uuid::Uuid::from_u128(0xa1f0e2c4_5b6d_4e7f_8a9b_0c1d2e3f4a5b);
+
+/// Deterministic 53-bit positive integer id derived from a stable `key`. Both
+/// devices compute the same value for the same key, so routine rows converge
+/// across devices instead of colliding the way INTEGER AUTOINCREMENT ids do
+/// (each device walks 1,2,3 independently). Routine ids stay integers (the
+/// engine + frontend use them as i64/parseInt), so we hash into an int rather
+/// than switching to UUID strings. 53 bits keeps the value exact through JSON /
+/// JS Number (precise below 2^53).
+pub fn deterministic_id(key: &str) -> i64 {
+    let u = uuid::Uuid::new_v5(&ROUTINE_NS, key.as_bytes());
+    let b = u.as_bytes();
+    let raw = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+    (raw & 0x1F_FFFF_FFFF_FFFF) as i64 // mask to 53 bits → always positive, JS-safe
+}
+
+/// Deterministic routine_runs.id from its natural key (chain_id, date, slot) —
+/// both devices agree on the id, so a pulled run UPSERTs onto the same row
+/// instead of violating UNIQUE(chain_id,date,slot).
+pub fn routine_run_id(chain_id: i64, date: &str, slot: &str) -> i64 {
+    deterministic_id(&format!("run:{}:{}:{}", chain_id, date, slot))
+}
+
+/// Deterministic routine_node_status.id from its natural key (run_id, node_id).
+pub fn routine_node_status_id(run_id: i64, node_id: i64) -> i64 {
+    deterministic_id(&format!("nstat:{}:{}", run_id, node_id))
+}
+
 // ── Chat types ──
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

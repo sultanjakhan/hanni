@@ -1377,11 +1377,11 @@ fn seed_morning_routine(conn: &rusqlite::Connection) {
     let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_morning_seed_v2'").ok()
         .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
     if done { return; }
+    let chain_id = crate::types::deterministic_id("chain:Утро");
     if conn.execute(
-        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Утро', 'sleep_end', 0)",
-        [],
+        "INSERT INTO routine_chains (id, title, trigger_type, sort_order) VALUES (?1, 'Утро', 'sleep_end', 0)",
+        rusqlite::params![chain_id],
     ).is_ok() {
-        let chain_id = conn.last_insert_rowid();
         // (key, title, category, pri, req, x, y, is_start)
         let nodes = [
             ("start", "Проснулся",         "other",   0, "required", 30,  210, 1),
@@ -1396,22 +1396,24 @@ fn seed_morning_routine(conn: &rusqlite::Connection) {
         let mut ids = std::collections::HashMap::new();
         for (key, title, cat, pri, req, x, y, is_start) in nodes {
             let stype = if is_start == 1 { "start" } else { "schedule" };
+            let nid = crate::types::deterministic_id(&format!("node:c{}:{}", chain_id, title));
             conn.execute(
                 "INSERT INTO routine_nodes
-                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+                 (id, chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![nid, chain_id, stype, title, cat, pri, req, x, y, is_start],
             ).ok();
-            ids.insert(key, conn.last_insert_rowid());
+            ids.insert(key, nid);
         }
         let edges = [
             ("start","up"), ("up","bed"), ("bed","toil"), ("bed","wash"),
             ("bed","teeth"), ("toil","vit"), ("wash","vit"), ("teeth","vit"), ("vit","exer"),
         ];
         for (from, to) in edges {
+            let eid = crate::types::deterministic_id(&format!("edge:c{}:{}>{}", chain_id, ids[from], ids[to]));
             conn.execute(
-                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![chain_id, ids[from], ids[to]],
+                "INSERT INTO routine_edges (id, chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![eid, chain_id, ids[from], ids[to]],
             ).ok();
         }
     }
@@ -1427,11 +1429,11 @@ fn seed_reflection_routine(conn: &rusqlite::Connection) {
     let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_reflection_seed_v1'").ok()
         .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
     if done { return; }
+    let chain_id = crate::types::deterministic_id("chain:Рефлексия");
     if conn.execute(
-        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Рефлексия', 'manual', 10)",
-        [],
+        "INSERT INTO routine_chains (id, title, trigger_type, sort_order) VALUES (?1, 'Рефлексия', 'manual', 10)",
+        rusqlite::params![chain_id],
     ).is_ok() {
-        let chain_id = conn.last_insert_rowid();
         // (key, title, category, pri, x, y, is_start)
         let nodes: [(&str, &str, &str, i32, i32, i32, i32); 32] = [
             ("start", "Подведу день",                    "other",     0, 30,  400, 1),
@@ -1475,20 +1477,22 @@ fn seed_reflection_routine(conn: &rusqlite::Connection) {
         for (key, title, cat, pri, x, y, is_start) in nodes {
             let stype = if is_start == 1 { "start" } else { "schedule" };
             let req = if is_start == 1 { "required" } else { "optional" };
+            let nid = crate::types::deterministic_id(&format!("node:c{}:{}", chain_id, title));
             conn.execute(
                 "INSERT INTO routine_nodes
-                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+                 (id, chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![nid, chain_id, stype, title, cat, pri, req, x, y, is_start],
             ).ok();
-            ids.insert(key, conn.last_insert_rowid());
+            ids.insert(key, nid);
         }
         // Fan-out: every non-start node has an edge from start.
         for (key, _, _, _, _, _, is_start) in nodes {
             if is_start == 1 { continue; }
+            let eid = crate::types::deterministic_id(&format!("edge:c{}:{}>{}", chain_id, ids["start"], ids[key]));
             conn.execute(
-                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![chain_id, ids["start"], ids[key]],
+                "INSERT INTO routine_edges (id, chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![eid, chain_id, ids["start"], ids[key]],
             ).ok();
         }
     }
@@ -1501,11 +1505,11 @@ fn seed_night_routine(conn: &rusqlite::Connection) {
     let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_night_seed_v1'").ok()
         .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
     if done { return; }
+    let chain_id = crate::types::deterministic_id("chain:Ночь");
     if conn.execute(
-        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Ночь', 'manual', 20)",
-        [],
+        "INSERT INTO routine_chains (id, title, trigger_type, sort_order) VALUES (?1, 'Ночь', 'manual', 20)",
+        rusqlite::params![chain_id],
     ).is_ok() {
-        let chain_id = conn.last_insert_rowid();
         let nodes = [
             ("start",  "Готовлюсь ко сну",            "other",     0, "required", 30,  220, 1),
             ("shower", "Душ",                          "hygiene",   4, "required", 200, 220, 0),
@@ -1518,13 +1522,14 @@ fn seed_night_routine(conn: &rusqlite::Connection) {
         let mut ids = std::collections::HashMap::new();
         for (key, title, cat, pri, req, x, y, is_start) in nodes {
             let stype = if is_start == 1 { "start" } else { "schedule" };
+            let nid = crate::types::deterministic_id(&format!("node:c{}:{}", chain_id, title));
             conn.execute(
                 "INSERT INTO routine_nodes
-                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+                 (id, chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![nid, chain_id, stype, title, cat, pri, req, x, y, is_start],
             ).ok();
-            ids.insert(key, conn.last_insert_rowid());
+            ids.insert(key, nid);
         }
         let edges = [
             ("start","shower"), ("shower","teeth"),
@@ -1533,9 +1538,10 @@ fn seed_night_routine(conn: &rusqlite::Connection) {
             ("read","bed"),
         ];
         for (from, to) in edges {
+            let eid = crate::types::deterministic_id(&format!("edge:c{}:{}>{}", chain_id, ids[from], ids[to]));
             conn.execute(
-                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![chain_id, ids[from], ids[to]],
+                "INSERT INTO routine_edges (id, chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![eid, chain_id, ids[from], ids[to]],
             ).ok();
         }
     }
@@ -1548,11 +1554,11 @@ fn seed_meal_routine(conn: &rusqlite::Connection) {
     let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_meal_seed_v1'").ok()
         .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
     if done { return; }
+    let chain_id = crate::types::deterministic_id("chain:Покушать");
     if conn.execute(
-        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Покушать', 'manual', 30)",
-        [],
+        "INSERT INTO routine_chains (id, title, trigger_type, sort_order) VALUES (?1, 'Покушать', 'manual', 30)",
+        rusqlite::params![chain_id],
     ).is_ok() {
-        let chain_id = conn.last_insert_rowid();
         let nodes = [
             ("start",  "Время поесть",            "other",   0, "required", 30,  220, 1),
             ("hands",  "Помыл руки",              "hygiene", 4, "required", 200, 220, 0),
@@ -1564,22 +1570,24 @@ fn seed_meal_routine(conn: &rusqlite::Connection) {
         let mut ids = std::collections::HashMap::new();
         for (key, title, cat, pri, req, x, y, is_start) in nodes {
             let stype = if is_start == 1 { "start" } else { "schedule" };
+            let nid = crate::types::deterministic_id(&format!("node:c{}:{}", chain_id, title));
             conn.execute(
                 "INSERT INTO routine_nodes
-                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+                 (id, chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![nid, chain_id, stype, title, cat, pri, req, x, y, is_start],
             ).ok();
-            ids.insert(key, conn.last_insert_rowid());
+            ids.insert(key, nid);
         }
         let edges = [
             ("start","hands"), ("hands","cook"), ("cook","eat"),
             ("eat","dishes"), ("dishes","log"),
         ];
         for (from, to) in edges {
+            let eid = crate::types::deterministic_id(&format!("edge:c{}:{}>{}", chain_id, ids[from], ids[to]));
             conn.execute(
-                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![chain_id, ids[from], ids[to]],
+                "INSERT INTO routine_edges (id, chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![eid, chain_id, ids[from], ids[to]],
             ).ok();
         }
     }
@@ -1593,11 +1601,11 @@ fn seed_workout_routine(conn: &rusqlite::Connection) {
     let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_workout_seed_v1'").ok()
         .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
     if done { return; }
+    let chain_id = crate::types::deterministic_id("chain:Спорт");
     if conn.execute(
-        "INSERT INTO routine_chains (title, trigger_type, sort_order) VALUES ('Спорт', 'manual', 40)",
-        [],
+        "INSERT INTO routine_chains (id, title, trigger_type, sort_order) VALUES (?1, 'Спорт', 'manual', 40)",
+        rusqlite::params![chain_id],
     ).is_ok() {
-        let chain_id = conn.last_insert_rowid();
         let nodes = [
             ("start",   "На тренировку",          "other",   0, "required", 30,  220, 1),
             ("muscle",  "Выбрал группу мышц",     "sport",   3, "optional", 200, 220, 0),
@@ -1609,22 +1617,24 @@ fn seed_workout_routine(conn: &rusqlite::Connection) {
         let mut ids = std::collections::HashMap::new();
         for (key, title, cat, pri, req, x, y, is_start) in nodes {
             let stype = if is_start == 1 { "start" } else { "schedule" };
+            let nid = crate::types::deterministic_id(&format!("node:c{}:{}", chain_id, title));
             conn.execute(
                 "INSERT INTO routine_nodes
-                 (chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                rusqlite::params![chain_id, stype, title, cat, pri, req, x, y, is_start],
+                 (id, chain_id, source_type, title, category, priority, requirement, pos_x, pos_y, is_start)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![nid, chain_id, stype, title, cat, pri, req, x, y, is_start],
             ).ok();
-            ids.insert(key, conn.last_insert_rowid());
+            ids.insert(key, nid);
         }
         let edges = [
             ("start","muscle"), ("muscle","warm"), ("warm","main"),
             ("main","stretch"), ("stretch","shower"),
         ];
         for (from, to) in edges {
+            let eid = crate::types::deterministic_id(&format!("edge:c{}:{}>{}", chain_id, ids[from], ids[to]));
             conn.execute(
-                "INSERT INTO routine_edges (chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3)",
-                rusqlite::params![chain_id, ids[from], ids[to]],
+                "INSERT INTO routine_edges (id, chain_id, from_node_id, to_node_id) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![eid, chain_id, ids[from], ids[to]],
             ).ok();
         }
     }
@@ -2812,6 +2822,8 @@ pub const SYNC_TABLES: &[&str] = &[
     "job_search_log", "dashboard_widgets", "timeline_activity_types",
     "timeline_blocks", "timeline_goals", "sleep_sessions", "sleep_stages",
     "heart_rate_samples", "event_categories",
+    "routine_chains", "routine_nodes", "routine_edges", "routine_runs",
+    "routine_node_status",
 ];
 
 /// Whether `table.column` is declared TEXT in the current schema. Used
@@ -3468,6 +3480,295 @@ pub fn migrate_schedules_to_uuid_pk(conn: &rusqlite::Connection) {
     }
 }
 
+/// Re-key the routine graph onto DETERMINISTIC integer ids so both devices
+/// converge on the same id for the same logical row — the prerequisite for
+/// syncing routine run/completion state (the per-device AUTOINCREMENT ids would
+/// otherwise collide). Seeded chains key on title (identical in source on both
+/// devices); user/renamed chains/nodes/edges key on device_id+old_id (they live
+/// on one device, just need a stable unique id). runs key on (chain,date,slot),
+/// node_status on (run,node) — matching start_routine_run / set_routine_node_status
+/// so a freshly-seeded device and a migrated one line up. Preserves all run +
+/// completion state. One-time (gated by _migrations); rebuilds the 5 tables in
+/// one transaction with foreign_keys OFF. Mirrors migrate_schedules_to_uuid_pk.
+pub fn migrate_routine_ids_deterministic(conn: &rusqlite::Connection) {
+    use std::collections::HashMap;
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_ids_deterministic_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    if conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='routine_chains'",
+        [], |r| r.get::<_, i64>(0),
+    ).unwrap_or(0) == 0 { return; }
+
+    let det = crate::types::deterministic_id;
+    let device_id: String = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='device_id'", [], |r| r.get::<_, String>(0),
+    ).unwrap_or_else(|_| "local".into());
+    let seeded: std::collections::HashSet<&str> =
+        ["Утро", "Рефлексия", "Ночь", "Покушать", "Спорт"].into_iter().collect();
+    let now_t = chrono::Local::now().to_rfc3339();
+    let norm = |s: &str| -> String {
+        if s.trim().is_empty() { now_t.clone() } else { s.replace(' ', "T") }
+    };
+
+    let _ = conn.execute_batch("PRAGMA foreign_keys=OFF;");
+    let result: Result<(usize, usize, usize, usize, usize), rusqlite::Error> = (|| {
+        // ── id maps (chains → nodes → edges → runs) ──
+        let mut chain_map: HashMap<i64, i64> = HashMap::new();
+        let mut chain_seeded: HashMap<i64, bool> = HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT id, title FROM routine_chains")?;
+            let rows: Vec<(i64, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .filter_map(Result::ok).collect();
+            for (old, title) in rows {
+                let is_seed = seeded.contains(title.as_str());
+                let new = if is_seed { det(&format!("chain:{}", title)) }
+                          else { det(&format!("uchain:{}:{}", device_id, old)) };
+                chain_map.insert(old, new);
+                chain_seeded.insert(old, is_seed);
+            }
+        }
+        let mut node_map: HashMap<i64, i64> = HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT id, chain_id, title FROM routine_nodes")?;
+            let rows: Vec<(i64, i64, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .filter_map(Result::ok).collect();
+            for (old, cid, title) in rows {
+                let new_cid = match chain_map.get(&cid) { Some(c) => *c, None => continue };
+                let new = if *chain_seeded.get(&cid).unwrap_or(&false) {
+                    det(&format!("node:c{}:{}", new_cid, title))
+                } else { det(&format!("unode:{}:{}", device_id, old)) };
+                node_map.insert(old, new);
+            }
+        }
+        let mut edge_map: HashMap<i64, i64> = HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT id, chain_id, from_node_id, to_node_id FROM routine_edges")?;
+            let rows: Vec<(i64, i64, i64, i64)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .filter_map(Result::ok).collect();
+            for (old, cid, from, to) in rows {
+                let new_cid = match chain_map.get(&cid) { Some(c) => *c, None => continue };
+                let (nf, nt) = match (node_map.get(&from), node_map.get(&to)) {
+                    (Some(a), Some(b)) => (*a, *b), _ => continue };
+                let new = if *chain_seeded.get(&cid).unwrap_or(&false) {
+                    det(&format!("edge:c{}:{}>{}", new_cid, nf, nt))
+                } else { det(&format!("uedge:{}:{}", device_id, old)) };
+                edge_map.insert(old, new);
+            }
+        }
+        let mut run_map: HashMap<i64, i64> = HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT id, chain_id, date, slot FROM routine_runs")?;
+            let rows: Vec<(i64, i64, String, String)> = stmt.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            )))?.filter_map(Result::ok).collect();
+            for (old, cid, date, slot) in rows {
+                let new_cid = match chain_map.get(&cid) { Some(c) => *c, None => continue };
+                run_map.insert(old, crate::types::routine_run_id(new_cid, &date, &slot));
+            }
+        }
+
+        // ── rebuild the 5 tables, applying the maps to ids + every FK ──
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE routine_chains_new (
+                 id INTEGER PRIMARY KEY, title TEXT NOT NULL,
+                 trigger_type TEXT NOT NULL DEFAULT 'manual',
+                 is_active INTEGER NOT NULL DEFAULT 1,
+                 sort_order INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 trigger_time TEXT,
+                 updated_at TEXT NOT NULL DEFAULT '');
+             CREATE TABLE routine_nodes_new (
+                 id INTEGER PRIMARY KEY,
+                 chain_id INTEGER NOT NULL REFERENCES routine_chains_new(id) ON DELETE CASCADE,
+                 source_type TEXT NOT NULL DEFAULT 'schedule',
+                 source_id TEXT,
+                 title TEXT NOT NULL,
+                 category TEXT NOT NULL DEFAULT 'other',
+                 icon TEXT,
+                 pos_x INTEGER NOT NULL DEFAULT 0,
+                 pos_y INTEGER NOT NULL DEFAULT 0,
+                 priority INTEGER NOT NULL DEFAULT 0,
+                 requirement TEXT NOT NULL DEFAULT 'required',
+                 is_start INTEGER NOT NULL DEFAULT 0,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT '');
+             CREATE TABLE routine_edges_new (
+                 id INTEGER PRIMARY KEY,
+                 chain_id INTEGER NOT NULL REFERENCES routine_chains_new(id) ON DELETE CASCADE,
+                 from_node_id INTEGER NOT NULL REFERENCES routine_nodes_new(id) ON DELETE CASCADE,
+                 to_node_id INTEGER NOT NULL REFERENCES routine_nodes_new(id) ON DELETE CASCADE,
+                 trigger_type TEXT NOT NULL DEFAULT 'after_completion',
+                 trigger_value INTEGER,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 updated_at TEXT NOT NULL DEFAULT '');
+             CREATE TABLE routine_runs_new (
+                 id INTEGER PRIMARY KEY,
+                 chain_id INTEGER NOT NULL REFERENCES routine_chains_new(id) ON DELETE CASCADE,
+                 date TEXT NOT NULL,
+                 slot TEXT NOT NULL DEFAULT '',
+                 state TEXT NOT NULL DEFAULT 'active',
+                 started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 completed_at TEXT,
+                 updated_at TEXT NOT NULL DEFAULT '',
+                 UNIQUE(chain_id, date, slot));
+             CREATE TABLE routine_node_status_new (
+                 id INTEGER PRIMARY KEY,
+                 run_id INTEGER NOT NULL REFERENCES routine_runs_new(id) ON DELETE CASCADE,
+                 node_id INTEGER NOT NULL REFERENCES routine_nodes_new(id) ON DELETE CASCADE,
+                 state TEXT NOT NULL DEFAULT 'done',
+                 updated_at TEXT NOT NULL DEFAULT '',
+                 UNIQUE(run_id, node_id));"
+        )?;
+
+        // chains
+        let mut stmt_c = conn.prepare(
+            "SELECT id, title, trigger_type, is_active, sort_order, created_at, trigger_time FROM routine_chains")?;
+        let chain_rows: Vec<(i64, String, String, i64, i64, String, Option<String>)> =
+            stmt_c.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(stmt_c);
+        let n_chains = chain_rows.len();
+        for (old, title, tt, act, so, ca, trt) in &chain_rows {
+            let nid = chain_map[old];
+            conn.execute(
+                "INSERT OR IGNORE INTO routine_chains_new
+                 (id, title, trigger_type, is_active, sort_order, created_at, trigger_time, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                rusqlite::params![nid, title, tt, act, so, ca, trt, norm(ca)],
+            )?;
+        }
+
+        // nodes (source_id may be TEXT UUID or legacy INTEGER — read as string)
+        let mut stmt_n = conn.prepare(
+            "SELECT id, chain_id, source_type, source_id, title, category, icon, pos_x, pos_y,
+                    priority, requirement, is_start, created_at FROM routine_nodes")?;
+        let node_rows: Vec<(i64, i64, String, Option<String>, String, String, Option<String>, i64, i64, i64, String, i64, String)> =
+            stmt_n.query_map([], |r| {
+                let sid: Option<String> = match r.get::<_, Option<String>>(3) {
+                    Ok(v) => v,
+                    Err(_) => r.get::<_, Option<i64>>(3).ok().flatten().map(|i| i.to_string()),
+                };
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, sid, r.get(4)?, r.get(5)?, r.get(6)?,
+                    r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?))
+            })?.filter_map(Result::ok).collect();
+        drop(stmt_n);
+        let mut n_nodes = 0;
+        for (old, cid, stype, sid, title, cat, icon, x, y, pri, req, is_start, ca) in &node_rows {
+            let nid = match node_map.get(old) { Some(n) => *n, None => continue };
+            let ncid = match chain_map.get(cid) { Some(c) => *c, None => continue };
+            conn.execute(
+                "INSERT OR IGNORE INTO routine_nodes_new
+                 (id, chain_id, source_type, source_id, title, category, icon, pos_x, pos_y,
+                  priority, requirement, is_start, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                rusqlite::params![nid, ncid, stype, sid, title, cat, icon, x, y, pri, req, is_start, ca, norm(ca)],
+            )?;
+            n_nodes += 1;
+        }
+
+        // edges (skip orphans whose endpoints didn't map)
+        let mut stmt_e = conn.prepare(
+            "SELECT id, chain_id, from_node_id, to_node_id, trigger_type, trigger_value, created_at FROM routine_edges")?;
+        let edge_rows: Vec<(i64, i64, i64, i64, String, Option<i64>, String)> =
+            stmt_e.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(stmt_e);
+        let mut n_edges = 0;
+        for (old, cid, from, to, tt, tv, ca) in &edge_rows {
+            let eid = match edge_map.get(old) { Some(e) => *e, None => continue };
+            let ncid = match chain_map.get(cid) { Some(c) => *c, None => continue };
+            let (nf, nt) = match (node_map.get(from), node_map.get(to)) {
+                (Some(a), Some(b)) => (*a, *b), _ => continue };
+            conn.execute(
+                "INSERT OR IGNORE INTO routine_edges_new
+                 (id, chain_id, from_node_id, to_node_id, trigger_type, trigger_value, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                rusqlite::params![eid, ncid, nf, nt, tt, tv, ca, norm(ca)],
+            )?;
+            n_edges += 1;
+        }
+
+        // runs (preserve state/completed_at; updated_at from real timestamp so LWW works)
+        let mut stmt_r = conn.prepare(
+            "SELECT id, chain_id, date, slot, state, started_at, completed_at FROM routine_runs")?;
+        let run_rows: Vec<(i64, i64, String, String, String, String, Option<String>)> =
+            stmt_r.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                r.get(4)?, r.get(5)?, r.get(6)?,
+            )))?.filter_map(Result::ok).collect();
+        drop(stmt_r);
+        let mut n_runs = 0;
+        for (old, cid, date, slot, state, started, completed) in &run_rows {
+            let nid = match run_map.get(old) { Some(n) => *n, None => continue };
+            let ncid = match chain_map.get(cid) { Some(c) => *c, None => continue };
+            let ua = norm(completed.as_deref().unwrap_or(started));
+            conn.execute(
+                "INSERT OR IGNORE INTO routine_runs_new
+                 (id, chain_id, date, slot, state, started_at, completed_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                rusqlite::params![nid, ncid, date, slot, state, started, completed, ua],
+            )?;
+            n_runs += 1;
+        }
+
+        // node_status (the actual completions; skip rows whose run/node didn't map)
+        let mut stmt_s = conn.prepare(
+            "SELECT id, run_id, node_id, state, updated_at FROM routine_node_status")?;
+        let stat_rows: Vec<(i64, i64, i64, String, String)> =
+            stmt_s.query_map([], |r| Ok((
+                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            )))?.filter_map(Result::ok).collect();
+        drop(stmt_s);
+        let mut n_stat = 0;
+        for (_old, rid, nid, state, ua) in &stat_rows {
+            let nrid = match run_map.get(rid) { Some(r) => *r, None => continue };
+            let nnid = match node_map.get(nid) { Some(n) => *n, None => continue };
+            let new_sid = crate::types::routine_node_status_id(nrid, nnid);
+            conn.execute(
+                "INSERT OR IGNORE INTO routine_node_status_new
+                 (id, run_id, node_id, state, updated_at) VALUES (?1,?2,?3,?4,?5)",
+                rusqlite::params![new_sid, nrid, nnid, state, norm(ua)],
+            )?;
+            n_stat += 1;
+        }
+
+        conn.execute_batch(
+            "DROP TABLE routine_node_status;
+             DROP TABLE routine_edges;
+             DROP TABLE routine_runs;
+             DROP TABLE routine_nodes;
+             DROP TABLE routine_chains;
+             ALTER TABLE routine_chains_new RENAME TO routine_chains;
+             ALTER TABLE routine_nodes_new RENAME TO routine_nodes;
+             ALTER TABLE routine_edges_new RENAME TO routine_edges;
+             ALTER TABLE routine_runs_new RENAME TO routine_runs;
+             ALTER TABLE routine_node_status_new RENAME TO routine_node_status;
+             CREATE INDEX IF NOT EXISTS idx_routine_nodes_chain ON routine_nodes(chain_id);
+             CREATE INDEX IF NOT EXISTS idx_routine_edges_chain ON routine_edges(chain_id);
+             CREATE INDEX IF NOT EXISTS idx_routine_runs_date ON routine_runs(date);
+             CREATE INDEX IF NOT EXISTS idx_routine_node_status_run ON routine_node_status(run_id);
+             DELETE FROM sync_tombstones WHERE table_name IN
+               ('routine_chains','routine_nodes','routine_edges','routine_runs','routine_node_status');
+             INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_ids_deterministic_v1');
+             COMMIT;"
+        )?;
+        Ok((n_chains, n_nodes, n_edges, n_runs, n_stat))
+    })();
+    let _ = conn.execute_batch("PRAGMA foreign_keys=ON;");
+    match result {
+        Ok((c, n, e, r, s)) => eprintln!(
+            "[migrate_routine_ids_deterministic] re-keyed {c} chains, {n} nodes, {e} edges, {r} runs, {s} statuses"),
+        Err(err) => {
+            eprintln!("[migrate_routine_ids_deterministic] failed: {err}");
+            let _ = conn.execute_batch("ROLLBACK;");
+        }
+    }
+}
 /// Orphan backfill for installs that ran migrate_schedules_to_uuid_pk BEFORE
 /// the routine_nodes remap was added inside it: schedules now have UUID ids
 /// but routine_nodes.source_id still holds the old INTEGER ids that no longer
