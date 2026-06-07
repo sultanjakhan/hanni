@@ -51,3 +51,27 @@ jobs:
         # updater reads it directly via .../releases/latest/download/latest.json
         # (see tauri.conf.json). No gist mirror step — that separate API call was
         # a silent single point of failure (rate-limit/PAT could freeze updates).
+
+      # OTA web-asset bundle: HTML/JS/CSS only (excludes the big rarely-changing
+      # sounds/ + assets/, which fall back to the embedded copies per-file). Both
+      # macOS and Android read this same web-manifest.json from releases/latest,
+      # so it's published ONCE here (the desktop job, which creates the release)
+      # — NOT also from release-android.yml: two `tar` runs embed different
+      # mtimes → different sha256 → a --clobber race could leave a bundle whose
+      # bytes don't match the manifest sha. Web-only pushes use the same logic in
+      # scripts/publish-web-update.sh.
+      - name: Build + upload web-asset bundle (seed web OTA channel)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          BUNDLE="web-${VERSION}.tar.gz"
+          tar czf "$BUNDLE" -C desktop/src --exclude=./sounds --exclude=./assets .
+          SHA=$(shasum -a 256 "$BUNDLE" | cut -d' ' -f1)
+          # min_native = this release: the bundle is built against this native
+          # shell, so it's the safe floor (older shells get the full update).
+          printf '{"web_version":"%s","min_native_version":"%s","sha256":"%s","asset":"%s"}\n' \
+            "$VERSION" "$VERSION" "$SHA" "$BUNDLE" > web-manifest.json
+          ls -la "$BUNDLE" web-manifest.json
+          gh release upload "$TAG" "$BUNDLE" web-manifest.json --clobber
