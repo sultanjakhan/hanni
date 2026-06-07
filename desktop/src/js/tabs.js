@@ -241,6 +241,11 @@ function renderTabBar() {
     if (!S.APP_VERSION || S.APP_VERSION === '?') {
       document.addEventListener('hanni:version-loaded', e => { ver.textContent = `v${e.detail}`; }, { once: true });
     }
+    // Append the applied OTA web-bundle version (Android/macOS web-OTA channel)
+    // so a silent web-only update is observable next to the native version.
+    invoke('web_ota_status').then(ws => {
+      if (ws?.applied) ver.textContent += ` · web ${ws.applied}`;
+    }).catch(() => {});
   }
 }
 
