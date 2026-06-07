@@ -689,17 +689,20 @@ body.qw-popover-open #task-control-widget {
    .tw-rt-start = ▶ that starts a timer step's schedule (shares the box geometry). */
 .tw-check, .tw-skip, .tw-rt-start {
   flex-shrink: 0;
-  width: 18px; height: 18px; border-radius: 4px;
+  width: 24px; height: 24px; border-radius: 6px;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; line-height: 1;
-  opacity: 0.6;
-  transition: opacity 0.1s, background 0.1s;
+  font-size: 13px; line-height: 1;
+  opacity: 0.7; cursor: pointer;
+  transition: opacity 0.1s, background 0.1s, color 0.1s, border-color 0.1s;
 }
-.tw-check { border: 1.5px solid var(--accent-blue); color: var(--accent-blue); }
-.tw-skip { border: 1.5px solid var(--color-red); color: var(--color-red); }
-.tw-rt-start { border: 1.5px solid var(--accent-blue); color: var(--accent-blue); font-size: 9px; cursor: pointer; }
-.tw-item:hover .tw-check, .tw-item:hover .tw-skip { opacity: 0.85; }
+.tw-check { border: 1.5px solid var(--color-green); color: var(--color-green); }
+.tw-skip { border: 1.5px solid var(--color-red); color: var(--color-red); margin-left: 8px; }
+.tw-rt-start { border: 1.5px solid var(--accent-blue); color: var(--accent-blue); font-size: 11px; }
+.tw-item:hover .tw-check, .tw-item:hover .tw-skip { opacity: 0.9; }
 .tw-check:hover, .tw-skip:hover, .tw-rt-start:hover { opacity: 1; }
+/* Filled state after a pick — stays visible so the choice is clear and changeable. */
+.tw-check--on { background: var(--color-green); border-color: var(--color-green); color: #fff; opacity: 1; }
+.tw-skip--on  { background: var(--color-red);  border-color: var(--color-red);  color: #fff; opacity: 1; }
 /* Routine cancel: subtle, not a task-like row */
 .tw-rt-cancel { padding: 4px 10px; opacity: 0.55; }
 .tw-rt-cancel:hover { opacity: 1; }
@@ -709,6 +712,10 @@ body.qw-popover-open #task-control-widget {
 .tw-rt-step { cursor: default; }
 .tw-rt-step--now { border-left: 3px solid var(--accent-blue); background: var(--bg-hover); }
 .tw-rt-step .tw-check, .tw-rt-step .tw-skip, .tw-rt-step .tw-rt-start { opacity: 1; }
+/* Action step (timer / Dan Koe): the whole row is the button — single tap. */
+.tw-rt-action { cursor: pointer; }
+.tw-rt-action:hover { background: var(--bg-hover); }
+.tw-rt-ind { flex-shrink: 0; color: var(--accent-blue); font-size: 10px; opacity: 0.7; }
 .tw-item-icon { flex-shrink: 0; font-size: 14px; }
 .tw-item-title {
   flex: 1;

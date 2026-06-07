@@ -35,34 +35,40 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
     let h = '';
     for (const t of run.tasks) {
       const cur = t.id === recommendedId ? ' tw-rt-step--now' : '';
-      // Control per step kind:
-      //   • Dan Koe practice  → ▶ opens the journaling modal (data-rt-dankoe)
-      //   • timer (track)     → ▶ starts its schedule's timer (data-rt-start)
-      //   • reflection (marks_previous_day) → ✓/✗ retrospective yes/no
-      //   • plain instant check (Встал, Витамины…) → single ✓, no skip
-      // ✗ (skip) shows for everything EXCEPT plain instant checks — those are a
-      // one-tap "done", not a +/- pair.
+      // ✓/✗ pair for steps you might skip — reflection (yes/no) or OPTIONAL checks
+      // (Зарядка, «Выбрал группу мышц»). Required checks (Встал, Витамины) are a
+      // clean tap-to-done tile. Timer → ▶ start, Dan Koe → ▶ journal. All derived
+      // from the schedule's tracking_mode/marks_previous_day + the step requirement.
       const isReflection = !!t.marks_previous_day;
       const isCheck = t.tracking_mode === 'check' || isReflection;
       const isDanKoe = isDanKoePractice(t.title);
       const isTrack = t.source_type === 'schedule' && t.source_id != null && !isCheck && !isDanKoe;
-      const isInstantCheck = isCheck && !isReflection;
-      let positive;
-      if (isDanKoe) {
-        positive = `<span class="tw-rt-start" data-rt-dankoe="${t.id}" data-rt-run="${run.run_id}" data-rt-title="${escapeHtml(t.title)}" data-rt-sched="${escapeHtml(String(t.source_id))}" title="Открыть">▶</span>`;
-      } else if (isTrack) {
-        positive = `<span class="tw-rt-start" data-rt-start="${t.id}" data-rt-run="${run.run_id}" data-rt-sched="${escapeHtml(String(t.source_id))}" title="Старт">▶</span>`;
+      const showPair = isCheck && (isReflection || t.requirement === 'optional');
+      if (showPair) {
+        h += `<div class="tw-item tw-rt-step${cur}">
+          <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
+          <span class="tw-item-title">${escapeHtml(t.title)}</span>
+          <span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>
+          <span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>
+        </div>`;
       } else {
-        positive = `<span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>`;
+        let rowAttrs, ind, ttl;
+        if (isDanKoe) {
+          rowAttrs = `data-rt-dankoe="${t.id}" data-rt-run="${run.run_id}" data-rt-title="${escapeHtml(t.title)}" data-rt-sched="${escapeHtml(String(t.source_id))}"`;
+          ind = '▶'; ttl = 'Открыть';
+        } else if (isTrack) {
+          rowAttrs = `data-rt-start="${t.id}" data-rt-run="${run.run_id}" data-rt-sched="${escapeHtml(String(t.source_id))}"`;
+          ind = '▶'; ttl = 'Старт';
+        } else {
+          rowAttrs = `data-rt-task="${t.id}" data-rt-run="${run.run_id}"`;
+          ind = ''; ttl = 'Сделал';
+        }
+        h += `<div class="tw-item tw-rt-step tw-rt-action${cur}" ${rowAttrs} title="${ttl}">
+          <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
+          <span class="tw-item-title">${escapeHtml(t.title)}</span>
+          ${ind ? `<span class="tw-rt-ind">${ind}</span>` : ''}
+        </div>`;
       }
-      const skip = isInstantCheck ? ''
-        : `<span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>`;
-      h += `<div class="tw-item tw-rt-step${cur}">
-        <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
-        <span class="tw-item-title">${escapeHtml(t.title)}</span>
-        ${positive}
-        ${skip}
-      </div>`;
     }
     for (const t of (run.locked || [])) {
       h += `<button class="tw-item tw-rt-locked" data-rt-unlock="${t.id}" data-rt-run="${run.run_id}">
@@ -152,7 +158,8 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
       onChange();
     });
   });
-  panel.querySelectorAll('[data-rt-task]').forEach(btn => {
+  // Tile rows (required check): tap the row = done, re-render to advance the chain.
+  panel.querySelectorAll('.tw-rt-action[data-rt-task]').forEach(btn => {
     btn.addEventListener('click', async () => {
       await invoke('set_routine_node_status', {
         runId: parseInt(btn.dataset.rtRun),
@@ -162,14 +169,29 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
       onChange();
     });
   });
-  panel.querySelectorAll('[data-rt-skip]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      await invoke('set_routine_node_status', {
-        runId: parseInt(btn.dataset.rtRun),
-        nodeId: parseInt(btn.dataset.rtSkip),
-        state: 'skipped',
-      }).catch(() => {});
-      onChange();
+  // ✓/✗ pair (reflection / optional): fill the choice in place and keep the row
+  // visible (no re-render) so it's clear and changeable; re-tap the lit box clears.
+  const markPair = async (row, runId, nodeId, want) => {
+    const checkEl = row.querySelector('.tw-check');
+    const skipEl = row.querySelector('.tw-skip');
+    const lit = want === 'done'
+      ? checkEl?.classList.contains('tw-check--on')
+      : skipEl?.classList.contains('tw-skip--on');
+    const state = lit ? 'pending' : want;
+    checkEl?.classList.toggle('tw-check--on', state === 'done');
+    skipEl?.classList.toggle('tw-skip--on', state === 'skipped');
+    await invoke('set_routine_node_status', { runId, nodeId, state }).catch(() => {});
+  };
+  panel.querySelectorAll('.tw-check[data-rt-task]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      markPair(el.closest('.tw-rt-step'), parseInt(el.dataset.rtRun), parseInt(el.dataset.rtTask), 'done');
+    });
+  });
+  panel.querySelectorAll('.tw-skip[data-rt-skip]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      markPair(el.closest('.tw-rt-step'), parseInt(el.dataset.rtRun), parseInt(el.dataset.rtSkip), 'skipped');
     });
   });
   panel.querySelectorAll('[data-rt-unlock]').forEach(btn => {
