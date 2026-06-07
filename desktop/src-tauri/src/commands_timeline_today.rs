@@ -349,6 +349,9 @@ pub fn complete_task_block(
                      ON CONFLICT(schedule_id, date) DO UPDATE SET completed=1, completed_at=?4, status='done'",
                     rusqlite::params![new_id, sid, block_date, now_rfc],
                 ).ok();
+                // Close any active routine step wrapping this schedule (▶ timer steps),
+                // same mirror used by toggle_schedule_completion / health auto-complete.
+                crate::routine_engine::mirror_schedule_to_routine(&conn, &sid, &block_date, "done");
             }
             "note" => {
                 conn.execute(

@@ -174,7 +174,21 @@ async function openStartDropdown(preserveScroll = false) {
     });
   });
 
-  wireRoutineSection(panel, () => openStartDropdown(true));
+  wireRoutineSection(panel, () => openStartDropdown(true), () => {
+    // A ▶ timer start makes a block active — close the picker so the widget's ■
+    // (stop) state shows, same as starting a regular track row.
+    window.dispatchEvent(new Event('task-state-changed'));
+    closeDropdown();
+    refreshState();
+  }, (title, sid) => {
+    // Dan Koe ▶: open the journaling modal (not a timer). Saving marks the
+    // schedule done → mirrors into the routine step; reopen so the chain advances.
+    closeDropdown();
+    openDanKoeModal(title, sid, () => {
+      window.dispatchEvent(new Event('task-state-changed'));
+      openStartDropdown(true);
+    });
+  });
 
   panel.querySelectorAll('.tw-item[data-idx]').forEach(btn => {
     btn.addEventListener('click', async () => {

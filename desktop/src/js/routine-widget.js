@@ -4,6 +4,7 @@
 import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { timeToMin } from './task-picker-sort.js';
+import { isDanKoePractice } from './dankoe-quick-modal.js';
 
 const CAT_ICONS = {
   health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡',
@@ -34,10 +35,25 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
     let h = '';
     for (const t of run.tasks) {
       const cur = t.id === recommendedId ? ' tw-rt-step--now' : '';
+      // Timer (track) steps start their schedule's timer via ▶; check/reflection
+      // steps (and steps with no wrapped schedule) keep the instant ✓. ✗ stays on
+      // both so a step can always be skipped to advance the chain. Dan Koe practices
+      // also use ▶ but open the journaling modal instead of a timer (data-rt-dankoe).
+      const isCheck = t.tracking_mode === 'check' || t.marks_previous_day;
+      const isDanKoe = isDanKoePractice(t.title);
+      const isTrack = t.source_type === 'schedule' && t.source_id != null && !isCheck && !isDanKoe;
+      let positive;
+      if (isDanKoe) {
+        positive = `<span class="tw-rt-start" data-rt-dankoe="${t.id}" data-rt-run="${run.run_id}" data-rt-title="${escapeHtml(t.title)}" data-rt-sched="${escapeHtml(String(t.source_id))}" title="Открыть">▶</span>`;
+      } else if (isTrack) {
+        positive = `<span class="tw-rt-start" data-rt-start="${t.id}" data-rt-run="${run.run_id}" data-rt-sched="${escapeHtml(String(t.source_id))}" title="Старт">▶</span>`;
+      } else {
+        positive = `<span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>`;
+      }
       h += `<div class="tw-item tw-rt-step${cur}">
         <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
         <span class="tw-item-title">${escapeHtml(t.title)}</span>
-        <span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>
+        ${positive}
         <span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>
       </div>`;
     }
@@ -103,8 +119,23 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
   return `<div class="tw-group-header">Рутина</div>${rows}`;
 }
 
-/// Wire clicks for the routine section. `onChange` re-renders the dropdown.
-export function wireRoutineSection(panel, onChange) {
+/// Wire clicks for the routine section. `onChange` re-renders the dropdown;
+/// `onStarted` runs after a ▶ timer start (closes the picker — defaults to onChange);
+/// `onDanKoe(title, scheduleId)` opens the Dan Koe journaling modal for ▶ practice steps.
+export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanKoe = null) {
+  panel.querySelectorAll('[data-rt-dankoe]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      onDanKoe?.(btn.dataset.rtTitle, String(btn.dataset.rtSched));
+    });
+  });
+  panel.querySelectorAll('[data-rt-start]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await invoke('start_task_block', {
+        sourceType: 'schedule', sourceId: String(btn.dataset.rtSched),
+      }).catch(() => {});
+      onStarted();
+    });
+  });
   panel.querySelectorAll('[data-rt-chain]').forEach(btn => {
     btn.addEventListener('click', async () => {
       await invoke('start_routine_run', {

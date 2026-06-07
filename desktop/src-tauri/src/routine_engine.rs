@@ -273,10 +273,22 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
             conn.execute("UPDATE routine_runs SET state='completed', completed_at=?1 WHERE id=?2",
                 rusqlite::params![chrono::Local::now().to_rfc3339(), run_id]).ok();
         }
-        let to_json = |n: &&RNode| serde_json::json!({
-            "id": n.id, "title": n.title, "category": n.category, "priority": n.priority,
-            "requirement": n.requirement, "source_type": n.source_type, "source_id": n.source_id,
-        });
+        // tracking_mode/marks_previous_day come from the wrapped schedule (if any) so
+        // the picker shows ✓/✗ for check/reflection steps but ▶ start for timer steps.
+        let to_json = |n: &&RNode| {
+            let (tracking_mode, marks_prev): (Option<String>, bool) = if n.source_type == "schedule" {
+                n.source_id.as_ref().and_then(|sid| conn.query_row(
+                    "SELECT COALESCE(tracking_mode,'track'), COALESCE(marks_previous_day,0) FROM schedules WHERE id=?1",
+                    rusqlite::params![sid],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? == 1)),
+                ).ok()).map(|(tm, mp)| (Some(tm), mp)).unwrap_or((None, false))
+            } else { (None, false) };
+            serde_json::json!({
+                "id": n.id, "title": n.title, "category": n.category, "priority": n.priority,
+                "requirement": n.requirement, "source_type": n.source_type, "source_id": n.source_id,
+                "tracking_mode": tracking_mode, "marks_previous_day": marks_prev,
+            })
+        };
         let tasks: Vec<serde_json::Value> = avail.iter().map(to_json).collect();
         let locked_tasks: Vec<serde_json::Value> = locked.iter().map(to_json).collect();
         out.push(serde_json::json!({
