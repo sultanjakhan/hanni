@@ -1,5 +1,5 @@
 // guest_memory.js — Memory view: host's food preferences split by level
-// (Не ем / Не люблю / Люблю) and by type (продукты / теги / категории).
+// (Не ем / Не люблю / Люблю) and by type (продукты / подгруппы / категории).
 (function () {
   const u = (window.HanniGuest || {}).utils;
   if (!u) return;
@@ -12,10 +12,10 @@
   };
   const TYPE_LABEL = {
     product:  'Продукты',
-    tag:      'Теги',
+    tag:      'Подгруппы',
     category: 'Категории',
     keyword:  'Слова в названии',
-    recipe:   'Рецепты',
+    recipe:   'Блюда',
   };
   const CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', fruit: 'Фрукты',
     grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи',
