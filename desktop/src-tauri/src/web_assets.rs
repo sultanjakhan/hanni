@@ -303,6 +303,30 @@ pub fn verify_trial_on_boot<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// Reconcile the applied OTA bundle against the embedded assets at startup. A
+/// native update ships fresh embedded assets; if the currently-applied bundle is
+/// OLDER than the native version (or there is none), drop it so the newer
+/// embedded assets serve instead of being shadowed by a stale bundle, and set
+/// the baseline to the native version so web_ota_check won't re-download a bundle
+/// identical to what just shipped. Call at startup, AFTER verify_trial_on_boot.
+#[cfg(any(target_os = "android", target_os = "macos"))]
+pub fn reconcile_native_baseline<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let native = app.package_info().version.to_string();
+    let applied = std::fs::read_to_string(version_file(app)).unwrap_or_default().trim().to_string();
+    let has_bundle = current_dir(app).join(READY_MARKER).exists();
+    // A genuine web update (>= native) sitting on top of this shell → keep it.
+    if has_bundle && version_gte(&applied, &native) {
+        return;
+    }
+    if has_bundle {
+        let _ = std::fs::remove_dir_all(current_dir(app));
+    }
+    if applied != native {
+        let _ = std::fs::create_dir_all(web_base(app));
+        let _ = std::fs::write(version_file(app), native.as_bytes());
+    }
+}
+
 /// Called by the frontend once it has loaded successfully. Confirms a trial
 /// bundle by clearing its markers so it's kept permanently. No-op otherwise.
 #[tauri::command]

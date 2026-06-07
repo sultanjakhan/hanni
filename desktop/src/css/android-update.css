@@ -56,3 +56,8 @@
   background: #fff;
   transition: width 0.2s ease;
 }
+
+/* Auto-dismissing "обновлено" toast — reuses the banner look, fades out. */
+.web-applied-toast {
+  transition: opacity 0.4s ease;
+}

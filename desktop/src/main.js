@@ -35,7 +35,7 @@ import {
   loadSchedule, loadDanKoe,
 } from './js/tab-data.js';
 import { autoImportHealth, startHealthPolling, maybeRequestHealthBackground } from './js/health-auto-sync.js';
-import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot, desktopWebOTA } from './js/android-update.js';
+import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot, desktopWebOTA, webAppliedToast } from './js/android-update.js';
 
 // ── One-time migration: work → jobs tab rename ──
 (() => {
@@ -428,6 +428,9 @@ document.addEventListener('keydown', (e) => {
   if (!IS_MOBILE) {
     desktopWebOTA();
   }
+
+  // Both platforms: toast if an OTA web bundle was applied since last launch.
+  webAppliedToast();
 
   // Android back button: close overlays, then go to previous tab
   if (IS_MOBILE) {

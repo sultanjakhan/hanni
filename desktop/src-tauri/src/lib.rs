@@ -969,6 +969,10 @@ pub fn run() {
                 // (breaks OTA serving). The black flash is handled by the white
                 // android:windowBackground (themes.xml), not by reordering this.
                 web_assets::verify_trial_on_boot(app.handle());
+                // Drop a stale OTA bundle older than this (possibly just-updated)
+                // native shell so embedded assets aren't shadowed + we don't
+                // re-download an identical bundle.
+                web_assets::reconcile_native_baseline(app.handle());
                 if let Some(win) = app.get_webview_window("main") {
                     let url = format!("http://{}.localhost/index.html", web_assets::SCHEME);
                     match url.parse::<tauri::Url>() {
@@ -994,6 +998,7 @@ pub fn run() {
             #[cfg(all(target_os = "macos", not(debug_assertions)))]
             {
                 web_assets::verify_trial_on_boot(app.handle());
+                web_assets::reconcile_native_baseline(app.handle());
                 if web_assets::prepare_origin(app.handle()) {
                     if let Some(win) = app.get_webview_window("main") {
                         let url = web_assets::nav_url();

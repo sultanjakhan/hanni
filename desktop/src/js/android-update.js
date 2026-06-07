@@ -45,6 +45,32 @@ export async function confirmWebBoot() {
   try { await invoke('web_ota_boot_ok'); } catch {}
 }
 
+// Both platforms: when an OTA web bundle was applied since the last launch, show
+// a brief auto-dismissing toast. Compares the applied web version
+// (web_ota_status) to the last one shown — no-op on first run, when unchanged,
+// or where nothing is applied (applied empty → embedded assets).
+export async function webAppliedToast() {
+  let applied;
+  try { applied = (await invoke('web_ota_status'))?.applied; } catch { return; }
+  if (!applied) return;
+  const seen = localStorage.getItem('__web_applied_seen');
+  localStorage.setItem('__web_applied_seen', applied);
+  if (seen === null || seen === applied) return; // first run or no change
+  const bar = document.createElement('div');
+  bar.className = 'apk-update-banner web-applied-toast';
+  const text = document.createElement('span');
+  text.className = 'apk-update-text';
+  text.textContent = `Обновлено до ${applied}`;
+  const close = document.createElement('button');
+  close.className = 'apk-update-close';
+  close.textContent = '×';
+  const remove = () => bar.remove();
+  close.addEventListener('click', remove);
+  bar.append(text, close);
+  document.body.appendChild(bar);
+  setTimeout(() => { bar.style.opacity = '0'; setTimeout(remove, 400); }, 4000);
+}
+
 // macOS desktop OTA web-assets. The release build switches the main window from
 // tauri://localhost to hanniweb://localhost so JS/CSS can be swapped from an OTA
 // bundle without a full .app download. This carries the user's localStorage
