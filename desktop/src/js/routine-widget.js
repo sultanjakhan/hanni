@@ -43,7 +43,10 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
       const isCheck = t.tracking_mode === 'check' || isReflection;
       const isDanKoe = isDanKoePractice(t.title);
       const isTrack = t.source_type === 'schedule' && t.source_id != null && !isCheck && !isDanKoe;
-      const showPair = isCheck && (isReflection || t.requirement === 'optional');
+      // ✓/✗ for any skippable step — reflections + OPTIONAL ones — even when not
+      // linked to a check-schedule (challenges like «Без сладкого» have source_id
+      // null, so isCheck is false). Timers/Dan Koe keep ▶; required checks = tile.
+      const showPair = !isDanKoe && !isTrack && (isReflection || t.requirement === 'optional');
       if (showPair) {
         h += `<div class="tw-item tw-rt-step${cur}">
           <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
