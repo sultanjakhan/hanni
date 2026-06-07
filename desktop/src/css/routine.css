@@ -22,6 +22,10 @@
   background: radial-gradient(circle, var(--border-subtle) 1px, transparent 1px);
   background-size: 22px 22px;
 }
+/* The repeated radial-gradient dot grid is one big composited layer that blows
+   the WebView tile-memory budget on high-DPI phones ("tile memory limits
+   exceeded" → jank). The dots are purely decorative, so drop them on mobile. */
+.mobile .rt-canvas { background-image: none; }
 .rt-edges { position: absolute; inset: 0; width: 100%; height: 100%; }
 .rt-edges path.rt-wire { pointer-events: none; }
 .rt-edges path.rt-hit {
