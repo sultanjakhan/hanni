@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8234 http://127.0.0.1:8235 http://127.0.0.1:8236 http://127.0.0.1:8237 ws://127.0.0.1:1430 ws://127.0.0.1:1431; media-src 'self' asset: http://asset.localhost blob:; worker-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' asset: http://asset.localhost; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8234 http://127.0.0.1:8235 http://127.0.0.1:8236 http://127.0.0.1:8237 ws://127.0.0.1:1430 ws://127.0.0.1:1431; media-src 'self' asset: http://asset.localhost blob:; worker-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Hanni</title>
 <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('hanni_theme') || 'light')</script>
 <link rel="stylesheet" href="styles.css">
