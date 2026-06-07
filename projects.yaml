@@ -294,6 +294,8 @@ food:
     - desktop/src/js/food-blacklist-menu.js
     - desktop/src/js/food-meal-plan.js
     - desktop/src/js/food-cooking-log.js
+    - desktop/src/js/food-cook-mode.js
+    - desktop/src/css/food-cook-mode.css
     - desktop/src/js/shopping-list.js
     - desktop/src/js/shopping-list-modal.js
     - desktop/src/js/fridge-multiadd.js
@@ -687,9 +689,11 @@ _shared:
       - desktop/src-tauri/libs/darwin-aarch64/crsqlite.dylib
       - desktop/src-tauri/libs/crsqlite-aarch64-linux-android.zip
       - desktop/src-tauri/libs/crsqlite-darwin-aarch64.zip
-      # CI/CD
+      # CI/CD + release/updater tooling
       - .github/workflows/release.yml
       - .github/workflows/release-android.yml
+      - scripts/release.sh             # smart release: web-only OTA vs full native
+      - scripts/publish-web-update.sh  # web-asset OTA bundle publisher
       - scripts/firebase-setup.sh
       - scripts/firebase_hosting_deploy.py
       # Root config
