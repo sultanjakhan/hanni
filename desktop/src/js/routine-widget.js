@@ -35,13 +35,18 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
     let h = '';
     for (const t of run.tasks) {
       const cur = t.id === recommendedId ? ' tw-rt-step--now' : '';
-      // Timer (track) steps start their schedule's timer via ▶; check/reflection
-      // steps (and steps with no wrapped schedule) keep the instant ✓. ✗ stays on
-      // both so a step can always be skipped to advance the chain. Dan Koe practices
-      // also use ▶ but open the journaling modal instead of a timer (data-rt-dankoe).
-      const isCheck = t.tracking_mode === 'check' || t.marks_previous_day;
+      // Control per step kind:
+      //   • Dan Koe practice  → ▶ opens the journaling modal (data-rt-dankoe)
+      //   • timer (track)     → ▶ starts its schedule's timer (data-rt-start)
+      //   • reflection (marks_previous_day) → ✓/✗ retrospective yes/no
+      //   • plain instant check (Встал, Витамины…) → single ✓, no skip
+      // ✗ (skip) shows for everything EXCEPT plain instant checks — those are a
+      // one-tap "done", not a +/- pair.
+      const isReflection = !!t.marks_previous_day;
+      const isCheck = t.tracking_mode === 'check' || isReflection;
       const isDanKoe = isDanKoePractice(t.title);
       const isTrack = t.source_type === 'schedule' && t.source_id != null && !isCheck && !isDanKoe;
+      const isInstantCheck = isCheck && !isReflection;
       let positive;
       if (isDanKoe) {
         positive = `<span class="tw-rt-start" data-rt-dankoe="${t.id}" data-rt-run="${run.run_id}" data-rt-title="${escapeHtml(t.title)}" data-rt-sched="${escapeHtml(String(t.source_id))}" title="Открыть">▶</span>`;
@@ -50,11 +55,13 @@ export async function renderRoutineSection(chains = [], now = [], recommendedId 
       } else {
         positive = `<span class="tw-check" data-rt-task="${t.id}" data-rt-run="${run.run_id}" title="Сделал">✓</span>`;
       }
+      const skip = isInstantCheck ? ''
+        : `<span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>`;
       h += `<div class="tw-item tw-rt-step${cur}">
         <span class="tw-item-icon">${CAT_ICONS[t.category] || CAT_ICONS.other}</span>
         <span class="tw-item-title">${escapeHtml(t.title)}</span>
         ${positive}
-        <span class="tw-skip" data-rt-skip="${t.id}" data-rt-run="${run.run_id}" title="Не выполнено">✗</span>
+        ${skip}
       </div>`;
     }
     for (const t of (run.locked || [])) {
