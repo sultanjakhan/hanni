@@ -319,12 +319,22 @@ pub fn web_ota_boot_ok<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), Strin
 // which partitions localStorage. To carry the user's UI prefs across the switch
 // we stage it: launch 1 stays on the old origin and exports localStorage; from
 // launch 2 we navigate to the scheme and the frontend re-imports the dump.
-// A pending marker self-heals a bad switch: if the frontend never confirms the
-// boot (white screen), the next launch disables the switch and serves embedded.
+// A switch that never boots (the frontend never calls web_origin_ok — e.g. a
+// white screen) accrues strikes in the pending file; after MAX_UNCONFIRMED
+// consecutive misses we disable it and serve embedded assets. One unlucky
+// quick-quit in the ~1s boot window therefore can't kill a working channel, and
+// a disabled channel auto-recovers after the next native update (a new shell may
+// fix whatever broke it).
+
+/// Tolerate this many consecutive unconfirmed switches before disabling.
+const MAX_UNCONFIRMED: u32 = 3;
 
 fn origin_stage_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("origin_stage") }
 fn ls_dump_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("ls_dump.json") }
 fn origin_pending_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("origin_pending") }
+/// Native version recorded when the switch was disabled — used to auto-retry
+/// once a newer shell is installed.
+fn origin_native_file<R: Runtime>(app: &tauri::AppHandle<R>) -> PathBuf { web_base(app).join("origin_native") }
 
 fn read_origin_stage<R: Runtime>(app: &tauri::AppHandle<R>) -> String {
     std::fs::read_to_string(origin_stage_file(app)).unwrap_or_default().trim().to_string()
@@ -333,28 +343,50 @@ fn write_origin_stage<R: Runtime>(app: &tauri::AppHandle<R>, stage: &str) {
     let _ = std::fs::create_dir_all(web_base(app));
     let _ = std::fs::write(origin_stage_file(app), stage.as_bytes());
 }
+/// Consecutive unconfirmed-boot strikes (absent file = 0). web_origin_ok clears
+/// it each successful launch, so only repeated failures accumulate.
+fn read_pending_strikes<R: Runtime>(app: &tauri::AppHandle<R>) -> u32 {
+    std::fs::read_to_string(origin_pending_file(app)).ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
 
 /// Decide whether to navigate the main window to the custom scheme this launch.
 /// Drives the staged migration and self-heals a switch that white-screened.
 pub fn prepare_origin<R: Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    let native = app.package_info().version.to_string();
+    // Auto-recover a disabled switch once a newer native shell is installed (it
+    // may fix whatever broke the switch). Legacy disables (no recorded version)
+    // also get one retry. Otherwise stay on embedded assets.
+    if read_origin_stage(app) == "disabled" {
+        let at = std::fs::read_to_string(origin_native_file(app)).unwrap_or_default().trim().to_string();
+        if at.is_empty() || at != native {
+            let _ = std::fs::remove_file(origin_pending_file(app));
+            write_origin_stage(app, "exported");
+        } else {
+            return false;
+        }
+    }
     match read_origin_stage(app).as_str() {
-        // Ready to switch (or already switched). Navigate — but first detect a
-        // previous switch that never booted (pending marker survived) and stop,
-        // so a broken custom-scheme serve costs at most one bad launch.
+        // Ready to switch (or already switched). Navigate, recording a strike; a
+        // switch that boots clears it (web_origin_ok). Only after
+        // MAX_UNCONFIRMED consecutive unconfirmed boots do we disable + fall back.
         "exported" | "live" => {
-            if origin_pending_file(app).exists() {
+            let strikes = read_pending_strikes(app);
+            if strikes >= MAX_UNCONFIRMED {
                 let _ = std::fs::remove_file(origin_pending_file(app));
                 write_origin_stage(app, "disabled");
-                eprintln!("[hanni] web_assets: previous switch never confirmed → embedded fallback");
+                let _ = std::fs::write(origin_native_file(app), native.as_bytes());
+                eprintln!("[hanni] web_assets: switch unconfirmed {strikes}× → embedded fallback (retries after next native update)");
                 false
             } else {
                 let _ = std::fs::create_dir_all(web_base(app));
-                let _ = std::fs::write(origin_pending_file(app), b"");
+                let _ = std::fs::write(origin_pending_file(app), (strikes + 1).to_string().as_bytes());
                 true
             }
         }
-        // Pristine (first launch of an OTA-capable build) or permanently
-        // disabled after a failed switch: stay on the default origin.
+        // Pristine (first launch of an OTA-capable build): stay on the default
+        // origin until the frontend exports localStorage.
         _ => false,
     }
 }
@@ -378,10 +410,12 @@ pub fn web_ls_import<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Option<Stri
 }
 
 /// Frontend confirms it booted on the custom-scheme origin. Clears the pending
-/// marker so the switch is kept, and marks the migration "live".
+/// strikes (and any stale disable record) so the switch is kept, and marks the
+/// migration "live".
 #[tauri::command]
 pub fn web_origin_ok<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
     let _ = std::fs::remove_file(origin_pending_file(&app));
+    let _ = std::fs::remove_file(origin_native_file(&app));
     write_origin_stage(&app, "live");
     Ok(())
 }
