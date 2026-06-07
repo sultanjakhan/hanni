@@ -147,7 +147,7 @@ export function showCookingLogModal(date, onSaved, preRecipe) {
 
 // ── "Что приготовить" — rank recipes by what's in the fridge, filter by
 // ingredient name or category. Opened from the calendar templates; picking a
-// recipe hands off to the cooking-log modal with it preselected. ──
+// recipe launches the guided cook mode, which logs the cook on finish. ──
 const CW_CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', fruit: 'Фрукты',
   grain: 'Крупы', dairy: 'Молочные', legumes: 'Бобовые', nuts: 'Орехи', spice: 'Специи',
   oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', sweet: 'Сладости', frozen: 'Заморозка', other: 'Другое' };
@@ -211,9 +211,14 @@ export async function showCookWhatModal(date, onSaved) {
         <div style="margin-top:4px;font-size:12px">${badge} <span class="muted">· ${x.total - x.missing.length}/${x.total} ингр.</span></div>
       </div>`;
     }).join('');
-    list.querySelectorAll('.cw-row').forEach(row => row.onclick = () => {
+    list.querySelectorAll('.cw-row').forEach(row => row.onclick = async () => {
       close();
-      showCookingLogModal(date, onSaved, { id: parseInt(row.dataset.rid), name: row.dataset.rname });
+      // Picking a recipe starts the guided cook mode (timer); it opens the
+      // cooking-log on finish, so the pick → cook → log pipeline stays intact.
+      const recipe = await invoke('get_recipe', { id: parseInt(row.dataset.rid) }).catch(() => null);
+      if (!recipe) return;
+      const { startCookMode } = await import('./food-cook-mode.js');
+      startCookMode(recipe, { onSaved, date });
     });
   }
   renderCats(); renderList();

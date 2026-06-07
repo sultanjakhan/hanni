@@ -5,7 +5,7 @@ import { loadCuisines, catalogCat, CAT_LABELS } from './food-recipe-filters.js';
 
 // instructions holds either a JSON array of {text,min,ingredients} (new) or
 // legacy newline-separated text. Normalise both to a step array.
-function parseSteps(raw) {
+export function parseSteps(raw) {
   const s = (raw || '').trim();
   if (s.startsWith('[')) {
     try {
@@ -122,6 +122,7 @@ export async function showRecipeDetail(id, reloadFn) {
     </div>
     <div class="modal-actions">
       <button class="btn-danger" id="recipe-del">Удалить</button>
+      <button class="btn-primary" id="recipe-cook">🍳 Готовить</button>
       <button class="btn-secondary" id="recipe-close">Закрыть</button>
     </div>
   </div>`;
@@ -153,6 +154,12 @@ export async function showRecipeDetail(id, reloadFn) {
     overlay.remove();
     const { showEditRecipeModal } = await import('./food-recipe-add.js');
     await showEditRecipeModal(recipe, reloadFn);
+  });
+
+  overlay.querySelector('#recipe-cook')?.addEventListener('click', async () => {
+    overlay.remove();
+    const { startCookMode } = await import('./food-cook-mode.js');
+    startCookMode(recipe, { onSaved: reloadFn });
   });
 
   overlay.querySelector('#recipe-close')?.addEventListener('click', () => overlay.remove());

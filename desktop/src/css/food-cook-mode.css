@@ -1,0 +1,68 @@
+/* ── Cook mode — guided step-by-step cooking with per-step ring timer ── */
+/* Modal card over the dimmed tab; opened from the recipe "🍳 Готовить" button.  */
+
+.cook-root {
+  position: fixed; inset: 0; z-index: 3000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.cook-card {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--space-4); box-sizing: border-box;
+  width: min(440px, 92vw); padding: var(--space-6);
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
+}
+
+/* Header */
+.cook-head { position: relative; width: 100%; }
+.cook-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.cook-progress-label { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.cook-close {
+  position: absolute; top: -4px; right: 0; width: 30px; height: 30px;
+  border: none; background: transparent; color: var(--text-muted);
+  font-size: 18px; cursor: pointer; border-radius: var(--radius-md);
+}
+.cook-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* Ring */
+.cook-stage { display: flex; align-items: center; justify-content: center; }
+.cook-ring-wrap { position: relative; width: 160px; height: 160px; }
+.cook-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.cook-ring-bg { fill: none; stroke: var(--border-default); stroke-width: 6; }
+.cook-ring-progress {
+  fill: none; stroke: var(--accent-blue); stroke-width: 6; stroke-linecap: round;
+  stroke-dasharray: 339.29; stroke-dashoffset: 339.29;
+  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
+}
+.cook-ring-inner {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+}
+.cook-time { font-size: 32px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1; }
+.cook-no-timer { color: var(--text-muted); font-size: 14px; padding: var(--space-6) 0; }
+
+/* Timer-done state — green ring + soft pulse */
+.cook-ringdone .cook-ring-progress { stroke: var(--color-green); }
+.cook-ringdone .cook-time { color: var(--color-green); animation: cook-pulse 0.9s ease-in-out 2; }
+@keyframes cook-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Step text + ingredients */
+.cook-step-text { font-size: 15px; color: var(--text-primary); line-height: 1.45; max-width: 42ch; }
+.cook-ingredients { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.cook-ingr {
+  font-size: 13px; color: var(--text-secondary); background: var(--bg-hover);
+  padding: 4px 10px; border-radius: var(--radius-pill);
+}
+
+/* Controls */
+.cook-controls { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: center; align-items: center; }
+.cook-btn { min-width: 84px; }
+.cook-btn-back { min-width: 40px; padding-left: 0; padding-right: 0; }
+.cook-btn-next { min-width: 120px; }
+
+/* Step progress dots */
+.cook-dots { display: flex; gap: 7px; justify-content: center; }
+.cook-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-default); transition: all 0.2s ease; }
+.cook-dot.on { background: var(--accent-blue); transform: scale(1.35); }
+.cook-dot.done { background: var(--text-muted); }

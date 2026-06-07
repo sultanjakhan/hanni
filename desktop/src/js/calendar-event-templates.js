@@ -13,7 +13,7 @@ import { itemsToDescription } from './shopping-list.js';
 // here (vs DB) is intentional — these are app-level UX shortcuts, not
 // user data; CRUD on them doesn't belong in the catalogue tables.
 const TEMPLATES = [
-  { id: 'cook',    icon: '🍳', label: 'Готовка',     title: 'Готовка',          dur: 30, cat: 'Готовка', tab: 'food',    handoff: 'cook' },
+  { id: 'cook',    icon: '✍️', label: 'Отметить готовку', title: 'Готовка',      dur: 30, cat: 'Готовка', tab: 'food',    handoff: 'cook' },
   { id: 'cookwhat',icon: '🍲', label: 'Что приготовить', title: 'Готовка',      dur: 30, cat: 'Готовка', tab: 'food',    handoff: 'cookwhat' },
   { id: 'workout', icon: '🏋️', label: 'Тренировка',  title: 'Тренировка',       dur: 60, cat: 'Спорт',   tab: 'sports' },
   { id: 'shower',  icon: '🚿', label: 'Душ',         title: 'Душ',              dur: 15, cat: 'Быт' },
