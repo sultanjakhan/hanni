@@ -1,6 +1,6 @@
 [package]
 name = "hanni"
-version = "1.0.0"
+version = "1.0.1"
 description = "Hanni — personal AI assistant"
 authors = ["sultanjakhan"]
 edition = "2021"
@@ -55,3 +55,11 @@ cpal = "0.16"
 hound = "3"
 voice_activity_detector = "0.2"
 tauri-plugin-global-shortcut = "2"
+
+# Release size: the default profile ships an unstripped ~110-127MB binary (mostly
+# debug symbols) → bloated .app/APK and expensive native updates. strip drops the
+# symbols (~3-4× smaller); thin LTO trims a bit more at modest build cost.
+# opt-level stays at the default 3 (speed) so the Rust backend isn't slowed.
+[profile.release]
+strip = true
+lto = "thin"
