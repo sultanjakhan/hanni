@@ -2822,8 +2822,11 @@ pub const SYNC_TABLES: &[&str] = &[
     "job_search_log", "dashboard_widgets", "timeline_activity_types",
     "timeline_blocks", "timeline_goals", "sleep_sessions", "sleep_stages",
     "heart_rate_samples", "event_categories",
-    "routine_chains", "routine_nodes", "routine_edges", "routine_runs",
-    "routine_node_status",
+    // NOTE: routine_* tables are intentionally NOT synced. Syncing their
+    // definitions (chains/nodes/edges) merged a device's customized graph with
+    // another's default seed → duplicate chains + tangled edges that gated step
+    // availability. Run/completion sync needs a redesign (sync run STATE against
+    // one canonical definition, never merge graphs) before re-enabling.
 ];
 
 /// Whether `table.column` is declared TEXT in the current schema. Used
