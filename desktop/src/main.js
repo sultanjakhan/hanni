@@ -393,22 +393,25 @@ document.addEventListener('keydown', (e) => {
   // → Firestore CRDT → Mac.
   if (IS_MOBILE) {
     autoImportHealth();
+    let lastResumeWork = 0;
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
-      autoImportHealth();
-      // Returning to foreground: pull the latest from whichever transport is
-      // active so we see what the Mac changed while we were backgrounded
-      // (e.g. a task it started). lan_sync_now is bidirectional (one POST =
-      // full exchange); cloud_owner_pull covers the async backend. Re-paint
-      // (and refresh the task widget) after each settles so fresh rows show
-      // without waiting for a poll.
-      const repaint = () => {
-        try { activateView(); } catch (_) {}
-        try { window.dispatchEvent(new Event('task-state-changed')); } catch (_) {}
-      };
-      repaint();
-      invoke('lan_sync_now').then(repaint, () => {});
-      invoke('cloud_owner_pull').then(repaint, () => {});
+      // Returning to foreground: pull what the Mac changed while backgrounded
+      // (e.g. a task it started) and re-paint. This MUST stay off the resume
+      // paint path — running it inline froze the UI for seconds on every
+      // foreground return (heavy with diverged DBs once cr-sqlite sync works).
+      // So: defer via setTimeout, re-paint ONCE after both syncs settle (not
+      // eagerly 3×), and debounce so quick re-entries don't redo the work.
+      const now = Date.now();
+      if (now - lastResumeWork < 5000) return;
+      lastResumeWork = now;
+      setTimeout(() => {
+        autoImportHealth();
+        Promise.allSettled([invoke('lan_sync_now'), invoke('cloud_owner_pull')]).then(() => {
+          try { activateView(); } catch (_) {}
+          try { window.dispatchEvent(new Event('task-state-changed')); } catch (_) {}
+        });
+      }, 50);
     });
     startHealthPolling(); // 3-min poll while foregrounded
     // Schedule WorkManager-driven periodic HC pull so the watch → Hanni →
