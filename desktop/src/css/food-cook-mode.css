@@ -52,6 +52,33 @@
 .cook-ringdone .cook-time { color: var(--color-green); animation: cook-pulse 0.9s ease-in-out 2; }
 @keyframes cook-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+/* Parallel-timer tray — every live countdown across steps */
+.cook-tray { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; width: 100%; }
+.ctray {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 4px 4px 10px; font-size: 12px; line-height: 1;
+  border: 1px solid var(--border-default); border-radius: var(--radius-pill);
+  background: var(--bg-hover); color: var(--text-secondary); cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.ctray:hover { color: var(--text-primary); }
+.ctray-time { font-weight: 700; color: var(--text-primary); }
+.ctray-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; border-radius: 50%; font-size: 13px; color: var(--text-muted);
+}
+.ctray-x:hover { background: var(--border-default); color: var(--text-primary); }
+.ctray.is-run { border-color: var(--accent-blue); }
+.ctray.is-run .ctray-time { color: var(--accent-blue); }
+.ctray.is-pause { opacity: 0.65; }
+.ctray.is-done { border-color: var(--color-green); }
+.ctray.is-done .ctray-time { color: var(--color-green); }
+/* The timer currently shown in the big ring — filled, like an active chip */
+.ctray.is-current { opacity: 1; background: var(--accent-fill); border-color: var(--accent-fill); }
+.ctray.is-current .ctray-label, .ctray.is-current .ctray-time { color: #fff; }
+.ctray.is-current .ctray-x { color: rgba(255, 255, 255, 0.7); }
+.ctray.is-current .ctray-x:hover { background: rgba(255, 255, 255, 0.25); color: #fff; }
+
 /* Step text + ingredients */
 .cook-step-text { font-size: 15px; color: var(--text-primary); line-height: 1.45; max-width: 42ch; }
 .cook-ingredients { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
