@@ -19,7 +19,7 @@ function convertAmount(amount, fromUnit, toUnit) {
   return null;
 }
 
-export function showCookingLogModal(date, onSaved, preRecipe) {
+export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
   const today = date || new Date().toISOString().slice(0, 10);
   let selectedId = preRecipe ? preRecipe.id : null;
   let selectedName = preRecipe ? preRecipe.name : '';
@@ -115,14 +115,19 @@ export function showCookingLogModal(date, onSaved, preRecipe) {
     const d = overlay.querySelector('#cl-date').value || today;
     const note = overlay.querySelector('#cl-note').value.trim();
     try {
-      let color = '#cb8a05';
-      const cats = await invoke('list_event_categories').catch(() => []);
-      const cat = cats.find(c => c.name === 'Готовка');
-      if (cat) color = cat.color;
-      const eventId = await invoke('create_event', {
-        title: selectedName, description: '', date: d, time: '',
-        durationMinutes: 30, category: 'Готовка', color, priority: null,
-      }).catch(() => null);
+      // Reuse the event created when cooking started; create one only for the
+      // log-only path (manual "уже приготовил", no cook session).
+      let eventId = preEventId ?? null;
+      if (eventId == null) {
+        let color = '#cb8a05';
+        const cats = await invoke('list_event_categories').catch(() => []);
+        const cat = cats.find(c => c.name === 'Готовка');
+        if (cat) color = cat.color;
+        eventId = await invoke('create_event', {
+          title: selectedName, description: '', date: d, time: '',
+          durationMinutes: 30, category: 'Готовка', color, priority: null,
+        }).catch(() => null);
+      }
       await invoke('log_cooking', { recipeId: selectedId, date: d, tasteRating: rating, cookNote: note, eventId });
       // Deduct the checked fridge items: by amount when units match, else one unit.
       for (const cb of overlay.querySelectorAll('.cl-deduct-cb:checked')) {
@@ -162,12 +167,17 @@ export async function showCookWhatModal(date, onSaved) {
     <input class="form-input" id="cw-search" placeholder="Поиск по рецепту или ингредиенту…" style="margin-bottom:8px">
     <div id="cw-cats" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
     <div id="cw-list"><div class="muted">Загрузка…</div></div>
-    <div class="modal-actions"><button class="btn-secondary" id="cw-close">Закрыть</button></div>
+    <div class="modal-actions" style="justify-content:space-between">
+      <button id="cw-justlog" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:13px;text-decoration:underline;padding:0">Уже приготовил — отметить</button>
+      <button class="btn-secondary" id="cw-close">Закрыть</button>
+    </div>
   </div>`;
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#cw-close').onclick = close;
+  // Skip the cook flow → log a cook that happened off-app (no timer, pick recipe in the log).
+  overlay.querySelector('#cw-justlog').onclick = () => { close(); showCookingLogModal(date, onSaved); };
 
   const [recipes, products, catalog] = await Promise.all([
     invoke('get_recipes', { search: null }).catch(() => []),

@@ -66,3 +66,39 @@
 .cook-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-default); transition: all 0.2s ease; }
 .cook-dot.on { background: var(--accent-blue); transform: scale(1.35); }
 .cook-dot.done { background: var(--text-muted); }
+
+/* Prep screen + all-ingredients list */
+.cook-prep-list { width: 100%; max-height: 42vh; overflow-y: auto; display: flex; flex-direction: column; }
+.cook-prep-item {
+  display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+  padding: 8px 4px; border-bottom: 1px solid var(--border-subtle);
+  font-size: 15px; color: var(--text-primary);
+}
+.cook-prep-item:last-child { border-bottom: none; }
+.cook-prep-amt { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cook-allingr {
+  background: none; border: none; color: var(--text-secondary); cursor: pointer;
+  font-size: 13px; text-decoration: underline; padding: 0;
+}
+.cook-allingr:hover { color: var(--text-primary); }
+
+/* Slide-over sheet (all ingredients) + exit confirm — overlay the card */
+.cook-sheet-wrap {
+  position: fixed; inset: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+.cook-sheet {
+  width: min(380px, 88vw); max-height: 78vh; overflow-y: auto; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: var(--space-3);
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: var(--space-4);
+}
+.cook-sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 700; color: var(--text-primary);
+}
+.cook-sheet-head .cook-close { position: static; width: 26px; height: 26px; font-size: 16px; }
+.cook-confirm-text { color: var(--text-primary); font-size: 15px; text-align: center; }
+.cook-exit-actions { display: flex; flex-direction: column; gap: 8px; }
+.cook-exit-actions .cook-btn { width: 100%; }
