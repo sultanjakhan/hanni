@@ -2,7 +2,8 @@
 // Opened from the calendar "+" menu. Creates a "Готовка" calendar event and an
 // immutable cooking_log entry with a per-day taste rating + note.
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, toast, emptyState } from './utils.js';
+import { EMPTY_ICONS } from './icons.js';
 
 // Convert `amount` between units of the same family (mass: г/кг, volume: мл/л).
 // Returns null when units are incompatible (e.g. г vs шт) so the caller can fall
@@ -19,11 +20,20 @@ function convertAmount(amount, fromUnit, toUnit) {
   return null;
 }
 
+const MEAL_OPTS = [['breakfast', 'Завтрак'], ['lunch', 'Обед'], ['dinner', 'Ужин'], ['snack', 'Перекус']];
+// Default the diary meal-type to the current time of day.
+function mealByHour() {
+  const h = new Date().getHours();
+  return h < 11 ? 'breakfast' : h < 16 ? 'lunch' : h < 22 ? 'dinner' : 'snack';
+}
+
 export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
   const today = date || new Date().toISOString().slice(0, 10);
   let selectedId = preRecipe ? preRecipe.id : null;
   let selectedName = preRecipe ? preRecipe.name : '';
   let rating = 0, allRecipes = [], deductMatches = [];
+  let selectedRecipe = null;       // full get_recipe (КБЖУ) — for the diary entry
+  let mealType = mealByHour();
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -39,6 +49,11 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
       <div class="rd-stars" id="cl-stars">${[1, 2, 3, 4, 5].map(n => `<span class="rd-star" data-n="${n}">★</span>`).join('')}</div></div>
     <div class="form-group"><label class="form-label">Заметка</label>
       <textarea class="form-textarea" id="cl-note" rows="2" placeholder="Как вышло, что поменять в следующий раз…"></textarea></div>
+    <div class="form-group">
+      <label class="cl-diary-toggle"><input type="checkbox" id="cl-diary" checked> Записать в дневник питания</label>
+      <div id="cl-meal-chips" class="cl-meal-chips">${MEAL_OPTS.map(([v, l]) =>
+        `<button type="button" class="rf-chip${v === mealType ? ' active' : ''}" data-meal="${v}">${l}</button>`).join('')}</div>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="cl-cancel">Отмена</button>
       <button class="btn-primary" id="cl-save" disabled>Сохранить</button>
@@ -55,6 +70,14 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
     s.onmouseenter = () => paintStars(parseInt(s.dataset.n)); // hover preview
   });
   overlay.querySelector('#cl-stars').onmouseleave = () => paintStars(rating); // restore actual
+
+  const chipsBox = overlay.querySelector('#cl-meal-chips');
+  const diaryCb = overlay.querySelector('#cl-diary');
+  overlay.querySelectorAll('[data-meal]').forEach(b => b.onclick = () => {
+    mealType = b.dataset.meal;
+    chipsBox.querySelectorAll('[data-meal]').forEach(x => x.classList.toggle('active', x === b));
+  });
+  diaryCb.onchange = () => chipsBox.classList.toggle('is-off', !diaryCb.checked); // dim when not logging
 
   const search = overlay.querySelector('#cl-search');
   search.oninput = () => renderList(search.value.trim().toLowerCase());
@@ -90,6 +113,7 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
       invoke('get_recipe', { id: selectedId }).catch(() => null),
       invoke('get_products', {}).catch(() => []),
     ]);
+    selectedRecipe = rec; // reused on save to fill the diary entry's macros
     const ings = (rec && rec.ingredient_items) || [];
     deductMatches = [];
     for (const ing of ings) {
@@ -129,6 +153,15 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
         }).catch(() => null);
       }
       await invoke('log_cooking', { recipeId: selectedId, date: d, tasteRating: rating, cookNote: note, eventId });
+      // Mirror the cook into the food diary so its macros show up there (v1: recipe totals ×1).
+      if (diaryCb.checked) {
+        const r = selectedRecipe || {};
+        await invoke('log_food', {
+          date: d, mealType, name: selectedName,
+          calories: r.calories || null, protein: r.protein || null,
+          carbs: r.carbs || null, fat: r.fat || null, notes: 'из готовки',
+        }).catch(() => {});
+      }
       // Deduct the checked fridge items: by amount when units match, else one unit.
       for (const cb of overlay.querySelectorAll('.cl-deduct-cb:checked')) {
         const m = deductMatches[parseInt(cb.dataset.i)]; if (!m) continue;
@@ -146,7 +179,7 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
       }
       close();
       if (onSaved) await onSaved();
-    } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+    } catch (e) { toast('Ошибка: ' + (e.message || e)); }
   };
 }
 
@@ -212,7 +245,7 @@ export async function showCookWhatModal(date, onSaved, searchSeed) {
       return cwNorm(x.r.name).includes(ql) || x.ings.some(n => cwNorm(n).includes(ql));
     }).sort((a, b) => (a.missing.length - b.missing.length) || ((b.r.cook_count || 0) - (a.r.cook_count || 0)));
     const list = overlay.querySelector('#cw-list');
-    if (!filtered.length) { list.innerHTML = '<div class="empty">Ничего не нашлось.</div>'; return; }
+    if (!filtered.length) { list.innerHTML = emptyState({ icon: EMPTY_ICONS.searchX, title: 'Ничего не нашлось', hint: 'Измените запрос или категорию.' }); return; }
     list.innerHTML = filtered.map(x => {
       const badge = x.missing.length === 0
         ? '<span class="badge badge-green">✓ есть всё</span>'

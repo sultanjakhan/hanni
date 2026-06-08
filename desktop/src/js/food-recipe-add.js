@@ -2,6 +2,7 @@
 // Shared logic: window.HanniRecipe.showAddRecipeModal({ backend, onSaved }).
 // Loaded via <script> tag in index.html (sets up window.HanniRecipe).
 import { invoke } from './state.js';
+import { toast } from './utils.js';
 import { loadCuisines, invalidateCuisineCache, getBlacklist, invalidateCatalogCache } from './food-recipe-filters.js';
 
 // Convert snake_case payload from shared module → camelCase for Tauri invoke.
@@ -37,11 +38,11 @@ function makeBackend() {
 }
 
 export async function showAddRecipeModal(reloadFn) {
-  if (!window.HanniRecipe) { alert('Модуль recipe-shared.js не загружен'); return; }
+  if (!window.HanniRecipe) { toast('Модуль рецептов не загружен'); return; }
   return window.HanniRecipe.showAddRecipeModal({ backend: makeBackend(), onSaved: reloadFn });
 }
 
 export async function showEditRecipeModal(recipe, reloadFn) {
-  if (!window.HanniRecipe) { alert('Модуль recipe-shared.js не загружен'); return; }
+  if (!window.HanniRecipe) { toast('Модуль рецептов не загружен'); return; }
   return window.HanniRecipe.showAddRecipeModal({ backend: makeBackend(), onSaved: reloadFn, recipe });
 }

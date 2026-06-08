@@ -40,6 +40,7 @@ export async function renderBlacklistPane(el) {
   el.innerHTML = `<div class="bl-pane">
     <div class="bl-levelbar">
       <div class="bl-levels"></div>
+      <span class="bl-count"></span>
       <button class="bl-add-one">+ Добавить</button>
     </div>
     <div class="bl-body"></div>
@@ -98,6 +99,9 @@ export async function renderBlacklistPane(el) {
   function renderBody() {
     const box = el.querySelector('.bl-body');
     box.innerHTML = '';
+    const cntEl = el.querySelector('.bl-count');
+    const lvlTotal = entries.filter(e => (e.level || 'hard') === activeLevel).length;
+    if (cntEl) cntEl.textContent = lvlTotal ? `Записей: ${lvlTotal}` : '';
     let any = false;
     for (const g of TYPE_GROUPS) {
       const items = entries.filter(e => (e.level || 'hard') === activeLevel && e.type === g.type);

@@ -870,6 +870,17 @@ async function renderDayCalendar(el, events) {
       refreshCalendarInner();
     });
   });
+  el.querySelector('.meal-plan-shop')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const ids = (btn.dataset.mpShop || '').split(',').map(Number).filter(Boolean);
+    btn.disabled = true;
+    const { addMissingForRecipes } = await import('./shopping-list.js');
+    const { toast } = await import('./utils.js');
+    const n = await addMissingForRecipes(ids).catch(() => 0);
+    toast(n ? `Добавлено в покупки: ${n}` : 'В холодильнике уже всё есть', n ? 'success' : 'info');
+    btn.disabled = false;
+  });
   document.getElementById('day-add-event')?.addEventListener('click', () => {
     S.selectedCalendarDate = S.calDayDate;
     showEventModal();

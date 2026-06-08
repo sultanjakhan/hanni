@@ -1,6 +1,7 @@
 // ── tab-food-recipes.js — Recipe book pane for Food tab ──
 import { invoke } from './state.js';
-import { escapeHtml, chips } from './utils.js';
+import { escapeHtml, chips, emptyState, toast } from './utils.js';
+import { EMPTY_ICONS } from './icons.js';
 import { renderCard, getIngrNames } from './food-recipe-card.js';
 import { showBlacklistContextMenu } from './food-blacklist-menu.js';
 import {
@@ -61,6 +62,7 @@ export async function renderRecipesPane(el) {
       </div>
       <div class="rf-popup-overlay" style="display:none"><div class="rf-panel"></div></div>
       <div class="rf-active-bar"></div>
+      <div class="recipe-count"></div>
       <div class="recipe-grid"></div></div>`;
     const popup = el.querySelector('.rf-popup-overlay');
     const closePopup = () => { panelOpen = false; popup.style.display = 'none'; };
@@ -154,10 +156,29 @@ export async function renderRecipesPane(el) {
     toggle.classList.toggle('rf-active', ac > 0);
   }
 
+  function updateCount(shown) {
+    const c = el.querySelector('.recipe-count');
+    if (!c) return;
+    const total = allRecipes.length;
+    c.textContent = total ? (shown >= total ? `${total} рецептов` : `показано ${shown} из ${total}`) : '';
+  }
+
   function updateGrid() {
     const list = getFiltered(), grid = el.querySelector('.recipe-grid');
     grid.innerHTML = '';
-    if (!list.length) { grid.innerHTML = '<div class="uni-empty">Нет рецептов</div>'; return; }
+    if (!list.length) {
+      const noneAtAll = allRecipes.length === 0;
+      grid.innerHTML = noneAtAll
+        ? emptyState({ icon: EMPTY_ICONS.utensils, title: 'Пока нет рецептов', hint: 'Добавьте первый рецепт, чтобы планировать и готовить.', actionLabel: '+ Рецепт', actionId: 'rf-empty-add' })
+        : emptyState({ icon: EMPTY_ICONS.searchX, title: 'Ничего не найдено', hint: 'Под текущие фильтры рецептов нет — измените или сбросьте их.' });
+      if (noneAtAll) el.querySelector('#rf-empty-add')?.addEventListener('click', async () => {
+        const { showAddRecipeModal } = await import('./food-recipe-modals.js');
+        showAddRecipeModal(fullReload);
+      });
+      updateCount(0);
+      return;
+    }
+    updateCount(list.length);
     for (const r of list) {
       const card = renderCard(
         r,
@@ -166,7 +187,7 @@ export async function renderRecipesPane(el) {
         },
         async (id) => {
           const { duplicateRecipe } = await import('./food-recipe-add.js');
-          try { await duplicateRecipe(id, fullReload); } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+          try { await duplicateRecipe(id, fullReload); } catch (e) { toast('Ошибка: ' + (e.message || e)); }
         },
       );
       card.onclick = async () => {

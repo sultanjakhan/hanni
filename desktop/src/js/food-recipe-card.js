@@ -4,6 +4,16 @@ import { catalogCat } from './food-recipe-filters.js';
 
 const MEAL_COLORS = { breakfast: 'green', lunch: 'yellow', dinner: 'red', universal: 'blue' };
 
+// "YYYY-MM-DD" → human "N дн. назад" relative to today.
+function cookedAgo(dateStr) {
+  const then = new Date(dateStr + 'T12:00:00');
+  if (isNaN(then.getTime())) return '';
+  const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+  if (days <= 0) return 'сегодня';
+  if (days === 1) return 'вчера';
+  return `${days} дн. назад`;
+}
+
 export const getIngrNames = (r) => (r.ingredients || '').split(',').map(s => {
   const i = s.indexOf(':'); return (i > -1 ? s.slice(0, i) : s).trim();
 }).filter(Boolean);
@@ -46,6 +56,8 @@ export function renderCard(r, onIngrClick, onDuplicate) {
       <span class="recipe-diff recipe-diff-${r.difficulty || 'easy'}">${diffLabel}</span>
       <span>❤${r.health_score || 5}</span><span>💰${r.price_score || 5}</span>
     </div>
+    <div class="recipe-card-cooked${r.last_cooked ? '' : ' is-never'}">${
+      r.last_cooked ? `🍳 готовили ${cookedAgo(r.last_cooked)}` : 'ещё не готовили'}</div>
     <div class="recipe-card-tags">${fridge}${badgesHtml}</div>
     <div class="recipe-card-ingr">${ingrHtml}</div>`;
   div.querySelectorAll('.ingr-tag[data-ingr]').forEach(tag => {
