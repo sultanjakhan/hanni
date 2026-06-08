@@ -120,6 +120,7 @@ export async function openNodeModal(node, chain, refresh) {
       <input class="rt-nm-title" id="rt-nm-title" value="${escapeHtml(node.title)}">
     </div>
     <div class="rt-nm-source" id="rt-nm-source">Загрузка…</div>
+    <div id="rt-nm-sport"></div>
     <div class="rt-nm-row">
       <span class="rt-nm-label">Важность</span>
       <span class="rt-nm-dots" id="rt-nm-dots"></span>
@@ -146,6 +147,17 @@ export async function openNodeModal(node, chain, refresh) {
     srcEl.innerHTML = `<span class="rt-nm-src-tag">${SRC_LABEL[node.source_type] || ''}</span>
       ${info?.extra ? `<span class="rt-nm-src-extra">${escapeHtml(info.extra)}</span>` : ''}
       <div class="rt-nm-src-detail">${info?.detail ? escapeHtml(info.detail) : 'Без описания'}</div>`;
+  }
+
+  // sport step: pick exercises from the catalog → log a workout for today
+  if (node.category === 'sport') {
+    const sp = overlay.querySelector('#rt-nm-sport');
+    sp.innerHTML = `<button class="btn-primary rt-nm-sport-btn" id="rt-nm-sport-btn">🔥 Выбрать упражнения из каталога</button>`;
+    sp.querySelector('#rt-nm-sport-btn').addEventListener('click', () => {
+      import('./routine-node-sport.js').then(m => m.openSportPicker(node, (n) => {
+        sp.querySelector('#rt-nm-sport-btn').textContent = `✅ Записано упражнений: ${n}`;
+      }));
+    });
   }
 
   // priority dots

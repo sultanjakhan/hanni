@@ -201,3 +201,24 @@
   margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary); font-size: 12px; line-height: 1.45;
 }
+
+/* sport step: pick catalog exercises → log a workout */
+.sp-modal { max-width: 440px; }
+.rt-nm-sport-btn { width: 100%; margin: 8px 0 4px; }
+.sp-picked { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.sp-picked:empty { display: none; }
+.sp-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+  background: var(--accent-blue-light); color: var(--accent-blue);
+  border-radius: var(--radius-pill); font-size: 12px;
+}
+.sp-chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+.sp-list { max-height: 280px; overflow-y: auto; margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.sp-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.sp-item:hover { background: var(--bg-hover); }
+.sp-item.on { background: var(--accent-blue-light); }
+.sp-item-name { color: var(--text-primary); font-size: 13px; }
+.sp-item-meta { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
