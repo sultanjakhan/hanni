@@ -339,8 +339,11 @@ document.addEventListener('keydown', (e) => {
     }
   }
 
-  // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis
-  for (const tabId of S.openTabs) {
+  // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis.
+  // Fetch all tabs' meta in parallel: a sequential await-loop here put one IPC
+  // round-trip per open tab (~20 on mobile, every cold start) on the critical
+  // path before the first real content render below — pure entry latency.
+  await Promise.all(S.openTabs.map(async (tabId) => {
     try {
       const raw = await Promise.race([
         invoke('get_ui_state', { key: `tab_meta_${tabId}` }),
@@ -354,7 +357,7 @@ document.addEventListener('keydown', (e) => {
         }
       }
     } catch (_) {}
-  }
+  }));
   saveTabCustom();
 
   // Render tab bar (re-render now that custom pages are registered).
