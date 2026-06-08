@@ -48,6 +48,18 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      # The cr-sqlite native lib (CRDT sync) lives in a gitignored jniLibs dir,
+      # so CI checkouts lack it → the APK ships without libcrsqlite.so → dlopen
+      # fails at runtime ("library libcrsqlite.so not found") → sync disabled.
+      # Copy the tracked arm64 lib into jniLibs so gradle packages it into
+      # lib/arm64-v8a/. Without this, Mac↔Android databases silently diverge.
+      - name: Bundle cr-sqlite native lib (jniLibs is gitignored)
+        run: |
+          DEST=desktop/src-tauri/gen/android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$DEST"
+          cp desktop/src-tauri/libs/android-aarch64/crsqlite.so "$DEST/libcrsqlite.so"
+          ls -la "$DEST"
+
       - name: Decode signing keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
