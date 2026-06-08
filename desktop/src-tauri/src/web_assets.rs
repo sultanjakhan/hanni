@@ -113,13 +113,41 @@ fn not_found() -> tauri::http::Response<Vec<u8>> {
     tauri::http::Response::builder().status(404).body(b"not found".to_vec()).unwrap()
 }
 
-/// Registers the OTA web-asset protocol on the builder (Android only).
+/// The version currently being served — the applied OTA bundle's version if one
+/// is live, else the native (embedded) version. Drives the protocol ETag so the
+/// WebView's cache invalidates exactly when the served content changes.
+#[cfg(any(target_os = "android", target_os = "macos"))]
+fn serve_version<R: Runtime>(app: &tauri::AppHandle<R>) -> String {
+    if current_dir(app).join(READY_MARKER).exists() {
+        let v = std::fs::read_to_string(version_file(app)).unwrap_or_default().trim().to_string();
+        if !v.is_empty() { return v; }
+    }
+    app.package_info().version.to_string()
+}
+
+/// Registers the OTA web-asset protocol on the builder (Android + macOS).
 #[cfg(any(target_os = "android", target_os = "macos"))]
 pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     use tauri::http::{Request, Response};
     use tauri::UriSchemeContext;
     builder.register_uri_scheme_protocol(SCHEME, move |ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>| {
         let app = ctx.app_handle();
+        // Cache + revalidate via an ETag tied to the served version (not no-store).
+        // no-store forced the WebView to re-fetch + re-parse all ~120 JS modules
+        // on every cold start (multi-second freeze after Android evicts the app
+        // from the background). With an ETag the WebView caches the parsed modules
+        // and revalidates cheaply: matching If-None-Match → 304 → reuse cache (no
+        // re-read/re-parse). An applied OTA bundle bumps version.txt → the ETag
+        // changes → the cache busts and the new bundle is fetched once.
+        let etag = format!("\"{}\"", serve_version(app));
+        if request.headers().get("If-None-Match").and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
+            return Response::builder()
+                .status(304)
+                .header("ETag", etag)
+                .header("Cache-Control", "no-cache")
+                .body(Vec::new())
+                .unwrap_or_else(|_| not_found());
+        }
         let rel = rel_path(&request.uri().to_string());
         match resolve(app, &rel) {
             Some((bytes, mime, csp)) => {
@@ -127,11 +155,8 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
                     .status(200)
                     .header("Content-Type", mime)
                     .header("Access-Control-Allow-Origin", "*")
-                    // No caching: the WebView persistently caches custom-protocol
-                    // responses, which would defeat OTA updates (an applied bundle
-                    // wouldn't show until cache eviction). Local disk reads are
-                    // cheap, so always re-serve the current bytes.
-                    .header("Cache-Control", "no-store");
+                    .header("Cache-Control", "no-cache")
+                    .header("ETag", etag);
                 if let Some(csp) = csp {
                     b = b.header("Content-Security-Policy", csp);
                 }
