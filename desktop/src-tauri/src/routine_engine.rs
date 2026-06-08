@@ -209,7 +209,7 @@ pub(crate) fn mirror_schedule_to_routine(
 /// finished chain doesn't keep showing "Я встал".
 #[tauri::command]
 pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT chain_id, slot FROM routine_runs WHERE date=?1 AND state='completed'"
     ).map_err(|e| format!("DB error: {}", e))?;

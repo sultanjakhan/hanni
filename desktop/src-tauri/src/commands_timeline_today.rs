@@ -18,7 +18,7 @@ fn shift_date(date: &str, delta: i64) -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut items: Vec<serde_json::Value> = Vec::new();
 
     // ── 1. Calendar events on date
@@ -462,7 +462,7 @@ pub fn get_active_block(db: tauri::State<'_, HanniDb>) -> Result<Option<serde_js
 /// picker to show an expected time. Only tasks with real history are returned.
 #[tauri::command]
 pub fn get_task_avg_durations(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT source_type, CAST(source_id AS TEXT),
                 CAST(ROUND(AVG(duration_minutes)) AS INTEGER) AS avg_min, COUNT(*) AS n

@@ -309,7 +309,7 @@ pub fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>
 
 #[tauri::command]
 pub fn get_app_setting(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<String>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let result: Option<String> = conn.query_row(
         "SELECT value FROM app_settings WHERE key=?1", rusqlite::params![key], |row| row.get(0),
     ).ok();
@@ -738,7 +738,7 @@ pub fn update_view_config(id: i64, filter_json: Option<String>, sort_json: Optio
 
 #[tauri::command]
 pub fn get_ui_state(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<String>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare("SELECT value FROM ui_state WHERE key=?1").map_err(|e| e.to_string())?;
     let val = stmt.query_row(rusqlite::params![key], |r| r.get::<_, String>(0)).ok();
     Ok(val)
