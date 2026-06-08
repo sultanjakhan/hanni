@@ -23,6 +23,18 @@ export function renderCanvas(canvas, chain, refresh) {
   for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain));
   wireNodes(canvas, chain, refresh);
   renderEdges(canvas, chain, refresh, null);
+  // On mobile, shrink the canvas to its node bounds. The fixed 1000×680 size
+  // (≈3000×2040 at 3x DPI) is one big composited layer that blows the WebView
+  // tile-memory budget and janks; desktop keeps the roomy fixed editing area.
+  if (document.documentElement.classList.contains('mobile')) {
+    let w = 0, h = 0;
+    canvas.querySelectorAll('.rt-node').forEach(el => {
+      w = Math.max(w, el.offsetLeft + el.offsetWidth);
+      h = Math.max(h, el.offsetTop + el.offsetHeight);
+    });
+    canvas.style.width = (w + 60) + 'px';
+    canvas.style.height = (h + 60) + 'px';
+  }
 }
 
 function buildNode(n, chain) {
