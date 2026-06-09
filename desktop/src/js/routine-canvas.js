@@ -100,15 +100,17 @@ function buildNode(n, chain, schedById = {}) {
 
 function wireNodes(canvas, chain, refresh) {
   const find = id => chain.nodes.find(n => n.id === id);
+  // Pointer events, not mouse: with mouse-only handlers the graph was inert on
+  // touch (Android) — nodes couldn't be dragged and edges couldn't be drawn.
   canvas.querySelectorAll('.rt-node').forEach(el => {
     const n = find(parseInt(el.dataset.id));
-    el.addEventListener('mousedown', (e) => {
+    el.addEventListener('pointerdown', (e) => {
       if (e.target.closest('[data-port],[data-del],[data-req]')) return;
       startDrag(canvas, chain, refresh, el, n, e);
     });
   });
   canvas.querySelectorAll('[data-port]').forEach(p =>
-    p.addEventListener('mousedown', (e) => {
+    p.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       startEdge(canvas, chain, refresh, parseInt(p.dataset.port));
     }));
@@ -151,18 +153,31 @@ function startDrag(canvas, chain, refresh, el, n, e) {
     el.style.top = n.pos_y + 'px';
     renderEdges(canvas, chain, refresh, null);
   };
-  const up = async () => {
-    document.removeEventListener('mousemove', move);
-    document.removeEventListener('mouseup', up);
+  const cleanup = () => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', cancel);
     el.classList.remove('rt-dragging');
-    if (!moved) {                                  // a click, not a drag
+  };
+  const up = async () => {
+    cleanup();
+    if (!moved) {                                  // a click/tap, not a drag
       openNodeModal(n, chain, refresh);
       return;
     }
     await invoke('update_routine_node', { id: n.id, posX: n.pos_x, posY: n.pos_y }).catch(() => {});
   };
-  document.addEventListener('mousemove', move);
-  document.addEventListener('mouseup', up);
+  // Browser reclaimed the gesture (e.g. scroll) — drop the drag, revert position.
+  const cancel = () => {
+    cleanup();
+    n.pos_x = ox; n.pos_y = oy;
+    el.style.left = ox + 'px';
+    el.style.top = oy + 'px';
+    renderEdges(canvas, chain, refresh, null);
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', cancel);
 }
 
 // ── draw an edge from an out-port to a target node ──
@@ -179,10 +194,14 @@ function startEdge(canvas, chain, refresh, fromId) {
     }
     renderEdges(canvas, chain, refresh, { fromId, x: dx, y: dy });
   };
-  const up = async (ev) => {
-    document.removeEventListener('mousemove', move);
-    document.removeEventListener('mouseup', up);
+  const cleanup = () => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', cancel);
     canvas.querySelectorAll('.rt-node').forEach(x => x.classList.remove('rt-droptarget'));
+  };
+  const up = async (ev) => {
+    cleanup();
     const t = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.rt-node');
     const toId = t ? parseInt(t.dataset.id) : null;
     if (toId && toId !== fromId && !t.classList.contains('rt-start')
@@ -193,8 +212,10 @@ function startEdge(canvas, chain, refresh, fromId) {
     }
     refresh();
   };
-  document.addEventListener('mousemove', move);
-  document.addEventListener('mouseup', up);
+  const cancel = () => { cleanup(); refresh(); };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', cancel);
 }
 
 function nodeBox(canvas, id) {

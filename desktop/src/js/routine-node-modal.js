@@ -167,9 +167,14 @@ export async function openNodeModal(node, chain, refresh) {
   const dotsEl = overlay.querySelector('#rt-nm-dots');
   const drawDots = () => {
     dotsEl.innerHTML = [1, 2, 3, 4, 5]
-      .map(i => `<span class="rt-nm-dot${i <= priority ? ' on' : ''}" data-p="${i}"></span>`).join('');
+      .map(i => `<span class="rt-nm-dot${i <= priority ? ' on' : ''}" data-p="${i}"
+        title="${i}/5 · клик по текущей — сбросить"></span>`).join('');
     dotsEl.querySelectorAll('[data-p]').forEach(d =>
-      d.addEventListener('click', () => { priority = parseInt(d.dataset.p); drawDots(); }));
+      d.addEventListener('click', () => {
+        const v = parseInt(d.dataset.p);
+        priority = v === priority ? 0 : v;   // re-tap the lit level to clear
+        drawDots();
+      }));
   };
   drawDots();
 
