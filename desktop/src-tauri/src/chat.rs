@@ -778,7 +778,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
     };
 
     let request = ChatRequest {
-        model: MODEL.into(),
+        model: llm_model(),
         messages: chat_messages,
         max_tokens: adaptive_max_tokens,
         stream: true,
@@ -791,7 +791,7 @@ pub async fn chat_inner(app: &AppHandle, messages: Vec<serde_json::Value>, call_
     // Retry connection up to 3 times (MLX server may still be loading model or return 404)
     let mut response = None;
     for attempt in 0..3 {
-        match client.post(MLX_URL).json(&request).send().await {
+        match client.post(llm_chat_url()).json(&request).send().await {
             Ok(r) => {
                 let status = r.status();
                 if status.is_success() {
@@ -943,7 +943,7 @@ pub async fn quality_check_response(
     );
 
     let request = ChatRequest {
-        model: MODEL.into(),
+        model: llm_model(),
         messages: vec![
             ChatMessage::text("system", "Ты — критик ответов. Будь краток. Отвечай на русском."),
             ChatMessage::text("user", &check_prompt),
@@ -956,7 +956,7 @@ pub async fn quality_check_response(
         tools: None,
     };
 
-    let resp = client.post(MLX_URL)
+    let resp = client.post(llm_chat_url())
         .json(&request)
         .timeout(std::time::Duration::from_secs(30))
         .send()

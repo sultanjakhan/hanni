@@ -304,6 +304,9 @@ pub fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>
     if key == "apple_calendar_enabled" {
         APPLE_CALENDAR_DISABLED.store(value == "false", Ordering::Relaxed);
     }
+    // LLM endpoint/model overrides take effect without restart
+    if key == "llm_server_url" { set_llm_base_url(&value); }
+    if key == "llm_model" { set_llm_model(&value); }
     Ok(())
 }
 
@@ -911,15 +914,15 @@ pub async fn get_model_info() -> Result<ModelInfo, String> {
         .map_err(|e| e.to_string())?;
 
     let online = client
-        .get("http://127.0.0.1:8234/v1/models")
+        .get(llm_models_url())
         .send()
         .await
         .map(|r| r.status().is_success())
         .unwrap_or(false);
 
     Ok(ModelInfo {
-        model_name: MODEL.to_string(),
-        server_url: MLX_URL.to_string(),
+        model_name: llm_model(),
+        server_url: llm_chat_url(),
         server_online: online,
     })
 }
@@ -935,7 +938,7 @@ pub async fn health_check(app: AppHandle) -> Result<HealthStatus, String> {
 
     // MLX server check
     let mlx_online = client
-        .get("http://127.0.0.1:8234/v1/models")
+        .get(llm_models_url())
         .send()
         .await
         .map(|r| r.status().is_success())
@@ -982,7 +985,7 @@ pub async fn health_check(app: AppHandle) -> Result<HealthStatus, String> {
 
     Ok(HealthStatus {
         mlx_online,
-        mlx_model: MODEL.to_string(),
+        mlx_model: llm_model(),
         voice_server_online,
         db_ok,
         db_tables,
@@ -1224,7 +1227,7 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
             .build()
             .unwrap_or_default();
         let model_online = client
-            .get("http://127.0.0.1:8234/v1/models")
+            .get(llm_models_url())
             .send()
             .await
             .map(|r| r.status().is_success())

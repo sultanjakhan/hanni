@@ -150,7 +150,7 @@ async function loadChatSettings() {
   if (!el) return;
   el.innerHTML = skeletonPage();
   try {
-    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory, useOpenClaw] = await Promise.all([
+    const [proactive, ttsVoices, ttsServerUrl, memories, voiceCloneEnabled, voiceCloneSample, voiceSamples, trainStats, trainFlywheel, trainHistory, useOpenClaw, llmServerUrl, llmModel] = await Promise.all([
       invoke('get_proactive_settings').catch(() => ({ enabled: false, interval_minutes: 15, active_hours_start: 9, active_hours_end: 23, reply_window_sec: 120, styles: [] })),
       invoke('get_tts_voices').catch(() => []),
       invoke('get_app_setting', { key: 'tts_server_url' }).catch(() => null),
@@ -162,6 +162,8 @@ async function loadChatSettings() {
       invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
       invoke('get_flywheel_history').catch(() => []),
       invoke('get_app_setting', { key: 'use_openclaw' }).catch(() => null),
+      invoke('get_app_setting', { key: 'llm_server_url' }).catch(() => null),
+      invoke('get_app_setting', { key: 'llm_model' }).catch(() => null),
     ]);
     const voicesByLang = {};
     for (const v of ttsVoices) {
@@ -349,6 +351,24 @@ async function loadChatSettings() {
           </div>
         </div>
         <div class="settings-section">
+          <div class="settings-section-title">LLM сервер (прямой режим)</div>
+          <div class="settings-row">
+            <span class="settings-label">URL сервера</span>
+            <input class="form-input" id="chat-llm-server-url" placeholder="http://127.0.0.1:8234" value="${llmServerUrl || ''}" style="width:220px">
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Модель</span>
+            <input class="form-input" id="chat-llm-model" placeholder="по умолчанию" value="${llmModel || ''}" style="width:220px">
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Статус</span>
+            <span class="settings-value" id="chat-llm-server-status">—</span>
+          </div>
+          <div class="settings-row" style="opacity:0.7">
+            <span class="settings-label" style="font-size:12px">OpenAI-совместимый эндпоинт. Пусто — локальный MLX :8234. Применяется сразу, без перезапуска.</span>
+          </div>
+        </div>
+        <div class="settings-section">
           <div class="settings-section-title">Встроенные инструменты</div>
           <div class="settings-row" style="opacity:0.7">
             <span class="settings-label" style="font-size:12px">web_search, read_url, set_timer, open_app, media, calendar, notes, money</span>
@@ -480,6 +500,22 @@ async function loadChatSettings() {
     document.getElementById('chat-use-openclaw')?.addEventListener('change', (e) => {
       invoke('set_app_setting', { key: 'use_openclaw', value: e.target.checked ? 'true' : 'false' });
     });
+
+    // LLM server override — save on change, then re-check availability server-side
+    const llmStatusCheck = async () => {
+      const statusEl = document.getElementById('chat-llm-server-status');
+      if (statusEl) statusEl.textContent = '…';
+      const info = await invoke('get_model_info').catch(() => null);
+      if (statusEl) statusEl.textContent = info && info.server_online ? `Онлайн — ${info.model_name}` : 'Недоступен';
+    };
+    const llmSave = async () => {
+      await invoke('set_app_setting', { key: 'llm_server_url', value: document.getElementById('chat-llm-server-url')?.value.trim() || '' });
+      await invoke('set_app_setting', { key: 'llm_model', value: document.getElementById('chat-llm-model')?.value.trim() || '' });
+      llmStatusCheck();
+    };
+    document.getElementById('chat-llm-server-url')?.addEventListener('change', llmSave);
+    document.getElementById('chat-llm-model')?.addEventListener('change', llmSave);
+    llmStatusCheck();
     document.getElementById('chat-proactive-enabled')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-voice-enabled')?.addEventListener('change', saveChatSettings);
     document.getElementById('chat-voice-name')?.addEventListener('change', saveChatSettings);

@@ -746,7 +746,7 @@ pub async fn process_conversation_end(
     );
 
     let request = ChatRequest {
-        model: MODEL.into(),
+        model: llm_model(),
         messages: vec![
             ChatMessage::text("system", "Ты извлекаешь структурированные данные из разговоров. Верни только валидный JSON."),
             ChatMessage::text("user", &prompt),
@@ -761,7 +761,7 @@ pub async fn process_conversation_end(
 
     tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
     let response = client
-        .post(MLX_URL)
+        .post(llm_chat_url())
         .json(&request)
         .timeout(std::time::Duration::from_secs(60))
         .send()
@@ -1010,7 +1010,7 @@ pub async fn process_conversation_end(
             );
 
             let dedup_request = ChatRequest {
-                model: MODEL.into(),
+                model: llm_model(),
                 messages: vec![
                     ChatMessage::text("system", "Ты дедуплицируешь факты памяти. Верни только валидный JSON массив."),
                     ChatMessage::text("user", &prompt_parts),
@@ -1025,7 +1025,7 @@ pub async fn process_conversation_end(
 
             // Async LLM call — no DB lock held (30s timeout)
             tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
-            if let Ok(resp) = client.post(MLX_URL).json(&dedup_request).timeout(std::time::Duration::from_secs(30)).send().await {
+            if let Ok(resp) = client.post(llm_chat_url()).json(&dedup_request).timeout(std::time::Duration::from_secs(30)).send().await {
                 if !resp.status().is_success() { eprintln!("[dedup] MLX error {}", resp.status()); }
                 else if let Ok(parsed) = resp.json::<NonStreamResponse>().await {
                     let raw_dedup = parsed.choices.first()
@@ -1158,7 +1158,7 @@ pub async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
 
     let client = &app.state::<HttpClient>().0;
     let request = ChatRequest {
-        model: MODEL.into(),
+        model: llm_model(),
         messages: vec![
             ChatMessage::text("system",
                 "Ты синтезируешь факты о пользователе в краткий профиль. Пиши на русском. \
@@ -1176,7 +1176,7 @@ pub async fn synthesize_user_profile(app: &AppHandle) -> Result<(), String> {
     };
 
     tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
-    let response = client.post(MLX_URL).json(&request).timeout(std::time::Duration::from_secs(30)).send().await
+    let response = client.post(llm_chat_url()).json(&request).timeout(std::time::Duration::from_secs(30)).send().await
         .map_err(|e| format!("Profile synthesis error: {}", e))?;
     if !response.status().is_success() {
         let status = response.status();

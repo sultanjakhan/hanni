@@ -787,7 +787,7 @@ pub async fn proactive_llm_call(
     }
 
     let request = ChatRequest {
-        model: MODEL.into(),
+        model: llm_model(),
         messages: vec![
             ChatMessage::text("system", &sys_prompt),
             ChatMessage::text("user", &user_content),
@@ -804,7 +804,7 @@ pub async fn proactive_llm_call(
     tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
 
     let response = client
-        .post(MLX_URL)
+        .post(llm_chat_url())
         .json(&request)
         .send()
         .await

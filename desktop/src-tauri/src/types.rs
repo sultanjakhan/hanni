@@ -3,12 +3,50 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 // ── Constants ──
 
-pub const MLX_URL: &str = "http://127.0.0.1:8234/v1/chat/completions";
+pub const DEFAULT_LLM_BASE_URL: &str = "http://127.0.0.1:8234";
 pub const MODEL: &str = "NexVeridian/Qwen3.5-35B-A3B-4bit";
+
+// ── LLM endpoint override ──
+// Runtime-configurable OpenAI-compatible server (app_settings keys
+// 'llm_server_url' / 'llm_model'). Loaded into statics at init_database and
+// refreshed by set_app_setting, so hot paths never hit the DB.
+
+static LLM_BASE_URL: OnceLock<RwLock<String>> = OnceLock::new();
+static LLM_MODEL: OnceLock<RwLock<String>> = OnceLock::new();
+
+fn llm_base_cell() -> &'static RwLock<String> {
+    LLM_BASE_URL.get_or_init(|| RwLock::new(DEFAULT_LLM_BASE_URL.to_string()))
+}
+fn llm_model_cell() -> &'static RwLock<String> {
+    LLM_MODEL.get_or_init(|| RwLock::new(MODEL.to_string()))
+}
+
+/// Accepts "host:port", "http://host:port" or "http://host:port/" — normalizes
+/// to a scheme-prefixed base without a trailing slash. Empty → default.
+pub fn set_llm_base_url(url: &str) {
+    let v = url.trim().trim_end_matches('/');
+    let v = if v.is_empty() {
+        DEFAULT_LLM_BASE_URL.to_string()
+    } else if v.contains("://") {
+        v.to_string()
+    } else {
+        format!("http://{v}")
+    };
+    *llm_base_cell().write().unwrap() = v;
+}
+pub fn set_llm_model(name: &str) {
+    let v = name.trim();
+    *llm_model_cell().write().unwrap() =
+        if v.is_empty() { MODEL.to_string() } else { v.to_string() };
+}
+pub fn llm_base_url() -> String { llm_base_cell().read().unwrap().clone() }
+pub fn llm_chat_url() -> String { format!("{}/v1/chat/completions", llm_base_url()) }
+pub fn llm_models_url() -> String { format!("{}/v1/models", llm_base_url()) }
+pub fn llm_model() -> String { llm_model_cell().read().unwrap().clone() }
 pub const VOICE_SERVER_URL: &str = "http://127.0.0.1:8237";
 
 // OpenClaw Gateway (token lives in app_settings 'openclaw_token', not in source)

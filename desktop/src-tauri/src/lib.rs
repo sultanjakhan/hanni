@@ -288,6 +288,20 @@ fn init_database() -> HanniDb {
         if val == "true" { CALENDAR_ACCESS_DENIED.store(true, Ordering::Relaxed); }
     }
 
+    // LLM endpoint/model override (e.g. a GPU box over Tailscale) → statics
+    if let Ok(val) = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='llm_server_url'",
+        [], |row| row.get::<_, String>(0),
+    ) {
+        set_llm_base_url(&val);
+    }
+    if let Ok(val) = conn.query_row(
+        "SELECT value FROM app_settings WHERE key='llm_model'",
+        [], |row| row.get::<_, String>(0),
+    ) {
+        set_llm_model(&val);
+    }
+
     eprintln!("[hanni] init_database: migrations complete");
     HanniDb(std::sync::Mutex::new(conn))
 }
@@ -1463,7 +1477,7 @@ pub fn run() {
                     );
 
                     let request = ChatRequest {
-                        model: MODEL.into(),
+                        model: llm_model(),
                         messages: vec![
                             ChatMessage::text("system", "Ты — аналитик поведения. Твоя задача — находить паттерны в активности пользователя. Будь краток и конкретен. Отвечай на русском."),
                             ChatMessage::text("user", &prompt),
@@ -1476,7 +1490,7 @@ pub fn run() {
                         tools: None,
                     };
 
-                    let resp = client.post(MLX_URL).json(&request).send().await;
+                    let resp = client.post(llm_chat_url()).json(&request).send().await;
                     if let Ok(resp) = resp {
                         if !resp.status().is_success() { continue; }
                         if let Ok(parsed) = resp.json::<NonStreamResponse>().await {

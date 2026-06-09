@@ -37,7 +37,7 @@ pub async fn run_agent_task(
             .map_err(|_| "Agent: LLM semaphore closed".to_string())?;
 
         let request = ChatRequest {
-            model: MODEL.into(),
+            model: llm_model(),
             messages: messages.clone(),
             max_tokens: 2048,
             stream: false,
@@ -48,7 +48,7 @@ pub async fn run_agent_task(
         };
 
         tokio::task::spawn_blocking(|| crate::mlx_manager::ensure_mlx()).await.ok();
-        let resp = client.post(MLX_URL)
+        let resp = client.post(llm_chat_url())
             .json(&request)
             .timeout(std::time::Duration::from_secs(180))
             .send()

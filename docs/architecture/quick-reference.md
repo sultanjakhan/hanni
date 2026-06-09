@@ -16,7 +16,8 @@
 - Одна `pub fn` = одна задача, ≤80 строк.
 
 ## LLM
-- Локальный **MLX-сервер** на `127.0.0.1:8234` (Qwen3.5-35B-A3B).
+- Локальный **MLX-сервер** на `127.0.0.1:8234` (Qwen3.5-35B-A3B) — дефолт.
+- Переопределение: app_settings `llm_server_url` / `llm_model` (Чат → Настройки → Инструменты → «LLM сервер») — любой OpenAI-совместимый эндпоинт, напр. GPU-машина по Tailscale. Применяется без перезапуска (`types::llm_chat_url()`).
 - Стриминг — **SSE-события**: `chat-token`, `chat-done`, `chat-reasoning`, `chat-reasoning-done`.
 
 ## HTTP API (automation)
