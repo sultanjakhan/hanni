@@ -33,6 +33,53 @@
   --btn-padding-sm: 5px 12px;
   --btn-padding-md: 8px 16px;
   --btn-padding-lg: 10px 20px;
+
+  /* ── Legacy aliases ──
+     Non-canonical names that accumulated across tabs. Without these
+     definitions, no-fallback usages were silently invalid (transparent
+     backgrounds, inherited colors, no shadows). Aliases resolve through
+     the canonical tokens, so both themes work. Prefer canonical names in
+     new code; migrating old usages is tracked tech debt. */
+  --accent: var(--accent-blue);
+  --accent-bg: var(--bg-hover);
+  --accent-blue-bg: var(--color-blue-bg);
+  --accent-blue-border: var(--accent-blue);
+  --accent-green: var(--color-green);
+  --accent-orange: var(--color-orange);
+  --accent-red: var(--color-red);
+  --accent-yellow: var(--color-yellow);
+  --bg-accent: var(--accent-blue);
+  --bg-active: var(--bg-hover);
+  --bg-base: var(--bg-page);
+  --bg-danger: var(--color-red-bg);
+  --bg-default: var(--bg-hover);
+  --bg-input: var(--bg-page);
+  --bg-secondary: var(--bg-card);
+  --bg-success: var(--color-green-bg);
+  --bg-tertiary: var(--bg-hover);
+  --bg-warning: var(--color-yellow-bg);
+  --blue: var(--accent-blue);
+  --blue-bg: var(--color-blue-bg);
+  --border: var(--border-default);
+  --border-active: var(--border-focus);
+  --border-color: var(--border-default);
+  --border-faint: var(--border-subtle);
+  --border-light: var(--border-subtle);
+  --card-accent: var(--accent-blue);
+  --color-accent: var(--accent-blue);
+  --color-teal: var(--color-green);
+  --color-teal-bg: var(--color-green-bg);
+  --radius-1: var(--radius-sm);
+  --radius-2: var(--radius-lg);
+  --radius-full: var(--radius-pill);
+  --radius-small: var(--radius-sm);
+  --red: var(--color-red);
+  --shadow-card: var(--shadow-sm);
+  --text-accent: var(--accent-blue);
+  --text-danger: var(--color-red);
+  --text-success: var(--color-green);
+  --text-tertiary: var(--text-muted);
+  --text-warning: var(--color-yellow);
 }
 
 /* ── Light Theme (default) ── */
@@ -63,6 +110,7 @@
   /* Accent */
   --accent-fill: #37352f;
   --accent-blue: #2383e2;
+  --accent-blue-rgb: 35, 131, 226; /* raw triplet for rgba(var(--accent-blue-rgb), a) */
   --accent-blue-light: #5ba3f5;
   --accent-purple: #9065b0;
 
@@ -154,6 +202,7 @@
   /* Accent */
   --accent-fill: #EBEBEB;
   --accent-blue: #447ACB;
+  --accent-blue-rgb: 68, 122, 203; /* raw triplet for rgba(var(--accent-blue-rgb), a) */
   --accent-blue-light: #6B9FE8;
   --accent-purple: #865DBB;
 
