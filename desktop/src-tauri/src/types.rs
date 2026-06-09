@@ -187,18 +187,35 @@ impl ProactiveState {
 
 // ── SQLite wrapper ──
 
-pub struct HanniDb(pub std::sync::Mutex<rusqlite::Connection>);
+pub struct HanniDb {
+    /// Serialized write path (one writer at a time). cr-sqlite/CRDT writes all
+    /// go through here — unchanged from the original single-connection design.
+    pub writer: std::sync::Mutex<rusqlite::Connection>,
+    /// Read-only path for the hot UI/boot commands. With WAL it reads a
+    /// consistent snapshot without waiting behind a long write on the writer,
+    /// so heavy sync/import no longer freezes the UI on launch/resume.
+    pub reader: std::sync::Mutex<rusqlite::Connection>,
+}
 
 impl HanniDb {
+    /// Writer connection — use for any command that writes (INSERT/UPDATE/DELETE)
+    /// or relies on the cr-sqlite write path.
     pub fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner())
+        self.writer.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    /// Read connection — pure SELECTs only. NEVER write through this: a write
+    /// here would contend with the writer and defeat the no-freeze guarantee.
+    pub fn read(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.reader.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl Drop for HanniDb {
     fn drop(&mut self) {
-        if let Ok(conn) = self.0.lock() {
-            let _ = conn.execute_batch("SELECT crsql_finalize();");
+        for m in [&self.writer, &self.reader] {
+            if let Ok(conn) = m.lock() {
+                let _ = conn.execute_batch("SELECT crsql_finalize();");
+            }
         }
     }
 }

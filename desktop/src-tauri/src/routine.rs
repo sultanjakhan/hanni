@@ -29,7 +29,7 @@ const NODE_COLS: &str =
 /// All chains, each with its nodes and edges — feeds the graph constructor.
 #[tauri::command]
 pub fn get_routine_chains(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut cstmt = conn.prepare(
         "SELECT id, title, trigger_type, trigger_time, is_active FROM routine_chains ORDER BY sort_order, id"
     ).map_err(|e| format!("DB error: {}", e))?;

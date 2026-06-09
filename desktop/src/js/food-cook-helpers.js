@@ -4,27 +4,54 @@
 // session state so food-cook-mode.js stays lean.
 import { escapeHtml } from './utils.js';
 import { invoke } from './state.js';
+import { catalogCat } from './food-recipe-filters.js';
 
-// Full recipe ingredients — items with amounts, else legacy "name: amount" string.
+// Full recipe ingredients as {name, amount(number), unit} — items, else legacy
+// "name: 500г" string (number + unit parsed out so servings can rescale them).
 export function recipeIngredients(recipe) {
   const items = recipe.ingredient_items || [];
-  if (items.length) return items.map(i => ({ name: i.name, amt: i.amount ? `${i.amount}${i.unit || ''}` : '' }));
-  return String(recipe.ingredients || '').split(',').map(s => s.trim()).filter(Boolean)
-    .map(p => { const c = p.split(':'); return { name: (c[0] || p).trim(), amt: (c[1] || '').trim() }; });
+  if (items.length) return items.map(i => ({ name: i.name, amount: Number(i.amount) || 0, unit: i.unit || '' }));
+  return String(recipe.ingredients || '').split(',').map(s => s.trim()).filter(Boolean).map(p => {
+    const c = p.split(':'); const name = (c[0] || p).trim(); const rest = (c[1] || '').trim();
+    const mm = rest.match(/^([\d.,]+)\s*(.*)$/);
+    return { name, amount: mm ? parseFloat(mm[1].replace(',', '.')) || 0 : 0, unit: mm ? mm[2].trim() : rest };
+  });
 }
 
-export function ingredientListHtml(recipe) {
+// Renders the ingredient list with a category colour dot, amount (scaled by
+// `ratio` for servings), and a tap-to-check state. `checked` is a Set of indices;
+// pass empty for the read-only "Все ингредиенты" sheet.
+export function ingredientListHtml(recipe, checked = new Set(), ratio = 1) {
   const list = recipeIngredients(recipe);
   if (!list.length) return '<div class="cook-no-timer">Ингредиенты не указаны</div>';
-  return `<div class="cook-prep-list">${list.map(i =>
-    `<div class="cook-prep-item"><span>${escapeHtml(i.name)}</span>${i.amt ? `<span class="cook-prep-amt">${escapeHtml(i.amt)}</span>` : ''}</div>`).join('')}</div>`;
+  return `<div class="cook-prep-list">${list.map((it, i) => {
+    const cat = catalogCat(it.name);
+    const amt = it.amount ? `${Math.round(it.amount * ratio * 10) / 10}${it.unit}` : '';
+    return `<div class="cook-prep-item${checked.has(i) ? ' checked' : ''}" data-i="${i}">
+      <span class="cook-prep-dot${cat ? ' cat-' + cat : ''}"></span>
+      <span class="cook-prep-name">${escapeHtml(it.name)}</span>
+      ${amt ? `<span class="cook-prep-amt">${escapeHtml(amt)}</span>` : ''}</div>`;
+  }).join('')}</div>`;
+}
+
+// Wire tap-to-check on the prep screen; updates the "Собрано N из M" counter.
+export function bindPrepChecklist(root, checked, total) {
+  root.querySelectorAll('.cook-prep-item').forEach(row => {
+    row.onclick = () => {
+      const i = Number(row.dataset.i);
+      checked.has(i) ? checked.delete(i) : checked.add(i);
+      row.classList.toggle('checked', checked.has(i));
+      const c = root.querySelector('#cook-prep-count');
+      if (c) c.textContent = `Собрано ${checked.size} из ${total}`;
+    };
+  });
 }
 
 export function headHtml(recipeName, label) {
   return `<div class="cook-head">
     <div class="cook-title">${escapeHtml(recipeName)}</div>
     <div class="cook-progress-label">${label}</div>
-    <button class="cook-close" id="cook-close" title="Выйти">✕ Выйти</button>
+    <button class="cook-close" id="cook-close" title="Выйти">✕</button>
   </div>`;
 }
 
@@ -47,6 +74,28 @@ export async function createCookEvent(recipe, steps, date) {
     title: recipe.name, description: '', date: d, time,
     durationMinutes: duration, category: 'Готовка', color, priority: null,
   }).catch(() => null);
+}
+
+// Resume support — persist the active cook (one slot) so leaving and returning to
+// the same recipe continues from the same step. Cleared on finish/cancel.
+const COOK_KEY = 'hanni_cook_session';
+export function saveCook(s) {
+  try { localStorage.setItem(COOK_KEY, JSON.stringify({ recipeId: s.recipe.id, idx: s.idx, servings: s.servings, eventId: s.eventId })); } catch { /* quota */ }
+}
+export function loadCook(recipeId) {
+  try { const d = JSON.parse(localStorage.getItem(COOK_KEY) || 'null'); return d && d.recipeId === recipeId ? d : null; } catch { return null; }
+}
+export function clearCook() { try { localStorage.removeItem(COOK_KEY); } catch { /* ignore */ } }
+
+// Keep the screen awake while cooking (Screen Wake Lock; no-op if unsupported).
+let _wakeLock = null;
+export async function requestWakeLock() {
+  try { if ('wakeLock' in navigator) _wakeLock = await navigator.wakeLock.request('screen'); }
+  catch { /* unsupported / denied — silent */ }
+}
+export function releaseWakeLock() {
+  try { _wakeLock?.release(); } catch { /* already gone */ }
+  _wakeLock = null;
 }
 
 // Short completion chime — Web Audio, no bundled asset.

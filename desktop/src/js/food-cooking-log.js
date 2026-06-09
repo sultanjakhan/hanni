@@ -158,8 +158,9 @@ const CW_CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', f
   oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', sweet: 'Сладости', frozen: 'Заморозка', other: 'Другое' };
 const cwNorm = (s) => String(s == null ? '' : s).trim().toLowerCase();
 const cwIngredients = (str) => String(str || '').split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+const cwName = (n) => n.split(':')[0].trim(); // "соль: 2ч.л." → "соль" (match fridge by name)
 
-export async function showCookWhatModal(date, onSaved) {
+export async function showCookWhatModal(date, onSaved, searchSeed) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
@@ -191,12 +192,12 @@ export async function showCookWhatModal(date, onSaved) {
   // catalog categories its ingredients span (for the category filter).
   const rows = recipes.map(r => {
     const ings = cwIngredients(r.ingredients);
-    const missing = ings.filter(n => !have.has(cwNorm(n)));
-    const cats = new Set(ings.map(n => catByName.get(cwNorm(n))).filter(Boolean));
+    const missing = ings.filter(n => !have.has(cwNorm(cwName(n))));
+    const cats = new Set(ings.map(n => catByName.get(cwNorm(cwName(n)))).filter(Boolean));
     return { r, ings, missing, total: ings.length, cats };
   });
   const usedCats = [...new Set(rows.flatMap(x => [...x.cats]))];
-  let q = '', cat = 'all';
+  let q = searchSeed || '', cat = 'all';
 
   function renderCats() {
     overlay.querySelector('#cw-cats').innerHTML = ['all', ...usedCats].map(c =>
@@ -215,12 +216,26 @@ export async function showCookWhatModal(date, onSaved) {
     list.innerHTML = filtered.map(x => {
       const badge = x.missing.length === 0
         ? '<span class="badge badge-green">✓ есть всё</span>'
-        : `<span class="badge badge-gray">не хватает ${x.missing.length}: ${escapeHtml(x.missing.slice(0, 3).join(', '))}${x.missing.length > 3 ? '…' : ''}</span>`;
+        : `<span class="badge badge-gray">не хватает ${x.missing.length}: ${escapeHtml(x.missing.slice(0, 3).map(cwName).join(', '))}${x.missing.length > 3 ? '…' : ''}</span>`;
+      const addBtn = x.missing.length
+        ? `<button class="cw-add-missing" title="Добавить недостающее в список покупок" style="font-size:11px;padding:3px 8px;background:none;border:1px solid var(--border-subtle);border-radius:6px;cursor:pointer;white-space:nowrap">+ в покупки</button>`
+        : '';
       return `<div class="cw-row" data-rid="${x.r.id}" data-rname="${escapeHtml(x.r.name)}" style="padding:10px;border:1px solid var(--border-subtle);border-radius:8px;margin-bottom:6px;cursor:pointer">
         <div style="font-weight:600">${escapeHtml(x.r.name)}</div>
-        <div style="margin-top:4px;font-size:12px">${badge} <span class="muted">· ${x.total - x.missing.length}/${x.total} ингр.</span></div>
+        <div style="margin-top:4px;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span>${badge} <span class="muted">· ${x.total - x.missing.length}/${x.total} ингр.</span></span>
+          ${addBtn}
+        </div>
       </div>`;
     }).join('');
+    list.querySelectorAll('.cw-add-missing').forEach(btn => btn.onclick = async (e) => {
+      e.stopPropagation();
+      const row = rows.find(x => x.r.id === parseInt(btn.closest('.cw-row').dataset.rid));
+      if (!row) return;
+      const { addShoppingItem } = await import('./shopping-list.js');
+      for (const n of row.missing) { const c = n.split(':'); await addShoppingItem(c[0].trim(), (c[1] || '').trim(), '').catch(() => {}); }
+      btn.textContent = '✓ в покупках'; btn.disabled = true;
+    });
     list.querySelectorAll('.cw-row').forEach(row => row.onclick = async () => {
       close();
       // Picking a recipe starts the guided cook mode (timer); it opens the
@@ -231,6 +246,7 @@ export async function showCookWhatModal(date, onSaved) {
       startCookMode(recipe, { onSaved, date });
     });
   }
+  overlay.querySelector('#cw-search').value = q;
   renderCats(); renderList();
   overlay.querySelector('#cw-search').oninput = (e) => { q = e.target.value; renderList(); };
 }

@@ -121,6 +121,8 @@
         return !isNaN(d) && d <= 3;
       }).slice().sort((a, b) => new Date(a.expiry_date) - new Date(b.expiry_date));
       if (!rows.length) return '';
+      // "Приготовить из этого" needs Hanni's recipe commands → Tauri-only (hidden for guests).
+      const inApp = !!(window.__TAURI__?.core?.invoke);
       return `<div style="margin-bottom:14px">
         <div style="font-weight:600;font-size:13px;margin-bottom:6px">⏰ Скоро испортится (${rows.length})</div>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -128,6 +130,7 @@
             <td style="padding:5px 8px">${esc(p.name)}</td>
             <td style="padding:5px 8px;color:var(--text-muted)">${esc(`${p.quantity ?? 1} ${p.unit || 'шт'}`.trim())}</td>
             <td style="padding:5px 8px;text-align:right">${expiryBadge(p.expiry_date)}</td>
+            ${inApp ? `<td style="padding:5px 8px;text-align:right"><button class="exp-cook" data-exp-cook="${esc(p.name)}" title="Приготовить из этого" style="font-size:12px;padding:2px 8px;background:none;border:1px solid var(--border-subtle);border-radius:6px;cursor:pointer">🍲</button></td>` : ''}
           </tr>`).join('')}
         </table>
       </div>`;
@@ -190,6 +193,10 @@
         const { showMultiAddModal } = await import('./fridge-multiadd.js');
         showMultiAddModal({ backend, location: state.loc === 'all' ? 'fridge' : state.loc, onAdded: () => load() });
       };
+      el.querySelectorAll('[data-exp-cook]').forEach(b => b.onclick = async () => {
+        const { showCookWhatModal } = await import('./food-cooking-log.js');
+        showCookWhatModal(new Date().toISOString().slice(0, 10), () => load(), b.dataset.expCook);
+      });
       paintGrid();
     }
 
