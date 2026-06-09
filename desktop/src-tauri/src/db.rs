@@ -2822,11 +2822,16 @@ pub const SYNC_TABLES: &[&str] = &[
     "job_search_log", "dashboard_widgets", "timeline_activity_types",
     "timeline_blocks", "timeline_goals", "sleep_sessions", "sleep_stages",
     "heart_rate_samples", "event_categories",
-    // NOTE: routine_* tables are intentionally NOT synced. Syncing their
-    // definitions (chains/nodes/edges) merged a device's customized graph with
-    // another's default seed → duplicate chains + tangled edges that gated step
-    // availability. Run/completion sync needs a redesign (sync run STATE against
-    // one canonical definition, never merge graphs) before re-enabling.
+    // Routine DEFINITIONS (chains/nodes/edges) are intentionally NOT synced:
+    // merging one device's customized graph with another's default seed produced
+    // duplicate chains + tangled edges that gated step availability. Only run
+    // STATE syncs — ids are deterministic (run = chain|date|slot, status =
+    // run|node, see types::routine_run_id), so both devices address the same
+    // rows. Rows referencing a chain/node the other device doesn't have fail
+    // the FK check on pull and are skipped (upsert_row logs and moves on).
+    // routine_runs MUST stay before routine_node_status: push walks this array
+    // in order, so runs land in the cloud (and apply) before their statuses.
+    "routine_runs", "routine_node_status",
 ];
 
 /// Whether `table.column` is declared TEXT in the current schema. Used
@@ -2881,6 +2886,13 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
     // 2. Backfill existing rows. We try the most-likely timestamp columns
     // in order and fall back to now(). Trying a non-existent column would
     // raise SQL error, so probe each table's schema first.
+    // updated_at / deleted_at must string-compare against the owner-sync
+    // cursor, which holds chrono RFC3339 values. SQLite datetime('now') yields
+    // a space-separated UTC form ("2026-05-19 01:02:03") that sorts *below*
+    // RFC3339 ("...T...") — push silently skipped every trigger-stamped row.
+    // Use a 'T'-separated local form so both paths order consistently.
+    let ts_expr = "strftime('%Y-%m-%dT%H:%M:%f','now','localtime')";
+
     let candidates = ["created_at", "started_at", "date", "logged_at"];
     for table in SYNC_TABLES {
         let cols = match table_columns_in(conn, table) {
@@ -2893,7 +2905,7 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
                 coalesce_args.push(format!("NULLIF({col}, '')"));
             }
         }
-        coalesce_args.push("datetime('now')".into());
+        coalesce_args.push(ts_expr.into());
         let sql = format!(
             "UPDATE {table} SET updated_at = COALESCE({}) \
              WHERE updated_at = '' OR updated_at IS NULL",
@@ -2901,13 +2913,6 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
         );
         conn.execute(&sql, []).ok();
     }
-
-    // updated_at / deleted_at must string-compare against the owner-sync
-    // cursor, which holds chrono RFC3339 values. SQLite datetime('now') yields
-    // a space-separated UTC form ("2026-05-19 01:02:03") that sorts *below*
-    // RFC3339 ("...T...") — push silently skipped every trigger-stamped row.
-    // Use a 'T'-separated local form so both paths order consistently.
-    let ts_expr = "strftime('%Y-%m-%dT%H:%M:%f','now','localtime')";
 
     // 3. AFTER INSERT triggers — set updated_at for fresh rows when the
     // INSERT didn't supply one. Avoids NULL/'' rows breaking LWW.

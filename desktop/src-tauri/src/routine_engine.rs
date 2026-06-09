@@ -317,10 +317,18 @@ fn edge_satisfied(
             if status.get(&e.from).map(|s| s.0.as_str()) != Some("done") { return false; }
             let mins = e.value.unwrap_or(0);
             let done_at = status.get(&e.from).map(|s| s.1.as_str()).unwrap_or("");
-            match chrono::NaiveDateTime::parse_from_str(done_at, "%Y-%m-%d %H:%M:%S") {
-                Ok(t) => (chrono::Utc::now().naive_utc() - t).num_minutes() >= mins,
-                Err(_) => true,                            // unparseable → don't block
-            }
+            // Sync triggers stamp updated_at as 'T'-separated LOCAL time with
+            // fractional seconds; legacy rows hold space-separated UTC.
+            let elapsed = if let Ok(t) =
+                chrono::NaiveDateTime::parse_from_str(done_at, "%Y-%m-%dT%H:%M:%S%.f") {
+                chrono::Local::now().naive_local() - t
+            } else if let Ok(t) =
+                chrono::NaiveDateTime::parse_from_str(done_at, "%Y-%m-%d %H:%M:%S") {
+                chrono::Utc::now().naive_utc() - t
+            } else {
+                return true;                               // unparseable → don't block
+            };
+            elapsed.num_minutes() >= mins
         }
         _ => closed(e.from),                                // after_completion
     }
