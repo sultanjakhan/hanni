@@ -3,7 +3,7 @@
 // (Stage C.1). Auto-sync section unchanged.
 
 import { invoke, listen } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { attachOwnerSync } from './cloud-owner-sync.js';
 import { attachLanSync } from './lan-sync-section.js';
 
@@ -119,7 +119,7 @@ export async function openCloudShareModal() {
       syncSection.style.opacity = '';
       syncSection.style.pointerEvents = '';
       googleBox.querySelector('#cs-signout').onclick = async () => {
-        if (!confirm('Выйти из аккаунта Google? Авто-sync остановится.')) return;
+        if (!await confirmModal('Выйти из аккаунта Google? Авто-sync остановится.', 'Выйти')) return;
         try {
           await invoke('google_auth_signout');
           renderGoogleBox(await invoke('google_auth_status'));

@@ -1,6 +1,6 @@
 // ── sport-program-modals.js — Program detail modal (balance, days, run, actions) ──
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { KIND_LABELS, KIND_COLORS } from './sport-program-filters.js';
 import { renderBalanceBar } from './sport-program-card.js';
 
@@ -69,7 +69,7 @@ export async function showProgramDetail(id, onChanged) {
   };
   overlay.querySelector('#pd-fav').onclick = async () => { await invoke('toggle_favorite_program', { id }); close(); onChanged(); };
   overlay.querySelector('#pd-delete').onclick = async () => {
-    if (!confirm('Удалить программу?')) return;
+    if (!await confirmModal('Удалить программу?', 'Удалить')) return;
     await invoke('delete_workout_program', { id }); close(); onChanged();
   };
   overlay.querySelector('#pd-start')?.addEventListener('click', async () => {

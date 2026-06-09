@@ -3,7 +3,7 @@
 // copy/import, auto-sync toggle, and the live tick listener.
 
 import { invoke, listen } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 
 export function attachOwnerSync(overlay, autoCfg) {
   const ownerMsg    = overlay.querySelector('#cs-owner-msg');
@@ -59,7 +59,7 @@ export function attachOwnerSync(overlay, autoCfg) {
   overlay.querySelector('#cs-owner-import-btn').onclick = async () => {
     const newUid = overlay.querySelector('#cs-owner-import').value.trim();
     if (!newUid) { err('Вставьте UID с другого устройства.'); return; }
-    if (!confirm(`Сменить Owner UID на "${newUid}"?\n\nPush/pull-метки сбросятся — следующий sync перепушит и перетянет всё с нуля.`)) return;
+    if (!await confirmModal(`Сменить Owner UID на "${newUid}"? Push/pull-метки сбросятся — следующий sync перепушит и перетянет всё с нуля.`, 'Сменить')) return;
     try {
       const applied = await invoke('cloud_owner_set_uid', { uid: newUid });
       overlay.querySelector('#cs-owner').value = applied;

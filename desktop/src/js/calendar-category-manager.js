@@ -2,7 +2,7 @@
 // recolor, change icon, delete) and the "add category" modal.
 
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { loadCategories, invalidateCategoriesCache, CATEGORY_PALETTE } from './calendar-categories.js';
 import { showEmojiPicker } from './emoji-picker.js';
 
@@ -143,7 +143,7 @@ export async function showCategoryManager(onChange) {
         const item = e.target.closest('.evm-cat-item');
         const id = Number(item.dataset.id);
         const name = item.dataset.name;
-        if (!confirm(`Удалить категорию «${name}»? События переедут в «general».`)) return;
+        if (!await confirmModal(`Удалить категорию «${name}»? События переедут в «general».`, 'Удалить')) return;
         try {
           await invoke('delete_event_category', { id, reassignTo: 'general' });
           item.remove();

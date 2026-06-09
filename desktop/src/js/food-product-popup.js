@@ -84,7 +84,7 @@ export function showProductPopup(anchorEl, product, catalog, onUpdate) {
     try {
       const usage = await invoke('check_ingredient_usage', { ingredientName: product.name });
       if (usage.count > 0) {
-        if (!confirm(`«${product.name}» используется в ${usage.count} рецептах:\n${usage.recipe_names.join(', ')}\n\nУдалить?`)) return;
+        if (!await confirmModal(`«${product.name}» используется в ${usage.count} рецептах: ${usage.recipe_names.join(', ')}. Удалить?`, 'Удалить')) return;
       }
       await invoke('delete_ingredient_from_catalog', { id: product.id });
       invalidateCatalogCache();

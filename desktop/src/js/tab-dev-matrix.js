@@ -1,7 +1,7 @@
 // ── tab-dev-matrix.js — competency matrix tree (area → competency → skill) ──
 
 import { S, invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { scoreTier, levelBarHtml, levelBadgeHtml } from './dev-level.js';
 import { matrixToolbarHtml, wireMatrixToolbar } from './dev-matrix-search.js';
 import { cefrChipHtml, wireCefrChips } from './dev-cefr.js';
@@ -92,7 +92,7 @@ function wireMatrix(el, projectId, reloadFn) {
 
   el.querySelectorAll('.dev-mx-del').forEach(b => b.addEventListener('click', async (e) => {
     stop(e);
-    if (!confirm('Удалить вместе со всем содержимым?')) return;
+    if (!await confirmModal('Удалить вместе со всем содержимым?', 'Удалить')) return;
     await invoke('delete_dev_node', { id: parseInt(b.dataset.id) });
     reloadFn();
   }));

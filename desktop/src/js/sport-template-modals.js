@@ -1,6 +1,6 @@
 // ── sport-template-modals.js — Template detail modal + delete ──
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { TYPE_COLORS, DIFF_COLORS } from './sport-template-filters.js';
 import { MUSCLE_LABELS, MUSCLE_COLORS } from './sport-catalog-filters.js';
 
@@ -61,7 +61,7 @@ export async function showTemplateDetail(id, onChanged) {
     onChanged();
   };
   overlay.querySelector('#td-delete').onclick = async () => {
-    if (!confirm('Удалить шаблон?')) return;
+    if (!await confirmModal('Удалить шаблон?', 'Удалить')) return;
     await invoke('delete_workout_template', { id });
     overlay.remove();
     onChanged();

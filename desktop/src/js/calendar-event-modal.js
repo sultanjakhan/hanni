@@ -2,7 +2,7 @@
 // DB-driven categories and 5-level priority picker.
 
 import { S, invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { loadCategories } from './calendar-categories.js';
 import { showCategoryManager, showAddCategory } from './calendar-category-manager.js';
 import { renderTemplatesAccordion, bindTemplates } from './calendar-event-templates.js';
@@ -231,7 +231,7 @@ export async function showEventModal(eventId = null) {
 
   // Delete (edit-mode only)
   overlay.querySelector('#evm-del')?.addEventListener('click', async () => {
-    if (!confirm('Удалить событие безвозвратно?')) return;
+    if (!await confirmModal('Удалить событие безвозвратно?', 'Удалить')) return;
     try {
       await invoke('delete_event', { id: Number(eventId) });
       overlay.remove();
