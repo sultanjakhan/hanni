@@ -9,6 +9,10 @@ on:
       # (latest.json of the latest release) nor the phone's in-app updater
       # (releases/latest excludes prereleases) ever picks it up.
       - 'android-test*'
+    # TEMP: build-on-push for the routine-sync/LLM-endpoint test branch
+    # (cloud session can't push tags or dispatch workflows). REMOVE on merge.
+    branches:
+      - 'claude/trusting-maxwell-zm2936'
   workflow_dispatch:
 
 jobs:
@@ -104,18 +108,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          REF_NAME="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${REF_NAME#android-test}" != "$REF_NAME" ]; then
-            TAG="android-test"
-            gh release view "$TAG" >/dev/null 2>&1 || \
-              gh release create "$TAG" --prerelease --target "${{ github.sha }}" \
-                --title "Hanni Android test build" \
-                --notes "Manual test build — not picked up by updaters."
-            gh release edit "$TAG" --prerelease \
-              --notes "Manual test build from ${{ github.ref_name }} @ ${{ github.sha }} ($(date -u +%Y-%m-%dT%H:%MZ)) — not picked up by updaters."
-          else
-            TAG="${{ github.ref_name }}"
-          fi
+          case "${{ github.ref_name }}" in
+            v*) TAG="${{ github.ref_name }}" ;;
+            *)  # dispatch / android-test* tag / TEMP branch push → test prerelease
+                TAG="android-test"
+                gh release view "$TAG" >/dev/null 2>&1 || \
+                  gh release create "$TAG" --prerelease --target "${{ github.sha }}" \
+                    --title "Hanni Android test build" \
+                    --notes "Manual test build — not picked up by updaters."
+                gh release edit "$TAG" --prerelease \
+                  --notes "Manual test build from ${{ github.ref_name }} @ ${{ github.sha }} ($(date -u +%Y-%m-%dT%H:%MZ)) — not picked up by updaters." ;;
+          esac
           VERSION="${TAG#v}"
           APK=desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           if [ ! -f "$APK" ]; then
