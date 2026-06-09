@@ -170,7 +170,7 @@ function nodeBox(canvas, id) {
 }
 
 function edgeColor(t) {
-  if (t === 'after_duration') return 'var(--accent-orange, #c98b3c)';
+  if (t === 'after_duration') return 'var(--color-orange)';
   if (t === 'manual') return 'var(--accent-purple)';
   return 'var(--text-secondary)';
 }
