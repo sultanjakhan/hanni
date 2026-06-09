@@ -36,7 +36,8 @@ export async function renderCalendarRoutine(el) {
       </div>
     </div>`;
   el.querySelector('#rt-add-task').addEventListener('click', () => {
-    openAddTaskModal(S._routineChainId, () => draw(el));
+    // Reload before drawing — `chains` is a cache and doesn't have the new node.
+    openAddTaskModal(S._routineChainId, async () => { await loadChains(); draw(el); }, freeSpawnPos());
   });
   el.querySelector('#rt-add-chain').addEventListener('click', () => addChain(el));
   // Mouse wheel scrolls the wide graph horizontally.
@@ -67,6 +68,18 @@ async function addChain(el) {
 }
 
 function chain() { return chains.find(c => c.id === S._routineChainId); }
+
+// First spot on a diagonal cascade not already occupied by a node — new nodes
+// used to all land on (60,60) and stack into an unreadable pile.
+function freeSpawnPos() {
+  const nodes = chain()?.nodes || [];
+  let x = 60, y = 60;
+  while (nodes.some(n => Math.abs(n.pos_x - x) < 40 && Math.abs(n.pos_y - y) < 40)) {
+    x += 36; y += 36;
+    if (y > 600) { x = x - 540 + 36; y = 60; } // wrap before the canvas bottom
+  }
+  return { x, y };
+}
 
 function renderChainChips(el) {
   const box = el.querySelector('#rt-chains');

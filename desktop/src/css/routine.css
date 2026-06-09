@@ -58,8 +58,8 @@
 .rt-node[data-cat="home"]::before      { background: var(--accent-purple); }
 .rt-node[data-cat="practice"]::before  { background: var(--accent-blue); }
 .rt-node[data-cat="challenge"]::before { background: var(--color-red); }
-.rt-node[data-cat="growth"]::before    { background: var(--color-green); }
-.rt-node[data-cat="work"]::before      { background: var(--text-muted); }
+.rt-node[data-cat="growth"]::before    { background: var(--color-lime); }
+.rt-node[data-cat="work"]::before      { background: var(--text-secondary); }
 .rt-start {
   width: auto; max-width: 240px; background: var(--bg-elevated);
   border-radius: var(--radius-lg); padding: 9px 14px;

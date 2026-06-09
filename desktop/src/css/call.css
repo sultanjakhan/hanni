@@ -703,6 +703,14 @@ body.qw-popover-open #task-control-widget {
 /* Filled state after a pick — stays visible so the choice is clear and changeable. */
 .tw-check--on { background: var(--color-green); border-color: var(--color-green); color: #fff; opacity: 1; }
 .tw-skip--on  { background: var(--color-red);  border-color: var(--color-red);  color: #fff; opacity: 1; }
+/* Locked routine step: gated until tapped open — subdued + dashed so it reads
+   as "closed", not as a regular startable task row. */
+.tw-rt-locked {
+  opacity: 0.55;
+  border: 1px dashed var(--border-default);
+}
+.tw-rt-locked .tw-item-title { color: var(--text-muted); }
+.tw-rt-locked:hover { opacity: 0.85; background: var(--bg-hover); }
 /* Routine cancel: subtle, not a task-like row */
 .tw-rt-cancel { padding: 4px 10px; opacity: 0.55; }
 .tw-rt-cancel:hover { opacity: 1; }

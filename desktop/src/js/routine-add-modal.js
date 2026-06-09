@@ -30,7 +30,7 @@ async function fetchTasks(srcType) {
   return rows.map(e => ({ id: e.id, title: e.title, category: e.category || 'other' }));
 }
 
-export function openAddTaskModal(chainId, onAdd) {
+export function openAddTaskModal(chainId, onAdd, spawn = null) {
   if (!chainId) return;
   let src = 'schedule';
   const overlay = document.createElement('div');
@@ -70,7 +70,8 @@ export function openAddTaskModal(chainId, onAdd) {
         if (!task) return;
         await invoke('create_routine_node', {
           chainId, sourceType: src, sourceId: String(task.id),
-          title: task.title, category: task.category, posX: 60, posY: 60,
+          title: task.title, category: task.category,
+          posX: spawn?.x ?? 60, posY: spawn?.y ?? 60,
         }).catch(() => {});
         overlay.remove();
         onAdd();
