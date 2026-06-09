@@ -5,8 +5,10 @@ import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { renderCanvas } from './routine-canvas.js';
 import { openAddTaskModal } from './routine-add-modal.js';
+import { promptModal } from './routine-prompt.js';
 
 let chains = [];
+let schedById = {};   // schedule id → row; gives canvas nodes their step type
 
 // Multi-time "meal" chains (e.g. Еда: breakfast/lunch/dinner) are played per-slot
 // in the "+" widget as Завтрак/Обед/Ужин — they don't get a single chip here.
@@ -51,6 +53,8 @@ export async function renderCalendarRoutine(el) {
 
 async function loadChains() {
   chains = await invoke('get_routine_chains').catch(() => []);
+  const scheds = await invoke('get_schedules', { category: null }).catch(() => []);
+  schedById = Object.fromEntries(scheds.map(s => [String(s.id), s]));
   const visible = chains.filter(c => !isMealChain(c));
   if (!S._routineChainId || !visible.some(c => c.id === S._routineChainId)) {
     S._routineChainId = visible[0]?.id || null;
@@ -59,7 +63,7 @@ async function loadChains() {
 
 // Create a new chain (with its start node) and switch to it.
 async function addChain(el) {
-  const title = (prompt('Название цепочки') || '').trim();
+  const title = ((await promptModal({ title: 'Название цепочки', placeholder: 'Утро' })) || '').trim();
   if (!title) return;
   const id = await invoke('create_routine_chain', { title }).catch(() => null);
   if (!id) return;
@@ -103,5 +107,5 @@ function draw(el) {
   renderCanvas(el.querySelector('#rt-canvas'), c, async () => {
     await loadChains();
     draw(el);
-  });
+  }, schedById);
 }

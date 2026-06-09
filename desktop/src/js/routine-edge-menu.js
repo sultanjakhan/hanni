@@ -1,6 +1,7 @@
 // ── js/routine-edge-menu.js — Context menu for a routine graph edge ──
 // Change the edge's trigger type / value, or delete it.
 import { invoke } from './state.js';
+import { promptModal } from './routine-prompt.js';
 
 export function openEdgeMenu(canvas, chain, refresh, edge, ev) {
   canvas.querySelectorAll('.rt-edge-menu').forEach(m => m.remove());
@@ -19,7 +20,10 @@ export function openEdgeMenu(canvas, chain, refresh, edge, ev) {
     if (t === 'del') {
       await invoke('delete_routine_edge', { id: edge.id }).catch(() => {});
     } else if (t === 'after_duration') {
-      const v = parseInt(prompt('Через сколько минут?', edge.trigger_value || 55));
+      const raw = await promptModal({
+        title: 'Через сколько минут?', value: edge.trigger_value || 55, type: 'number',
+      });
+      const v = parseInt(raw);
       if (v > 0) await invoke('update_routine_edge', {
         id: edge.id, triggerType: 'after_duration', triggerValue: v,
       }).catch(() => {});

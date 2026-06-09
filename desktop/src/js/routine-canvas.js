@@ -5,6 +5,7 @@ import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { openNodeModal } from './routine-node-modal.js';
 import { openEdgeMenu } from './routine-edge-menu.js';
+import { isDanKoePractice } from './dankoe-quick-modal.js';
 
 const CAT_ICONS = {
   health: '💚', sport: '🔥', hygiene: '🫧', home: '🏡',
@@ -18,9 +19,9 @@ const TRIGGER_SUB = {
 };
 const TRIGGER_ICON = { sleep_end: '☀️', time: '🕐', manual: '▶️' };
 
-export function renderCanvas(canvas, chain, refresh) {
+export function renderCanvas(canvas, chain, refresh, schedById = {}) {
   canvas.querySelectorAll('.rt-node, .rt-edge-menu').forEach(n => n.remove());
-  for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain));
+  for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain, schedById));
   wireNodes(canvas, chain, refresh);
   renderEdges(canvas, chain, refresh, null);
   // On mobile, shrink the canvas to its node bounds. The fixed 1000×680 size
@@ -37,7 +38,26 @@ export function renderCanvas(canvas, chain, refresh) {
   }
 }
 
-function buildNode(n, chain) {
+// Step-type chip — same semantics as the "+" player rows (▶ timer / ✓ check /
+// «за вчера» reflection / 📓 Dan Koe journal), so the graph tells you how a
+// node will behave when the chain runs.
+function typeChip(n, schedById) {
+  const sched = n.source_type === 'schedule' && n.source_id != null
+    ? schedById[String(n.source_id)] : null;
+  if (!sched) return '';
+  const isRefl = !!sched.marks_previous_day;
+  const isCheck = sched.tracking_mode === 'check' || isRefl;
+  const [cls, ic, ttl] = isDanKoePractice(n.title)
+    ? ['', '📓', 'Шаг-дневник (Dan Koe)']
+    : isCheck
+      ? ['ck', '✓', isRefl ? 'Отметка за вчера' : 'Быстрая отметка']
+      : ['tr', '▶', 'Таймер-шаг'];
+  const time = sched.visible_from
+    ? `<span class="rt-node-time">${escapeHtml(sched.visible_from)}</span>` : '';
+  return `${time}<span class="rt-node-type ${cls}" title="${ttl}">${ic}${isRefl ? ' вчера' : ''}</span>`;
+}
+
+function buildNode(n, chain, schedById = {}) {
   const d = document.createElement('div');
   d.className = 'rt-node' + (n.is_start ? ' rt-start' : '');
   d.style.left = n.pos_x + 'px';
@@ -69,6 +89,7 @@ function buildNode(n, chain) {
       <div class="rt-node-top">
         <span class="rt-node-icon">${CAT_ICONS[n.category] || CAT_ICONS.other}</span>
         <span class="rt-node-title">${escapeHtml(n.title)}</span>
+        ${typeChip(n, schedById)}
       </div>
       ${meta}
       <div class="rt-port in"></div>
@@ -114,14 +135,18 @@ function wireNodes(canvas, chain, refresh) {
 // ── drag a node (persist on drop) or, if it didn't move, open its detail modal ──
 function startDrag(canvas, chain, refresh, el, n, e) {
   const sx = e.clientX, sy = e.clientY, ox = n.pos_x, oy = n.pos_y;
+  // Keep the node inside the canvas — it used to escape past the right/bottom
+  // edge (only 0,0 was clamped) and leave the dot-grid background.
+  const maxX = Math.max(0, canvas.offsetWidth - el.offsetWidth);
+  const maxY = Math.max(0, canvas.offsetHeight - el.offsetHeight);
   let moved = false;
   const move = (ev) => {
     if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) {
       moved = true;
       el.classList.add('rt-dragging');
     }
-    n.pos_x = Math.max(0, ox + ev.clientX - sx);
-    n.pos_y = Math.max(0, oy + ev.clientY - sy);
+    n.pos_x = Math.min(maxX, Math.max(0, ox + ev.clientX - sx));
+    n.pos_y = Math.min(maxY, Math.max(0, oy + ev.clientY - sy));
     el.style.left = n.pos_x + 'px';
     el.style.top = n.pos_y + 'px';
     renderEdges(canvas, chain, refresh, null);

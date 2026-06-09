@@ -96,6 +96,7 @@ calendar:
         - desktop/src/js/routine-node-modal.js
         - desktop/src/js/routine-node-sport.js
         - desktop/src/js/routine-edge-menu.js
+        - desktop/src/js/routine-prompt.js
         - desktop/src/css/routine.css
       rust:
         - desktop/src-tauri/src/routine.rs
