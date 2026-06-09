@@ -30,8 +30,8 @@ export async function renderCalendarRoutine(el) {
         <button class="rt-btn-add" id="rt-add-chain">＋ Цепочка</button>
         <span class="rt-toolbar-sep"></span>
         <button class="rt-btn-add" id="rt-add-task">＋ Задача</button>
-        <span class="rt-toolbar-info" tabindex="0"
-          title="Тяни узлы, чтобы расставить · тяни от круглого порта справа — рисуешь стрелку · клик по стрелке — сменить тип или удалить">ⓘ подсказка</span>
+        <span class="rt-toolbar-info" tabindex="0" role="button"
+          title="Жесты и типы связей">ⓘ подсказка</span>
       </div>
       <div class="rt-canvas-wrap">
         <div class="rt-canvas" id="rt-canvas"><svg class="rt-edges" id="rt-edges"></svg></div>
@@ -42,6 +42,11 @@ export async function renderCalendarRoutine(el) {
     openAddTaskModal(S._routineChainId, async () => { await loadChains(); draw(el); }, freeSpawnPos());
   });
   el.querySelector('#rt-add-chain').addEventListener('click', () => addChain(el));
+  const info = el.querySelector('.rt-toolbar-info');
+  info.addEventListener('click', () => toggleLegend(el));
+  info.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleLegend(el); }
+  });
   // Mouse wheel scrolls the wide graph horizontally.
   const wrap = el.querySelector('.rt-canvas-wrap');
   wrap.addEventListener('wheel', (e) => {
@@ -59,6 +64,33 @@ async function loadChains() {
   if (!S._routineChainId || !visible.some(c => c.id === S._routineChainId)) {
     S._routineChainId = visible[0]?.id || null;
   }
+}
+
+// Legend popover under the ⓘ — edge types and gestures. The old title-only
+// tooltip was unreachable on touch and unexplained the wire colors entirely.
+function toggleLegend(el) {
+  const ex = el.querySelector('.rt-legend');
+  if (ex) { ex.remove(); return; }
+  const lg = document.createElement('div');
+  lg.className = 'rt-legend';
+  lg.innerHTML = `
+    <div class="rt-leg-title">Связи</div>
+    <div class="rt-leg-row"><span class="rt-leg-line"></span>после завершения</div>
+    <div class="rt-leg-row"><span class="rt-leg-line rt-leg-line--dur"></span>через N минут</div>
+    <div class="rt-leg-row"><span class="rt-leg-line rt-leg-line--man"></span>вручную</div>
+    <div class="rt-leg-title">Шаги</div>
+    <div class="rt-leg-row"><span class="rt-leg-ic tr">▶</span>таймер</div>
+    <div class="rt-leg-row"><span class="rt-leg-ic ck">✓</span>быстрая отметка</div>
+    <div class="rt-leg-row"><span class="rt-leg-ic">📓</span>дневник</div>
+    <div class="rt-leg-hint">Тяни узел — расставить · клик по узлу — карточка ·
+      тяни от ○ порта — связь · клик по связи — тип / удалить</div>`;
+  el.querySelector('.rt-toolbar').appendChild(lg);
+  setTimeout(() => document.addEventListener('pointerdown', function close(e) {
+    if (!e.target.closest('.rt-legend, .rt-toolbar-info')) {
+      lg.remove();
+      document.removeEventListener('pointerdown', close);
+    }
+  }), 0);
 }
 
 // Create a new chain (with its start node) and switch to it.

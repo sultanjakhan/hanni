@@ -95,6 +95,8 @@
   background: var(--bg-elevated); border: 2px solid var(--border-hover);
   touch-action: none; /* not inherited from .rt-node — edge drawing on touch */
 }
+/* invisible halo: ~27px hit target for an 11px port (finger- and mouse-friendly) */
+.rt-port::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
 .rt-port.out { right: -7px; top: 50%; transform: translateY(-50%); cursor: crosshair; }
 .rt-port.out:hover { border-color: var(--accent-blue); background: var(--accent-blue); }
 .rt-port.in { left: -7px; top: 50%; transform: translateY(-50%); }
@@ -109,6 +111,8 @@
 .rt-node:hover .rt-node-del { display: flex; }
 /* no hover on touch — keep the delete button always visible there */
 .mobile .rt-node-del { display: flex; }
+/* invisible halo: ~30px hit target for the 18px ✕ */
+.rt-node-del::after { content: ''; position: absolute; inset: -6px; }
 
 /* edge menu popup */
 .rt-edge-menu {
@@ -131,6 +135,35 @@
   display: flex; gap: 8px; align-items: center;
   padding: 10px 14px; border-bottom: 1px solid var(--border-default);
   flex-shrink: 0;
+  position: relative; /* anchors the ⓘ legend popover */
+}
+
+/* ⓘ legend popover: edge types + gestures (tooltip is unreachable on touch) */
+.rt-legend {
+  position: absolute; top: calc(100% + 6px); right: 14px; z-index: 50;
+  background: var(--bg-elevated); border: 1px solid var(--border-hover);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+  padding: 10px 12px; width: 240px; font-size: 12px; color: var(--text-secondary);
+  animation: rt-pop-in 120ms cubic-bezier(0.4,0,0.2,1);
+}
+.rt-leg-title {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-muted); margin: 8px 0 4px;
+}
+.rt-leg-title:first-child { margin-top: 0; }
+.rt-leg-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.rt-leg-line {
+  flex-shrink: 0; width: 22px; height: 0;
+  border-top: 2px solid var(--text-secondary);
+}
+.rt-leg-line--dur { border-top-style: dashed; border-top-color: var(--color-orange); }
+.rt-leg-line--man { border-top-style: dotted; border-top-color: var(--accent-purple); }
+.rt-leg-ic { flex-shrink: 0; width: 22px; text-align: center; font-size: 11px; }
+.rt-leg-ic.tr { color: var(--accent-blue); }
+.rt-leg-ic.ck { color: var(--color-green); }
+.rt-leg-hint {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);
+  font-size: 11px; color: var(--text-muted); line-height: 1.45;
 }
 .rt-toolbar-sep {
   width: 1px; height: 18px; background: var(--border-default); margin: 0 2px;
