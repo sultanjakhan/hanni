@@ -89,20 +89,23 @@ function openTriggerModal(node, chain, refresh) {
 // Pull human-readable info about the node's linked source.
 async function fetchSourceInfo(sourceType, sourceId) {
   if (!sourceId) return null;
+  // source_id is stored as TEXT; schedule ids are UUID strings, event/note ids
+  // come back numeric from their queries — compare as strings.
+  const sid = String(sourceId);
   try {
     if (sourceType === 'schedule') {
       const rows = await invoke('get_schedules', { category: null });
-      const s = rows.find(r => r.id === sourceId);
+      const s = rows.find(r => String(r.id) === sid);
       return s ? { detail: s.details || '', extra: s.time_of_day || s.frequency || '' } : null;
     }
     if (sourceType === 'note') {
       const rows = await invoke('get_notes', { filter: null, search: null });
-      const n = rows.find(r => r.id === sourceId);
+      const n = rows.find(r => String(r.id) === sid);
       return n ? { detail: (n.content || '').slice(0, 200), extra: '' } : null;
     }
     const now = new Date();
     const rows = await invoke('get_events', { month: now.getMonth() + 1, year: now.getFullYear() });
-    const e = rows.find(r => r.id === sourceId);
+    const e = rows.find(r => String(r.id) === sid);
     return e ? { detail: e.description || '', extra: [e.date, e.time].filter(Boolean).join(' ') } : null;
   } catch { return null; }
 }

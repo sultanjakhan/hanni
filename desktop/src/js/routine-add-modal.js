@@ -64,9 +64,12 @@ export function openAddTaskModal(chainId, onAdd) {
     </div>`).join('');
     listEl.querySelectorAll('[data-tid]').forEach(item => {
       item.addEventListener('click', async () => {
-        const task = tasks.find(t => t.id === parseInt(item.dataset.tid));
+        // Schedule ids are UUID strings (cr-sqlite), event/note ids are numbers —
+        // compare and send as strings (Rust side takes Option<String>).
+        const task = tasks.find(t => String(t.id) === item.dataset.tid);
+        if (!task) return;
         await invoke('create_routine_node', {
-          chainId, sourceType: src, sourceId: task.id,
+          chainId, sourceType: src, sourceId: String(task.id),
           title: task.title, category: task.category, posX: 60, posY: 60,
         }).catch(() => {});
         overlay.remove();
