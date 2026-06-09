@@ -188,8 +188,9 @@ fn init_database() -> HanniDb {
     // (PRAGMA table_info / SELECT) on every call — ~1.3s of pure waste on
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
-    // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 8;
+    // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block
+    // (or change SYNC_TABLES — migrate_sync_meta must re-run to bind triggers).
+    const SCHEMA_VERSION: i64 = 9;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
