@@ -74,7 +74,7 @@ export function enableColumnDrag(tableEl, tabId, reloadFn, visProps) {
 
       ghost = th.cloneNode(true);
       ghost.className = 'col-drag-ghost';
-      ghost.style.cssText = `position:fixed;top:${th.getBoundingClientRect().top}px;left:${e.clientX - 40}px;width:${th.offsetWidth}px;height:${th.offsetHeight}px;opacity:0.85;pointer-events:none;z-index:9999;background:var(--bg-secondary);border:1px solid var(--accent-blue);border-radius:4px;display:flex;align-items:center;padding:0 8px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);`;
+      ghost.style.cssText = `position:fixed;top:${th.getBoundingClientRect().top}px;left:${e.clientX - 40}px;width:${th.offsetWidth}px;height:${th.offsetHeight}px;opacity:0.85;pointer-events:none;z-index:9999;background:var(--bg-card);border:1px solid var(--accent-blue);border-radius:4px;display:flex;align-items:center;padding:0 8px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.15);`;
       document.body.appendChild(ghost);
 
       document.addEventListener('mousemove', onMove);

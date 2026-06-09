@@ -35,7 +35,7 @@ listen('update-ready', (event) => {
   const v = event.payload || updaterVersion;
   setUpdaterBanner(
     `Готово: v${v} установлена · ` +
-    `<button id="updater-restart-btn" style="background:var(--bg-accent,#333);color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;">Перезапустить</button>`
+    `<button id="updater-restart-btn" style="background:var(--accent-blue);color:#fff;border:none;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;">Перезапустить</button>`
   );
   document.getElementById('updater-restart-btn')?.addEventListener('click', () => {
     invoke('restart_app');
@@ -45,7 +45,7 @@ listen('update-error', (event) => {
   const msg = event.payload || 'Ошибка';
   setUpdaterBanner(
     `Обновление не установилось: ${escapeHtml(String(msg))} · ` +
-    `<a href="https://github.com/sultanjakhan/hanni/releases/latest" target="_blank" style="color:var(--text-accent,#06f);">Скачать DMG вручную</a>`
+    `<a href="https://github.com/sultanjakhan/hanni/releases/latest" target="_blank" style="color:var(--accent-blue);">Скачать DMG вручную</a>`
   );
 });
 
@@ -345,7 +345,7 @@ async function loadChatSettings() {
             <span class="settings-label" style="font-size:12px">Агент, 24 инструмента, Talk Mode, Telegram</span>
           </div>
           <div class="settings-row" style="opacity:0.7">
-            <span class="settings-label" style="font-size:12px">Дашборд: <a href="#" onclick="window.__TAURI__.shell.open('http://127.0.0.1:18789/');return false" style="color:var(--blue)">localhost:18789</a></span>
+            <span class="settings-label" style="font-size:12px">Дашборд: <a href="#" onclick="window.__TAURI__.shell.open('http://127.0.0.1:18789/');return false" style="color:var(--accent-blue)">localhost:18789</a></span>
           </div>
         </div>
         <div class="settings-section">
@@ -371,7 +371,7 @@ async function loadChatSettings() {
         <div class="settings-section">
           <div class="settings-section-title">Data Flywheel</div>
           <div class="settings-row"><span class="settings-label">Всего thumbs-up</span><span class="settings-value">${trainFlywheel.thumbs_up_total}</span></div>
-          <div class="settings-row"><span class="settings-label">Новых (не экспортировано)</span><span class="settings-value" style="${trainFlywheel.new_pairs >= 20 ? 'color:var(--accent)' : ''}">${trainFlywheel.new_pairs}</span></div>
+          <div class="settings-row"><span class="settings-label">Новых (не экспортировано)</span><span class="settings-value" style="${trainFlywheel.new_pairs >= 20 ? 'color:var(--accent-blue)' : ''}">${trainFlywheel.new_pairs}</span></div>
           <div class="settings-row"><span class="settings-label">Циклов обучения</span><span class="settings-value">${trainFlywheel.total_cycles}</span></div>
           <div class="settings-row"><span class="settings-label">Последний цикл</span><span class="settings-value">${trainFlywheel.last_cycle ? trainFlywheel.last_cycle.date.substring(0,10) + ' — ' + trainFlywheel.last_cycle.status : '—'}</span></div>
           <div class="settings-row">
@@ -388,7 +388,7 @@ async function loadChatSettings() {
           <div style="margin-top:12px;">
             <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">История циклов:</div>
             ${trainHistory.slice(0, 5).map(c => `
-              <div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border-color);">
+              <div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border-default);">
                 #${c.id} ${(c.started_at || '').substring(0,16)} — ${c.status} (${c.train_pairs} пар)${c.eval_score != null ? ' score:' + c.eval_score.toFixed(2) : ''}
               </div>
             `).join('')}
@@ -772,7 +772,7 @@ function _chatSettingsSetupMemory(memories) {
       const cat = overlay.querySelector('.memory-add-cat').value;
       const key = overlay.querySelector('.memory-add-key').value.trim();
       const val = overlay.querySelector('.memory-add-val').value.trim();
-      if (!key || key.length < 2 || !val || val.length < 2) { overlay.querySelector('.memory-add-key').style.borderColor = !key || key.length < 2 ? 'var(--accent)' : ''; return; }
+      if (!key || key.length < 2 || !val || val.length < 2) { overlay.querySelector('.memory-add-key').style.borderColor = !key || key.length < 2 ? 'var(--accent-blue)' : ''; return; }
       try { await invoke('memory_remember', { category: cat, key, value: val }); } catch (err) { console.error(err); }
       overlay.remove();
       reloadMem();

@@ -364,7 +364,7 @@
   cursor: pointer;
   color: var(--text-secondary);
   position: relative;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   transition: all 0.15s;
   flex-shrink: 0;
 }
@@ -381,7 +381,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent-green, #22c55e);
+  background: var(--color-green);
   border: 2px solid var(--bg-elevated);
   animation: mw-pulse 2s ease infinite;
 }
@@ -401,7 +401,7 @@
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg, 12px);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   animation: nw-slideIn 0.15s ease;
   transform-origin: bottom right;
   margin-bottom: 8px;
@@ -422,7 +422,7 @@
 .ap-stop-all {
   background: none;
   border: none;
-  color: var(--accent-red, #ef4444);
+  color: var(--color-red);
   font-size: 11px;
   cursor: pointer;
   padding: 2px 6px;
@@ -530,8 +530,8 @@
   background: var(--bg-hover);
 }
 .ap-play.playing {
-  background: var(--accent-green, #22c55e);
-  border-color: var(--accent-green, #22c55e);
+  background: var(--color-green);
+  border-color: var(--color-green);
   color: #fff;
 }
 
@@ -579,7 +579,7 @@ body.qw-popover-open #task-control-widget {
   cursor: pointer;
   color: var(--text-secondary);
   position: relative;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   transition: all 0.15s;
   flex-shrink: 0;
 }
@@ -604,7 +604,7 @@ body.qw-popover-open #task-control-widget {
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg, 12px);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 8px;
   max-height: min(360px, calc(100vh - 420px));
   overflow-y: auto;
@@ -780,7 +780,7 @@ body.qw-popover-open #task-control-widget {
   cursor: pointer;
   color: var(--text-secondary);
   position: relative;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   transition: all 0.15s;
   flex-shrink: 0;
 }
@@ -797,7 +797,7 @@ body.qw-popover-open #task-control-widget {
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg, 12px);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   animation: nw-slideIn 0.15s ease;
   transform-origin: bottom right;
   margin-bottom: 8px;
@@ -889,7 +889,7 @@ body.qw-popover-open #task-control-widget {
   cursor: pointer;
   color: var(--text-secondary);
   position: relative;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   transition: all 0.15s;
   flex-shrink: 0;
 }
@@ -903,7 +903,7 @@ body.qw-popover-open #task-control-widget {
   position: absolute;
   top: -4px;
   right: -4px;
-  background: var(--accent-red, #ef4444);
+  background: var(--color-red);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -921,7 +921,7 @@ body.qw-popover-open #task-control-widget {
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   width: 280px;
   max-height: 360px;
   overflow-y: auto;
@@ -972,7 +972,7 @@ body.qw-popover-open #task-control-widget {
   color: var(--text-faint);
 }
 
-.nw-overdue .nw-time { color: var(--accent-red, #ef4444); }
+.nw-overdue .nw-time { color: var(--color-red); }
 .nw-event .nw-time { color: var(--accent-blue, #3b82f6); }
 
 .nw-footer {
@@ -1015,7 +1015,7 @@ body.qw-popover-open #task-control-widget {
   cursor: pointer;
   font-size: 18px;
   transition: all 0.15s ease;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   flex-shrink: 0;
 }
 .focus-widget-btn:hover {
@@ -1030,7 +1030,7 @@ body.qw-popover-open #task-control-widget {
   border-radius: var(--radius-lg);
   padding: 14px;
   width: 240px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   animation: fw-scaleIn 0.15s ease;
   transform-origin: bottom right;
 }
@@ -1082,7 +1082,7 @@ body.qw-popover-open #task-control-widget {
   transition: all 0.12s ease;
 }
 .fw-preset:hover { border-color: var(--border-hover); color: var(--text-primary); }
-.fw-preset.selected { border-color: var(--accent-blue); color: var(--accent-blue); background: var(--blue-bg); }
+.fw-preset.selected { border-color: var(--accent-blue); color: var(--accent-blue); background: var(--color-blue-bg); }
 
 .fw-start-btn {
   width: 100%;
@@ -1104,11 +1104,11 @@ body.qw-popover-open #task-control-widget {
   gap: 8px;
   padding: 6px 10px 6px 12px;
   border-radius: var(--radius-pill);
-  background: var(--blue-bg);
+  background: var(--color-blue-bg);
   border: 1px solid var(--accent-blue);
   font-size: 13px;
   color: var(--text-primary);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   animation: fw-scaleIn 0.15s ease;
   cursor: pointer;
 }
@@ -1149,7 +1149,7 @@ body.qw-popover-open #task-control-widget {
   transition: all 0.12s ease;
   flex-shrink: 0;
 }
-.fw-stop-btn:hover { border-color: var(--accent-red); color: var(--accent-red); }
+.fw-stop-btn:hover { border-color: var(--color-red); color: var(--color-red); }
 
 .fw-popout-btn {
   width: 24px;
@@ -1185,7 +1185,7 @@ body.qw-popover-open #task-control-widget {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-sm);
   transition: all 0.15s ease;
 }
 .chat-overlay-fab:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
@@ -1438,7 +1438,7 @@ body.qw-popover-open #task-control-widget {
 }
 .dk-quick-modal {
   background: var(--bg-elevated); border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-card);
+  border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-sm);
   width: 100%; max-width: 560px; max-height: calc(100vh - 48px);
   display: flex; flex-direction: column; overflow: hidden;
 }

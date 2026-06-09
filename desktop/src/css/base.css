@@ -37,9 +37,11 @@
   /* ── Legacy aliases ──
      Non-canonical names that accumulated across tabs. Without these
      definitions, no-fallback usages were silently invalid (transparent
-     backgrounds, inherited colors, no shadows). Aliases resolve through
-     the canonical tokens, so both themes work. Prefer canonical names in
-     new code; migrating old usages is tracked tech debt. */
+     backgrounds, inherited colors, no shadows). All static usages were
+     migrated to canonical tokens (2026-06); aliases remain as a safety
+     net for dynamically built names (e.g. var(--color-${cat}) can yield
+     --color-teal) and for guest-shared files that fall back gracefully.
+     Use canonical names in new code. */
   --accent: var(--accent-blue);
   --accent-bg: var(--bg-hover);
   --accent-blue-bg: var(--color-blue-bg);

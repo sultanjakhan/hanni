@@ -92,7 +92,7 @@ export async function showScheduleTemplatesModal(reloadFn) {
       <div style="display:flex;flex-direction:column;gap:4px;">`;
     for (const item of g.items) {
       const exists = existingTitles.has(item.title.toLowerCase());
-      html += `<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 8px;border-radius:var(--radius-1);cursor:pointer;${exists ? 'opacity:0.4;' : ''}">
+      html += `<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 8px;border-radius:var(--radius-sm);cursor:pointer;${exists ? 'opacity:0.4;' : ''}">
         <input type="checkbox" class="tpl-cb" data-cat="${g.cat}" data-title="${item.title}" data-freq="${item.freq}" ${exists ? 'disabled' : ''}>
         <span>${item.title}</span>
         ${exists ? '<span style="font-size:11px;color:var(--text-faint);">уже есть</span>' : ''}

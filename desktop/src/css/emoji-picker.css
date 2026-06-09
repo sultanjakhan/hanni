@@ -29,14 +29,14 @@
   padding: 6px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  background: var(--bg-page);
   color: var(--text-primary);
   font-size: 12px;
   outline: none;
 }
 
 .emoji-picker-search input:focus {
-  border-color: var(--border-active);
+  border-color: var(--border-focus);
 }
 
 .emoji-picker-cats {
@@ -79,7 +79,7 @@
 .emoji-section-label {
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   padding: 6px 0 3px 0;
   text-transform: uppercase;
   letter-spacing: 0.5px;

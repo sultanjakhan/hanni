@@ -192,7 +192,7 @@
   width: 3px; align-self: stretch; border-radius: 2px;
   background: transparent; flex-shrink: 0; margin: -8px 0 -8px -8px;
 }
-.ctl-priority-1 { background: var(--accent-yellow, #f59e0b); }
+.ctl-priority-1 { background: var(--color-yellow); }
 .ctl-priority-2 { background: var(--color-red, #d32f2f); }
 .ctl-section-title + .ctl-row { border-top: none; }
 .ctl-row:hover { background: var(--bg-hover); }
@@ -843,14 +843,14 @@
   border: none;
   cursor: pointer;
   font-size: 16px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   transition: opacity var(--transition-fast), color var(--transition-fast);
   flex-shrink: 0;
 }
-.trash-restore:hover { color: var(--accent-green); }
-.trash-delete:hover { color: var(--accent-red); }
+.trash-restore:hover { color: var(--color-green); }
+.trash-delete:hover { color: var(--color-red); }
 
 .trash-list { display: flex; flex-direction: column; }
 
@@ -1534,7 +1534,7 @@
 .wf-chapter-item:hover { background: var(--bg-hover); }
 .wf-chapter-num {
   width: 24px; height: 24px; border-radius: 50%;
-  background: var(--bg-tertiary); color: var(--text-muted);
+  background: var(--bg-hover); color: var(--text-muted);
   font-size: 12px; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; margin-top: 2px;
@@ -1593,7 +1593,7 @@
 .rf-reset { margin-left: auto; padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
 .rf-reset:hover { color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
 .rf-active-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
-.rf-active-chip { padding: 3px 9px; border-radius: var(--radius-sm); border: 1px solid var(--accent-fill); background: var(--accent-bg, var(--bg-hover)); color: var(--accent-fill); font-size: 12px; cursor: pointer; font-family: inherit; }
+.rf-active-chip { padding: 3px 9px; border-radius: var(--radius-sm); border: 1px solid var(--accent-fill); background: var(--bg-hover); color: var(--accent-fill); font-size: 12px; cursor: pointer; font-family: inherit; }
 .rf-active-chip:hover { background: var(--color-red-bg, rgba(224,62,62,0.12)); color: var(--color-red, #e03e3e); border-color: var(--color-red, #e03e3e); }
 .rf-section { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rf-title { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 55px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -1648,9 +1648,9 @@
 .recipe-card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
 .recipe-card-ingr { display: flex; gap: 4px; flex-wrap: wrap; }
 .recipe-diff { font-size: 11px; padding: 1px 6px; border-radius: var(--radius-sm); }
-.recipe-diff-easy { background: var(--bg-success); color: var(--text-success); }
-.recipe-diff-medium { background: var(--bg-warning); color: var(--text-warning); }
-.recipe-diff-hard { background: var(--bg-danger); color: var(--text-danger); }
+.recipe-diff-easy { background: var(--color-green-bg); color: var(--color-green); }
+.recipe-diff-medium { background: var(--color-yellow-bg); color: var(--color-yellow); }
+.recipe-diff-hard { background: var(--color-red-bg); color: var(--color-red); }
 .badge-purple { background: #f0e6ff; color: #7c3aed; }
 [data-theme="dark"] .badge-purple { background: #2d1b59; color: #a78bfa; }
 
@@ -1757,7 +1757,7 @@
 .product-cat-orange { background: var(--color-orange-bg); color: var(--color-orange); }
 .product-cat-yellow { background: var(--color-yellow-bg); color: var(--color-yellow); }
 .product-cat-purple { background: var(--color-purple-bg); color: var(--color-purple); }
-.product-cat-teal { background: var(--color-teal-bg, var(--color-green-bg)); color: var(--color-teal, var(--color-green)); }
+.product-cat-teal { background: var(--color-green-bg); color: var(--color-green); }
 .product-cat-brown { background: var(--color-orange-bg); color: var(--color-orange); }
 .product-cat-pink { background: var(--color-pink-bg, var(--color-red-bg)); color: var(--color-pink, var(--color-red)); }
 .product-cat-amber { background: var(--color-yellow-bg); color: var(--color-yellow); }
@@ -1883,7 +1883,7 @@
 .rd-serv .serv-btn:hover { border-color: var(--accent-fill); color: var(--accent-fill); }
 .rd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
 .rd-tag { font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm); background: var(--bg-hover); color: var(--text-secondary); }
-.rd-tag--meal { background: var(--accent-bg, var(--bg-hover)); color: var(--accent-fill); }
+.rd-tag--meal { background: var(--bg-hover); color: var(--accent-fill); }
 .rd-cooked { font-size: 12px; color: var(--text-muted); margin-bottom: 14px; }
 .cook-log { display: flex; flex-direction: column; gap: 8px; }
 .cook-log-entry { border: 1px solid var(--border-subtle, var(--border-default)); border-radius: var(--radius-sm); padding: 6px 10px; }
@@ -1891,7 +1891,7 @@
 .cook-log-date { font-size: 13px; color: var(--text-primary); }
 .cook-log-stars .rd-star { font-size: 14px; cursor: default; }
 .cook-log-note { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
-.mp-recipe-option.selected { background: var(--accent-bg, var(--bg-hover)); border-radius: var(--radius-sm); }
+.mp-recipe-option.selected { background: var(--bg-hover); border-radius: var(--radius-sm); }
 .rd-photo { width: 100%; max-height: 220px; object-fit: cover; border-radius: var(--radius-md); margin-bottom: 12px; display: block; }
 .recipe-card-thumb { width: 100%; height: 120px; object-fit: cover; border-radius: var(--radius-md); margin-bottom: 10px; display: block; }
 .rd-cooked-block { border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: 10px 12px; }
@@ -2211,7 +2211,7 @@
   padding: 1px 6px; background: var(--bg-hover); border-radius: 8px;
 }
 .cal-chart-filter-group[open] > .cal-chart-filter-group-head .cal-chart-filter-group-count {
-  background: var(--bg-default, var(--bg-hover));
+  background: var(--bg-hover);
 }
 .cal-chart-filter-group-body { padding: 4px 12px 12px 12px; }
 .cal-chart-filter-empty { font-size: 12px; color: var(--text-muted); padding: 4px 8px; }
@@ -2331,7 +2331,7 @@
 .sl-list {
   max-height: 320px; overflow-y: auto;
   border: 1px solid var(--border-default); border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  background: var(--bg-card);
 }
 .sl-row {
   display: flex; align-items: center; gap: 10px; padding: 8px 12px;

@@ -1937,7 +1937,7 @@ function showFrozenPopover(anchor, frozen, onUnfreeze) {
     menu.innerHTML =
       `<div style="padding:8px 12px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border-subtle);">Заморожено · клик или ПКМ → Разморозить</div>
        <table style="font-size:13px;width:100%;border-collapse:collapse;table-layout:fixed;">
-         <thead><tr style="background:var(--bg-secondary);">
+         <thead><tr style="background:var(--bg-card);">
            <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:28%;">Название</th>
            <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:20%;">Категория</th>
            <th style="padding:6px 10px;text-align:left;font-weight:500;color:var(--text-muted);font-size:12px;width:22%;">Повторение</th>
@@ -2110,7 +2110,7 @@ async function loadSchedule(subTab) {
         tbody.querySelector('.dbv-expired-separator')?.remove();
         const sep = document.createElement('tr');
         sep.className = 'dbv-expired-separator';
-        sep.innerHTML = `<td colspan="${colCount}" style="padding:10px 10px 6px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;background:var(--bg-secondary);border-top:1px solid var(--border-subtle);">Истекшие</td>`;
+        sep.innerHTML = `<td colspan="${colCount}" style="padding:10px 10px 6px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;background:var(--bg-card);border-top:1px solid var(--border-subtle);">Истекшие</td>`;
         tr.before(sep);
         list.forEach(s => {
           if (!isScheduleExpired(s)) return;
@@ -2464,7 +2464,7 @@ function dkRenderHeader(active) {
   ];
   const pills = tabs.map(t => {
     const isActive = active === t.key;
-    return `<button class="dk-tab" data-view="${t.key}" style="padding:6px 14px;border-radius:var(--radius-1);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-active)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;">${t.icon} ${escapeHtml(t.label)}</button>`;
+    return `<button class="dk-tab" data-view="${t.key}" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-hover)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;">${t.icon} ${escapeHtml(t.label)}</button>`;
   }).join('');
   return `
     <div class="module-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
@@ -2503,13 +2503,13 @@ async function loadDanKoe(subTab) {
 
 function dkRenderInstructions(el) {
   const cards = DK_PRACTICES.map(p => `
-    <div style="padding:18px;border-radius:var(--radius-2);border:1px solid var(--border-subtle);background:var(--bg-card);margin-bottom:16px;">
+    <div style="padding:18px;border-radius:var(--radius-lg);border:1px solid var(--border-subtle);background:var(--bg-card);margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <span style="font-size:22px;">${p.icon}</span>
         <span style="font-size:16px;font-weight:600;color:var(--text-primary);">${escapeHtml(p.label)}</span>
       </div>
       <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">${escapeHtml(p.what)}</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-1);"><b>Зачем:</b> ${escapeHtml(p.why)}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-sm);"><b>Зачем:</b> ${escapeHtml(p.why)}</div>
       <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Как делать:</div>
       <ul style="margin:0 0 10px 16px;padding:0;font-size:13px;color:var(--text-secondary);line-height:1.7;">
         ${p.how.map(h => `<li>${escapeHtml(h)}</li>`).join('')}
@@ -2522,7 +2522,7 @@ function dkRenderInstructions(el) {
     </div>`).join('');
   el.innerHTML = `
     ${dkRenderHeader('instructions')}
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;padding:10px 12px;border-radius:var(--radius-1);background:var(--bg-hover);">
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg-hover);">
       ℹ️ Запись практик за день — через событие в календаре. Здесь — только описание и история.
     </div>
     ${cards}`;
@@ -2540,7 +2540,7 @@ async function dkRenderHistory(el) {
   ];
   const chips = filterTypes.map(t => {
     const isActive = filter === t.key;
-    return `<button class="dk-chip" data-filter="${t.key}" style="padding:6px 12px;border-radius:var(--radius-1);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-active)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;margin-right:6px;">${t.icon} ${escapeHtml(t.label)}</button>`;
+    return `<button class="dk-chip" data-filter="${t.key}" style="padding:6px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-hover)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;margin-right:6px;">${t.icon} ${escapeHtml(t.label)}</button>`;
   }).join('');
 
   const visibleKeys = filter === 'all' ? DK_TEXT_TABS : [filter];
@@ -2576,7 +2576,7 @@ async function dkRenderHistory(el) {
   const tableBody = rows
     ? `<tbody>${rows}</tbody>`
     : `<tbody><tr><td colspan="${colSpan}" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:13px;">Пока пусто. Записи появятся здесь после заполнения через событие в календаре.</td></tr></tbody>`;
-  const tableHtml = `<table style="width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:var(--radius-2);overflow:hidden;border:1px solid var(--border-subtle);">${tableHeader}${tableBody}</table>`;
+  const tableHtml = `<table style="width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border-subtle);">${tableHeader}${tableBody}</table>`;
 
   el.innerHTML = `
     ${dkRenderHeader('history')}
@@ -2605,7 +2605,7 @@ function dkOpenViewer(date, label, icon, text) {
   overlay.className = 'dk-viewer-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center;';
   overlay.innerHTML = `
-    <div style="background:var(--bg-card);border-radius:var(--radius-2);max-width:600px;width:90%;max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--border-subtle);">
+    <div style="background:var(--bg-card);border-radius:var(--radius-lg);max-width:600px;width:90%;max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--border-subtle);">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;">
         <div style="font-size:14px;font-weight:600;color:var(--text-primary);">${icon} ${escapeHtml(label)} · ${escapeHtml(date)}</div>
         <button class="dk-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);">×</button>

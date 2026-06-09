@@ -30,7 +30,7 @@
 
 .tl-row { height: 20px; }
 .tl-row-half { height: 20px; }
-.tl-row:nth-child(even) { background: var(--bg-secondary); }
+.tl-row:nth-child(even) { background: var(--bg-card); }
 
 .tl-time-label {
   width: 50px;
@@ -95,7 +95,7 @@
 /* Dashboard */
 .tl-dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .tl-dash-card {
-  background: var(--bg-secondary);
+  background: var(--bg-card);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   padding: 12px 16px;
@@ -129,8 +129,8 @@
 .tl-month-header { font-size: 12px; font-weight: 500; color: var(--text-muted); padding: 6px 4px; text-align: center; border-bottom: 1px solid var(--border-default); }
 .tl-month-cell { border: 1px solid var(--border-subtle); padding: 6px; vertical-align: top; height: 70px; cursor: pointer; transition: background var(--transition-fast); }
 .tl-month-cell:hover { background: var(--bg-hover); }
-.tl-month-cell.tl-today { background: rgba(var(--accent-blue-rgb, 59,130,246), 0.06); }
-.tl-month-empty { background: var(--bg-secondary); cursor: default; }
+.tl-month-cell.tl-today { background: rgba(var(--accent-blue-rgb), 0.06); }
+.tl-month-empty { background: var(--bg-card); cursor: default; }
 .tl-month-day-num { font-size: 12px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px; }
 .tl-month-cell.tl-today .tl-month-day-num { color: var(--accent-blue); font-weight: 600; }
 .tl-month-bars { display: flex; flex-direction: column; gap: 2px; }
@@ -147,14 +147,14 @@
 .tt-card {
   display: flex;
   align-items: stretch;
-  background: var(--bg-secondary);
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 .tt-card:hover { background: var(--bg-hover); border-color: var(--border-default); }
-.tt-card-bar { width: 3px; background: var(--card-accent, var(--accent-blue)); flex-shrink: 0; }
+.tt-card-bar { width: 3px; background: var(--accent-blue); flex-shrink: 0; }
 .tt-card-body { flex: 1; padding: 10px 12px; min-width: 0; }
 .tt-card-head { display: flex; align-items: center; gap: 8px; }
 .tt-card-title { font-size: 14px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

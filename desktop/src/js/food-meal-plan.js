@@ -3,7 +3,7 @@ import { invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 
 const MEAL_LABELS = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snack: 'Перекус' };
-const MEAL_COLORS = { breakfast: 'var(--accent-yellow, #d4a843)', lunch: 'var(--color-green)', dinner: 'var(--accent-purple)', snack: 'var(--text-muted)' };
+const MEAL_COLORS = { breakfast: 'var(--color-yellow)', lunch: 'var(--color-green)', dinner: 'var(--accent-purple)', snack: 'var(--text-muted)' };
 
 export async function renderMealPlanBlock(date) {
   const meals = await invoke('get_meal_plan', { date }).catch(() => []);

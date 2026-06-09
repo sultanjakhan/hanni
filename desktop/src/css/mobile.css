@@ -1,7 +1,7 @@
 /* ── Mobile preview mode (force-mobile via localStorage flag) ──
    Constrains body width to 360px so desktop dev window can preview mobile. */
 .mobile-preview body, html.mobile-preview body { max-width: 360px; min-width: 360px; margin-left: 0; box-shadow: 2px 0 0 var(--accent-blue, #4f8cff); overflow-x: hidden; }
-.mobile-preview { background: var(--bg-base, #1a1a1a); }
+.mobile-preview { background: var(--bg-page); }
 
 /* ── Mobile fixes (toolbar + FAB + Day-grid) ── */
 

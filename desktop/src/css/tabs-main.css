@@ -1265,7 +1265,7 @@
 
 /* Column selection highlight */
 .col-selected {
-  background: var(--accent-blue-bg, rgba(37, 99, 235, 0.06)) !important;
+  background: var(--color-blue-bg) !important;
 }
 
 .col-menu-title {
@@ -1296,7 +1296,7 @@
 .col-menu-item.toggle { justify-content: space-between; }
 .col-menu-toggle {
   width: 28px; height: 16px; border-radius: 8px;
-  background: var(--border-light); position: relative;
+  background: var(--border-subtle); position: relative;
   flex-shrink: 0; transition: background var(--transition-fast);
 }
 .col-menu-toggle::after {
