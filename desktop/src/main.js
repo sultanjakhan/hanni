@@ -28,12 +28,10 @@ import { initMusicWidget } from './js/music-widget.js';
 import { initQuotesWidget } from './js/quotes-widget.js';
 import { initTaskControlWidget } from './js/task-control-widget.js';
 import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, createAndOpenNote, createAndOpenTask } from './js/tab-notes.js';
-import {
-  loadHome, loadFood, loadMoney, loadPeople,
-  loadMemoryTab, loadAbout, loadJobs, loadProjects, loadDevelopment,
-  loadHobbies, loadSports, loadHealth, loadCustomPage,
-  loadSchedule, loadDanKoe,
-} from './js/tab-data.js';
+// tab-data.js is loaded lazily (see lazyData below). It's the heaviest module
+// in the bundle and statically pulls in the whole db-view engine (~40 files),
+// none of which the default Calendar boot view needs — keeping it off the
+// cold-start parse path is the biggest single entry-latency win.
 import { autoImportHealth, startHealthPolling, maybeRequestHealthBackground } from './js/health-auto-sync.js';
 import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot, desktopWebOTA, webAppliedToast } from './js/android-update.js';
 
@@ -119,19 +117,25 @@ tabLoaders.stopWakeWordSSE = stopWakeWordSSE;
 tabLoaders.loadCalendar = loadCalendar;
 tabLoaders.loadFocus = loadFocus;
 tabLoaders.loadNotes = loadNotes;
-tabLoaders.loadJobs = loadJobs;
-tabLoaders.loadProjects = loadProjects;
-tabLoaders.loadDevelopment = loadDevelopment;
-tabLoaders.loadHome = loadHome;
-tabLoaders.loadHobbies = loadHobbies;
-tabLoaders.loadSports = loadSports;
-tabLoaders.loadHealth = loadHealth;
-tabLoaders.loadFood = loadFood;
-tabLoaders.loadMoney = loadMoney;
-tabLoaders.loadPeople = loadPeople;
-tabLoaders.loadSchedule = loadSchedule;
-tabLoaders.loadDanKoe = loadDanKoe;
-tabLoaders.loadCustomPage = loadCustomPage;
+// Data-tab loaders are invoked fire-and-forget on tab activation, so a loader
+// that returns a promise (resolving once tab-data.js is fetched+parsed) is
+// transparent — it just moves that module's cost from every cold start to the
+// first time a data tab is opened.
+const lazyData = (name) => (...args) =>
+  import('./js/tab-data.js').then(m => m[name](...args));
+tabLoaders.loadJobs = lazyData('loadJobs');
+tabLoaders.loadProjects = lazyData('loadProjects');
+tabLoaders.loadDevelopment = lazyData('loadDevelopment');
+tabLoaders.loadHome = lazyData('loadHome');
+tabLoaders.loadHobbies = lazyData('loadHobbies');
+tabLoaders.loadSports = lazyData('loadSports');
+tabLoaders.loadHealth = lazyData('loadHealth');
+tabLoaders.loadFood = lazyData('loadFood');
+tabLoaders.loadMoney = lazyData('loadMoney');
+tabLoaders.loadPeople = lazyData('loadPeople');
+tabLoaders.loadSchedule = lazyData('loadSchedule');
+tabLoaders.loadDanKoe = lazyData('loadDanKoe');
+tabLoaders.loadCustomPage = lazyData('loadCustomPage');
 
 // Focus widget
 tabLoaders.createFocusWidget = createFocusWidget;
@@ -339,8 +343,11 @@ document.addEventListener('keydown', (e) => {
     }
   }
 
-  // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis
-  for (const tabId of S.openTabs) {
+  // Sync tab_meta icons → tabCustomizations so sidebar shows custom emojis.
+  // Fetch all tabs' meta in parallel: a sequential await-loop here put one IPC
+  // round-trip per open tab (~20 on mobile, every cold start) on the critical
+  // path before the first real content render below — pure entry latency.
+  await Promise.all(S.openTabs.map(async (tabId) => {
     try {
       const raw = await Promise.race([
         invoke('get_ui_state', { key: `tab_meta_${tabId}` }),
@@ -354,7 +361,7 @@ document.addEventListener('keydown', (e) => {
         }
       }
     } catch (_) {}
-  }
+  }));
   saveTabCustom();
 
   // Render tab bar (re-render now that custom pages are registered).
@@ -393,22 +400,25 @@ document.addEventListener('keydown', (e) => {
   // → Firestore CRDT → Mac.
   if (IS_MOBILE) {
     autoImportHealth();
+    let lastResumeWork = 0;
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
-      autoImportHealth();
-      // Returning to foreground: pull the latest from whichever transport is
-      // active so we see what the Mac changed while we were backgrounded
-      // (e.g. a task it started). lan_sync_now is bidirectional (one POST =
-      // full exchange); cloud_owner_pull covers the async backend. Re-paint
-      // (and refresh the task widget) after each settles so fresh rows show
-      // without waiting for a poll.
-      const repaint = () => {
-        try { activateView(); } catch (_) {}
-        try { window.dispatchEvent(new Event('task-state-changed')); } catch (_) {}
-      };
-      repaint();
-      invoke('lan_sync_now').then(repaint, () => {});
-      invoke('cloud_owner_pull').then(repaint, () => {});
+      // Returning to foreground: pull what the Mac changed while backgrounded
+      // (e.g. a task it started) and re-paint. This MUST stay off the resume
+      // paint path — running it inline froze the UI for seconds on every
+      // foreground return (heavy with diverged DBs once cr-sqlite sync works).
+      // So: defer via setTimeout, re-paint ONCE after both syncs settle (not
+      // eagerly 3×), and debounce so quick re-entries don't redo the work.
+      const now = Date.now();
+      if (now - lastResumeWork < 5000) return;
+      lastResumeWork = now;
+      setTimeout(() => {
+        autoImportHealth();
+        Promise.allSettled([invoke('lan_sync_now'), invoke('cloud_owner_pull')]).then(() => {
+          try { activateView(); } catch (_) {}
+          try { window.dispatchEvent(new Event('task-state-changed')); } catch (_) {}
+        });
+      }, 50);
     });
     startHealthPolling(); // 3-min poll while foregrounded
     // Schedule WorkManager-driven periodic HC pull so the watch → Hanni →

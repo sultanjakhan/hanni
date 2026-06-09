@@ -7,10 +7,10 @@
 import { escapeHtml } from './utils.js';
 import { invoke } from './state.js';
 import { parseSteps } from './food-recipe-modals.js';
-import { ingredientListHtml, chime, createCookEvent, headHtml, dotsHtml } from './food-cook-helpers.js';
+import { ingredientListHtml, createCookEvent, headHtml, dotsHtml, bindPrepChecklist, recipeIngredients, requestWakeLock, releaseWakeLock, saveCook, loadCook, clearCook } from './food-cook-helpers.js';
+import { loadCatalog } from './food-recipe-filters.js';
+import { RING_R, fmt, paintRing, toggleTimer, addTime, trayHtml, cancelTimer, clearAllTimers } from './food-cook-timer.js';
 
-const RING_R = 54;
-const CIRC = 2 * Math.PI * RING_R; // 339.29 — matches .cook-ring-progress dasharray
 let session = null; // one active cook at a time
 
 export function startCookMode(recipe, opts = {}) {
@@ -20,32 +20,48 @@ export function startCookMode(recipe, opts = {}) {
     return;
   }
   closeCookMode();
+  const saved = loadCook(recipe.id);
   session = {
     recipe, steps, idx: 0, phase: 'prep', onSaved: opts.onSaved, date: opts.date ?? null,
-    eventId: null, eventPromise: null, intervalId: null, remaining: 0, total: 0, running: false, started: false,
+    baseServ: recipe.servings || 1, servings: saved?.servings || recipe.servings || 1,
+    checked: new Set(), eventId: saved?.eventId ?? null, eventPromise: null,
+    timers: {}, // per-step countdowns, several may run at once
   };
   const root = document.createElement('div');
   root.className = 'cook-root';
   root.addEventListener('click', (e) => { if (e.target === root) requestExit(); });
   document.body.appendChild(root);
   session.root = root;
-  renderPrep();
+  requestWakeLock();
+  session.onVis = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
+  document.addEventListener('visibilitychange', session.onVis);
+  // Resume the saved cook (same recipe) at its step; else start at prep.
+  if (saved && saved.idx < steps.length) { session.phase = 'cook'; loadStep(saved.idx); }
+  else renderPrep();
+  loadCatalog().then(() => { if (session && session.phase === 'prep') renderPrep(); }).catch(() => {});
 }
 
 export function closeCookMode() {
   if (!session) return;
-  if (session.intervalId) clearInterval(session.intervalId);
+  clearAllTimers(session);
+  if (session.onVis) document.removeEventListener('visibilitychange', session.onVis);
+  releaseWakeLock();
   session.root?.remove();
   session = null;
 }
 
-const fmt = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 const q = (s) => session.root.querySelector(s);
 
 function renderPrep() {
+  const total = recipeIngredients(session.recipe).length;
+  const ratio = session.servings / session.baseServ;
   session.root.innerHTML = `<div class="cook-card">
     ${headHtml(session.recipe.name, 'Подготовка · достань всё')}
-    ${ingredientListHtml(session.recipe)}
+    <div class="cook-prep-head">
+      <span class="cook-prep-count" id="cook-prep-count">Собрано ${session.checked.size} из ${total}</span>
+      <span class="cook-prep-serv">Порций <button class="cook-serv-btn" data-d="-1">−</button><b id="cook-serv">${session.servings}</b><button class="cook-serv-btn" data-d="1">+</button></span>
+    </div>
+    ${ingredientListHtml(session.recipe, session.checked, ratio)}
     <div class="cook-controls"><button class="btn-primary cook-btn cook-btn-next" id="cook-begin">Начать готовить →</button></div>
     <div class="cook-dots">${dotsHtml(session.steps, session.phase, session.idx)}</div>
   </div>`;
@@ -55,19 +71,21 @@ function renderPrep() {
     loadStep(0);
     // Record the cook in the calendar at the start (enriched on finish, removed on cancel).
     session.eventPromise = createCookEvent(session.recipe, session.steps, session.date).then(id => {
-      if (session) { session.eventId = id; window.dispatchEvent(new CustomEvent('hanni:calendar-refresh')); }
+      if (session) { session.eventId = id; saveCook(session); window.dispatchEvent(new CustomEvent('hanni:calendar-refresh')); }
       return id;
     });
   };
+  session.root.querySelectorAll('.cook-serv-btn').forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    const n = session.servings + Number(b.dataset.d);
+    if (n >= 1 && n <= 40) { session.servings = n; renderPrep(); }
+  });
+  bindPrepChecklist(session.root, session.checked, total);
 }
 
 function loadStep(idx) {
-  if (session.intervalId) { clearInterval(session.intervalId); session.intervalId = null; }
-  session.idx = idx;
-  session.total = (session.steps[idx].min || 0) * 60;
-  session.remaining = session.total;
-  session.running = false;
-  session.started = false;
+  session.idx = idx;   // navigating never stops a running timer — they live in session.timers
+  saveCook(session);   // persist position for resume
   renderStep();
 }
 
@@ -76,6 +94,11 @@ function renderStep() {
   const step = steps[idx];
   const last = idx === steps.length - 1;
   const hasTimer = (step.min || 0) > 0;
+  // Current step's live timer state (may have been started, then left running).
+  const t = session.timers[idx];
+  const remaining = t ? t.remaining : (step.min || 0) * 60;
+  const running = !!(t && t.intervalId);
+  const done = !!(t && t.done);
 
   const stage = hasTimer ? `
     <div class="cook-ring-wrap">
@@ -83,18 +106,20 @@ function renderStep() {
         <circle class="cook-ring-bg" cx="60" cy="60" r="${RING_R}" />
         <circle class="cook-ring-progress" id="cook-ring" cx="60" cy="60" r="${RING_R}" />
       </svg>
-      <div class="cook-ring-inner"><div class="cook-time" id="cook-time">${fmt(session.remaining)}</div></div>
+      <div class="cook-ring-inner"><div class="cook-time" id="cook-time">${fmt(remaining)}</div></div>
     </div>` : '<div class="cook-no-timer">Без таймера</div>';
 
   const ingr = step.ingredients.length
     ? `<div class="cook-ingredients">${step.ingredients.map(n => `<span class="cook-ingr">${escapeHtml(n)}</span>`).join('')}</div>` : '';
 
+  const startLabel = running ? '⏸ Пауза' : (t && !done ? '▶ Продолжить' : '▶ Старт');
   const timerBtns = hasTimer ? `
     <button class="btn-secondary cook-btn" id="cook-addtime">+1 мин</button>
-    <button class="btn-secondary cook-btn" id="cook-startpause">▶ Старт</button>` : '';
+    <button class="btn-secondary cook-btn" id="cook-startpause">${startLabel}</button>` : '';
 
-  session.root.innerHTML = `<div class="cook-card">
+  session.root.innerHTML = `<div class="cook-card${done ? ' cook-ringdone' : ''}">
     ${headHtml(session.recipe.name, `Шаг ${idx + 1} из ${steps.length}`)}
+    ${trayHtml(session)}
     <div class="cook-stage">${stage}</div>
     <div class="cook-step-text">${escapeHtml(step.text)}</div>
     ${ingr}
@@ -112,10 +137,19 @@ function renderStep() {
   q('#cook-next').onclick = advance;
   if (idx > 0) q('#cook-back').onclick = () => loadStep(idx - 1);
   if (hasTimer) {
-    q('#cook-addtime').onclick = addTime;
-    q('#cook-startpause').onclick = toggleTimer;
-    paintRing();
+    q('#cook-addtime').onclick = () => addTime(session, idx, renderStep);
+    q('#cook-startpause').onclick = () => toggleTimer(session, idx, renderStep);
+    paintRing(session, idx);
   }
+  // Tray chips: tap to jump to that step; "×" cancels its timer.
+  session.root.querySelectorAll('.ctray[data-tray]').forEach(b => b.onclick = (e) => {
+    if (e.target.closest('[data-trayx]')) return;
+    loadStep(parseInt(b.dataset.tray));
+  });
+  session.root.querySelectorAll('[data-trayx]').forEach(x => x.onclick = (e) => {
+    e.stopPropagation();
+    cancelTimer(session, parseInt(x.dataset.trayx), renderStep);
+  });
 }
 
 // Slide-over with the full ingredient list, reachable from any step.
@@ -125,7 +159,7 @@ function showSheet() {
   w.className = 'cook-sheet-wrap';
   w.innerHTML = `<div class="cook-sheet">
     <div class="cook-sheet-head"><span>Все ингредиенты</span><button class="cook-close" id="cook-sheet-close" title="Закрыть">✕</button></div>
-    ${ingredientListHtml(session.recipe)}
+    ${ingredientListHtml(session.recipe, new Set(), session.servings / session.baseServ)}
   </div>`;
   session.root.appendChild(w);
   const close = () => w.remove();
@@ -133,8 +167,7 @@ function showSheet() {
   w.addEventListener('click', (e) => { if (e.target === w) close(); });
 }
 
-// From the prep screen nothing is recorded yet → leave at once. Once cooking has
-// started (event in the calendar) → ask: stay / keep the record / cancel it.
+// Prep: nothing recorded yet → leave at once. Cooking started → stay / keep / cancel.
 function requestExit() {
   if (!session) return;
   if (session.phase === 'prep') { closeCookMode(); return; }
@@ -154,65 +187,12 @@ function requestExit() {
   w.querySelector('#cook-cancel').onclick = cancelCook;
 }
 
-// Close and remove the calendar event (awaits its creation in case it's in flight).
 function cancelCook() {
   const p = session.eventPromise;
+  clearCook();
   closeCookMode();
   Promise.resolve(p).then(id => id && invoke('delete_event', { id })).catch(() => {})
     .then(() => window.dispatchEvent(new CustomEvent('hanni:calendar-refresh')));
-}
-
-function paintRing() {
-  const ring = q('#cook-ring');
-  if (!ring) return;
-  const frac = session.total ? session.remaining / session.total : 1;
-  ring.style.strokeDasharray = CIRC;
-  ring.style.strokeDashoffset = CIRC * frac; // full offset = empty; 0 = full ring
-}
-
-function tick() {
-  session.remaining = Math.max(0, session.remaining - 1);
-  const t = q('#cook-time');
-  if (t) t.textContent = fmt(session.remaining);
-  paintRing();
-  if (session.remaining <= 0) {
-    clearInterval(session.intervalId);
-    session.intervalId = null;
-    session.running = false;
-    onTimerDone();
-  }
-}
-
-function toggleTimer() {
-  const btn = q('#cook-startpause');
-  if (session.running) {
-    clearInterval(session.intervalId);
-    session.intervalId = null;
-    session.running = false;
-    btn.textContent = '▶ Продолжить';
-  } else {
-    if (session.remaining <= 0) { session.remaining = session.total = 60; paintRing(); }
-    session.running = true;
-    session.started = true;
-    btn.textContent = '⏸ Пауза';
-    session.intervalId = setInterval(tick, 1000);
-  }
-}
-
-function addTime() {
-  session.remaining += 60;
-  session.total = Math.max(session.total, session.remaining);
-  const t = q('#cook-time');
-  if (t) t.textContent = fmt(session.remaining);
-  paintRing();
-}
-
-function onTimerDone() {
-  q('.cook-card')?.classList.add('cook-ringdone');
-  const btn = q('#cook-startpause');
-  if (btn) btn.textContent = '▶ Старт';
-  chime();
-  invoke('send_notification', { title: '🍳 Готовка', body: `Шаг ${session.idx + 1} готов` }).catch(() => {});
 }
 
 function advance() {
@@ -220,6 +200,7 @@ function advance() {
     loadStep(session.idx + 1);
   } else {
     const { recipe, onSaved, date, eventId } = session;
+    clearCook();
     closeCookMode();
     import('./food-cooking-log.js').then(m => m.showCookingLogModal(date ?? null, onSaved, recipe, eventId));
   }

@@ -27,7 +27,7 @@ pub fn toggle_task_pin(
 /// All current pins as ["source_type:source_id", ...] for quick client-side lookup.
 #[tauri::command]
 pub fn get_task_pins(db: tauri::State<'_, HanniDb>) -> Result<Vec<String>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare("SELECT source_type, source_id FROM task_pins")
         .map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map([], |r| {

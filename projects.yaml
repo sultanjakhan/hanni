@@ -297,6 +297,7 @@ food:
     - desktop/src/js/food-cooking-log.js
     - desktop/src/js/food-cook-mode.js
     - desktop/src/js/food-cook-helpers.js
+    - desktop/src/js/food-cook-timer.js
     - desktop/src/css/food-cook-mode.css
     - desktop/src/js/shopping-list.js
     - desktop/src/js/shopping-list-modal.js

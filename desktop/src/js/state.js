@@ -21,6 +21,10 @@ const _SYNC_WRITE_PREFIXES = [
 const _SYNC_WRITE_EXACT = new Set([
   'start_task_block', 'complete_task_block', 'pause_task_block',
   'finish_task_block', 'skip_schedule_completion',
+  // Routine run state syncs across devices (SYNC_TABLES: routine_runs,
+  // routine_node_status) — push right away so the other device picks the
+  // started run / checked step within seconds, not on the next auto-loop.
+  'start_routine_run', 'set_routine_node_status', 'delete_routine_run',
 ]);
 
 export function invoke(cmd, args) {

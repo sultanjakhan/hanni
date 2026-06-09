@@ -141,6 +141,35 @@ export function confirmModal(msg = 'Удалить?', confirmLabel = 'Да') {
   });
 }
 
+// ── Toast ──
+// Transient bottom notification. Replaces alert() for action feedback so a
+// failed/successful operation no longer blocks the UI thread.
+let _toastWrap = null;
+export function toast(msg, type = 'error') {
+  if (!_toastWrap) {
+    _toastWrap = document.createElement('div');
+    _toastWrap.className = 'hanni-toast-wrap';
+    document.body.appendChild(_toastWrap);
+  }
+  const el = document.createElement('div');
+  el.className = `hanni-toast hanni-toast-${type}`;
+  el.textContent = msg;
+  _toastWrap.appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 220); }, 3000);
+}
+
+// ── Empty state ──
+// Consistent "nothing here yet" block: icon (raw SVG) + title + hint + optional
+// action button. Pass actionId to wire a click handler after insertion.
+export function emptyState({ icon = '', title = '', hint = '', actionLabel = '', actionId = '' } = {}) {
+  return `<div class="hanni-empty">
+    ${icon ? `<div class="hanni-empty-icon">${icon}</div>` : ''}
+    <div class="hanni-empty-title">${escapeHtml(title)}</div>
+    ${hint ? `<div class="hanni-empty-hint">${escapeHtml(hint)}</div>` : ''}
+    ${actionLabel ? `<button class="hanni-empty-action"${actionId ? ` id="${actionId}"` : ''}>${escapeHtml(actionLabel)}</button>` : ''}
+  </div>`;
+}
+
 // ── History message helpers ──
 
 export function normalizeHistoryMessage(msg) {

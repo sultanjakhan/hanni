@@ -167,6 +167,13 @@ fn init_database() -> HanniDb {
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
 
+    // WAL lets the read connection (see HanniDb::read) read a consistent
+    // snapshot while a long write (sync/import) holds the writer. Without it the
+    // writer takes an exclusive lock that blocks readers and freezes the UI on
+    // launch/resume. busy_timeout makes a competing writer wait, not error out.
+    conn.pragma_update(None, "journal_mode", "WAL").ok();
+    conn.busy_timeout(std::time::Duration::from_millis(5000)).ok();
+
     // Harden secrets-at-rest: hanni.db holds plaintext tokens/keys (until the
     // keychain migration). Lock the data dir to owner-only and the DB + WAL/SHM
     // sidecars to 0600 so backups / shared-machine users can't read them.
@@ -188,8 +195,9 @@ fn init_database() -> HanniDb {
     // (PRAGMA table_info / SELECT) on every call — ~1.3s of pure waste on
     // Android once already applied. Gate the whole block behind PRAGMA
     // user_version so an already-migrated DB skips it and starts fast.
-    // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block.
-    const SCHEMA_VERSION: i64 = 8;
+    // CONTRACT: bump SCHEMA_VERSION whenever you add a migration to this block
+    // (or change SYNC_TABLES — migrate_sync_meta must re-run to bind triggers).
+    const SCHEMA_VERSION: i64 = 10;
     let schema_ver: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap_or(0);
@@ -251,6 +259,7 @@ fn init_database() -> HanniDb {
         db::migrate_schedule_chain_only(&conn); // schedules visible only inside a chain run
         db::migrate_routine_run_slots(&conn); // multiple runs/day per chain (meal slots)
         db::migrate_routine_ids_deterministic(&conn); // deterministic ids so routines sync (v0.95)
+        db::migrate_routine_ids_deterministic_v2(&conn); // content-key the WHOLE graph so chains/nodes/edges converge + sync (v1.0.x)
         db::migrate_sync_meta(&conn); // re-run: bind updated_at/tombstone triggers to the rebuilt routine tables
         let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
     }
@@ -289,7 +298,21 @@ fn init_database() -> HanniDb {
     }
 
     eprintln!("[hanni] init_database: migrations complete");
-    HanniDb(std::sync::Mutex::new(conn))
+
+    // Dedicated read-only connection for the hot UI/boot path (HanniDb::read).
+    // The DB is already in WAL (set on the writer above; persistent in the DB
+    // header), so this connection opens in WAL too and reads snapshots without
+    // blocking behind the writer. cr-sqlite is loaded so SELECTs over CRR views
+    // work; no migrations/seed run here — the writer already initialised them.
+    let reader = rusqlite::Connection::open(&db_path)
+        .expect("Cannot open hanni.db (reader)");
+    reader.busy_timeout(std::time::Duration::from_millis(5000)).ok();
+    load_crsqlite(&reader);
+
+    HanniDb {
+        writer: std::sync::Mutex::new(conn),
+        reader: std::sync::Mutex::new(reader),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

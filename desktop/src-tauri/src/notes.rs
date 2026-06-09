@@ -86,7 +86,7 @@ pub fn toggle_note_archive(id: i64, db: tauri::State<'_, HanniDb>) -> Result<boo
 
 #[tauri::command]
 pub fn get_notes(filter: Option<String>, search: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let rows = if let Some(q) = search {
         if q.trim().is_empty() { get_notes_all(&conn)? }
         else {
@@ -260,7 +260,7 @@ pub fn create_custom_page(page_type: Option<String>, db: tauri::State<'_, HanniD
 
 #[tauri::command]
 pub fn get_custom_pages(db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT id, title, icon, description, content, sub_tabs, sort_order, created_at, updated_at, content_blocks, page_type FROM custom_pages ORDER BY sort_order"
     ).map_err(|e| format!("DB error: {}", e))?;

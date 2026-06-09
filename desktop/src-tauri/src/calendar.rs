@@ -20,7 +20,7 @@ pub fn create_event(title: String, description: String, date: String, time: Stri
 
 #[tauri::command]
 pub fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let prefix = format!("{}-{:02}", year, month);
     let mut stmt = conn.prepare(
         "SELECT id, title, description, date, time, duration_minutes, category, color, completed, COALESCE(source,'manual'), COALESCE(priority,0), COALESCE(linked_tab,'') FROM events WHERE date LIKE ?1 ORDER BY date, time"

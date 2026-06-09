@@ -1,6 +1,6 @@
 // ── food-meal-plan.js — Meal plan for calendar day view ──
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, toast } from './utils.js';
 
 const MEAL_LABELS = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', snack: 'Перекус' };
 const MEAL_COLORS = { breakfast: 'var(--color-yellow)', lunch: 'var(--color-green)', dinner: 'var(--accent-purple)', snack: 'var(--text-muted)' };
@@ -21,10 +21,14 @@ export async function renderMealPlanBlock(date) {
   }).join('');
 
   const totalCal = meals.reduce((s, m) => s + (m.calories || 0), 0);
+  const recipeIds = [...new Set(meals.map(m => m.recipe_id).filter(Boolean))].join(',');
   return `<div class="meal-plan-block">
     <div class="meal-plan-header">
       <span>🍽 План питания</span>
-      <span class="meal-plan-total">${totalCal} kcal</span>
+      <span class="meal-plan-header-right">
+        <span class="meal-plan-total">${totalCal} kcal</span>
+        <button class="meal-plan-shop" data-mp-shop="${recipeIds}" title="Добавить недостающие ингредиенты в список покупок">🛒 В покупки</button>
+      </span>
     </div>
     ${items}
   </div>`;
@@ -80,7 +84,7 @@ export function showMealPlanModal(date, reloadFn) {
           await invoke('plan_meal', { date, mealType, recipeId, notes: null });
           overlay.remove();
           if (reloadFn) reloadFn();
-        } catch (e) { alert('Error: ' + e); }
+        } catch (e) { toast('Не удалось добавить в план: ' + e); }
       };
     });
   }

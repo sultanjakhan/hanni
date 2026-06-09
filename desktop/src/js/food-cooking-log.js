@@ -2,7 +2,8 @@
 // Opened from the calendar "+" menu. Creates a "Готовка" calendar event and an
 // immutable cooking_log entry with a per-day taste rating + note.
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, toast, emptyState } from './utils.js';
+import { EMPTY_ICONS } from './icons.js';
 
 // Convert `amount` between units of the same family (mass: г/кг, volume: мл/л).
 // Returns null when units are incompatible (e.g. г vs шт) so the caller can fall
@@ -19,11 +20,20 @@ function convertAmount(amount, fromUnit, toUnit) {
   return null;
 }
 
+const MEAL_OPTS = [['breakfast', 'Завтрак'], ['lunch', 'Обед'], ['dinner', 'Ужин'], ['snack', 'Перекус']];
+// Default the diary meal-type to the current time of day.
+function mealByHour() {
+  const h = new Date().getHours();
+  return h < 11 ? 'breakfast' : h < 16 ? 'lunch' : h < 22 ? 'dinner' : 'snack';
+}
+
 export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
   const today = date || new Date().toISOString().slice(0, 10);
   let selectedId = preRecipe ? preRecipe.id : null;
   let selectedName = preRecipe ? preRecipe.name : '';
   let rating = 0, allRecipes = [], deductMatches = [];
+  let selectedRecipe = null;       // full get_recipe (КБЖУ) — for the diary entry
+  let mealType = mealByHour();
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -39,6 +49,11 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
       <div class="rd-stars" id="cl-stars">${[1, 2, 3, 4, 5].map(n => `<span class="rd-star" data-n="${n}">★</span>`).join('')}</div></div>
     <div class="form-group"><label class="form-label">Заметка</label>
       <textarea class="form-textarea" id="cl-note" rows="2" placeholder="Как вышло, что поменять в следующий раз…"></textarea></div>
+    <div class="form-group">
+      <label class="cl-diary-toggle"><input type="checkbox" id="cl-diary" checked> Записать в дневник питания</label>
+      <div id="cl-meal-chips" class="cl-meal-chips">${MEAL_OPTS.map(([v, l]) =>
+        `<button type="button" class="rf-chip${v === mealType ? ' active' : ''}" data-meal="${v}">${l}</button>`).join('')}</div>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="cl-cancel">Отмена</button>
       <button class="btn-primary" id="cl-save" disabled>Сохранить</button>
@@ -55,6 +70,14 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
     s.onmouseenter = () => paintStars(parseInt(s.dataset.n)); // hover preview
   });
   overlay.querySelector('#cl-stars').onmouseleave = () => paintStars(rating); // restore actual
+
+  const chipsBox = overlay.querySelector('#cl-meal-chips');
+  const diaryCb = overlay.querySelector('#cl-diary');
+  overlay.querySelectorAll('[data-meal]').forEach(b => b.onclick = () => {
+    mealType = b.dataset.meal;
+    chipsBox.querySelectorAll('[data-meal]').forEach(x => x.classList.toggle('active', x === b));
+  });
+  diaryCb.onchange = () => chipsBox.classList.toggle('is-off', !diaryCb.checked); // dim when not logging
 
   const search = overlay.querySelector('#cl-search');
   search.oninput = () => renderList(search.value.trim().toLowerCase());
@@ -90,6 +113,7 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
       invoke('get_recipe', { id: selectedId }).catch(() => null),
       invoke('get_products', {}).catch(() => []),
     ]);
+    selectedRecipe = rec; // reused on save to fill the diary entry's macros
     const ings = (rec && rec.ingredient_items) || [];
     deductMatches = [];
     for (const ing of ings) {
@@ -129,6 +153,15 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
         }).catch(() => null);
       }
       await invoke('log_cooking', { recipeId: selectedId, date: d, tasteRating: rating, cookNote: note, eventId });
+      // Mirror the cook into the food diary so its macros show up there (v1: recipe totals ×1).
+      if (diaryCb.checked) {
+        const r = selectedRecipe || {};
+        await invoke('log_food', {
+          date: d, mealType, name: selectedName,
+          calories: r.calories || null, protein: r.protein || null,
+          carbs: r.carbs || null, fat: r.fat || null, notes: 'из готовки',
+        }).catch(() => {});
+      }
       // Deduct the checked fridge items: by amount when units match, else one unit.
       for (const cb of overlay.querySelectorAll('.cl-deduct-cb:checked')) {
         const m = deductMatches[parseInt(cb.dataset.i)]; if (!m) continue;
@@ -146,7 +179,7 @@ export function showCookingLogModal(date, onSaved, preRecipe, preEventId) {
       }
       close();
       if (onSaved) await onSaved();
-    } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+    } catch (e) { toast('Ошибка: ' + (e.message || e)); }
   };
 }
 
@@ -158,8 +191,9 @@ const CW_CAT_LABELS = { meat: 'Мясо', fish: 'Рыба', veg: 'Овощи', f
   oil: 'Масла', bakery: 'Выпечка', drinks: 'Напитки', sweet: 'Сладости', frozen: 'Заморозка', other: 'Другое' };
 const cwNorm = (s) => String(s == null ? '' : s).trim().toLowerCase();
 const cwIngredients = (str) => String(str || '').split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+const cwName = (n) => n.split(':')[0].trim(); // "соль: 2ч.л." → "соль" (match fridge by name)
 
-export async function showCookWhatModal(date, onSaved) {
+export async function showCookWhatModal(date, onSaved, searchSeed) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
@@ -191,12 +225,12 @@ export async function showCookWhatModal(date, onSaved) {
   // catalog categories its ingredients span (for the category filter).
   const rows = recipes.map(r => {
     const ings = cwIngredients(r.ingredients);
-    const missing = ings.filter(n => !have.has(cwNorm(n)));
-    const cats = new Set(ings.map(n => catByName.get(cwNorm(n))).filter(Boolean));
+    const missing = ings.filter(n => !have.has(cwNorm(cwName(n))));
+    const cats = new Set(ings.map(n => catByName.get(cwNorm(cwName(n)))).filter(Boolean));
     return { r, ings, missing, total: ings.length, cats };
   });
   const usedCats = [...new Set(rows.flatMap(x => [...x.cats]))];
-  let q = '', cat = 'all';
+  let q = searchSeed || '', cat = 'all';
 
   function renderCats() {
     overlay.querySelector('#cw-cats').innerHTML = ['all', ...usedCats].map(c =>
@@ -211,16 +245,30 @@ export async function showCookWhatModal(date, onSaved) {
       return cwNorm(x.r.name).includes(ql) || x.ings.some(n => cwNorm(n).includes(ql));
     }).sort((a, b) => (a.missing.length - b.missing.length) || ((b.r.cook_count || 0) - (a.r.cook_count || 0)));
     const list = overlay.querySelector('#cw-list');
-    if (!filtered.length) { list.innerHTML = '<div class="empty">Ничего не нашлось.</div>'; return; }
+    if (!filtered.length) { list.innerHTML = emptyState({ icon: EMPTY_ICONS.searchX, title: 'Ничего не нашлось', hint: 'Измените запрос или категорию.' }); return; }
     list.innerHTML = filtered.map(x => {
       const badge = x.missing.length === 0
         ? '<span class="badge badge-green">✓ есть всё</span>'
-        : `<span class="badge badge-gray">не хватает ${x.missing.length}: ${escapeHtml(x.missing.slice(0, 3).join(', '))}${x.missing.length > 3 ? '…' : ''}</span>`;
+        : `<span class="badge badge-gray">не хватает ${x.missing.length}: ${escapeHtml(x.missing.slice(0, 3).map(cwName).join(', '))}${x.missing.length > 3 ? '…' : ''}</span>`;
+      const addBtn = x.missing.length
+        ? `<button class="cw-add-missing" title="Добавить недостающее в список покупок" style="font-size:11px;padding:3px 8px;background:none;border:1px solid var(--border-subtle);border-radius:6px;cursor:pointer;white-space:nowrap">+ в покупки</button>`
+        : '';
       return `<div class="cw-row" data-rid="${x.r.id}" data-rname="${escapeHtml(x.r.name)}" style="padding:10px;border:1px solid var(--border-subtle);border-radius:8px;margin-bottom:6px;cursor:pointer">
         <div style="font-weight:600">${escapeHtml(x.r.name)}</div>
-        <div style="margin-top:4px;font-size:12px">${badge} <span class="muted">· ${x.total - x.missing.length}/${x.total} ингр.</span></div>
+        <div style="margin-top:4px;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span>${badge} <span class="muted">· ${x.total - x.missing.length}/${x.total} ингр.</span></span>
+          ${addBtn}
+        </div>
       </div>`;
     }).join('');
+    list.querySelectorAll('.cw-add-missing').forEach(btn => btn.onclick = async (e) => {
+      e.stopPropagation();
+      const row = rows.find(x => x.r.id === parseInt(btn.closest('.cw-row').dataset.rid));
+      if (!row) return;
+      const { addShoppingItem } = await import('./shopping-list.js');
+      for (const n of row.missing) { const c = n.split(':'); await addShoppingItem(c[0].trim(), (c[1] || '').trim(), '').catch(() => {}); }
+      btn.textContent = '✓ в покупках'; btn.disabled = true;
+    });
     list.querySelectorAll('.cw-row').forEach(row => row.onclick = async () => {
       close();
       // Picking a recipe starts the guided cook mode (timer); it opens the
@@ -231,6 +279,7 @@ export async function showCookWhatModal(date, onSaved) {
       startCookMode(recipe, { onSaved, date });
     });
   }
+  overlay.querySelector('#cw-search').value = q;
   renderCats(); renderList();
   overlay.querySelector('#cw-search').oninput = (e) => { q = e.target.value; renderList(); };
 }
