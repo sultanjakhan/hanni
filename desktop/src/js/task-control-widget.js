@@ -123,6 +123,9 @@ async function openStartDropdown(preserveScroll = false) {
 
   panel = document.createElement('div');
   panel.className = 'tw-panel';
+  // Entry animation only on a fresh open — in-place re-renders (pin, routine
+  // step) would replay the slide and jitter the panel.
+  if (preserveScroll) panel.style.animation = 'none';
   panel.innerHTML = `
     <div class="tw-panel-header"><span>Запустить таск</span></div>
     <div class="tw-panel-body">${bodyHtml}</div>

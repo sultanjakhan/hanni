@@ -77,7 +77,9 @@
 .rt-start-sub { font-size: 10.5px; color: var(--text-muted); line-height: 1.3; }
 .rt-node-top { display: flex; align-items: center; gap: 7px; }
 .rt-node-icon { font-size: 15px; }
-.rt-node-title { font-size: 13px; font-weight: 500; color: var(--text-primary); flex: 1; min-width: 0; }
+.rt-node-title { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+/* task rows only: title pushes the type chip right (start node is column-flex) */
+.rt-node-top .rt-node-title { flex: 1; min-width: 0; }
 /* step-type chip (▶ timer / ✓ check / 📓 journal) + optional visible_from time */
 .rt-node-type { flex-shrink: 0; font-size: 10px; color: var(--text-muted); cursor: help; }
 .rt-node-type.tr { color: var(--accent-blue); }

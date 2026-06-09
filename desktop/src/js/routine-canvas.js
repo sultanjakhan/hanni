@@ -19,23 +19,28 @@ const TRIGGER_SUB = {
 };
 const TRIGGER_ICON = { sleep_end: '☀️', time: '🕐', manual: '▶️' };
 
+const isMobile = () => document.documentElement.classList.contains('mobile');
+
+// On mobile, shrink the canvas to its node bounds. The fixed 1000×680 size
+// (≈3000×2040 at 3x DPI) is one big composited layer that blows the WebView
+// tile-memory budget and janks; desktop keeps the roomy fixed editing area.
+function fitCanvasMobile(canvas) {
+  if (!isMobile()) return;
+  let w = 0, h = 0;
+  canvas.querySelectorAll('.rt-node').forEach(el => {
+    w = Math.max(w, el.offsetLeft + el.offsetWidth);
+    h = Math.max(h, el.offsetTop + el.offsetHeight);
+  });
+  canvas.style.width = (w + 60) + 'px';
+  canvas.style.height = (h + 60) + 'px';
+}
+
 export function renderCanvas(canvas, chain, refresh, schedById = {}) {
   canvas.querySelectorAll('.rt-node, .rt-edge-menu').forEach(n => n.remove());
   for (const n of chain.nodes) canvas.appendChild(buildNode(n, chain, schedById));
   wireNodes(canvas, chain, refresh);
   renderEdges(canvas, chain, refresh, null);
-  // On mobile, shrink the canvas to its node bounds. The fixed 1000×680 size
-  // (≈3000×2040 at 3x DPI) is one big composited layer that blows the WebView
-  // tile-memory budget and janks; desktop keeps the roomy fixed editing area.
-  if (document.documentElement.classList.contains('mobile')) {
-    let w = 0, h = 0;
-    canvas.querySelectorAll('.rt-node').forEach(el => {
-      w = Math.max(w, el.offsetLeft + el.offsetWidth);
-      h = Math.max(h, el.offsetTop + el.offsetHeight);
-    });
-    canvas.style.width = (w + 60) + 'px';
-    canvas.style.height = (h + 60) + 'px';
-  }
+  fitCanvasMobile(canvas);
 }
 
 // Step-type chip — same semantics as the "+" player rows (▶ timer / ✓ check /
@@ -138,9 +143,11 @@ function wireNodes(canvas, chain, refresh) {
 function startDrag(canvas, chain, refresh, el, n, e) {
   const sx = e.clientX, sy = e.clientY, ox = n.pos_x, oy = n.pos_y;
   // Keep the node inside the canvas — it used to escape past the right/bottom
-  // edge (only 0,0 was clamped) and leave the dot-grid background.
-  const maxX = Math.max(0, canvas.offsetWidth - el.offsetWidth);
-  const maxY = Math.max(0, canvas.offsetHeight - el.offsetHeight);
+  // edge (only 0,0 was clamped) and leave the dot-grid background. On mobile
+  // the canvas hugs the node bounds, so clamping there would block expanding
+  // the layout — it re-fits after the drop instead.
+  const maxX = isMobile() ? Infinity : Math.max(0, canvas.offsetWidth - el.offsetWidth);
+  const maxY = isMobile() ? Infinity : Math.max(0, canvas.offsetHeight - el.offsetHeight);
   let moved = false;
   const move = (ev) => {
     if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) {
@@ -165,6 +172,7 @@ function startDrag(canvas, chain, refresh, el, n, e) {
       openNodeModal(n, chain, refresh);
       return;
     }
+    fitCanvasMobile(canvas);
     await invoke('update_routine_node', { id: n.id, posX: n.pos_x, posY: n.pos_y }).catch(() => {});
   };
   // Browser reclaimed the gesture (e.g. scroll) — drop the drag, revert position.
