@@ -241,7 +241,7 @@ pub fn get_current_activity(db: tauri::State<'_, HanniDb>) -> Result<serde_json:
 
 #[tauri::command]
 pub fn get_activity_log(date: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let target_date = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut stmt = conn.prepare(
         "SELECT id, title, category, started_at, ended_at, duration_minutes FROM activities
@@ -1197,7 +1197,7 @@ pub fn create_schedule(title: String, category: String, frequency: String, frequ
 
 #[tauri::command]
 pub fn get_schedules(category: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let sql = if category.is_some() {
         "SELECT id, title, category, frequency, frequency_days, time_of_day, details, is_active, created_at, marks_previous_day, until_date, COALESCE(track_overdue,0), target_minutes, COALESCE(tracking_mode,'track'), COALESCE(auto_source,''), COALESCE(visible_from,''), COALESCE(chain_only,0) FROM schedules WHERE category=?1 ORDER BY title"
     } else {
@@ -1339,7 +1339,7 @@ pub fn skip_schedule_completion(schedule_id: String, date: String, db: tauri::St
 
 #[tauri::command]
 pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day, sc.completed_at, COALESCE(s.tracking_mode, 'track'), COALESCE(s.marks_previous_day, 0), COALESCE(sc.status, 'planned')
          FROM schedule_completions sc JOIN schedules s ON s.id = sc.schedule_id
@@ -1738,7 +1738,7 @@ pub fn get_dashboard_data(db: tauri::State<'_, HanniDb>) -> Result<serde_json::V
 
 #[tauri::command]
 pub fn get_notifications(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let now = chrono::Local::now();
     let today = now.format("%Y-%m-%d").to_string();
     let current_time = now.format("%H:%M").to_string();
@@ -3803,7 +3803,7 @@ pub fn rate_message(db: tauri::State<'_, HanniDb>, conversation_id: i64, message
 
 #[tauri::command]
 pub fn get_message_ratings(db: tauri::State<'_, HanniDb>, conversation_id: i64) -> Result<Vec<(i64, i64)>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT message_index, rating FROM message_feedback WHERE conversation_id = ?1"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -3992,7 +3992,7 @@ pub async fn create_body_record(
     note: Option<String>,
     date: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn();
     let d = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let n = note.unwrap_or_default();
     conn.execute(
@@ -4010,7 +4010,7 @@ pub async fn get_body_records(
     zone: Option<String>,
     record_type: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.read();
     let mut sql = "SELECT id, zone, zone_label, record_type, intensity, pain_type, goal_type, value, unit, treatment_type, note, date, created_at FROM body_records WHERE 1=1".to_string();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
     if let Some(z) = &zone {
@@ -4047,14 +4047,14 @@ pub async fn get_body_records(
 
 #[tauri::command]
 pub async fn delete_body_record(db: tauri::State<'_, HanniDb>, id: i64) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.conn();
     conn.execute("DELETE FROM body_records WHERE id = ?1", [id]).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_body_zones_summary(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT zone, zone_label, record_type, COUNT(*) as cnt,
                 MAX(CASE WHEN record_type='pain' THEN intensity ELSE NULL END) as max_intensity

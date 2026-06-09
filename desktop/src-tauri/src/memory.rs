@@ -595,7 +595,7 @@ pub fn get_conversations(
     limit: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let max = limit.unwrap_or(30);
     let mut stmt = conn.prepare(
         "SELECT id, started_at, summary, message_count FROM conversations
@@ -619,7 +619,7 @@ pub fn get_conversation(
     id: i64,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<serde_json::Value, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let (messages_json, summary, started_at): (String, Option<String>, String) = conn.query_row(
         "SELECT messages, summary, started_at FROM conversations WHERE id=?1",
         rusqlite::params![id],

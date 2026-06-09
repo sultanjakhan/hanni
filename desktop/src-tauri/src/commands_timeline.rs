@@ -73,7 +73,7 @@ pub fn create_timeline_block(type_id: i64, date: String, start_time: String, end
 
 #[tauri::command]
 pub fn get_timeline_blocks(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
-    let conn = db.conn();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT b.id, b.type_id, b.date, b.start_time, b.end_time, b.duration_minutes, b.source, b.notes, t.name, t.color, t.icon,
                 COALESCE(b.is_active,0), b.source_type, CAST(b.source_id AS TEXT), COALESCE(b.quality,0), b.reflection, b.mood
