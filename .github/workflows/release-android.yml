@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual test builds from any branch: uploads the signed APK to the
+  # 'android-test' PRERELEASE (a non-v* tag), so neither the desktop updater
+  # (latest.json of the latest release) nor the phone's in-app updater
+  # (releases/latest excludes prereleases) ever picks it up.
+  workflow_dispatch:
 
 jobs:
   release-android:
@@ -78,6 +83,7 @@ jobs:
         run: npx tauri android build --apk --target aarch64
 
       - name: Wait for release to exist (release.yml creates it)
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -97,7 +103,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="android-test"
+            gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --prerelease --target "${{ github.sha }}" \
+                --title "Hanni Android test build" \
+                --notes "Manual test build — not picked up by updaters."
+            gh release edit "$TAG" --prerelease \
+              --notes "Manual test build from ${{ github.ref_name }} @ ${{ github.sha }} ($(date -u +%Y-%m-%dT%H:%MZ)) — not picked up by updaters."
+          else
+            TAG="${{ github.ref_name }}"
+          fi
           VERSION="${TAG#v}"
           APK=desktop/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           if [ ! -f "$APK" ]; then
