@@ -4,10 +4,11 @@ on:
   push:
     tags:
       - 'v*'
-  # Manual test builds from any branch: uploads the signed APK to the
-  # 'android-test' PRERELEASE (a non-v* tag), so neither the desktop updater
-  # (latest.json of the latest release) nor the phone's in-app updater
-  # (releases/latest excludes prereleases) ever picks it up.
+      # Test builds: push an 'android-test*' tag at any commit. The signed APK
+      # lands in the 'android-test' PRERELEASE, so neither the desktop updater
+      # (latest.json of the latest release) nor the phone's in-app updater
+      # (releases/latest excludes prereleases) ever picks it up.
+      - 'android-test*'
   workflow_dispatch:
 
 jobs:
@@ -83,7 +84,7 @@ jobs:
         run: npx tauri android build --apk --target aarch64
 
       - name: Wait for release to exist (release.yml creates it)
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && startsWith(github.ref_name, 'v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -103,7 +104,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          REF_NAME="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${REF_NAME#android-test}" != "$REF_NAME" ]; then
             TAG="android-test"
             gh release view "$TAG" >/dev/null 2>&1 || \
               gh release create "$TAG" --prerelease --target "${{ github.sha }}" \
