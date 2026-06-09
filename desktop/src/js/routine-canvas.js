@@ -94,6 +94,10 @@ function wireNodes(canvas, chain, refresh) {
   canvas.querySelectorAll('[data-del]').forEach(b =>
     b.addEventListener('click', async (e) => {
       e.stopPropagation();
+      // The ✕ sits 10px from the out-port — an easy mis-click while wiring,
+      // and deletion loses the node's position/settings. Confirm first.
+      const n = find(parseInt(b.dataset.del));
+      if (!confirm(`Удалить узел «${n?.title || ''}»?`)) return;
       await invoke('delete_routine_node', { id: parseInt(b.dataset.del) }).catch(() => {});
       refresh();
     }));
@@ -112,7 +116,10 @@ function startDrag(canvas, chain, refresh, el, n, e) {
   const sx = e.clientX, sy = e.clientY, ox = n.pos_x, oy = n.pos_y;
   let moved = false;
   const move = (ev) => {
-    if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) moved = true;
+    if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) {
+      moved = true;
+      el.classList.add('rt-dragging');
+    }
     n.pos_x = Math.max(0, ox + ev.clientX - sx);
     n.pos_y = Math.max(0, oy + ev.clientY - sy);
     el.style.left = n.pos_x + 'px';
@@ -122,6 +129,7 @@ function startDrag(canvas, chain, refresh, el, n, e) {
   const up = async () => {
     document.removeEventListener('mousemove', move);
     document.removeEventListener('mouseup', up);
+    el.classList.remove('rt-dragging');
     if (!moved) {                                  // a click, not a drag
       openNodeModal(n, chain, refresh);
       return;
@@ -169,11 +177,14 @@ function nodeBox(canvas, id) {
   return e ? { x: e.offsetLeft, y: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight } : null;
 }
 
-function edgeColor(t) {
-  if (t === 'after_duration') return 'var(--color-orange)';
-  if (t === 'manual') return 'var(--accent-purple)';
-  return 'var(--text-secondary)';
-}
+// Stroke + matching arrowhead marker per edge trigger type — a single gray
+// marker on colored wires read as a mismatch.
+const EDGE_STYLES = {
+  after_duration: { color: 'var(--color-orange)', marker: 'rt-ar-dur' },
+  manual:         { color: 'var(--accent-purple)', marker: 'rt-ar-man' },
+  default:        { color: 'var(--text-secondary)', marker: 'rt-ar' },
+};
+const edgeStyle = (t) => EDGE_STYLES[t] || EDGE_STYLES.default;
 
 function svgPath(d) {
   const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -183,9 +194,9 @@ function svgPath(d) {
 
 function renderEdges(canvas, chain, refresh, draft) {
   const svg = canvas.querySelector('#rt-edges');
-  svg.innerHTML = `<defs>
-    <marker id="rt-ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-      <path d="M0,0 L7,3 L0,6 Z" fill="var(--text-secondary)"/></marker></defs>`;
+  svg.innerHTML = `<defs>${Object.values(EDGE_STYLES).map(s =>
+    `<marker id="${s.marker}" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="${s.color}"/></marker>`).join('')}</defs>`;
   chain.edges.forEach((e) => {
     const a = nodeBox(canvas, e.from_node_id);
     const b = nodeBox(canvas, e.to_node_id);
@@ -193,16 +204,21 @@ function renderEdges(canvas, chain, refresh, draft) {
     const ax = a.x + a.w, ay = a.y + a.h / 2, bx = b.x, by = b.y + b.h / 2;
     const mx = (ax + bx) / 2;
     const d = `M${ax},${ay} C${mx},${ay} ${mx},${by} ${bx},${by}`;
+    const style = edgeStyle(e.trigger_type);
     const wire = svgPath(d);
     wire.setAttribute('class', 'rt-wire');
     wire.setAttribute('fill', 'none');
-    wire.setAttribute('stroke', edgeColor(e.trigger_type));
+    wire.setAttribute('stroke', style.color);
     wire.setAttribute('stroke-width', '1.8');
     if (e.trigger_type === 'after_duration') wire.setAttribute('stroke-dasharray', '5,4');
     if (e.trigger_type === 'manual') wire.setAttribute('stroke-dasharray', '2,3');
-    wire.setAttribute('marker-end', 'url(#rt-ar)');
+    wire.setAttribute('marker-end', `url(#${style.marker})`);
     const hit = svgPath(d);
     hit.setAttribute('class', 'rt-hit');
+    // Hover affordance: the invisible hit path widens the wire so it's clear
+    // the edge is clickable before the menu opens.
+    hit.addEventListener('mouseenter', () => wire.classList.add('rt-wire--hover'));
+    hit.addEventListener('mouseleave', () => wire.classList.remove('rt-wire--hover'));
     hit.addEventListener('click', (ev) => openEdgeMenu(canvas, chain, refresh, e, ev));
     svg.append(wire, hit);
   });
