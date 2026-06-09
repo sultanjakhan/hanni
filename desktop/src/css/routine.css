@@ -198,16 +198,6 @@
 .rt-add-item:hover { background: var(--bg-hover); border-color: var(--accent-blue); }
 .rt-add-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px; }
 
-/* app-styled prompt (replaces window.prompt) */
-.rt-prompt-modal { max-width: 320px; }
-.rt-prompt-input {
-  width: 100%; padding: 7px 10px; font-size: 13px;
-  background: var(--bg-page); border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm); color: var(--text-primary);
-  margin-bottom: 12px;
-}
-.rt-prompt-input:focus { outline: none; border-color: var(--border-focus); }
-
 /* node detail modal */
 .rt-node-modal { max-width: 360px; }
 .rt-nm-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }

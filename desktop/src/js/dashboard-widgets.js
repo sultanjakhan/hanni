@@ -35,7 +35,8 @@ export function renderInteractiveWidget(el, widget, data, reloadFn) {
     <div class="uni-dash-value">${escapeHtml(String(display))}</div>
     <div class="uni-dash-label">${escapeHtml(c.label || '')}</div>`;
   el.addEventListener('click', async () => {
-    const input = prompt(c.action?.prompt || c.label);
+    const { promptModal } = await import('./prompt-modal.js');
+    const input = await promptModal({ title: c.action?.prompt || c.label || '' });
     if (input == null) return;
     const args = { ...(c.action?.commandArgs || {}) };
     const param = c.action?.valueParam || 'value';

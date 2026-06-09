@@ -2,7 +2,7 @@
 // renderCanvas() draws a chain and wires drag, edge drawing, edit and delete.
 // `refresh` is an async callback that reloads data and redraws after edits.
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, confirmModal } from './utils.js';
 import { openNodeModal } from './routine-node-modal.js';
 import { openEdgeMenu } from './routine-edge-menu.js';
 import { isDanKoePractice } from './dankoe-quick-modal.js';
@@ -125,7 +125,7 @@ function wireNodes(canvas, chain, refresh) {
       // The ✕ sits 10px from the out-port — an easy mis-click while wiring,
       // and deletion loses the node's position/settings. Confirm first.
       const n = find(parseInt(b.dataset.del));
-      if (!confirm(`Удалить узел «${n?.title || ''}»?`)) return;
+      if (!await confirmModal(`Удалить узел «${n?.title || ''}»?`, 'Удалить')) return;
       await invoke('delete_routine_node', { id: parseInt(b.dataset.del) }).catch(() => {});
       refresh();
     }));

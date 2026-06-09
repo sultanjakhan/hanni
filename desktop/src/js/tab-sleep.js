@@ -130,12 +130,18 @@ function shortTime(s) {
 function fmt(d) { return d.toISOString().slice(0, 10); }
 
 async function addManualSleep(el) {
-  const date = prompt('Дата (YYYY-MM-DD):', fmt(new Date()));
-  if (!date) return;
-  const start = prompt('Начало сна (HH:MM):', '23:00');
-  if (!start) return;
-  const end = prompt('Конец сна (HH:MM):', '07:00');
-  if (!end) return;
+  // One modal with native date/time inputs instead of three chained prompts.
+  const { promptModal } = await import('./prompt-modal.js');
+  const res = await promptModal({
+    title: 'Добавить сон вручную',
+    fields: [
+      { key: 'date', label: 'Дата', type: 'date', value: fmt(new Date()) },
+      { key: 'start', label: 'Начало сна', type: 'time', value: '23:00' },
+      { key: 'end', label: 'Конец сна', type: 'time', value: '07:00' },
+    ],
+  });
+  if (!res || !res.date || !res.start || !res.end) return;
+  const { date, start, end } = res;
   const startDt = new Date(`${date}T${start}:00`);
   let endDt = new Date(`${date}T${end}:00`);
   if (endDt <= startDt) endDt.setDate(endDt.getDate() + 1);

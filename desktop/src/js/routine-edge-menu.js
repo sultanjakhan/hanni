@@ -1,7 +1,7 @@
 // ── js/routine-edge-menu.js — Context menu for a routine graph edge ──
 // Change the edge's trigger type / value, or delete it.
 import { invoke } from './state.js';
-import { promptModal } from './routine-prompt.js';
+import { promptModal } from './prompt-modal.js';
 
 export function openEdgeMenu(canvas, chain, refresh, edge, ev) {
   canvas.querySelectorAll('.rt-edge-menu').forEach(m => m.remove());

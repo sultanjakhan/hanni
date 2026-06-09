@@ -573,7 +573,8 @@ async function loadChatSettings() {
     document.getElementById('chat-record-voice-sample')?.addEventListener('click', async () => {
       const btn = document.getElementById('chat-record-voice-sample');
       if (!btn) return;
-      const name = prompt('Имя для образца голоса:', 'my_voice');
+      const { promptModal } = await import('./prompt-modal.js');
+      const name = await promptModal({ title: 'Имя для образца голоса', value: 'my_voice' });
       if (!name) return;
       btn.textContent = 'Записываю (5 сек)...';
       btn.disabled = true;

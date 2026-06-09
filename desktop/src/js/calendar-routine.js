@@ -5,7 +5,7 @@ import { S, invoke } from './state.js';
 import { escapeHtml } from './utils.js';
 import { renderCanvas } from './routine-canvas.js';
 import { openAddTaskModal } from './routine-add-modal.js';
-import { promptModal } from './routine-prompt.js';
+import { promptModal } from './prompt-modal.js';
 
 let chains = [];
 let schedById = {};   // schedule id → row; gives canvas nodes their step type

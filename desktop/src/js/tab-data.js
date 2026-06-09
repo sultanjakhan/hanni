@@ -1284,8 +1284,9 @@ async function loadHobbiesOverview(el) {
       <div style="margin-top:16px;">
         <button class="btn-primary" id="create-list-btn">+ New List</button>
       </div>`;
-    document.getElementById('create-list-btn')?.addEventListener('click', () => {
-      const name = prompt('List name:');
+    document.getElementById('create-list-btn')?.addEventListener('click', async () => {
+      const { promptModal } = await import('./prompt-modal.js');
+      const name = await promptModal({ title: 'Название списка' });
       if (name) invoke('create_user_list', { name, description: '', color: '#9B9B9B' }).then(() => loadHobbies('Overview')).catch(e => alert(e));
     });
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
@@ -1683,8 +1684,9 @@ function renderHealth(el, today, habits) {
     ],
     idField: 'id',
     addButton: '+ Привычка',
-    onAdd: () => {
-      const name = prompt('Название привычки:');
+    onAdd: async () => {
+      const { promptModal } = await import('./prompt-modal.js');
+      const name = await promptModal({ title: 'Название привычки' });
       if (name) invoke('create_habit', { name, icon: '', frequency: 'daily' }).then(() => loadHealth()).catch(e => alert(e));
     },
     onQuickAdd: async () => {
