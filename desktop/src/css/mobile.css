@@ -30,6 +30,14 @@
 }
 
 
+/* Unified page header: the tab name is already shown in #mobile-header,
+   so the big icon + title + description block is a duplicate that eats
+   ~100px of a small screen. Collapse it to a slim one-liner. */
+.mobile .uni-header { padding: 4px 0 0; margin-bottom: 4px; }
+.mobile .uni-header-icon { font-size: 18px; width: auto; height: auto; }
+.mobile .uni-header-name { font-size: 16px; }
+.mobile .uni-header-desc { display: none; }
+
 /* Sub-tab bar (Дашборд / Таблица / Цели / Заметки / Память):
    on narrow viewports the last tab gets cut off. Make the row
    horizontally scrollable so all tabs remain reachable. */
