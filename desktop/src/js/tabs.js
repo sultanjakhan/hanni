@@ -63,6 +63,10 @@ const SETTINGS_SECTIONS = {
     { id: 'blocklist', label: 'Блок-лист' },
     { id: 'mcp', label: 'MCP серверы' },
     { id: 'manage', label: 'Управление' },
+    // The chat tab (with its own settings incl. «О Hanni») is disabled in
+    // TAB_REGISTRY, so About — version, updates, LLM endpoint — must be
+    // reachable from every tab's gear.
+    { id: 'about', label: 'О Hanni' },
   ],
 };
 
@@ -944,6 +948,10 @@ async function renderSettingsPage(tabId, sectionId) {
   wireSyncControls(el);
   wireSecurityControls(el);
   wireManageControls(el, tabId);
+  if (sec.id === 'about') {
+    const host = el.querySelector('#settings-about-host');
+    if (host) tabLoaders.loadAbout?.(host);
+  }
 }
 
 async function renderSettingsSectionContent(tabId, sectionId) {
@@ -998,6 +1006,10 @@ async function renderSettingsSectionContent(tabId, sectionId) {
     return await renderSecuritySection();
   } else if (sectionId === 'manage') {
     return renderManageSection(tabId);
+  } else if (sectionId === 'about') {
+    // Host div — filled by tabLoaders.loadAbout after the page is inserted
+    // (renderSettingsPage), since loadAbout needs a live element.
+    return `<div id="settings-about-host"></div>`;
   }
   return '';
 }
