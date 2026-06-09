@@ -155,22 +155,41 @@ async function openStartDropdown(preserveScroll = false) {
   });
 
   // ✓/✗ pair for reflections / instant schedules — mark done / "не выполнено".
-  panel.querySelectorAll('.tw-check[data-check-idx]').forEach(x => {
-    x.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const p = orderedItems[parseInt(x.dataset.checkIdx)];
-      await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(() => {});
+  // In-place like the routine pair: light the box from the backend's toggle
+  // result, keep the row and the menu as-is. Rebuilding the dropdown here made
+  // clicks feel dead (no feedback until ~9 IPC calls finished) and a repeat
+  // click during the wait silently un-toggled the mark.
+  const markPair = async (el, p, want) => {
+    const row = el.closest('.tw-item');
+    if (!row || row.dataset.busy) return;
+    row.dataset.busy = '1';
+    const checkEl = row.querySelector('.tw-check');
+    const skipEl = row.querySelector('.tw-skip');
+    const date = p.completion_date || localDate();
+    try {
+      if (want === 'done') {
+        const done = await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date });
+        checkEl?.classList.toggle('tw-check--on', done === true);
+        skipEl?.classList.remove('tw-skip--on');
+      } else {
+        const st = await invoke('skip_schedule_completion', { scheduleId: p.source_id, date });
+        skipEl?.classList.toggle('tw-skip--on', st === 'skipped');
+        checkEl?.classList.remove('tw-check--on');
+      }
       window.dispatchEvent(new Event('task-state-changed'));
-      await openStartDropdown(true);
+    } catch (err) { console.error('tw pair:', err); }
+    delete row.dataset.busy;
+  };
+  panel.querySelectorAll('.tw-check[data-check-idx]').forEach(x => {
+    x.addEventListener('click', (e) => {
+      e.stopPropagation();
+      markPair(x, orderedItems[parseInt(x.dataset.checkIdx)], 'done');
     });
   });
   panel.querySelectorAll('.tw-skip[data-skip-idx]').forEach(x => {
-    x.addEventListener('click', async (e) => {
+    x.addEventListener('click', (e) => {
       e.stopPropagation();
-      const p = orderedItems[parseInt(x.dataset.skipIdx)];
-      await invoke('skip_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(() => {});
-      window.dispatchEvent(new Event('task-state-changed'));
-      await openStartDropdown(true);
+      markPair(x, orderedItems[parseInt(x.dataset.skipIdx)], 'skipped');
     });
   });
 
@@ -202,23 +221,19 @@ async function openStartDropdown(preserveScroll = false) {
         return;
       }
       const isCheck = p.tracking_mode === 'check';
+      if (isCheck && p.source_type === 'schedule') {
+        // Same in-place ✓ as the pair box (reflections write to yesterday via
+        // completion_date). Menu stays open so several can be marked in a row.
+        await markPair(btn, p, 'done');
+        return;
+      }
       try {
-        if (isCheck && p.source_type === 'schedule') {
-          // Reflections write to yesterday (completion_date), not today.
-          await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() });
-        } else {
-          await invoke('start_task_block', { sourceType: p.source_type, sourceId: String(p.source_id) });
-        }
+        await invoke('start_task_block', { sourceType: p.source_type, sourceId: String(p.source_id) });
       } catch (err) { console.error('tw item click:', err); }
       window.dispatchEvent(new Event('task-state-changed'));
-      // Check-mode is a quick toggle — keep the menu open so several can be
-      // marked in a row. Track-mode starts a timer; close so the timer UI shows.
-      if (isCheck && p.source_type === 'schedule') {
-        await openStartDropdown(true);
-      } else {
-        closeDropdown();
-        await refreshState();
-      }
+      // Track-mode starts a timer; close so the timer UI shows.
+      closeDropdown();
+      await refreshState();
     });
   });
 }
