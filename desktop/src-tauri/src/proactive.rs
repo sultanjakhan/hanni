@@ -1,6 +1,6 @@
 // proactive.rs — Proactive messaging logic
 use crate::types::*;
-use crate::memory::{build_memory_context_from_db, save_proactive_settings};
+use crate::memory_embed::{build_memory_context_from_db, save_proactive_settings};
 use crate::macos::{run_osascript, check_calendar_access, classify_app, get_macos_idle_seconds, is_screen_locked};
 use crate::voice::speak_tts;
 use tauri::{AppHandle, Emitter, Manager};

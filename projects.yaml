@@ -55,6 +55,7 @@ chat:
     - desktop/src-tauri/src/voice.rs
     - desktop/src-tauri/src/voice_stubs.rs
     - desktop/src-tauri/src/memory.rs
+    - desktop/src-tauri/src/memory_embed.rs
     - desktop/src-tauri/src/agent.rs
     - desktop/src-tauri/src/prompts.rs
     - desktop/src-tauri/src/mlx_manager.rs

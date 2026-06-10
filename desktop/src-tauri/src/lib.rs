@@ -6,6 +6,7 @@ mod db;
 mod sports_seed;
 mod chat;
 mod memory;
+mod memory_embed;
 #[cfg(not(target_os = "android"))]
 mod voice;
 #[cfg(target_os = "android")]
@@ -82,9 +83,9 @@ mod window_state;
 use types::*;
 use prompts::SYSTEM_PROMPT;
 use db::*;
-use memory::load_proactive_settings;
+use memory_embed::load_proactive_settings;
 #[cfg(not(target_os = "android"))]
-use memory::{embed_texts, store_fact_embedding};
+use memory_embed::{embed_texts, store_fact_embedding};
 #[cfg(not(target_os = "android"))]
 use voice::speak_silero_core;
 #[cfg(not(target_os = "android"))]
