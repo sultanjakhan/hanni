@@ -219,6 +219,43 @@ pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>)
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Auto-✗: when a reflection run closes (auto-completed or expired at the
+/// midnight cleanup), every reflection check the user never answered gets an
+/// explicit 'skipped' completion for the day the run reflected on (run.date−1).
+/// Touches only marks_previous_day schedules and never overwrites an answer.
+fn skip_unanswered_reflections(conn: &rusqlite::Connection, chain_id: i64, run_id: i64, run_date: &str) {
+    let prev = match chrono::NaiveDate::parse_from_str(run_date, "%Y-%m-%d") {
+        Ok(nd) => (nd - chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
+        Err(_) => return,
+    };
+    // Nodes resolve to their schedule via source_id, or — for converge-era
+    // nodes that came in unlinked — by exact title, mirroring the runtime
+    // fallback in set_routine_node_status.
+    let mut stmt = match conn.prepare(
+        "SELECT DISTINCT s.id FROM routine_nodes n
+          JOIN schedules s ON (s.id = n.source_id)
+                           OR (n.source_id IS NULL AND s.title = n.title)
+         WHERE n.chain_id=?1 AND n.source_type='schedule'
+           AND COALESCE(s.marks_previous_day,0)=1 AND s.is_active=1
+           AND NOT EXISTS (SELECT 1 FROM routine_node_status st
+                            WHERE st.run_id=?2 AND st.node_id=n.id AND st.state IN ('done','skipped'))
+           AND NOT EXISTS (SELECT 1 FROM schedule_completions c
+                            WHERE c.schedule_id=s.id AND c.date=?3)",
+    ) { Ok(s) => s, Err(_) => return };
+    let sids: Vec<String> = stmt
+        .query_map(rusqlite::params![chain_id, run_id, &prev], |r| r.get(0))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default();
+    for sid in sids {
+        let _ = conn.execute(
+            "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status)
+             VALUES (?1, ?2, ?3, 0, NULL, 'skipped')
+             ON CONFLICT(schedule_id, date) DO NOTHING",
+            rusqlite::params![crate::types::new_uuid_v7(), sid, &prev],
+        );
+    }
+}
+
 /// Core of the engine: for every active run on `date`, return the available nodes
 /// (incoming edges satisfied, not yet closed). A run with all required nodes
 /// closed is auto-marked 'completed'.
@@ -231,13 +268,18 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
     // off; mirrored schedule_completions stay intact). Keyed to the device's
     // local today, not the `date` argument, so browsing past days is safe.
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let _ = conn.execute(
-        "DELETE FROM routine_node_status WHERE run_id IN
-           (SELECT id FROM routine_runs WHERE state='active' AND date < ?1)",
-        rusqlite::params![today]);
-    let _ = conn.execute(
-        "DELETE FROM routine_runs WHERE state='active' AND date < ?1",
-        rusqlite::params![today]);
+    let stale: Vec<(i64, i64, String)> = conn
+        .prepare("SELECT id, chain_id, date FROM routine_runs WHERE state='active' AND date < ?1")
+        .and_then(|mut s| {
+            s.query_map(rusqlite::params![today], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
+    for (rid, cid, rdate) in &stale {
+        skip_unanswered_reflections(&conn, *cid, *rid, rdate);
+        let _ = conn.execute("DELETE FROM routine_node_status WHERE run_id=?1", rusqlite::params![rid]);
+        let _ = conn.execute("DELETE FROM routine_runs WHERE id=?1", rusqlite::params![rid]);
+    }
     let mut rstmt = conn.prepare(
         "SELECT r.id, r.chain_id, c.title, r.slot FROM routine_runs r
          JOIN routine_chains c ON c.id = r.chain_id
@@ -290,6 +332,7 @@ pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Ve
         if done && nodes.values().any(|n| !n.is_start) {
             conn.execute("UPDATE routine_runs SET state='completed', completed_at=?1 WHERE id=?2",
                 rusqlite::params![chrono::Local::now().to_rfc3339(), run_id]).ok();
+            skip_unanswered_reflections(&conn, chain_id, run_id, &date);
         }
         // tracking_mode/marks_previous_day come from the wrapped schedule (if any) so
         // the picker shows ✓/✗ for check/reflection steps but ▶ start for timer steps.
