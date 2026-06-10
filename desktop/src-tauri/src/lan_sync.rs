@@ -133,9 +133,13 @@ fn gather(conn: &rusqlite::Connection, cursors: &Map<String, Value>, tomb_cursor
 fn apply_batch(conn: &rusqlite::Connection, batch: &SyncBatch) -> usize {
     let mut applied = 0;
     let mut touched_schedules = false;
+    let mut touched_health = false;
     for item in &batch.rows {
         if !SYNC_TABLES.contains(&item.t.as_str()) { continue; }
         if item.t == "schedules" { touched_schedules = true; }
+        if matches!(item.t.as_str(), "health_log" | "events" | "sleep_sessions") {
+            touched_health = true;
+        }
         if let Ok(true) = upsert_row(conn, &item.t, &item.f) { applied += 1; }
     }
     for t in &batch.tombs {
@@ -148,6 +152,19 @@ fn apply_batch(conn: &rusqlite::Connection, batch: &SyncBatch) -> usize {
     // logical schedule. Collapse them right after apply so the next round
     // doesn't echo the duplicates and the user never sees them in UI.
     if touched_schedules { crate::db::dedup_schedules_by_title(conn); }
+    // Health data that arrives over LAN (the Android background worker pushes
+    // walks/steps/sleep while the phone app is closed) must still auto-✓ the
+    // linked schedules — the importer that normally does this only runs on the
+    // importing device. Idempotent; cover today + yesterday for the midnight
+    // batch (yesterday's totals land just after 00:00).
+    if touched_health {
+        let now = chrono::Local::now().to_rfc3339();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d").to_string();
+        let _ = crate::calendar_health::auto_complete_from_health(conn, &today, &now);
+        let _ = crate::calendar_health::auto_complete_from_health(conn, &yesterday, &now);
+    }
     applied
 }
 

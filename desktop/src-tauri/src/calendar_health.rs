@@ -221,7 +221,7 @@ fn mark_schedule_done(conn: &rusqlite::Connection, schedule_id: &str, date: &str
 /// A schedule's `target_minutes` overrides the threshold (interpreted as the raw
 /// number: minutes for activity/sleep, step count for steps). 'cooking' is handled
 /// separately by auto_complete_from_cooking. Idempotent (keeps completed_at on conflict).
-fn auto_complete_from_health(conn: &rusqlite::Connection, date: &str, now: &str) -> rusqlite::Result<()> {
+pub(crate) fn auto_complete_from_health(conn: &rusqlite::Connection, date: &str, now: &str) -> rusqlite::Result<()> {
     use std::collections::HashMap;
     const DEFAULT_ACTIVITY_MIN: i64 = 15;
     const DEFAULT_STEPS: i64 = 8000;
@@ -241,6 +241,36 @@ fn auto_complete_from_health(conn: &rusqlite::Connection, date: &str, now: &str)
             if let Ok((title, dur)) = r {
                 if let Some(key) = source_key_for_event_title(&title) {
                     *ex.entry(key).or_insert(0) += dur;
+                }
+            }
+        }
+    }
+    // Exercise minutes also land in health_log (type='exercise', notes
+    // '<key>: <title>') via the Android background worker, which writes no
+    // calendar events. Count them per key too — deduped by start_time (the
+    // worker + LAN sync can duplicate a session until the boot-time dedup
+    // runs) — and take the LARGER of the two stores per key: when the in-app
+    // import also ran, both hold the same sessions and summing would double.
+    {
+        const KEYS: [&str; 8] = ["walking", "running", "cycling", "swimming",
+                                 "strength", "yoga", "hiking", "workout"];
+        let mut stmt = conn.prepare(
+            "SELECT k, COALESCE(SUM(m), 0) FROM (
+               SELECT substr(notes, 1, instr(notes, ':') - 1) AS k,
+                      start_time, MAX(value) AS m
+                 FROM health_log
+                WHERE date=?1 AND type='exercise' AND instr(notes, ':') > 1
+                GROUP BY k, start_time
+             ) GROUP BY k"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![date], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)? as i64))
+        })?;
+        for r in rows {
+            if let Ok((key, mins)) = r {
+                if let Some(k) = KEYS.iter().find(|k| **k == key) {
+                    let e = ex.entry(*k).or_insert(0);
+                    if mins > *e { *e = mins; }
                 }
             }
         }
