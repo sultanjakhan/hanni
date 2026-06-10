@@ -20,7 +20,7 @@ tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "rustls-tls-webpki-roots", "http2", "charset"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "process", "sync", "time", "io-util"] }
 futures-util = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
@@ -28,13 +28,11 @@ dirs = "6"
 rusqlite = { version = "0.32", features = ["bundled", "load_extension"] }
 regex = "1"
 axum = "0.8"
-tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }   # CORS for guests on Firebase Hosting
 rand = "0.9"
 uuid = { version = "1", features = ["v4", "v5", "v7"] }
 tempfile = "3"
 sqlite-vec = "0.1"
-zerocopy = { version = "0.8", features = ["derive"] }
 rmcp = { version = "1.2", features = ["client", "transport-child-process"] }
 jsonwebtoken = "9"          # Firebase service-account JWT signing for cloud-share
 sha2 = "0.10"               # owner_uid derivation from service-account email (Stage C)
@@ -58,8 +56,10 @@ tauri-plugin-global-shortcut = "2"
 
 # Release size: the default profile ships an unstripped ~110-127MB binary (mostly
 # debug symbols) → bloated .app/APK and expensive native updates. strip drops the
-# symbols (~3-4× smaller); thin LTO trims a bit more at modest build cost.
+# symbols (~3-4× smaller); fat LTO + codegen-units=1 trim a few more MB at the
+# cost of a longer CI link step.
 # opt-level stays at the default 3 (speed) so the Rust backend isn't slowed.
 [profile.release]
 strip = true
-lto = "thin"
+lto = "fat"
+codegen-units = 1

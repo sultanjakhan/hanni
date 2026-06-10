@@ -1802,7 +1802,7 @@ dependencies = [
 
 [[package]]
 name = "hanni"
-version = "1.0.9"
+version = "1.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1838,12 +1838,10 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "tokio",
- "tower",
  "tower-http",
  "uuid",
  "voice_activity_detector",
  "whisper-rs",
- "zerocopy",
 ]
 
 [[package]]
@@ -5393,7 +5391,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

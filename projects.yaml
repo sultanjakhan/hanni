@@ -169,10 +169,8 @@ projects-tab:
     - desktop/src/js/db-view/db-filters.js
     - desktop/src/js/db-view/db-filter-logic.js
     - desktop/src/js/db-view/db-sort.js
-    - desktop/src/js/db-view/db-group.js
     - desktop/src/js/db-view/db-select.js
     - desktop/src/js/db-view/db-selection.js
-    - desktop/src/js/db-view/db-search.js
     - desktop/src/js/db-view/db-properties.js
     - desktop/src/js/db-view/db-col-state.js
     - desktop/src/js/db-view/db-col-clicks.js
@@ -185,7 +183,6 @@ projects-tab:
     - desktop/src/js/db-view/db-type-editors.js
     - desktop/src/js/db-view/db-row-menu.js
     - desktop/src/js/db-view/db-drag-rows.js
-    - desktop/src/js/db-view/db-table-events.js
     - desktop/src/js/db-view/db-clipboard.js
     - desktop/src/js/db-view/db-dropdowns.js
     - desktop/src/js/db-view/db-option-edit.js
@@ -195,7 +192,6 @@ projects-tab:
     - desktop/src/js/db-view/db-add-property.js
     - desktop/src/js/db-view/db-side-peek.js
     - desktop/src/js/db-view/db-recurrence-editor.js
-    - desktop/src/js/db-view/db-calc.js
     - desktop/src/js/db-view/unified-layout.js
     - desktop/src/css/database-view.css
     - desktop/src/css/tabs-data.css
@@ -302,7 +298,6 @@ food:
     - desktop/src/js/food-product-modal.js
     - desktop/src/js/food-product-card.js
     - desktop/src/js/food-product-views.js
-    - desktop/src/js/food-product-popup.js
     - desktop/src/js/food-blacklist-view.js
     - desktop/src/js/food-blacklist-add.js
     - desktop/src/js/food-blacklist-menu.js
@@ -498,7 +493,6 @@ android:
     - desktop/src-tauri/gen/android/app/build.gradle.kts
     - desktop/src-tauri/gen/android/app/proguard-rules.pro
     - desktop/src-tauri/gen/android/app/src/main/AndroidManifest.xml
-    - desktop/src-tauri/gen/android/app/src/main/assets/libs/darwin-aarch64/crsqlite.dylib
     - desktop/src-tauri/gen/android/app/src/main/java/com/sultanjakhan/hanni/InstallApkPlugin.kt
     - desktop/src-tauri/gen/android/app/src/main/java/com/sultanjakhan/hanni/MainActivity.kt
     # Android resources (icons, drawables, themes)
@@ -611,25 +605,17 @@ _shared:
     description: "Ambient audio файлы и звуки"
     files:
       - desktop/src/sounds/birds.m4a
-      - desktop/src/sounds/birds.ogg
       - desktop/src/sounds/blackhole.m4a
       - desktop/src/sounds/fireplace.m4a
-      - desktop/src/sounds/fireplace.ogg
       - desktop/src/sounds/forest.m4a
-      - desktop/src/sounds/forest.ogg
       - desktop/src/sounds/jupiter.m4a
       - desktop/src/sounds/ocean.m4a
-      - desktop/src/sounds/ocean.ogg
       - desktop/src/sounds/rain.m4a
-      - desktop/src/sounds/rain.ogg
       - desktop/src/sounds/saturn.m4a
       - desktop/src/sounds/space.m4a
       - desktop/src/sounds/stream.m4a
-      - desktop/src/sounds/stream.ogg
       - desktop/src/sounds/thunder.m4a
-      - desktop/src/sounds/thunder.ogg
       - desktop/src/sounds/wind.m4a
-      - desktop/src/sounds/wind.ogg
 
   vendor:
     description: "Third-party JS-библиотеки (editorjs, three.js, draco, html2canvas)"
@@ -646,13 +632,7 @@ _shared:
       - desktop/src/vendor/drag-drop.min.js
       - desktop/src/vendor/html2canvas.min.js
       - desktop/src/vendor/three-bundle.min.js
-      - desktop/src/vendor/three/three.module.min.js
-      - desktop/src/vendor/three/addons/GLTFLoader.js
-      - desktop/src/vendor/three/addons/OrbitControls.js
-      - desktop/src/vendor/three/addons/DRACOLoader.js
-      - desktop/src/assets/draco/draco_decoder.js
       - desktop/src/assets/draco/draco_wasm_wrapper.js
-      - desktop/src/js/vendor/html2canvas.min.js
 
   automation:
     description: "HTTP automation API :8236 dev / :8235 prod + dev tooling, background sync loops"
