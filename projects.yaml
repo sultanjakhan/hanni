@@ -60,6 +60,7 @@ chat:
     - desktop/src-tauri/src/prompts.rs
     - desktop/src-tauri/src/mlx_manager.rs
     - desktop/src-tauri/src/proactive.rs
+    - desktop/src-tauri/src/proactive_context.rs
   tables: [conversations, facts, vec_facts]
   memory: []
   related: []

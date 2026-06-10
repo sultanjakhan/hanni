@@ -1,7 +1,7 @@
 // macos.rs — macOS actions, OS context helpers, reminders, web search
 use crate::types::*;
 use tauri::Manager;
-use crate::proactive::truncate_utf8;
+use crate::proactive_context::truncate_utf8;
 use std::sync::atomic::Ordering;
 use std::io::Write;
 

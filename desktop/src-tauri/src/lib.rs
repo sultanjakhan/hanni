@@ -13,6 +13,7 @@ mod voice;
 #[path = "voice_stubs.rs"]
 mod voice;
 mod proactive;
+mod proactive_context;
 mod macos;
 mod android_update;
 mod web_assets;
@@ -89,9 +90,10 @@ use memory_embed::{embed_texts, store_fact_embedding};
 #[cfg(not(target_os = "android"))]
 use voice::speak_silero_core;
 #[cfg(not(target_os = "android"))]
-use proactive::{
+use proactive::proactive_loop;
+use proactive_context::{
     get_frontmost_app, get_browser_url, get_now_playing_sync,
-    get_upcoming_events_soon, proactive_loop,
+    get_upcoming_events_soon,
 };
 #[cfg(not(target_os = "android"))]
 use macos::run_osascript;
@@ -1305,7 +1307,7 @@ pub fn run() {
                             get_frontmost_app(),
                             get_browser_url(),
                             get_now_playing_sync(),
-                            proactive::get_window_title(),
+                            proactive_context::get_window_title(),
                             macos::get_macos_idle_seconds(),
                             macos::is_screen_locked(),
                         )
@@ -1328,7 +1330,7 @@ pub fn run() {
                     let category = if is_afk {
                         "afk"
                     } else {
-                        proactive::classify_activity(&app_name, &browser, &window_title)
+                        proactive_context::classify_activity(&app_name, &browser, &window_title)
                     };
 
                     // Compute productive vs distraction (0.5 min per 30-sec snapshot)

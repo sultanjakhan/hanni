@@ -4,7 +4,7 @@ use crate::types::*;
 use crate::prompts::*;
 use crate::mcp::McpState;
 use crate::memory_embed::{build_memory_context_from_db, embed_texts, rerank_facts, search_similar_facts, gather_memory_candidates};
-use crate::proactive::{get_frontmost_app, get_browser_url, get_now_playing_sync};
+use crate::proactive_context::{get_frontmost_app, get_browser_url, get_now_playing_sync};
 use crate::macos::get_macos_idle_seconds;
 use tauri::{AppHandle, Emitter, Manager};
 use std::collections::HashMap;
