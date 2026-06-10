@@ -2,6 +2,7 @@
 // Idle: + opens dropdown with planned tasks → click = start
 // Active: ■ pulsing red → click = stop
 import { invoke } from './state.js';
+import { escapeHtml } from './utils.js';
 import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
 import { buildPickerBody, loadCategoryWeights } from './task-picker-view.js';
 import { pickRecommendedTaskId, pickStartChainId, timeToMin } from './task-picker-sort.js';
@@ -22,12 +23,6 @@ const STOP_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentC
 function localDate() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
 }
 
 async function refreshState() {

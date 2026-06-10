@@ -1,5 +1,6 @@
 // ── body-recommendations.js — modal listing exercises tagged for a body zone ──
 import { invoke } from './state.js';
+import { escapeHtml } from './utils.js';
 import { MUSCLE_LABELS, TYPE_LABELS, MUSCLE_COLORS, TYPE_COLORS } from './sport-catalog-filters.js';
 
 export async function showBodyRecommendationsModal(zone, zoneLabel) {
@@ -55,10 +56,4 @@ function renderExerciseRow(ex) {
     </div>
     ${desc}
   </div>`;
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
 }
