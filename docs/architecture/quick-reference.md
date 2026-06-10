@@ -8,6 +8,7 @@
 ## Frontend state
 - Общий объект **`S`** в `desktop/src/js/state.js` — только персистентные данные, без temp-переменных.
 - Реестр **`tabLoaders`** — для кросс-модульных вызовов между табами.
+- **db-view** (`desktop/src/js/db-view/`, ~34 модуля) — общий движок таблиц/канбана/галереи/календаря для 12 data-табов; грузится лениво вместе с `tab-data.js` при первом входе в data-таб.
 
 ## Rust pattern
 - `types.rs` шарится через `use types::*`.
@@ -19,6 +20,7 @@
 - Локальный **MLX-сервер** на `127.0.0.1:8234` (Qwen3.5-35B-A3B) — дефолт.
 - Переопределение: app_settings `llm_server_url` / `llm_model` (Чат → Настройки → Инструменты → «LLM сервер») — любой OpenAI-совместимый эндпоинт, напр. GPU-машина по Tailscale. Применяется без перезапуска (`types::llm_chat_url()`).
 - Стриминг — **SSE-события**: `chat-token`, `chat-done`, `chat-reasoning`, `chat-reasoning-done`.
+- **Сейчас MLX офлайн**: табы Chat и Focus закомментированы в `TAB_REGISTRY` (`state.js`), дефолтный таб — Calendar. Вернуть при включении MLX.
 
 ## HTTP API (automation)
 - `127.0.0.1:8235` (prod), `127.0.0.1:8236` (dev, `cfg!(debug_assertions)`).
