@@ -264,6 +264,7 @@ sports:
     - desktop/src/assets/draco/draco_decoder.wasm
   rust:
     - desktop/src-tauri/src/health_import.rs
+    - desktop/src-tauri/src/commands_sports.rs
     - desktop/src-tauri/src/sports_seed.rs                  # one-time exercise-catalog seed
     - desktop/src-tauri/src/sports_seed/exercises.json      # bundled public-domain dataset (Unlicense)
     - desktop/src-tauri/src/commands_programs.rs            # multi-day workout programs
@@ -310,7 +311,8 @@ food:
     - desktop/src/js/shopping-list.js
     - desktop/src/js/shopping-list-modal.js
     - desktop/src/js/fridge-multiadd.js
-  rust: []  # commands_data.rs + commands_shopping.rs
+  rust:
+    - desktop/src-tauri/src/commands_food.rs  # + commands_shopping.rs
   tables: [food_log, recipes, recipe_ingredients, products, ingredient_catalog, meal_plan, food_blacklist, shopping_list]
   subprojects:
     cooking-tracker:
@@ -323,7 +325,8 @@ food:
 money:
   description: "Финансы (5 sub-tabs): транзакции, бюджеты, цели, подписки, долги (через db-view)"
   files: []
-  rust: []
+  rust:
+    - desktop/src-tauri/src/commands_money.rs
   tables: [transactions, budgets, savings_goals, subscriptions, debts]
   memory: []
   related: []
@@ -532,6 +535,7 @@ _shared:
       - desktop/src-tauri/src/db.rs
       - desktop/src-tauri/src/commands_meta.rs
       - desktop/src-tauri/src/commands_data.rs
+      - desktop/src-tauri/src/commands_flywheel.rs
       - desktop/src-tauri/src/commands_shopping.rs
       - desktop/src-tauri/src/macos.rs
       - desktop/src-tauri/src/window_state.rs

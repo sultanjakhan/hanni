@@ -191,7 +191,7 @@ pub fn complete_program_day(run_id: i64, db: tauri::State<'_, HanniDb>) -> Resul
         .map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     let mut logged = 0i64;
     for tid in &tids {
-        if crate::commands_data::make_workout_from_template(&conn, *tid).is_ok() { logged += 1; }
+        if crate::commands_sports::make_workout_from_template(&conn, *tid).is_ok() { logged += 1; }
     }
     let cycle = if cycle > 0 { cycle } else { 1 };
     let next = (current_day + 1) % cycle;
