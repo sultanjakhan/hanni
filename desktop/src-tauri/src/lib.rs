@@ -25,6 +25,11 @@ mod commands_sports;
 mod commands_flywheel;
 mod commands_programs;
 mod commands_meta;
+mod commands_focus;
+mod commands_contacts;
+mod commands_system;
+mod commands_api;
+mod commands_updater;
 mod pm_matrix;
 mod routine;
 mod routine_engine;
@@ -89,9 +94,9 @@ use proactive::{
 };
 #[cfg(not(target_os = "android"))]
 use macos::run_osascript;
-use commands_meta::spawn_api_server;
+use commands_api::spawn_api_server;
 #[cfg(not(target_os = "android"))]
-use commands_meta::ensure_voice_server_launchagent;
+use commands_api::ensure_voice_server_launchagent;
 
 // Imports needed by run()
 use std::sync::Arc;
@@ -412,7 +417,7 @@ pub fn run() {
         .manage(focus_manager)
         .manage(call_mode)
         .manage(mcp::McpState::empty())
-        .manage(commands_meta::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
+        .manage(commands_api::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
         .manage(share_tunnel::ShareTunnel::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
@@ -472,18 +477,18 @@ pub fn run() {
             commands_data::tracker_get_stats,
             commands_data::tracker_get_recent,
             // Integrations & Meta
-            commands_meta::get_integrations,
-            commands_meta::get_model_info,
-            commands_meta::health_check,
+            commands_system::get_integrations,
+            commands_system::get_model_info,
+            commands_system::health_check,
             // macOS
             macos::get_activity_summary,
             macos::get_calendar_events,
             macos::get_now_playing,
             macos::get_browser_tab,
-            commands_meta::get_app_version,
-            commands_meta::is_debug_build,
-            commands_meta::check_update,
-            commands_meta::restart_app,
+            commands_updater::get_app_version,
+            commands_updater::is_debug_build,
+            commands_updater::check_update,
+            commands_updater::restart_app,
             // Proactive
             proactive::get_proactive_settings,
             proactive::set_proactive_settings,
@@ -514,10 +519,10 @@ pub fn run() {
             voice::stop_recording,
             voice::check_whisper_model,
             // Focus
-            commands_meta::start_focus,
-            commands_meta::stop_focus,
-            commands_meta::get_focus_status,
-            commands_meta::update_blocklist,
+            commands_focus::start_focus,
+            commands_focus::stop_focus,
+            commands_focus::get_focus_status,
+            commands_focus::update_blocklist,
             // Training
             commands_flywheel::get_training_stats,
             commands_flywheel::export_training_data,
@@ -805,17 +810,17 @@ pub fn run() {
             commands_meta::delete_home_item,
             commands_meta::toggle_home_item_needed,
             // People / Contacts
-            commands_meta::add_contact,
-            commands_meta::get_contacts,
-            commands_meta::update_contact,
-            commands_meta::delete_contact,
-            commands_meta::toggle_contact_blocked,
-            commands_meta::toggle_contact_favorite,
+            commands_contacts::add_contact,
+            commands_contacts::get_contacts,
+            commands_contacts::update_contact,
+            commands_contacts::delete_contact,
+            commands_contacts::toggle_contact_blocked,
+            commands_contacts::toggle_contact_favorite,
             // Contact blocks
-            commands_meta::add_contact_block,
-            commands_meta::get_contact_blocks,
-            commands_meta::delete_contact_block,
-            commands_meta::toggle_contact_block_active,
+            commands_contacts::add_contact_block,
+            commands_contacts::get_contact_blocks,
+            commands_contacts::delete_contact_block,
+            commands_contacts::toggle_contact_block_active,
             // Page Meta & Custom Properties
             commands_meta::get_page_meta,
             commands_meta::update_page_meta,
@@ -877,10 +882,10 @@ pub fn run() {
             vacancy::vacancy_search_now,
             vacancy::vacancy_search_source,
             // Automation API
-            commands_meta::auto_eval_callback,
-            commands_meta::rotate_api_token,
-            commands_meta::get_api_token_preview,
-            commands_meta::list_automation_log,
+            commands_api::auto_eval_callback,
+            commands_api::rotate_api_token,
+            commands_api::get_api_token_preview,
+            commands_api::list_automation_log,
             // Body Records (3D Body Tab)
             commands_flywheel::create_body_record,
             commands_flywheel::get_body_records,
@@ -1082,11 +1087,11 @@ pub fn run() {
 
             // Auto-updater (desktop only) — downloads in background and emits
             // `update-ready`; the UI shows a "Restart" button instead of
-            // auto-restarting (see commands_meta::auto_check_on_startup).
+            // auto-restarting (see commands_updater::auto_check_on_startup).
             #[cfg(not(target_os = "android"))]
             {
                 let handle = app.handle().clone();
-                tauri::async_runtime::spawn(commands_meta::auto_check_on_startup(handle));
+                tauri::async_runtime::spawn(commands_updater::auto_check_on_startup(handle));
             }
 
             // Owner-side cloud auto-sync (Mac ↔ Android via Firestore).

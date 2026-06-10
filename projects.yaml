@@ -109,7 +109,8 @@ focus:
   files:
     - desktop/src/js/tab-focus.js
     - desktop/src/focus-overlay.html
-  rust: []  # logic в commands_meta.rs
+  rust:
+    - desktop/src-tauri/src/commands_focus.rs
   tables: [activities]
   memory: []
   related: [calendar]
@@ -334,7 +335,8 @@ money:
 people:
   description: "Контакты, блокировка контактов"
   files: []
-  rust: []
+  rust:
+    - desktop/src-tauri/src/commands_contacts.rs
   tables: [contacts]
   memory: []
   related: []
@@ -534,6 +536,9 @@ _shared:
       - desktop/src-tauri/src/types.rs
       - desktop/src-tauri/src/db.rs
       - desktop/src-tauri/src/commands_meta.rs
+      - desktop/src-tauri/src/commands_system.rs
+      - desktop/src-tauri/src/commands_api.rs
+      - desktop/src-tauri/src/commands_updater.rs
       - desktop/src-tauri/src/commands_data.rs
       - desktop/src-tauri/src/commands_flywheel.rs
       - desktop/src-tauri/src/commands_shopping.rs

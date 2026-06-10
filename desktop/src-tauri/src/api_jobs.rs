@@ -1,7 +1,7 @@
 // api_jobs.rs — HTTP API for the browser extension (apps/jobs-extension):
 // lookup a vacancy by URL and upsert application status into job_vacancies.
 use crate::types::*;
-use crate::commands_meta::{check_auth, ApiState};
+use crate::commands_api::{check_auth, ApiState};
 use axum::extract::{Query, State as AxumState};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
