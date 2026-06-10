@@ -9,7 +9,7 @@ import { invoke } from './state.js';
 import { parseSteps } from './food-recipe-modals.js';
 import { ingredientListHtml, createCookEvent, headHtml, dotsHtml, bindPrepChecklist, recipeIngredients, requestWakeLock, releaseWakeLock, saveCook, loadCook, clearCook } from './food-cook-helpers.js';
 import { loadCatalog } from './food-recipe-filters.js';
-import { RING_R, fmt, paintRing, toggleTimer, addTime } from './food-cook-timer.js';
+import { RING_R, fmt, paintRing, toggleTimer, addTime, trayHtml, cancelTimer, clearAllTimers } from './food-cook-timer.js';
 
 let session = null; // one active cook at a time
 
@@ -25,7 +25,7 @@ export function startCookMode(recipe, opts = {}) {
     recipe, steps, idx: 0, phase: 'prep', onSaved: opts.onSaved, date: opts.date ?? null,
     baseServ: recipe.servings || 1, servings: saved?.servings || recipe.servings || 1,
     checked: new Set(), eventId: saved?.eventId ?? null, eventPromise: null,
-    intervalId: null, remaining: 0, total: 0, running: false, started: false,
+    timers: {}, // per-step countdowns, several may run at once
   };
   const root = document.createElement('div');
   root.className = 'cook-root';
@@ -43,7 +43,7 @@ export function startCookMode(recipe, opts = {}) {
 
 export function closeCookMode() {
   if (!session) return;
-  if (session.intervalId) clearInterval(session.intervalId);
+  clearAllTimers(session);
   if (session.onVis) document.removeEventListener('visibilitychange', session.onVis);
   releaseWakeLock();
   session.root?.remove();
@@ -84,13 +84,8 @@ function renderPrep() {
 }
 
 function loadStep(idx) {
-  if (session.intervalId) { clearInterval(session.intervalId); session.intervalId = null; }
-  session.idx = idx;
-  session.total = (session.steps[idx].min || 0) * 60;
-  session.remaining = session.total;
-  session.running = false;
-  session.started = false;
-  saveCook(session); // persist position for resume
+  session.idx = idx;   // navigating never stops a running timer — they live in session.timers
+  saveCook(session);   // persist position for resume
   renderStep();
 }
 
@@ -99,6 +94,11 @@ function renderStep() {
   const step = steps[idx];
   const last = idx === steps.length - 1;
   const hasTimer = (step.min || 0) > 0;
+  // Current step's live timer state (may have been started, then left running).
+  const t = session.timers[idx];
+  const remaining = t ? t.remaining : (step.min || 0) * 60;
+  const running = !!(t && t.intervalId);
+  const done = !!(t && t.done);
 
   const stage = hasTimer ? `
     <div class="cook-ring-wrap">
@@ -106,18 +106,20 @@ function renderStep() {
         <circle class="cook-ring-bg" cx="60" cy="60" r="${RING_R}" />
         <circle class="cook-ring-progress" id="cook-ring" cx="60" cy="60" r="${RING_R}" />
       </svg>
-      <div class="cook-ring-inner"><div class="cook-time" id="cook-time">${fmt(session.remaining)}</div></div>
+      <div class="cook-ring-inner"><div class="cook-time" id="cook-time">${fmt(remaining)}</div></div>
     </div>` : '<div class="cook-no-timer">Без таймера</div>';
 
   const ingr = step.ingredients.length
     ? `<div class="cook-ingredients">${step.ingredients.map(n => `<span class="cook-ingr">${escapeHtml(n)}</span>`).join('')}</div>` : '';
 
+  const startLabel = running ? '⏸ Пауза' : (t && !done ? '▶ Продолжить' : '▶ Старт');
   const timerBtns = hasTimer ? `
     <button class="btn-secondary cook-btn" id="cook-addtime">+1 мин</button>
-    <button class="btn-secondary cook-btn" id="cook-startpause">▶ Старт</button>` : '';
+    <button class="btn-secondary cook-btn" id="cook-startpause">${startLabel}</button>` : '';
 
-  session.root.innerHTML = `<div class="cook-card">
+  session.root.innerHTML = `<div class="cook-card${done ? ' cook-ringdone' : ''}">
     ${headHtml(session.recipe.name, `Шаг ${idx + 1} из ${steps.length}`)}
+    ${trayHtml(session)}
     <div class="cook-stage">${stage}</div>
     <div class="cook-step-text">${escapeHtml(step.text)}</div>
     ${ingr}
@@ -135,10 +137,19 @@ function renderStep() {
   q('#cook-next').onclick = advance;
   if (idx > 0) q('#cook-back').onclick = () => loadStep(idx - 1);
   if (hasTimer) {
-    q('#cook-addtime').onclick = () => addTime(session);
-    q('#cook-startpause').onclick = () => toggleTimer(session);
-    paintRing(session);
+    q('#cook-addtime').onclick = () => addTime(session, idx, renderStep);
+    q('#cook-startpause').onclick = () => toggleTimer(session, idx, renderStep);
+    paintRing(session, idx);
   }
+  // Tray chips: tap to jump to that step; "×" cancels its timer.
+  session.root.querySelectorAll('.ctray[data-tray]').forEach(b => b.onclick = (e) => {
+    if (e.target.closest('[data-trayx]')) return;
+    loadStep(parseInt(b.dataset.tray));
+  });
+  session.root.querySelectorAll('[data-trayx]').forEach(x => x.onclick = (e) => {
+    e.stopPropagation();
+    cancelTimer(session, parseInt(x.dataset.trayx), renderStep);
+  });
 }
 
 // Slide-over with the full ingredient list, reachable from any step.

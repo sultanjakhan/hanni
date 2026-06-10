@@ -2,7 +2,7 @@
 
 import { S, invoke, tabLoaders, TAB_REGISTRY, TAB_ICONS, MEDIA_TYPES, MEDIA_LABELS, STATUS_LABELS, MEMORY_CATEGORIES } from './state.js';
 import { showEmojiPicker } from './emoji-picker.js';
-import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks, loadTabBlockEditor } from './utils.js';
+import { escapeHtml, renderMarkdown, renderPageHeader, setupPageHeaderControls, confirmModal, skeletonPage, skeletonGrid, skeletonList, skeletonSettings, initBlockEditor, blocksToPlainText, migrateTextToBlocks, loadTabBlockEditor, toast } from './utils.js';
 import { renderTabBar, closeTab } from './tabs.js';
 import { DatabaseView } from './db-view/db-view.js';
 import { formatRecurrence } from './db-view/db-recurrence-editor.js';
@@ -282,6 +282,15 @@ async function loadFoodLog(el) {
       reloadFn: () => loadFoodLog(el),
     });
     await dbv.render();
+    // Daily macro total above the table — also the landing spot for cooks
+    // auto-logged from the cooking modal.
+    if (log.length) {
+      const sum = (k) => Math.round(log.reduce((s, r) => s + (Number(r[k]) || 0), 0));
+      el.insertAdjacentHTML('afterbegin', `<div class="food-day-summary">
+        <span class="fds-cal">${sum('calories')} kcal</span>
+        <span class="fds-macros">Б ${sum('protein')} · Ж ${sum('fat')} · У ${sum('carbs')} г</span>
+      </div>`);
+    }
   } catch (e) { el.innerHTML = `<div style="color:var(--text-muted);font-size:14px;">Error: ${e}</div>`; }
 }
 
@@ -321,7 +330,7 @@ function showAddFoodModal(el) {
       });
       overlay.remove();
       loadFoodLog(el);
-    } catch (err) { alert('Error: ' + err); }
+    } catch (err) { toast('Не удалось записать: ' + err); }
   });
 }
 

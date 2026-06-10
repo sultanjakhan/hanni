@@ -16,7 +16,14 @@
      (worst on Android where module parsing is slower). Removed by main.js
      after the initial renderTabBar(). Inline styles so it shows even when
      styles.css hasn't loaded yet. -->
-<div id="boot-splash" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg-primary,#fff);color:var(--text-secondary,#888);font:14px -apple-system,system-ui,sans-serif;z-index:99999;transition:opacity 180ms ease">Загрузка…</div>
+<style>
+@keyframes hanni-spin { to { transform: rotate(360deg); } }
+#boot-splash { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; background:var(--bg-primary,#fff); color:var(--text-secondary,#888); font:14px -apple-system,system-ui,sans-serif; z-index:99999; transition:opacity 180ms ease; }
+#boot-splash .spinner { width:30px; height:30px; border:3px solid var(--border-color,#e6e6e6); border-top-color:var(--accent-blue,#3b82f6); border-radius:50%; animation:hanni-spin .7s linear infinite; }
+</style>
+<!-- Animated (CSS-only) so it reads as "loading", not a frozen screen, during
+     the ~1s WebView-engine startup before main.js runs. -->
+<div id="boot-splash"><div class="spinner"></div><span>Загрузка…</span></div>
 
 <!-- Drag region for window controls -->
 <div id="drag-region"></div>

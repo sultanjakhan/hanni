@@ -1,6 +1,6 @@
 // ── food-recipe-modals.js — Recipe detail modal ──
 import { invoke } from './state.js';
-import { escapeHtml, confirmModal } from './utils.js';
+import { escapeHtml, confirmModal, toast } from './utils.js';
 import { loadCuisines, catalogCat, CAT_LABELS } from './food-recipe-filters.js';
 
 // instructions holds either a JSON array of {text,min,ingredients} (new) or
@@ -53,7 +53,7 @@ function ingredientsHtml(items, legacy) {
 
 export async function showRecipeDetail(id, reloadFn) {
   let recipe;
-  try { recipe = await invoke('get_recipe', { id }); } catch (e) { alert('Error: ' + e); return; }
+  try { recipe = await invoke('get_recipe', { id }); } catch (e) { toast('Не удалось открыть рецепт: ' + e); return; }
   const log = await invoke('get_cooking_log', { recipeId: id }).catch(() => []);
 
   const baseServ = recipe.servings || 1;
@@ -147,7 +147,7 @@ export async function showRecipeDetail(id, reloadFn) {
   });
   overlay.querySelector('#recipe-del')?.addEventListener('click', async () => {
     if (!await confirmModal('Удалить рецепт?', 'Удалить')) return;
-    try { await invoke('delete_recipe', { id }); overlay.remove(); if (reloadFn) await reloadFn(); } catch (e) { alert('Error: ' + e); }
+    try { await invoke('delete_recipe', { id }); overlay.remove(); if (reloadFn) await reloadFn(); } catch (e) { toast('Не удалось удалить: ' + e); }
   });
 
   overlay.querySelector('#recipe-edit')?.addEventListener('click', async () => {

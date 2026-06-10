@@ -7,3 +7,12 @@ export const ICONS = {
   share: `<svg ${SVG_ATTRS}><circle cx="12" cy="3.5" r="1.75"/><circle cx="4" cy="8" r="1.75"/><circle cx="12" cy="12.5" r="1.75"/><path d="M5.5 7.1l5-2.7M5.5 8.9l5 2.7"/></svg>`,
   ban: `<svg ${SVG_ATTRS}><circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4"/></svg>`,
 };
+
+// Larger empty-state glyphs (Lucide-derived, 24 grid). Sized via CSS (.hanni-empty-icon svg).
+const SVG24 = 'width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
+export const EMPTY_ICONS = {
+  utensils: `<svg ${SVG24}><path d="M7 2v7a2 2 0 0 0 4 0V2"/><path d="M9 9v13"/><path d="M17 2c-1.7 0-3 2.2-3 5s1.3 5 3 5"/><path d="M17 12v10"/></svg>`,
+  box: `<svg ${SVG24}><path d="M21 8v8a2 2 0 0 1-1 1.7l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.7l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`,
+  searchX: `<svg ${SVG24}><circle cx="11" cy="11" r="7"/><path d="m21 21-3.5-3.5"/><path d="m9 9 4 4"/><path d="m13 9-4 4"/></svg>`,
+  clipboard: `<svg ${SVG24}><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>`,
+};

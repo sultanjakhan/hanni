@@ -1,7 +1,8 @@
 // ── food-product-views.js — drill-down views: category → [parent|subgroup] → product ──
 import { CAT_LABELS, CAT_ORDER, ingredientBlockLevel, tagBlockLevel, categoryBlockLevel } from './food-recipe-filters.js';
 import { renderProductCard } from './food-product-card.js';
-import { escAttr as esc } from './utils.js';
+import { escAttr as esc, emptyState } from './utils.js';
+import { EMPTY_ICONS } from './icons.js';
 
 export const CAT_EMOJI = { meat:'🥩', fish:'🐟', veg:'🥬', fruit:'🍎', grain:'🌾', dairy:'🧀',
   legumes:'🫘', nuts:'🌰', spice:'🌶️', oil:'🫒', bakery:'🥖', drinks:'🥤', other:'📦' };
@@ -92,7 +93,11 @@ export function renderProductsGrid(el, catalog, category, subgroup, blacklist, o
   el.innerHTML = '';
   el.classList.remove('cat-grid', 'sg-grid');
   el.classList.add('recipe-grid');
-  if (!items.length) { el.innerHTML = '<div class="empty-state">Нет продуктов</div>'; return; }
+  if (!items.length) {
+    el.innerHTML = emptyState({ icon: EMPTY_ICONS.box, title: 'Здесь пока пусто',
+      hint: 'Добавьте продукт в эту группу через «+ Продукт».' });
+    return;
+  }
   appendProductCards(el, items, blacklist, onOpen);
 }
 
@@ -192,7 +197,11 @@ export function renderChildrenGrid(el, catalog, parent, blacklist, onOpen) {
   el.innerHTML = '';
   el.classList.remove('cat-grid', 'sg-grid');
   el.classList.add('recipe-grid');
-  if (!items.length) { el.innerHTML = '<div class="empty-state">Нет продуктов</div>'; return; }
+  if (!items.length) {
+    el.innerHTML = emptyState({ icon: EMPTY_ICONS.box, title: 'Здесь пока пусто',
+      hint: 'Добавьте продукт в эту группу через «+ Продукт».' });
+    return;
+  }
   appendProductCards(el, items, blacklist, onOpen);
 }
 

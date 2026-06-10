@@ -1,4 +1,6 @@
 // ── food-product-catalog.js — Drill-down product wiki: category → [parent|subgroup] → product ──
+import { emptyState } from './utils.js';
+import { EMPTY_ICONS } from './icons.js';
 import { CAT_LABELS, invalidateCatalogCache, loadCatalog, getBlacklist,
   ingredientBlockLevel, categoryBlockLevel } from './food-recipe-filters.js';
 import { showProductModal } from './food-product-modal.js';
@@ -28,8 +30,11 @@ function buildShell(el) {
       <input class="rf-search" placeholder="Поиск...">
       <button class="btn-primary rf-add" style="font-size:13px;padding:6px 12px;">+ Продукт</button>
     </div>
+    <div class="catalog-count"></div>
     <div class="drill-content"></div>
   </div>`;
+  const cnt = el.querySelector('.catalog-count');
+  if (cnt) cnt.textContent = allProducts.length ? `${allProducts.length} продуктов в каталоге` : '';
   el.querySelector('.rf-back').onclick = goBack;
   el.querySelector('.rf-search').oninput = (e) => { nav.q = e.target.value.trim(); render(); };
   el.querySelector('.rf-add').onclick = () => showProductModal(fullReload, null, {
@@ -63,7 +68,15 @@ function renderFlatList(el, items) {
   el.innerHTML = '';
   el.classList.remove('cat-grid', 'sg-grid');
   el.classList.add('recipe-grid');
-  if (!items.length) { el.innerHTML = '<div class="empty-state">Ничего не найдено</div>'; return; }
+  if (!items.length) {
+    el.innerHTML = emptyState({ icon: EMPTY_ICONS.searchX, title: 'Ничего не найдено',
+      hint: 'Попробуйте другой запрос или добавьте это как новый продукт.',
+      actionLabel: '+ Продукт', actionId: 'cat-empty-add' });
+    el.querySelector('#cat-empty-add')?.addEventListener('click', () => showProductModal(fullReload, null, {
+      category: nav.category || 'other', subgroup: nav.subgroup || '',
+    }));
+    return;
+  }
   const blockedTags = new Set(blacklist.filter(e => e.type === 'tag').map(e => e.value.toLowerCase()));
   for (const p of items.slice(0, 200)) {
     const card = renderProductCard(p, {
