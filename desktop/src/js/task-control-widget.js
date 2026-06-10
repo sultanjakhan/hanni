@@ -141,7 +141,7 @@ async function openStartDropdown(preserveScroll = false) {
     await invoke('create_note', {
       title, content: '', tags: '', status: 'task', tabName: null,
       dueDate: localDate(), reminderAt: null,
-    }).catch(() => {});
+    }).catch(e => console.warn('[picker]', e));
     await openStartDropdown();
   });
 
@@ -149,7 +149,7 @@ async function openStartDropdown(preserveScroll = false) {
     star.addEventListener('click', async (e) => {
       e.stopPropagation();
       const p = orderedItems[parseInt(star.dataset.pinIdx)];
-      await invoke('toggle_task_pin', { sourceType: p.source_type, sourceId: p.source_id }).catch(() => {});
+      await invoke('toggle_task_pin', { sourceType: p.source_type, sourceId: p.source_id }).catch(e => console.warn('[picker]', e));
       await openStartDropdown(true);
     });
   });
@@ -159,7 +159,7 @@ async function openStartDropdown(preserveScroll = false) {
     x.addEventListener('click', async (e) => {
       e.stopPropagation();
       const p = orderedItems[parseInt(x.dataset.checkIdx)];
-      await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(() => {});
+      await invoke('toggle_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(e => console.warn('[picker]', e));
       window.dispatchEvent(new Event('task-state-changed'));
       await openStartDropdown(true);
     });
@@ -168,7 +168,7 @@ async function openStartDropdown(preserveScroll = false) {
     x.addEventListener('click', async (e) => {
       e.stopPropagation();
       const p = orderedItems[parseInt(x.dataset.skipIdx)];
-      await invoke('skip_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(() => {});
+      await invoke('skip_schedule_completion', { scheduleId: p.source_id, date: p.completion_date || localDate() }).catch(e => console.warn('[picker]', e));
       window.dispatchEvent(new Event('task-state-changed'));
       await openStartDropdown(true);
     });

@@ -148,7 +148,7 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
     btn.addEventListener('click', async () => {
       await invoke('start_task_block', {
         sourceType: 'schedule', sourceId: String(btn.dataset.rtSched),
-      }).catch(() => {});
+      }).catch(e => console.warn('[picker]', e));
       onStarted();
     });
   });
@@ -157,7 +157,7 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
       await invoke('start_routine_run', {
         chainId: parseInt(btn.dataset.rtChain), date: localDate(),
         slot: btn.dataset.rtSlot || '',
-      }).catch(() => {});
+      }).catch(e => console.warn('[picker]', e));
       onChange();
     });
   });
@@ -168,12 +168,15 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
         runId: parseInt(btn.dataset.rtRun),
         nodeId: parseInt(btn.dataset.rtTask),
         state: 'done',
-      }).catch(() => {});
+      }).catch(e => console.warn('[picker]', e));
       onChange();
     });
   });
-  // ✓/✗ pair (reflection / optional): fill the choice in place and keep the row
-  // visible (no re-render) so it's clear and changeable; re-tap the lit box clears.
+  // ✓/✗ pair (reflection / optional): light the box for instant feedback, then
+  // re-render so the chain ADVANCES — in a linear chain the next step is gated
+  // by this answer and must appear right away (answering used to leave the
+  // picker frozen until closed/reopened). Changing an answer afterwards lives
+  // in Список/Месяц/День.
   const markPair = async (row, runId, nodeId, want) => {
     const checkEl = row.querySelector('.tw-check');
     const skipEl = row.querySelector('.tw-skip');
@@ -183,7 +186,9 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
     const state = lit ? 'pending' : want;
     checkEl?.classList.toggle('tw-check--on', state === 'done');
     skipEl?.classList.toggle('tw-skip--on', state === 'skipped');
-    await invoke('set_routine_node_status', { runId, nodeId, state }).catch(() => {});
+    await invoke('set_routine_node_status', { runId, nodeId, state })
+      .catch(e => console.warn('[picker] set_routine_node_status', e));
+    onChange();
   };
   panel.querySelectorAll('.tw-check[data-rt-task]').forEach(el => {
     el.addEventListener('click', (e) => {
@@ -203,13 +208,13 @@ export function wireRoutineSection(panel, onChange, onStarted = onChange, onDanK
         runId: parseInt(btn.dataset.rtRun),
         nodeId: parseInt(btn.dataset.rtUnlock),
         state: 'unlocked',
-      }).catch(() => {});
+      }).catch(e => console.warn('[picker]', e));
       onChange();
     });
   });
   panel.querySelectorAll('[data-rt-cancel]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      await invoke('delete_routine_run', { runId: parseInt(btn.dataset.rtCancel) }).catch(() => {});
+      await invoke('delete_routine_run', { runId: parseInt(btn.dataset.rtCancel) }).catch(e => console.warn('[picker]', e));
       onChange();
     });
   });
