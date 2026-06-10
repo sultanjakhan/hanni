@@ -1006,6 +1006,7 @@ function renderVacanciesTable(el, vacancies) {
         }
         return escapeHtml(c);
       } },
+      { key: 'found_at', label: 'Добавлена', render: r => r.found_at ? r.found_at.slice(0, 10) : '—' },
       { key: 'applied_at', label: 'Подача', editable: true, editType: 'date', render: r => r.applied_at ? r.applied_at.slice(0, 10) : '—' },
       { key: 'source', label: 'Источник', editable: true, editType: 'text', render: r => r.source ? `<span class="badge badge-blue">${escapeHtml(r.source)}</span>` : '—' },
     ],

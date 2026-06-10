@@ -24,6 +24,15 @@ function condOptionsForType(type) {
 }
 
 /** Render filter chip bar above the database view */
+// Column editOptions are objects ({value,label,color}), custom-prop options are
+// plain strings. Filters store/compare the raw value but must display the label.
+const optValue = (o) => String(o && typeof o === 'object' ? o.value : o);
+const optLabel = (o) => (o && typeof o === 'object' ? (o.label ?? String(o.value)) : String(o));
+function optionLabelFor(field, value) {
+  const o = (field?.options || []).find((x) => optValue(x) === String(value));
+  return o ? optLabel(o) : value;
+}
+
 export function renderFilterBar(el, tabId, allFields, onApply) {
   const filters = S.dbvFilters[tabId] || [];
   if (filters.length === 0) return;
@@ -34,7 +43,7 @@ export function renderFilterBar(el, tabId, allFields, onApply) {
     const label = field ? field.label : '?';
     const condLabel = ALL_COND_LABELS[f.condition] || f.condition;
     return `<span class="dbv-filter-chip" data-idx="${idx}">
-      ${escapeHtml(label)} <em>${condLabel}</em> ${f.value ? escapeHtml(f.value) : ''}
+      ${escapeHtml(label)} <em>${condLabel}</em> ${f.value ? escapeHtml(optionLabelFor(field, f.value)) : ''}
       <span class="dbv-filter-chip-remove" data-remove="${idx}">×</span>
     </span>`;
   }).join('');
@@ -90,7 +99,7 @@ export function showFilterDropdown(anchorEl, tabId, allFields, onApply) {
       <div class="dbv-fd-row"><div class="dbv-fd-picker" id="dbv-fd-prop">${escapeHtml(selField.label)}<span class="dbv-fd-arrow">▾</span></div></div>
       <div class="dbv-fd-row"><div class="dbv-fd-picker" id="dbv-fd-cond">${escapeHtml(selCond.label)}<span class="dbv-fd-arrow">▾</span></div></div>
       ${!noValue ? `<div class="dbv-fd-row">${fieldOpts.length > 0
-        ? `<div class="dbv-fd-picker" id="dbv-fd-val">${valueStr ? escapeHtml(valueStr) : '<span style="color:var(--text-faint)">Выберите...</span>'}<span class="dbv-fd-arrow">▾</span></div>`
+        ? `<div class="dbv-fd-picker" id="dbv-fd-val">${valueStr ? escapeHtml(optionLabelFor(selField, valueStr)) : '<span style="color:var(--text-faint)">Выберите...</span>'}<span class="dbv-fd-arrow">▾</span></div>`
         : `<input class="dbv-fd-input" id="dbv-fd-val" placeholder="Значение..." value="${escapeHtml(valueStr)}">`}</div>` : ''}
       <button class="dbv-fd-apply">Применить</button>`;
 
@@ -106,7 +115,7 @@ export function showFilterDropdown(anchorEl, tabId, allFields, onApply) {
     });
     const valEl = dd.querySelector('#dbv-fd-val');
     if (valEl && fieldOpts.length > 0 && valEl.tagName !== 'INPUT') {
-      valEl.addEventListener('click', () => { showPickerMenu(valEl, fieldOpts.map(o => ({ value: o, label: o })), valueStr, (v) => { valueStr = v; render(); }); });
+      valEl.addEventListener('click', () => { showPickerMenu(valEl, fieldOpts.map(o => ({ value: optValue(o), label: optLabel(o) })), valueStr, (v) => { valueStr = v; render(); }); });
     }
     if (valEl?.tagName === 'INPUT') valEl.addEventListener('input', (e) => { valueStr = e.target.value; });
 

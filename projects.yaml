@@ -142,15 +142,16 @@ work:
         - desktop/src-tauri/src/vacancy.rs
         - desktop/src-tauri/src/api_jobs.rs
     jobs-extension:
-      description: "Chrome-расширение (MV3): кнопка поверх страницы вакансии → отметка отклика → POST /api/vacancy"
+      description: "Chrome-расширение (MV3): side panel + кнопка поверх страницы вакансии → отметка отклика → POST /api/vacancy"
       files:
         - apps/jobs-extension/manifest.json
         - apps/jobs-extension/background.js
         - apps/jobs-extension/content.js
         - apps/jobs-extension/parser.js
         - apps/jobs-extension/panel.css
-        - apps/jobs-extension/popup.html
-        - apps/jobs-extension/popup.js
+        - apps/jobs-extension/sidepanel.html
+        - apps/jobs-extension/sidepanel.js
+        - apps/jobs-extension/hh-sync.js
         - apps/jobs-extension/README.md
   memory: []
   related: [projects-tab, development]

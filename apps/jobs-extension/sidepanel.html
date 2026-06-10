@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      padding: 12px;
+      box-sizing: border-box;
+      background: #0c0c0c;
+      color: #ffffff;
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    h3 { margin: 0; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+    h3 button {
+      width: 26px; height: 26px; padding: 0;
+      background: #1f1f1f; color: #fff; font-weight: 400;
+    }
+    label { display: flex; flex-direction: column; gap: 2px; }
+    label span { color: #9b9b9b; font-size: 11px; }
+    input, select, textarea {
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: #1f1f1f;
+      color: #ffffff;
+      font: inherit;
+      resize: vertical;
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #ffffff; }
+    button {
+      padding: 7px;
+      border: none;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #000000;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #1f1f1f; color: #f2f2f7; font-weight: 400; }
+    button:hover { filter: brightness(1.1); }
+    #status {
+      min-height: 16px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #1f1f1f;
+      color: #9b9b9b;
+    }
+    #status.ok { color: #34c759; }
+    #status.error { color: #ff453a; }
+    details { margin-top: auto; }
+    summary { color: #9b9b9b; cursor: pointer; font-size: 12px; }
+    details[open] summary { margin-bottom: 8px; }
+    details > :not(summary) { margin-bottom: 8px; }
+    .seg { display: flex; gap: 6px; }
+    .seg button { flex: 1; background: #1f1f1f; font-weight: 400; color: #9b9b9b; }
+    .seg button.active { background: #ffffff; color: #000000; font-weight: 600; }
+    #token-state { color: #9b9b9b; font-size: 11px; min-height: 13px; }
+    #token-state.ok { color: #34c759; }
+    #token-state.error { color: #ff453a; }
+    input:disabled { opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <h3>Hanni — вакансия <button id="refresh" class="secondary" title="Перечитать страницу">↻</button></h3>
+  <div id="status"></div>
+  <label><span>Позиция</span><input id="position"></label>
+  <label><span>Компания</span><input id="company"></label>
+  <label><span>Зарплата</span><input id="salary"></label>
+  <label><span>Этап</span>
+    <select id="stage">
+      <option value="found">Найдена</option>
+      <option value="saved">Сохранена</option>
+      <option value="applied" selected>Отклик</option>
+      <option value="responded">Ответ</option>
+      <option value="interview">Интервью</option>
+      <option value="offer">Оффер</option>
+      <option value="accepted">Принято</option>
+      <option value="rejected">Отказ</option>
+      <option value="ignored">Пропущена</option>
+    </select>
+  </label>
+  <label><span>Контакт</span><input id="contact"></label>
+  <label><span>Источник</span><input id="source"></label>
+  <label><span>Заметка</span><textarea id="notes" rows="2"></textarea></label>
+  <button id="save">Сохранить в Hanni</button>
+  <details id="settings">
+    <summary>Настройки</summary>
+    <label><span>Порт Hanni</span></label>
+    <div class="seg">
+      <button data-port="8235">8235 · prod</button>
+      <button data-port="8236">8236 · dev</button>
+    </div>
+    <label><span>API-токен (api_token.txt)</span>
+      <input id="token" type="password" placeholder="вставь токен">
+    </label>
+    <div id="token-state"></div>
+    <button id="check" class="secondary">Проверить связь</button>
+  </details>
+  <script src="token.local.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

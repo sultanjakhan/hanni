@@ -90,12 +90,31 @@ function hanniParseGeneric() {
   };
 }
 
-// Canonical URL: <link rel=canonical> → href without hash. Query is kept
-// because some boards (LinkedIn) carry the job id in the query string.
+// Canonical URL with per-board normalization. hh puts regional subdomains
+// (almaty.hh.kz) into rel=canonical and tracking params into the address,
+// LinkedIn carries the job id either in the path or in ?currentJobId —
+// without collapsing these, one vacancy turns into several rows.
 function hanniJobUrl() {
   const canon = document.querySelector('link[rel="canonical"]');
-  if (canon && canon.href) return canon.href;
-  return location.href.split('#')[0];
+  const raw = (canon && canon.href) || location.href.split('#')[0];
+  const hh = raw.match(/^https?:\/\/(?:[^/]+\.)?(hh\.(?:kz|ru))\/vacancy\/(\d+)/);
+  if (hh) return `https://${hh[1]}/vacancy/${hh[2]}`;
+  try {
+    const u = new URL(raw);
+    if (/(?:^|\.)linkedin\.com$/.test(u.hostname)) {
+      const id = u.searchParams.get('currentJobId') ||
+        (u.pathname.match(/\/jobs\/view\/(\d+)/) || [])[1];
+      if (id) return `https://www.linkedin.com/jobs/view/${id}`;
+    }
+  } catch { /* keep raw */ }
+  return raw;
+}
+
+// almaty.hh.kz → hh.kz; everything else — hostname without www.
+function hanniSourceHost() {
+  const host = location.hostname.replace(/^www\./, '');
+  const hh = host.match(/(?:^|\.)(hh\.(?:kz|ru))$/);
+  return hh ? hh[1] : host;
 }
 
 function hanniLooksLikeJobPage() {
@@ -114,7 +133,7 @@ window.__hanniParseJob = function () {
     position: ld.position || hanniText(rules.position) || gen.position || '',
     company: ld.company || hanniText(rules.company) || gen.company || '',
     salary: ld.salary || hanniText(rules.salary) || '',
-    source: location.hostname.replace(/^www\./, ''),
+    source: hanniSourceHost(),
     url: hanniJobUrl(),
     detected: hanniLooksLikeJobPage(),
   };

@@ -124,11 +124,14 @@ async function hanniSave() {
   }
 }
 
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === 'hanni-show-panel') {
     hanniEnsureFab();
     hanniTogglePanel();
   }
+  // The side panel asks for the parsed vacancy of this tab.
+  if (msg && msg.type === 'hanni-get-parse') sendResponse(window.__hanniParseJob());
 });
 
-if (window.__hanniParseJob().detected) hanniEnsureFab();
+// FAB on every page — quick in-page alternative to the side panel.
+hanniEnsureFab();

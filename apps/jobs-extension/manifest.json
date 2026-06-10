@@ -1,20 +1,31 @@
 {
   "manifest_version": 3,
   "name": "Hanni Job Tracker",
-  "version": "0.1.0",
-  "description": "Кнопка поверх страницы вакансии: отметить отклик и сохранить в таблицу Jobs в Hanni",
-  "permissions": ["storage", "activeTab"],
+  "version": "0.3.0",
+  "description": "Side panel рядом с браузером: вакансия с активной вкладки → отметить отклик → таблица Jobs в Hanni",
+  "permissions": ["storage", "activeTab", "contextMenus", "scripting", "sidePanel", "tabs"],
   "host_permissions": ["http://127.0.0.1/*"],
   "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "Hanni Job Tracker"
+    "default_title": "Hanni Job Tracker — открыть панель"
+  },
+  "commands": {
+    "hanni-mark": {
+      "suggested_key": { "default": "Alt+H" },
+      "description": "Отметить вакансию на этой странице"
+    }
   },
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["parser.js", "content.js"],
       "css": ["panel.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.hh.kz/*", "*://*.hh.ru/*"],
+      "js": ["hh-sync.js"],
       "run_at": "document_idle"
     }
   ]
