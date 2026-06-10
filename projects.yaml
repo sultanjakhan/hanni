@@ -529,6 +529,7 @@ _shared:
       - desktop/src/js/state.js
       - desktop/src/js/tabs.js
       - desktop/src/js/tab-data.js
+      - desktop/src/js/tab-data-dankoe.js
       - desktop/src/js/actions.js
       - desktop/src/js/utils.js
       - desktop/src/js/icons.js
