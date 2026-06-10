@@ -891,6 +891,10 @@ function panelItem(item) {
 async function loadAbout(el) {
   try {
     const info = await invoke('get_model_info').catch(() => ({}));
+    const [llmUrl, llmModel] = await Promise.all([
+      invoke('get_app_setting', { key: 'llm_server_url' }).catch(() => null),
+      invoke('get_app_setting', { key: 'llm_model' }).catch(() => null),
+    ]);
     el.innerHTML = `
       <div class="about-wrapper">
         <div class="about-card">
@@ -901,9 +905,14 @@ async function loadAbout(el) {
           </div>
           <hr class="about-divider">
           <div class="about-info-list">
-            <div class="about-info-row"><span class="about-info-label">Модель</span><span class="about-info-value">${info.model_name||'?'}</span></div>
-            <div class="about-info-row"><span class="about-info-label">MLX сервер</span><span class="about-info-value ${info.server_online?'online':'offline'}">${info.server_online?'Онлайн':'Офлайн'}</span></div>
+            <div class="about-info-row"><span class="about-info-label">Модель</span><span class="about-info-value" id="about-llm-model-name">${info.model_name||'?'}</span></div>
+            <div class="about-info-row"><span class="about-info-label">LLM сервер</span><span class="about-info-value ${info.server_online?'online':'offline'}" id="about-llm-status">${info.server_online?'Онлайн':'Офлайн'}</span></div>
             <div class="about-info-row"><span class="about-info-label">HTTP API</span><span class="about-info-value" id="about-api-status">Проверяю...</span></div>
+          </div>
+          <hr class="about-divider">
+          <div class="about-info-list">
+            <div class="about-info-row"><span class="about-info-label">LLM URL</span><input class="form-input" id="about-llm-url" placeholder="http://127.0.0.1:8234" value="${llmUrl || ''}" style="width:220px"></div>
+            <div class="about-info-row"><span class="about-info-label">LLM модель</span><input class="form-input" id="about-llm-model" placeholder="по умолчанию" value="${llmModel || ''}" style="width:220px"></div>
           </div>
           <hr class="about-divider">
           <div class="about-actions">
@@ -911,6 +920,21 @@ async function loadAbout(el) {
           </div>
         </div>
       </div>`;
+    // OpenAI-compatible endpoint override (e.g. GPU box over Tailscale).
+    // Lives here because the chat tab (and its settings panel) is currently
+    // disabled in TAB_REGISTRY — About is reachable from every tab's gear.
+    const llmSave = async () => {
+      await invoke('set_app_setting', { key: 'llm_server_url', value: document.getElementById('about-llm-url')?.value.trim() || '' });
+      await invoke('set_app_setting', { key: 'llm_model', value: document.getElementById('about-llm-model')?.value.trim() || '' });
+      const st = document.getElementById('about-llm-status');
+      if (st) st.textContent = '…';
+      const fresh = await invoke('get_model_info').catch(() => null);
+      if (st && fresh) { st.textContent = fresh.server_online ? 'Онлайн' : 'Офлайн'; st.className = 'about-info-value ' + (fresh.server_online ? 'online' : 'offline'); }
+      const mn = document.getElementById('about-llm-model-name');
+      if (mn && fresh) mn.textContent = fresh.model_name || '?';
+    };
+    document.getElementById('about-llm-url')?.addEventListener('change', llmSave);
+    document.getElementById('about-llm-model')?.addEventListener('change', llmSave);
     document.getElementById('about-check-update')?.addEventListener('click', async (e) => {
       const btn = e.target; btn.textContent = 'Проверяю...'; btn.disabled = true;
       try { const r = await invoke('check_update'); btn.textContent = r; }

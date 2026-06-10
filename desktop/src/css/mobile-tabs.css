@@ -8,11 +8,22 @@
   grid-template-columns: 1fr;
 }
 
-/* ── Calendar Month: keep 7 cols, shrink cells + dot-style pills ── */
+/* ── Calendar Month: keep 7 cols, stretch the grid to fill the viewport ──
+   Fixed 56px rows left half the screen as dead space below the month.
+   Grid rows share the leftover height (~header/nav chrome ≈ 330px) instead;
+   minmax keeps a sane floor so 6-row months degrade to scrolling. */
+.mobile .cal-grid {
+  grid-auto-rows: minmax(52px, 1fr);
+  min-height: calc(100vh - 330px);
+  min-height: calc(100dvh - 330px);
+}
 .mobile .cal-day {
-  min-height: 56px;
+  min-height: 52px;
   padding: 2px;
 }
+/* Tighter month chrome: nav row and view pills */
+.mobile .calendar-nav { margin-bottom: 4px; gap: 4px; }
+.mobile .day-mode-tabs { margin-bottom: 4px; }
 .mobile .cal-day-num {
   font-size: 11px; width: 18px; height: 18px;
 }
