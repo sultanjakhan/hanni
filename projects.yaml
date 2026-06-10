@@ -46,6 +46,7 @@ chat:
   description: "AI ассистент, conversations, voice, LLM streaming, proactive actions"
   files:
     - desktop/src/js/chat.js
+    - desktop/src/js/chat-settings.js
     - desktop/src/js/conversations.js
     - desktop/src/js/voice.js
     - desktop/src/css/chat.css
