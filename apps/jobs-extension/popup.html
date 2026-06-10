@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 280px;
+      margin: 0;
+      padding: 12px;
+      background: #1c1c1e;
+      color: #f2f2f7;
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    h3 { margin: 0; font-size: 14px; }
+    label { display: flex; flex-direction: column; gap: 2px; }
+    label span { color: #98989f; font-size: 11px; }
+    input, select {
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: #2c2c2e;
+      color: #f2f2f7;
+      font: inherit;
+    }
+    input:focus, select:focus { outline: none; border-color: #8b5cf6; }
+    button {
+      padding: 7px;
+      border: none;
+      border-radius: 8px;
+      background: #8b5cf6;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #2c2c2e; font-weight: 400; }
+    button:hover { filter: brightness(1.1); }
+    #status { min-height: 16px; color: #98989f; }
+    #status.ok { color: #34c759; }
+    #status.error { color: #ff453a; }
+  </style>
+</head>
+<body>
+  <h3>Hanni Job Tracker</h3>
+  <button id="mark">Отметить вакансию на этой странице</button>
+  <label><span>Порт Hanni</span>
+    <select id="port">
+      <option value="8235">8235 — обычный Hanni (prod)</option>
+      <option value="8236">8236 — dev-сборка</option>
+    </select>
+  </label>
+  <label><span>API-токен (api_token.txt)</span>
+    <input id="token" type="password" placeholder="вставь токен">
+  </label>
+  <button id="save" class="secondary">Сохранить настройки</button>
+  <button id="check" class="secondary">Проверить связь</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

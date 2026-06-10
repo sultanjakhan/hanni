@@ -28,6 +28,7 @@ mod task_pins;
 mod mcp;
 mod agent;
 mod vacancy;
+mod api_jobs;
 mod dashboard;
 mod commands_timeline;
 mod commands_timeline_today;

@@ -1097,10 +1097,38 @@ pub fn get_or_create_api_token() -> String {
     token
 }
 
+/// Shared state of the local HTTP API (:8236 dev / :8235 prod).
+/// Module-level so route handlers can live in other modules (api_jobs.rs).
+#[derive(Clone)]
+pub struct ApiState {
+    pub app: AppHandle,
+    pub token: String,
+    // (count, window_start_epoch_secs) keyed by source IP.
+    pub rate_limit: std::sync::Arc<std::sync::Mutex<HashMap<String, (u32, i64)>>>,
+}
+
+pub fn check_auth(headers: &axum::http::HeaderMap, token: &str) -> Result<(), (axum::http::StatusCode, String)> {
+    use subtle::ConstantTimeEq;
+    let auth = headers
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let provided = auth.strip_prefix("Bearer ").unwrap_or(auth);
+    // Constant-time compare so byte-by-byte timing can't be used to
+    // brute-force the token. Length mismatch short-circuits because
+    // ct_eq panics on unequal slices — we want a stable false instead.
+    let ok = provided.len() == token.len()
+        && bool::from(provided.as_bytes().ct_eq(token.as_bytes()));
+    if ok {
+        Ok(())
+    } else {
+        Err((axum::http::StatusCode::UNAUTHORIZED, "Invalid token".into()))
+    }
+}
+
 pub async fn spawn_api_server(app_handle: AppHandle) {
     use axum::{Router, routing::{get, post}, extract::{State as AxumState, Query, DefaultBodyLimit}, Json, http::{StatusCode, HeaderMap}};
     use std::sync::{Arc, Mutex};
-    use subtle::ConstantTimeEq;
 
     let api_token = get_or_create_api_token();
 
@@ -1114,14 +1142,6 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
     const AUTO_EVAL_RATE_PER_MINUTE: u32 = 100;
     // Retention: automation_log rows older than this are pruned lazily.
     const AUTO_LOG_RETENTION_SECS: i64 = 7 * 24 * 60 * 60;
-
-    #[derive(Clone)]
-    struct ApiState {
-        app: AppHandle,
-        token: String,
-        // (count, window_start_epoch_secs) keyed by source IP.
-        rate_limit: Arc<Mutex<HashMap<String, (u32, i64)>>>,
-    }
 
     let state = ApiState {
         app: app_handle.clone(),
@@ -1145,24 +1165,6 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
                 );
             }
         });
-    }
-
-    pub fn check_auth(headers: &HeaderMap, token: &str) -> Result<(), (StatusCode, String)> {
-        let auth = headers
-            .get("Authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let provided = auth.strip_prefix("Bearer ").unwrap_or(auth);
-        // Constant-time compare so byte-by-byte timing can't be used to
-        // brute-force the token. Length mismatch short-circuits because
-        // ct_eq panics on unequal slices — we want a stable false instead.
-        let ok = provided.len() == token.len()
-            && bool::from(provided.as_bytes().ct_eq(token.as_bytes()));
-        if ok {
-            Ok(())
-        } else {
-            Err((StatusCode::UNAUTHORIZED, "Invalid token".into()))
-        }
     }
 
     fn rate_limit_check(state: &ApiState, key: &str) -> Result<(), (StatusCode, String)> {
@@ -1448,6 +1450,7 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         .route("/api/chat", post(api_chat))
         .route("/api/memory/search", get(api_memory_search))
         .route("/api/memory", post(api_memory_add))
+        .route("/api/vacancy", get(crate::api_jobs::api_vacancy_lookup).post(crate::api_jobs::api_vacancy_save))
         .route(
             "/auto/eval",
             post(auto_eval).layer(DefaultBodyLimit::max(AUTO_EVAL_BODY_LIMIT)),

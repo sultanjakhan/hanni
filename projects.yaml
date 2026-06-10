@@ -128,7 +128,7 @@ work:
   description: "Задачи (flat view) + jobs (вакансии CRM)"
   files: []
   rust: []
-  tables: [projects, tasks, vacancies, vacancy_pipeline]
+  tables: [projects, tasks, job_vacancies, job_sources, job_roles, job_search_log]
   subprojects:
     jobs:
       description: "Job tracking — вакансии, источники, резюме, agent-driven поиск"
@@ -140,6 +140,18 @@ work:
         - desktop/src/js/jobs-stores.js
       rust:
         - desktop/src-tauri/src/vacancy.rs
+        - desktop/src-tauri/src/api_jobs.rs
+    jobs-extension:
+      description: "Chrome-расширение (MV3): кнопка поверх страницы вакансии → отметка отклика → POST /api/vacancy"
+      files:
+        - apps/jobs-extension/manifest.json
+        - apps/jobs-extension/background.js
+        - apps/jobs-extension/content.js
+        - apps/jobs-extension/parser.js
+        - apps/jobs-extension/panel.css
+        - apps/jobs-extension/popup.html
+        - apps/jobs-extension/popup.js
+        - apps/jobs-extension/README.md
   memory: []
   related: [projects-tab, development]
 

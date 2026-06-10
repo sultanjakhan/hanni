@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Hanni Job Tracker",
+  "version": "0.1.0",
+  "description": "Кнопка поверх страницы вакансии: отметить отклик и сохранить в таблицу Jobs в Hanni",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Hanni Job Tracker"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["parser.js", "content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
