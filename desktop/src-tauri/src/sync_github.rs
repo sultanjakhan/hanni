@@ -11,7 +11,7 @@ use crate::db::SYNC_TABLES;
 use crate::sync_github_api::{
     blob_entry, build_doc, fetch_doc, fetch_tarball, gh_get, gh_head, gh_post, gh_req, resolve_gh,
 };
-use crate::sync_owner::{get_setting, row_to_json, set_setting, upsert_row};
+use crate::sync_owner::{get_setting, row_to_json, set_setting, tombstone_row_id, upsert_row};
 use crate::types::HanniDb;
 use reqwest::Method;
 use serde_json::{json, Map, Value};
@@ -57,8 +57,11 @@ pub(crate) async fn gh_push(db: &HanniDb) -> Result<Value, String> {
             "SELECT table_name, row_id, deleted_at FROM sync_tombstones \
              WHERE deleted_at > ?1 ORDER BY deleted_at ASC LIMIT 500")
             .map_err(|e| format!("prep tombstones: {}", e))?;
-        let tombs: Vec<(String, i64, String)> = stmt
-            .query_map(rusqlite::params![tcur], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        // row_id is TEXT (holds both integer ids and UUID strings) — reading it
+        // as i64 made rusqlite error out every row and filter_map silently
+        // dropped them all, so tombstones never pushed.
+        let tombs: Vec<(String, String, String)> = stmt
+            .query_map(rusqlite::params![tcur], |r| Ok((r.get(0)?, r.get::<_, String>(1)?, r.get(2)?)))
             .map_err(|e| format!("tombstones: {}", e))?.filter_map(Result::ok).collect();
         drop(stmt);
         let mut tmax = tcur.clone();
@@ -160,7 +163,10 @@ fn apply_doc(conn: &rusqlite::Connection, doc: &Map<String, Value>) -> Result<bo
     let table = doc.get("_table").and_then(|v| v.as_str()).unwrap_or("");
     if table == "tombstones" {
         let target = doc.get("_target_table").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(id) = doc.get("_row_id").and_then(|v| v.as_i64()) {
+        // _row_id is a JSON number in legacy docs and a string since v1.0.8
+        // (covers UUID-keyed tables like schedules); numeric strings bind as
+        // integers so INTEGER-id tables match exactly.
+        if let Some(id) = tombstone_row_id(doc.get("_row_id")) {
             if SYNC_TABLES.contains(&target) {
                 let _ = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", target),
                                      rusqlite::params![id]);

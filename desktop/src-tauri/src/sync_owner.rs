@@ -234,7 +234,21 @@ async fn run_query(client: &reqwest::Client, token: &str, project_id: &str,
 // outside the root parent).
 fn data_collection(owner_uid: &str) -> String { format!("owners/{}/data", owner_uid) }
 fn data_doc_id(table: &str, id: i64) -> String { format!("{}_{}", table, id) }
-fn tombstone_doc_id(table: &str, id: i64) -> String { format!("tombstone_{}_{}", table, id) }
+fn tombstone_doc_id(table: &str, id: &str) -> String { format!("tombstone_{}_{}", table, id) }
+
+/// Bind value for a pulled tombstone's `_row_id`: legacy docs carry a JSON
+/// number, v1.0.8+ docs a string (row_id is TEXT — it also holds UUID ids).
+/// Numeric strings bind as integers so INTEGER-id tables match exactly.
+pub(crate) fn tombstone_row_id(v: Option<&Value>) -> Option<rusqlite::types::Value> {
+    match v {
+        Some(Value::Number(n)) => n.as_i64().map(rusqlite::types::Value::Integer),
+        Some(Value::String(s)) => Some(match s.parse::<i64>() {
+            Ok(n) => rusqlite::types::Value::Integer(n),
+            Err(_) => rusqlite::types::Value::Text(s.clone()),
+        }),
+        _ => None,
+    }
+}
 
 async fn push_table(db: &HanniDb, table: &str, client: &reqwest::Client,
                     token: &str, project_id: &str, owner_uid: &str)
@@ -294,9 +308,11 @@ async fn push_tombstones(db: &HanniDb, client: &reqwest::Client,
              WHERE deleted_at > ?1 ORDER BY deleted_at ASC LIMIT 500"
         ).map_err(|e| format!("prep tombstones: {}", e))?;
         let mut max = cursor.clone();
-        let dirty: Vec<(String, i64, String)> = stmt.query_map(
+        // row_id is TEXT (integer ids and UUID strings alike) — reading it as
+        // i64 errored every row and filter_map dropped them all silently.
+        let dirty: Vec<(String, String, String)> = stmt.query_map(
             rusqlite::params![cursor],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
         ).map_err(|e| format!("tombstones: {}", e))?
             .filter_map(Result::ok)
             .inspect(|(_, _, ts)| { if ts > &max { max = ts.clone(); } })
@@ -309,7 +325,7 @@ async fn push_tombstones(db: &HanniDb, client: &reqwest::Client,
     for (table, id, ts) in &rows {
         let row = json!({ "_target_table": table, "_row_id": id, "_deleted": true });
         let body = encode_doc(&row, &dev_id, ts, "tombstones");
-        patch_doc(client, token, project_id, &path, &tombstone_doc_id(table, *id), &body).await?;
+        patch_doc(client, token, project_id, &path, &tombstone_doc_id(table, id), &body).await?;
         pushed += 1;
     }
     if pushed > 0 {
@@ -507,7 +523,7 @@ async fn pull_all(db: &HanniDb, client: &reqwest::Client,
 
         if table == "tombstones" {
             let Some(target) = fields.get("_target_table").and_then(|v| v.as_str()) else { continue };
-            let Some(id)    = fields.get("_row_id").and_then(|v| v.as_i64()) else { continue };
+            let Some(id)    = tombstone_row_id(fields.get("_row_id")) else { continue };
             if !allowed.contains(target) { continue; }
             let _ = conn.execute(
                 &format!("DELETE FROM {} WHERE id = ?1", target),

@@ -225,6 +225,19 @@ pub fn get_completed_routine_chains(date: String, db: tauri::State<'_, HanniDb>)
 #[tauri::command]
 pub fn get_routine_now(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.conn();
+    // Self-heal: a run abandoned before today (started at 23:xx, lost at the
+    // midnight rollover) stays 'active' forever yet is invisible to the picker.
+    // Cancel it the way the ✕ button does (statuses first — FK cascades are
+    // off; mirrored schedule_completions stay intact). Keyed to the device's
+    // local today, not the `date` argument, so browsing past days is safe.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let _ = conn.execute(
+        "DELETE FROM routine_node_status WHERE run_id IN
+           (SELECT id FROM routine_runs WHERE state='active' AND date < ?1)",
+        rusqlite::params![today]);
+    let _ = conn.execute(
+        "DELETE FROM routine_runs WHERE state='active' AND date < ?1",
+        rusqlite::params![today]);
     let mut rstmt = conn.prepare(
         "SELECT r.id, r.chain_id, c.title, r.slot FROM routine_runs r
          JOIN routine_chains c ON c.id = r.chain_id

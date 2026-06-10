@@ -273,6 +273,7 @@ fn init_database() -> HanniDb {
     db::migrate_dedup_health_exercise(&conn);
     db::migrate_dedup_auto_health_events(&conn);
     db::backfill_routine_nodes_source_id(&conn);
+    db::migrate_routine_dedup_cleanup(&conn); // one-time: drop v1.0.6 converge duplicates (self-gated)
     db::dedup_schedules_by_title(&conn);
 
     // cr-sqlite CRR setup — cheap (~10ms), internally guarded; run every launch.

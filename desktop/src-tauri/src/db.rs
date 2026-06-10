@@ -4051,6 +4051,81 @@ pub fn migrate_routine_ids_deterministic_v2(conn: &rusqlite::Connection) {
     }
 }
 
+/// One-time data fix after the v1.0.6 routine-graph converge: two seed chains
+/// had been renamed on the Mac («Покушать»→«Еда», «Ночь»→«Вечер»), so the
+/// content-keyed converge (see migrate_routine_ids_deterministic_v2) brought
+/// the other device's fresh seeds in as duplicates, and «Рефлексия» ended up
+/// holding BOTH its old linear edge chain and the new seed's star fan-out.
+/// Drops the duplicate chains, keeps the linear reflection (deletes the star
+/// edges, chains the four new-seed-only nodes onto the tail) and removes
+/// 2099-dated test runs. Everything is keyed by deterministic ids, so each
+/// device converges to the same result on its own — tombstone push was broken
+/// until v1.0.8, so cross-device delete propagation can't be relied on here.
+pub fn migrate_routine_dedup_cleanup(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare("SELECT 1 FROM _migrations WHERE name='routine_dedup_cleanup_v1'").ok()
+        .and_then(|mut s| s.query_row([], |_| Ok(())).ok()).is_some();
+    if done { return; }
+    let det = crate::types::deterministic_id;
+
+    // Duplicate chains — explicit bottom-up deletes so every row fires its
+    // tombstone trigger (FK cascades are off on this connection).
+    for title in ["Ночь", "Покушать"] {
+        let cid = det(&format!("chain:{}", title));
+        let _ = conn.execute(
+            "DELETE FROM routine_node_status
+              WHERE node_id IN (SELECT id FROM routine_nodes WHERE chain_id=?1)
+                 OR run_id  IN (SELECT id FROM routine_runs  WHERE chain_id=?1)",
+            rusqlite::params![cid]);
+        let _ = conn.execute("DELETE FROM routine_runs  WHERE chain_id=?1", rusqlite::params![cid]);
+        let _ = conn.execute("DELETE FROM routine_edges WHERE chain_id=?1", rusqlite::params![cid]);
+        let _ = conn.execute("DELETE FROM routine_nodes WHERE chain_id=?1", rusqlite::params![cid]);
+        let _ = conn.execute("DELETE FROM routine_chains WHERE id=?1", rusqlite::params![cid]);
+    }
+
+    // «Рефлексия» → linear: drop the star fan-out, i.e. every start→X edge
+    // except the linear chain's entry edge start→Pattern Interrupt.
+    let r = det("chain:Рефлексия");
+    let nid = |title: &str| det(&format!("node:c{}:{}", r, title));
+    let start = nid("Подведу день");
+    let _ = conn.execute(
+        "DELETE FROM routine_edges WHERE chain_id=?1 AND from_node_id=?2 AND to_node_id<>?3",
+        rusqlite::params![r, start, nid("Pattern Interrupt")]);
+
+    // The four nodes that only exist in the new seed get appended to the tail
+    // of the linear chain so they stay part of the one-at-a-time flow.
+    let tail = ["Выспался 7ч+", "Без сладкого",
+                "Contemplation (Dan Koe)", "Vision (Dan Koe)", "Integration (Dan Koe)"];
+    for w in tail.windows(2) {
+        let (from, to) = (nid(w[0]), nid(w[1]));
+        let eid = det(&format!("edge:c{}:{}>{}", r, from, to));
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO routine_edges (id, chain_id, from_node_id, to_node_id)
+             VALUES (?1,?2,?3,?4)",
+            rusqlite::params![eid, r, from, to]);
+    }
+
+    // Test runs parked on 2099 dates.
+    let _ = conn.execute(
+        "DELETE FROM routine_node_status WHERE run_id IN
+           (SELECT id FROM routine_runs WHERE date >= '2099')", []);
+    let _ = conn.execute("DELETE FROM routine_runs WHERE date >= '2099'", []);
+
+    // The v1.0.8 tombstone-push fix starts from this cursor; park it at "now"
+    // so the multi-year tombstone backlog (52K+ rows that never pushed while
+    // the reader was broken) doesn't flood the first push. Format matches the
+    // tombstone triggers' strftime('%Y-%m-%dT%H:%M:%f','now','localtime').
+    let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+    for key in ["cloud_owner_gh_push_tombstones", "cloud_owner_v2_push_tombstones"] {
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, now]);
+    }
+
+    let _ = conn.execute("INSERT OR IGNORE INTO _migrations (name) VALUES ('routine_dedup_cleanup_v1')", []);
+    eprintln!("[migrate_routine_dedup_cleanup] duplicate chains dropped, reflection back to linear");
+}
+
 /// Orphan backfill for installs that ran migrate_schedules_to_uuid_pk BEFORE
 /// the routine_nodes remap was added inside it: schedules now have UUID ids
 /// but routine_nodes.source_id still holds the old INTEGER ids that no longer
