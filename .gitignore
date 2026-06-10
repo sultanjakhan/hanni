@@ -33,6 +33,7 @@ __pycache__/
 
 # User data
 /hanni.db*
+desktop/src-tauri/hanni.db*
 user_data.json
 credentials.json
 token.pickle

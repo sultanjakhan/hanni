@@ -402,33 +402,6 @@ share:
         - desktop/src-tauri/src/share_assets/guest_products.js
         - desktop/src-tauri/src/share_assets/guest_recipe_add.js
         - desktop/src-tauri/src/share_assets/guest_recipes.js
-    guest_cloud:
-      description: "Firebase Hosting + Web SDK для гостевого доступа (Stage A read-only)"
-      files:
-        - apps/guest-cloud/index.html
-        - apps/guest-cloud/firebase-config.js
-        - apps/guest-cloud/css/guest.css
-        - apps/guest-cloud/js/guest.js
-        - apps/guest-cloud/js/guest_firestore.js
-        - apps/guest-cloud/js/guest_fridge.js
-        - apps/guest-cloud/js/guest_meal_plan.js
-        - apps/guest-cloud/js/guest_memory.js
-        - apps/guest-cloud/js/guest_products.js
-        - apps/guest-cloud/js/guest_recipe_add.js
-        - apps/guest-cloud/js/guest_recipes.js
-        - apps/guest-cloud/js/fridge-shared.js
-        - apps/guest-cloud/js/recipe-shared.js
-        - apps/guest-cloud/js/recipe-shared-ingredients.js
-        - apps/guest-cloud/js/recipe-shared-steps.js
-        - apps/guest-cloud/js/recipe-shared-image.js
-    firestore:
-      description: "Firestore rules/indexes + Firebase project config"
-      files:
-        - firebase/.firebaserc
-        - firebase/firebase.json
-        - firebase/firestore.rules
-        - firebase/firestore.indexes.json
-        - firebase/README.md
   memory: [tech/project_share_feature.md]
   related: [food, sync]
 
