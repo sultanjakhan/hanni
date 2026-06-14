@@ -2477,42 +2477,32 @@ const DK_PRACTICES = [
 ];
 
 const DK_TEXT_FIELD = { contemplation: 'contemplation_text', vision: 'vision_text', integration: 'integration_text' };
-const DK_TEXT_TABS = ['contemplation', 'vision', 'integration'];
 const DK_VIEWS = ['instructions', 'history'];
-
-function dkWordCount(text) {
-  return (text || '').trim().split(/\s+/).filter(Boolean).length;
-}
-
-function dkPreview(text, max = 80) {
-  const t = (text || '').replace(/\s+/g, ' ').trim();
-  return t.length > max ? t.slice(0, max) + '…' : t;
-}
+const DK_FILTERS = ['all', ...DK_PRACTICES.map(p => p.key)];
 
 function dkRenderHeader(active) {
   const tabs = [
     { key: 'instructions', icon: '📖', label: 'Инструкция' },
     { key: 'history', icon: '📊', label: 'История' },
   ];
-  const pills = tabs.map(t => {
-    const isActive = active === t.key;
-    return `<button class="dk-tab" data-view="${t.key}" style="padding:6px 14px;border-radius:var(--radius-1);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-active)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;">${t.icon} ${escapeHtml(t.label)}</button>`;
-  }).join('');
+  const pills = tabs.map(t =>
+    `<button class="dk-pill${active === t.key ? ' active' : ''}" data-view="${t.key}">${t.icon} ${escapeHtml(t.label)}</button>`
+  ).join('');
   return `
-    <div class="module-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:22px;">🧠</span>
+    <div class="module-header dk-header">
+      <div class="dk-header-titles">
+        <span class="dk-header-icon">🧠</span>
         <div>
-          <h2 style="margin:0;font-size:18px;">Dan Koe Protocol</h2>
-          <div style="font-size:12px;color:var(--text-muted);">Ежедневная практика осознанности · запись через календарь</div>
+          <h2 class="dk-header-h">Dan Koe Protocol</h2>
+          <div class="dk-header-sub">4 практики осознанности</div>
         </div>
       </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">${pills}</div>
+      <div class="dk-pills">${pills}</div>
     </div>`;
 }
 
 function dkBindTabs(el) {
-  el.querySelectorAll('.dk-tab').forEach(btn => {
+  el.querySelectorAll('.dk-pill').forEach(btn => {
     btn.addEventListener('click', () => {
       S._dkView = btn.dataset.view;
       loadDanKoe(S._dkView);
@@ -2535,85 +2525,84 @@ async function loadDanKoe(subTab) {
 
 function dkRenderInstructions(el) {
   const cards = DK_PRACTICES.map(p => `
-    <div style="padding:18px;border-radius:var(--radius-2);border:1px solid var(--border-subtle);background:var(--bg-card);margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-        <span style="font-size:22px;">${p.icon}</span>
-        <span style="font-size:16px;font-weight:600;color:var(--text-primary);">${escapeHtml(p.label)}</span>
+    <div class="dk-card">
+      <div class="dk-card-head">
+        <span class="dk-card-icon">${p.icon}</span>
+        <span class="dk-card-label">${escapeHtml(p.label)}</span>
+        ${p.hasText ? '' : '<span class="dk-card-tag">В моменте — без записи</span>'}
       </div>
-      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">${escapeHtml(p.what)}</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-1);"><b>Зачем:</b> ${escapeHtml(p.why)}</div>
-      <div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Как делать:</div>
-      <ul style="margin:0 0 10px 16px;padding:0;font-size:13px;color:var(--text-secondary);line-height:1.7;">
+      <div class="dk-card-lead">${escapeHtml(p.what)}</div>
+      <div class="dk-card-why"><b>Зачем:</b> ${escapeHtml(p.why)}</div>
+      <div class="dk-card-subhead">Как делать:</div>
+      <ul class="dk-card-list">
         ${p.how.map(h => `<li>${escapeHtml(h)}</li>`).join('')}
       </ul>
-      ${p.questions ? `<div style="font-size:13px;color:var(--text-primary);font-weight:500;margin-bottom:6px;">Вопросы для рефлексии:</div>
-        <ul style="margin:0 0 10px 16px;padding:0;font-size:13px;color:var(--text-muted);line-height:1.7;font-style:italic;">
+      ${p.questions ? `<div class="dk-card-subhead">Вопросы для рефлексии:</div>
+        <ul class="dk-card-list muted">
           ${p.questions.map(q => `<li>${escapeHtml(q)}</li>`).join('')}
         </ul>` : ''}
-      ${p.examples ? `<div style="font-size:12px;color:var(--text-faint);margin-top:6px;">💡 <i>${escapeHtml(p.examples)}</i></div>` : ''}
+      ${p.examples ? `<div class="dk-card-ex">💡 <i>${escapeHtml(p.examples)}</i></div>` : ''}
     </div>`).join('');
   el.innerHTML = `
     ${dkRenderHeader('instructions')}
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;padding:10px 12px;border-radius:var(--radius-1);background:var(--bg-hover);">
-      ℹ️ Запись практик за день — через событие в календаре. Здесь — только описание и история.
-    </div>
-    ${cards}`;
+    ${cards}
+    <div class="dk-footnote">ℹ️ Записи делаются через событие в календаре или быстрый журнал. Здесь — описание практик и история.</div>`;
 }
 
 async function dkRenderHistory(el) {
-  const filter = DK_TEXT_TABS.includes(S._dkFilter) || S._dkFilter === 'all' ? S._dkFilter : 'all';
+  const filter = DK_FILTERS.includes(S._dkFilter) ? S._dkFilter : 'all';
   const history = await invoke('get_dan_koe_history', { days: 30 }).catch(() => []);
   const meta = Object.fromEntries(DK_PRACTICES.map(p => [p.key, p]));
   const today = new Date().toISOString().slice(0, 10);
 
+  // Text practices count as done when they hold journaled text; Pattern Interrupt
+  // (no text field) counts as done from its boolean flag in the history payload.
+  const doneFor = (e, p) => p.hasText
+    ? !!(e[DK_TEXT_FIELD[p.key]] || '').trim()
+    : !!e[p.key];
+  const anyDone = e => DK_PRACTICES.some(p => doneFor(e, p));
+
   const filterTypes = [
     { key: 'all', icon: '∗', label: 'All' },
-    ...DK_TEXT_TABS.map(k => ({ key: k, icon: meta[k].icon, label: meta[k].label })),
+    ...DK_PRACTICES.map(p => ({ key: p.key, icon: p.icon, label: p.label })),
   ];
-  const chips = filterTypes.map(t => {
-    const isActive = filter === t.key;
-    return `<button class="dk-chip" data-filter="${t.key}" style="padding:6px 12px;border-radius:var(--radius-1);border:1px solid var(--border-subtle);background:${isActive ? 'var(--bg-active)' : 'transparent'};color:${isActive ? 'var(--text-primary)' : 'var(--text-muted)'};font-size:13px;font-weight:${isActive ? '600' : '400'};cursor:pointer;margin-right:6px;">${t.icon} ${escapeHtml(t.label)}</button>`;
-  }).join('');
+  const chips = filterTypes.map(t =>
+    `<button class="dk-chip${filter === t.key ? ' active' : ''}" data-filter="${t.key}">${t.icon} ${escapeHtml(t.label)}</button>`
+  ).join('');
 
-  const visibleKeys = filter === 'all' ? DK_TEXT_TABS : [filter];
-  const flatRows = [];
-  for (const e of history) {
-    for (const k of visibleKeys) {
-      const txt = e[DK_TEXT_FIELD[k]] || '';
-      if (!txt.trim()) continue;
-      flatRows.push({ date: e.date, key: k, text: txt });
-    }
-  }
+  const rows = history
+    .map((e, di) => ({ e, di }))
+    .filter(({ e }) => filter === 'all' ? anyDone(e) : doneFor(e, meta[filter]))
+    .map(({ e, di }) => {
+      const isToday = e.date === today;
+      const cells = DK_PRACTICES.map(p => {
+        const done = doneFor(e, p);
+        const clickable = p.hasText && done;
+        const off = filter !== 'all' && p.key !== filter;
+        const cls = ['dk-cell', done ? 'done' : 'empty', clickable ? 'clickable' : '', off ? 'off' : '']
+          .filter(Boolean).join(' ');
+        const title = p.hasText
+          ? `${p.label}: ${done ? 'открыть запись' : 'нет записи'}`
+          : (done ? 'Прерывание паттерна выполнено' : 'Pattern Interrupt: не отмечено');
+        const attrs = clickable ? ` data-di="${di}" data-key="${p.key}"` : '';
+        return `<span class="${cls}"${attrs} title="${escapeHtml(title)}">${done ? p.icon : '·'}</span>`;
+      }).join('');
+      const count = DK_PRACTICES.filter(p => doneFor(e, p)).length;
+      return `<div class="dk-day-row${isToday ? ' today' : ''}">
+        <div class="dk-day-date">${escapeHtml(e.date)}${isToday ? ' <span class="dk-today-tag">· сегодня</span>' : ''}</div>
+        <div class="dk-cells">${cells}</div>
+        <div class="dk-count">${count}/${DK_PRACTICES.length}</div>
+      </div>`;
+    }).join('');
 
-  const showType = filter === 'all';
-  const rows = flatRows.map((r, idx) => {
-    const m = meta[r.key];
-    const isToday = r.date === today;
-    return `<tr class="dk-row" data-idx="${idx}" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">
-      <td style="padding:8px 10px;font-size:13px;color:var(--text-primary);white-space:nowrap;">${escapeHtml(r.date)}${isToday ? ' <span style="color:var(--color-green);font-size:11px;">· сегодня</span>' : ''}</td>
-      ${showType ? `<td style="padding:8px 10px;font-size:13px;color:var(--text-secondary);white-space:nowrap;">${m.icon} ${escapeHtml(m.label)}</td>` : ''}
-      <td style="padding:8px 10px;font-size:13px;color:var(--text-secondary);">${escapeHtml(dkPreview(r.text))}</td>
-      <td style="padding:8px 10px;font-size:12px;color:var(--text-muted);text-align:right;white-space:nowrap;">${dkWordCount(r.text)}</td>
-    </tr>`;
-  }).join('');
-
-  const tableHeader = `
-    <thead><tr style="background:var(--bg-hover);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:500;width:140px;">Дата</th>
-      ${showType ? '<th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:500;width:160px;">Тип</th>' : ''}
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--text-muted);font-weight:500;">Содержание</th>
-      <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text-muted);font-weight:500;width:60px;">Слов</th>
-    </tr></thead>`;
-  const colSpan = showType ? 4 : 3;
-  const tableBody = rows
-    ? `<tbody>${rows}</tbody>`
-    : `<tbody><tr><td colspan="${colSpan}" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:13px;">Пока пусто. Записи появятся здесь после заполнения через событие в календаре.</td></tr></tbody>`;
-  const tableHtml = `<table style="width:100%;border-collapse:collapse;background:var(--bg-card);border-radius:var(--radius-2);overflow:hidden;border:1px solid var(--border-subtle);">${tableHeader}${tableBody}</table>`;
+  const body = rows
+    ? `<div class="dk-days">${rows}</div>`
+    : '<div class="dk-empty">Пока пусто. Записи появятся здесь после заполнения практик.</div>';
 
   el.innerHTML = `
     ${dkRenderHeader('history')}
-    <div style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
-    ${tableHtml}`;
+    <div class="dk-chips">${chips}</div>
+    ${body}`;
 
   el.querySelectorAll('.dk-chip').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2621,12 +2610,12 @@ async function dkRenderHistory(el) {
       dkRenderHistory(el).then(() => dkBindTabs(el));
     });
   });
-  el.querySelectorAll('.dk-row').forEach(tr => {
-    tr.addEventListener('click', () => {
-      const r = flatRows[parseInt(tr.dataset.idx, 10)];
-      if (!r) return;
-      const m = meta[r.key];
-      dkOpenViewer(r.date, m.label, m.icon, r.text);
+  el.querySelectorAll('.dk-cell.clickable').forEach(cell => {
+    cell.addEventListener('click', () => {
+      const e = history[parseInt(cell.dataset.di, 10)];
+      const p = meta[cell.dataset.key];
+      if (!e || !p) return;
+      dkOpenViewer(e.date, p.label, p.icon, e[DK_TEXT_FIELD[p.key]] || '');
     });
   });
 }
@@ -2635,14 +2624,13 @@ function dkOpenViewer(date, label, icon, text) {
   document.querySelector('.dk-viewer-overlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'dk-viewer-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:10000;display:flex;align-items:center;justify-content:center;';
   overlay.innerHTML = `
-    <div style="background:var(--bg-card);border-radius:var(--radius-2);max-width:600px;width:90%;max-height:80vh;overflow:auto;padding:20px;border:1px solid var(--border-subtle);">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;">
-        <div style="font-size:14px;font-weight:600;color:var(--text-primary);">${icon} ${escapeHtml(label)} · ${escapeHtml(date)}</div>
-        <button class="dk-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-muted);">×</button>
+    <div class="dk-viewer-modal">
+      <div class="dk-viewer-head">
+        <div class="dk-viewer-title">${icon} ${escapeHtml(label)} · ${escapeHtml(date)}</div>
+        <button class="dk-close">×</button>
       </div>
-      <div style="font-size:13px;color:var(--text-primary);white-space:pre-wrap;line-height:1.6;">${escapeHtml(text)}</div>
+      <div class="dk-viewer-body">${escapeHtml(text)}</div>
     </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
