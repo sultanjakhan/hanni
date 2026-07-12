@@ -253,7 +253,7 @@
 }
 .ctl-live-timer {
   min-width: 58px; padding: 3px 8px; border-radius: 10px;
-  background: color-mix(in srgb, var(--accent-blue) 14%, transparent);
+  background: var(--color-blue-bg);
   color: var(--accent-blue); font-size: 12px; font-weight: 700;
   font-variant-numeric: tabular-nums; text-align: center; flex-shrink: 0;
 }

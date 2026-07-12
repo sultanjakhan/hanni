@@ -22,7 +22,7 @@ export function showFinishModal(blockId, taskTitle, onDone) {
     `<button class="ctl-fin-mood" data-mood="${m.value}" type="button" title="${m.label}">${m.icon}</button>`
   ).join('');
   overlay.innerHTML = `<div class="modal modal-compact ctl-fin-modal">
-    <div class="modal-title">Как прошло?</div>
+    <div class="modal-title">Завершить задачу</div>
     ${taskTitle ? `<div class="ctl-fin-task">${escapeHtml(taskTitle)}</div>` : ''}
     <div class="ctl-fin-section">
       <label class="ctl-fin-label">Качество</label>
@@ -37,8 +37,8 @@ export function showFinishModal(blockId, taskTitle, onDone) {
       <textarea class="form-textarea" id="ctl-fin-reflection" placeholder="Как прошло, что мешало, что заметил…" rows="3"></textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn-secondary" id="ctl-fin-skip">Пропустить</button>
-      <button class="btn-primary" id="ctl-fin-save">Сохранить</button>
+      <button class="btn-secondary" id="ctl-fin-skip">Завершить без заметки</button>
+      <button class="btn-primary" id="ctl-fin-save">Сохранить и завершить</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
