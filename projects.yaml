@@ -446,9 +446,13 @@ android:
   android:
     # Kotlin plugins (custom код)
     - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/BackgroundSyncPlugin.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/BackgroundLanSync.kt
     - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HanniHealthWorker.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HanniLanSyncWorker.kt
     - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HealthConnectPlugin.kt
     - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HealthConnectReaders.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/HanniUpdateReceiver.kt
+    - desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/LanSyncDatabase.kt
     # Generated Tauri Android skeleton (tauri android init)
     - desktop/src-tauri/gen/android/.editorconfig
     - desktop/src-tauri/gen/android/.gitignore

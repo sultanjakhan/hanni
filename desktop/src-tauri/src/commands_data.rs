@@ -1317,18 +1317,23 @@ pub fn skip_schedule_completion(schedule_id: String, date: String, db: tauri::St
         rusqlite::params![schedule_id, date], |row| row.get(0),
     ).ok();
     let new_status = if existing.as_deref() == Some("skipped") { "planned" } else { "skipped" };
+    let marked_at = if new_status == "skipped" {
+        Some(chrono::Local::now().to_rfc3339())
+    } else {
+        None
+    };
     match existing {
         Some(_) => {
             conn.execute(
-                "UPDATE schedule_completions SET completed=0, completed_at=NULL, status=?3 WHERE schedule_id=?1 AND date=?2",
-                rusqlite::params![schedule_id, date, new_status],
+                "UPDATE schedule_completions SET completed=0, completed_at=?4, status=?3 WHERE schedule_id=?1 AND date=?2",
+                rusqlite::params![schedule_id, date, new_status, marked_at],
             ).map_err(|e| format!("DB error: {}", e))?;
         }
         None => {
             let new_id = crate::types::new_uuid_v7();
             conn.execute(
-                "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, ?3, 0, NULL, ?4)",
-                rusqlite::params![new_id, schedule_id, date, new_status],
+                "INSERT INTO schedule_completions (id, schedule_id, date, completed, completed_at, status) VALUES (?1, ?2, ?3, 0, ?5, ?4)",
+                rusqlite::params![new_id, schedule_id, date, new_status, marked_at],
             ).map_err(|e| format!("DB error: {}", e))?;
         }
     }
@@ -1341,18 +1346,23 @@ pub fn skip_schedule_completion(schedule_id: String, date: String, db: tauri::St
 pub fn get_schedule_completions(date: String, db: tauri::State<'_, HanniDb>) -> Result<Vec<serde_json::Value>, String> {
     let conn = db.read();
     let mut stmt = conn.prepare(
-        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day, sc.completed_at, COALESCE(s.tracking_mode, 'track'), COALESCE(s.marks_previous_day, 0), COALESCE(sc.status, 'planned')
+        "SELECT sc.schedule_id, sc.completed, s.title, s.category, s.time_of_day, sc.completed_at, COALESCE(s.tracking_mode, 'track'), COALESCE(s.marks_previous_day, 0), COALESCE(sc.status, 'planned'), sc.updated_at
          FROM schedule_completions sc JOIN schedules s ON s.id = sc.schedule_id
          WHERE sc.date=?1"
     ).map_err(|e| format!("DB error: {}", e))?;
     let rows = stmt.query_map(rusqlite::params![date], |row| {
+        let completed_at: Option<String> = row.get(5)?;
+        let updated_at: String = row.get(9)?;
+        let marked_at = completed_at.clone().unwrap_or_else(|| updated_at.clone());
         Ok(serde_json::json!({
             "schedule_id": row.get::<_, String>(0)?,
             "completed": row.get::<_, i64>(1)? == 1,
             "title": row.get::<_, String>(2)?,
             "category": row.get::<_, String>(3)?,
             "time_of_day": row.get::<_, Option<String>>(4)?,
-            "completed_at": row.get::<_, Option<String>>(5)?,
+            "completed_at": completed_at,
+            "marked_at": marked_at,
+            "updated_at": updated_at,
             "tracking_mode": row.get::<_, String>(6)?,
             "marks_previous_day": row.get::<_, i64>(7)? == 1,
             "status": row.get::<_, String>(8)?,

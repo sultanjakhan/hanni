@@ -37,11 +37,21 @@ export async function checkWebUpdate() {
   }
 }
 
-// Reaching app init means the currently-served bundle loaded fine. Confirm it so
-// verify_trial_on_boot keeps it instead of reverting to embedded next launch.
-// No-op when there's no trial bundle pending.
+// Confirm the served bundle ONLY after the shell actually paints. Reaching app
+// init isn't proof of a render — a bundle whose JS runs but paints nothing must
+// stay unconfirmed so verify_trial_on_boot (next launch) and the native boot
+// watchdog (same launch) revert it instead of keeping a white screen. We wait
+// for a real frame, then check the tab bar rendered nodes; if it never did, we
+// skip the confirm and let the watchdog fall back to the embedded assets.
 export async function confirmWebBoot() {
   if (!IS_ANDROID) return;
+  const painted = await new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const bar = document.getElementById('tab-bar');
+      resolve(!!bar && bar.children.length > 0);
+    }));
+  });
+  if (!painted) return;
   try { await invoke('web_ota_boot_ok'); } catch {}
 }
 

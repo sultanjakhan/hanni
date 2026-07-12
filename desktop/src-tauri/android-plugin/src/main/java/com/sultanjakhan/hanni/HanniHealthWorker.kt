@@ -17,8 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -51,23 +49,17 @@ class HanniHealthWorker(
             val client = HealthConnectClient.getOrCreate(ctx)
             val granted = client.permissionController.getGrantedPermissions()
             Log.i(TAG, "doWork: granted=${granted.size} HC permissions")
-            val needed = setOf(
-                HealthPermission.getReadPermission(SleepSessionRecord::class),
-                HealthPermission.getReadPermission(ExerciseSessionRecord::class),
-                HealthPermission.getReadPermission(StepsRecord::class),
-                HealthPermission.getReadPermission(HeartRateRecord::class),
-            )
-            if (!granted.containsAll(needed)) {
-                Log.w(TAG, "HC permissions missing; nothing to do until user grants")
-                return@withContext Result.success()
-            }
-
             val end = Instant.now()
             val start = end.minus(30, ChronoUnit.DAYS)
+            fun has(record: kotlin.reflect.KClass<out androidx.health.connect.client.records.Record>) =
+                granted.contains(HealthPermission.getReadPermission(record))
 
-            val sleep = readSleepSessions(client, start, end)
-            val exercise = readExerciseSessions(client, start, end)
-            val steps = readDailySteps(client, start, end)
+            // Import every granted type independently. Denying heart rate must
+            // not disable sleep, steps and walks.
+            val sleep = if (has(SleepSessionRecord::class)) readSleepSessions(client, start, end) else JSONArray()
+            val exercise = if (has(ExerciseSessionRecord::class)) readExerciseSessions(client, start, end) else JSONArray()
+            val steps = if (has(StepsRecord::class)) readDailySteps(client, start, end) else JSONArray()
+            val heartRate = if (has(HeartRateRecord::class)) readHeartRateSamples(client, start, end) else JSONArray()
 
             // Hanni keeps the DB in app_data_dir (Tauri's path resolver), not
             // the standard `databases/` sub-dir, so getDatabasePath() misses it.
@@ -88,18 +80,11 @@ class HanniHealthWorker(
                 insertSleep(db, sleep)
                 insertExercise(db, exercise)
                 insertSteps(db, steps)
-
-                // Best-effort push to the configured LAN peer. We only push
-                // (no apply of the response) — Hanni Rust will fully sync
-                // next time it boots and runs lan_sync_now.
-                val (peer, key) = readLanConfig(db) ?: Pair(null, null)
-                if (peer != null && key != null && peer.isNotBlank() && key.isNotBlank()) {
-                    pushLan(db, peer, key)
-                }
+                insertHeartRate(db, heartRate)
             } finally {
                 db.close()
             }
-            Log.i(TAG, "doWork ok: sleep=${sleep.length()} exercise=${exercise.length()} steps=${steps.length()}")
+            Log.i(TAG, "doWork ok: sleep=${sleep.length()} exercise=${exercise.length()} steps=${steps.length()} hr=${heartRate.length()}")
             Result.success()
         } catch (se: SecurityException) {
             // Background read not permitted — READ_HEALTH_DATA_IN_BACKGROUND not
@@ -124,39 +109,73 @@ class HanniHealthWorker(
             val endTime = s.optString("end_time")
             val dur = s.optLong("duration_minutes", 0L)
             if (date.isEmpty() || startTime.isEmpty() || endTime.isEmpty() || dur <= 0) continue
-            // Phase 1 UUID PK: generate a v4 UUID (Java stdlib) and INSERT
-            // with CONFLICT_IGNORE on UNIQUE(date, start_time, source). If a
-            // session already exists (either ours from a prior tick or one
-            // pulled from the Mac via LAN sync), the insert is a no-op and
-            // we just refresh end_time/duration so the night doesn't get
-            // pinned to the first segment we saw. We never DELETE the
-            // existing row — that would replace a Mac-side UUID and create
-            // a duplicate after the next sync.
-            val cv = ContentValues().apply {
-                put("id", java.util.UUID.randomUUID().toString())
-                put("date", date)
-                put("start_time", startTime)
-                put("end_time", endTime)
-                put("duration_minutes", dur)
-                put("source", "health_connect")
-                put("created_at", now)
-            }
-            val rowId = db.insertWithOnConflict(
-                "sleep_sessions", null, cv, SQLiteDatabase.CONFLICT_IGNORE
+            val recordId = s.optString("record_id", "sleep:$date:$startTime")
+            val cur = db.rawQuery(
+                "SELECT id FROM sleep_sessions WHERE id=? OR (date=? AND start_time=? AND source='health_connect') " +
+                    "ORDER BY (id=?) DESC LIMIT 1",
+                arrayOf(recordId, date, startTime, recordId)
             )
-            if (rowId == -1L) {
-                // Conflict — session already existed. Refresh end_time + duration
-                // (last write wins, HC may extend a session as the night progresses).
+            var sessionId: String? = if (cur.moveToFirst()) cur.getString(0) else null
+            cur.close()
+            if (sessionId == null) {
+                val cv = ContentValues().apply {
+                    put("id", recordId)
+                    put("date", date)
+                    put("start_time", startTime)
+                    put("end_time", endTime)
+                    put("duration_minutes", dur)
+                    put("source", "health_connect")
+                    put("created_at", now)
+                }
+                if (db.insertWithOnConflict("sleep_sessions", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L) {
+                    sessionId = recordId
+                } else {
+                    db.rawQuery(
+                        "SELECT id FROM sleep_sessions WHERE date=? AND start_time=? AND source='health_connect' LIMIT 1",
+                        arrayOf(date, startTime)
+                    ).use { if (it.moveToFirst()) sessionId = it.getString(0) }
+                }
+            }
+            sessionId?.let { sid ->
                 val patch = ContentValues().apply {
                     put("end_time", endTime)
                     put("duration_minutes", dur)
                 }
-                db.update(
-                    "sleep_sessions", patch,
-                    "date=? AND start_time=? AND source='health_connect'",
-                    arrayOf(date, startTime)
-                )
+                db.update("sleep_sessions", patch, "id=?", arrayOf(sid))
+                reconcileSleepStages(db, sid, s.optJSONArray("stages") ?: JSONArray())
             }
+        }
+    }
+
+    private fun reconcileSleepStages(db: SQLiteDatabase, sessionId: String, stages: JSONArray) {
+        val desired = linkedSetOf<Triple<String, String, String>>()
+        for (i in 0 until stages.length()) {
+            val st = stages.optJSONObject(i) ?: continue
+            val key = Triple(st.optString("start_time"), st.optString("end_time"), st.optString("stage"))
+            if (key.first.isNotEmpty() && key.second.isNotEmpty() && key.third.isNotEmpty()) desired.add(key)
+        }
+        val kept = mutableSetOf<Triple<String, String, String>>()
+        val remove = mutableListOf<String>()
+        db.rawQuery(
+            "SELECT id,start_time,end_time,stage FROM sleep_stages WHERE session_id=?",
+            arrayOf(sessionId)
+        ).use { c ->
+            while (c.moveToNext()) {
+                val key = Triple(c.getString(1), c.getString(2), c.getString(3))
+                if (key !in desired || !kept.add(key)) remove.add(c.getString(0))
+            }
+        }
+        remove.forEach { db.delete("sleep_stages", "id=?", arrayOf(it)) }
+        for ((start, end, stage) in desired) {
+            if (Triple(start, end, stage) in kept) continue
+            val cv = ContentValues().apply {
+                put("id", "stage:$sessionId:$start:$end:$stage")
+                put("session_id", sessionId)
+                put("start_time", start)
+                put("end_time", end)
+                put("stage", stage)
+            }
+            db.insertWithOnConflict("sleep_stages", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
         }
     }
 
@@ -186,7 +205,8 @@ class HanniHealthWorker(
                 db.update("health_log", patch, "id=?", arrayOf(existingId))
             } else {
                 val cv = ContentValues().apply {
-                    put("id", java.util.UUID.randomUUID().toString())
+                    val recordId = s.optString("record_id")
+                    put("id", if (recordId.isEmpty()) "health:exercise:$date:$startTime:$notes" else "health:exercise:$recordId")
                     put("date", date)
                     put("type", "exercise")
                     put("value", dur)
@@ -221,7 +241,7 @@ class HanniHealthWorker(
                 db.update("health_log", patch, "id=?", arrayOf(existingId))
             } else {
                 val cv = ContentValues().apply {
-                    put("id", java.util.UUID.randomUUID().toString())
+                    put("id", "health:steps:$date")
                     put("date", date)
                     put("type", "steps")
                     put("value", steps)
@@ -235,113 +255,21 @@ class HanniHealthWorker(
         }
     }
 
-    // Read lan_sync_peer + lan_sync_key from app_settings. Returns null
-    // if the user hasn't configured LAN sync yet (worker just writes
-    // locally then; Hanni will push next launch).
-    private fun readLanConfig(db: SQLiteDatabase): Pair<String, String>? {
-        var peer: String? = null
-        var key: String? = null
-        db.rawQuery(
-            "SELECT key, value FROM app_settings WHERE key IN ('lan_sync_peer','lan_sync_key','lan_sync_enabled')",
-            null
-        ).use { c ->
-            while (c.moveToNext()) {
-                when (c.getString(0)) {
-                    "lan_sync_peer" -> peer = c.getString(1)
-                    "lan_sync_key" -> key = c.getString(1)
-                    "lan_sync_enabled" -> if (c.getString(1) != "true") return null
-                }
+    private fun insertHeartRate(db: SQLiteDatabase, arr: JSONArray) {
+        for (i in 0 until arr.length()) {
+            val s = arr.optJSONObject(i) ?: continue
+            val date = s.optString("date")
+            val time = s.optString("time")
+            val bpm = s.optLong("bpm", 0L)
+            if (date.isEmpty() || time.isEmpty() || bpm <= 0) continue
+            val recordId = s.optString("record_id")
+            val sampleIndex = s.optInt("sample_index", 0)
+            val id = if (recordId.isEmpty()) "health:hr:$date:$time" else "health:hr:$recordId:$sampleIndex"
+            val cv = ContentValues().apply {
+                put("id", id); put("date", date); put("time", time); put("bpm", bpm)
             }
+            db.insertWithOnConflict("heart_rate_samples", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
         }
-        return if (peer != null && key != null) Pair(peer!!, key!!) else null
-    }
-
-    // Gather rows newer than each table's lan_cursor_* setting and POST them
-    // to the configured peer in the same shape Rust's lan_sync_now does, so
-    // Mac's lan_sync server can upsert them via LWW. We don't apply the
-    // response — Hanni Rust pulls Mac's rows on next launch.
-    private fun pushLan(db: SQLiteDatabase, peer: String, key: String) {
-        val tables = listOf(
-            "events", "sleep_sessions", "health_log", "notes", "facts",
-            "recipes", "transactions", "body_records", "conversations",
-        )
-        val cursors = JSONObject()
-        val rows = JSONArray()
-        for (t in tables) {
-            val cursor = readSetting(db, "lan_cursor_$t") ?: "1970-01-01T00:00:00"
-            cursors.put(t, cursor)
-            // SELECT * for rows with updated_at > cursor. SQLite WHERE
-            // applied per-row.
-            val cur = runCatching {
-                db.rawQuery("SELECT * FROM $t WHERE updated_at > ? LIMIT 500", arrayOf(cursor))
-            }.getOrNull()
-            if (cur == null) continue
-            cur.use { c ->
-                val cols = c.columnNames
-                while (c.moveToNext()) {
-                    val f = JSONObject()
-                    for (i in cols.indices) {
-                        when (c.getType(i)) {
-                            android.database.Cursor.FIELD_TYPE_INTEGER -> f.put(cols[i], c.getLong(i))
-                            android.database.Cursor.FIELD_TYPE_FLOAT -> f.put(cols[i], c.getDouble(i))
-                            android.database.Cursor.FIELD_TYPE_STRING -> f.put(cols[i], c.getString(i))
-                            android.database.Cursor.FIELD_TYPE_NULL -> f.put(cols[i], JSONObject.NULL)
-                            else -> f.put(cols[i], c.getString(i))
-                        }
-                    }
-                    val item = JSONObject().apply { put("t", t); put("f", f) }
-                    rows.put(item)
-                }
-            }
-        }
-        if (rows.length() == 0) {
-            Log.i(TAG, "pushLan: nothing new")
-            return
-        }
-        val body = JSONObject().apply {
-            put("key", key)
-            put("cursors", cursors)
-            put("tomb_cursor", readSetting(db, "lan_cursor_tombstones") ?: "1970-01-01T00:00:00")
-            put("rows", rows)
-            put("tombs", JSONArray())
-        }
-        val url = URL("http://$peer/lan/sync")
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "POST"
-        conn.setRequestProperty("Content-Type", "application/json")
-        conn.connectTimeout = 6000
-        conn.readTimeout = 8000
-        conn.doOutput = true
-        conn.outputStream.use { it.write(body.toString().toByteArray()) }
-        val code = conn.responseCode
-        Log.i(TAG, "pushLan rows=${rows.length()} http=$code")
-        conn.disconnect()
-
-        // Advance cursors to the max updated_at we just sent so we don't
-        // re-push on the next tick.
-        var maxTs = "1970-01-01T00:00:00"
-        for (i in 0 until rows.length()) {
-            val f = rows.optJSONObject(i)?.optJSONObject("f")
-            if (f != null) {
-                val ts = f.optString("updated_at", "")
-                if (ts > maxTs) maxTs = ts
-            }
-        }
-        for (t in tables) writeSetting(db, "lan_cursor_$t", maxTs)
-    }
-
-    private fun readSetting(db: SQLiteDatabase, key: String): String? {
-        db.rawQuery("SELECT value FROM app_settings WHERE key=?", arrayOf(key)).use {
-            return if (it.moveToFirst()) it.getString(0) else null
-        }
-    }
-
-    private fun writeSetting(db: SQLiteDatabase, key: String, value: String) {
-        db.execSQL(
-            "INSERT INTO app_settings(key, value) VALUES(?, ?) " +
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            arrayOf(key, value)
-        )
     }
 
     private fun isoNow(): String =

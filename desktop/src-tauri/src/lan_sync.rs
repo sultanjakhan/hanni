@@ -11,7 +11,7 @@
 // re-applying idempotent, so there is no cursor-skip race.
 
 use crate::db::SYNC_TABLES;
-use crate::sync_owner::{get_setting, row_to_json, set_setting, upsert_row};
+use crate::sync_owner::{get_setting, row_to_json, set_setting, tombstone_row_id, upsert_row};
 use crate::types::HanniDb;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -25,7 +25,12 @@ const EPOCH: &str = "1970-01-01T00:00:00";
 struct RowItem { t: String, f: Map<String, Value> }
 
 #[derive(Serialize, Deserialize)]
-struct TombItem { tt: String, id: i64 }
+struct TombItem {
+    tt: String,
+    id: Value,
+    #[serde(default)]
+    deleted_at: String,
+}
 
 #[derive(Serialize, Deserialize)]
 struct SyncReq {
@@ -34,6 +39,8 @@ struct SyncReq {
     tomb_cursor: String,
     rows: Vec<RowItem>,
     tombs: Vec<TombItem>,
+    #[serde(default)]
+    push_only: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -118,10 +125,14 @@ fn gather(conn: &rusqlite::Connection, cursors: &Map<String, Value>, tomb_cursor
     }
     let tombs: Vec<TombItem> = (|| {
         let mut stmt = conn.prepare(
-            "SELECT table_name, row_id FROM sync_tombstones \
+            "SELECT table_name, row_id, deleted_at FROM sync_tombstones \
              WHERE deleted_at > ?1 ORDER BY deleted_at LIMIT 500")?;
         let v = stmt.query_map(rusqlite::params![tomb_cursor], |r|
-            Ok(TombItem { tt: r.get(0)?, id: r.get(1)? }))?
+            Ok(TombItem {
+                tt: r.get(0)?,
+                id: Value::String(r.get::<_, String>(1)?),
+                deleted_at: r.get(2)?,
+            }))?
             .filter_map(Result::ok).collect();
         Ok::<_, rusqlite::Error>(v)
     })().unwrap_or_default();
@@ -144,8 +155,35 @@ fn apply_batch(conn: &rusqlite::Connection, batch: &SyncBatch) -> usize {
     }
     for t in &batch.tombs {
         if !SYNC_TABLES.contains(&t.tt.as_str()) { continue; }
-        let _ = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", t.tt),
-                             rusqlite::params![t.id]);
+        let Some(row_id) = tombstone_row_id(Some(&t.id)) else { continue; };
+        // Do not let an old delete win over a row edited later on this device.
+        let local_updated: Option<String> = conn.query_row(
+            &format!("SELECT updated_at FROM {} WHERE id=?1", t.tt),
+            rusqlite::params![&row_id], |r| r.get(0),
+        ).ok();
+        if !t.deleted_at.is_empty()
+            && local_updated.as_deref().is_some_and(|updated| updated > t.deleted_at.as_str()) {
+            continue;
+        }
+        let deleted = conn.execute(
+            &format!("DELETE FROM {} WHERE id = ?1", t.tt),
+            rusqlite::params![&row_id],
+        ).unwrap_or(0);
+        if deleted > 0 { applied += 1; }
+        // The DELETE trigger writes the local clock. Restore the originating
+        // timestamp so tombstone cursors advance to data actually exchanged.
+        if !t.deleted_at.is_empty() {
+            let row_id_text = match &row_id {
+                rusqlite::types::Value::Integer(v) => v.to_string(),
+                rusqlite::types::Value::Text(v) => v.clone(),
+                _ => continue,
+            };
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO sync_tombstones(table_name,row_id,deleted_at)
+                 VALUES (?1,?2,?3)",
+                rusqlite::params![&t.tt, row_id_text, &t.deleted_at],
+            );
+        }
     }
     // Phase 3 follow-up: if this batch added schedules from a peer, two
     // independently-migrated devices can end up with two rows for the same
@@ -185,6 +223,12 @@ fn advance_cursors(conn: &rusqlite::Connection, batches: &[&SyncBatch]) {
         let key = format!("lan_cursor_{}", table);
         let cur = get_setting(conn, &key).unwrap_or_default();
         if ts > cur { set_setting(conn, &key, &ts); }
+    }
+    let max_tomb = batches.iter().flat_map(|b| b.tombs.iter())
+        .map(|t| t.deleted_at.as_str()).filter(|ts| !ts.is_empty()).max();
+    if let Some(ts) = max_tomb {
+        let cur = get_setting(conn, "lan_cursor_tombstones").unwrap_or_default();
+        if ts > cur.as_str() { set_setting(conn, "lan_cursor_tombstones", ts); }
     }
 }
 
@@ -243,6 +287,7 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
         tomb_cursor,
         rows: mine.rows,
         tombs: mine.tombs,
+        push_only: false,
     };
     let url = format!("http://{}/lan/sync", peer);
     // Tailscale's direct path goes cold when idle, so the first connect can
@@ -289,7 +334,6 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
         applied = apply_batch(&conn, &theirs);
         let mine_batch = SyncBatch { rows: req.rows, tombs: req.tombs, peer_hint: None };
         advance_cursors(&conn, &[&mine_batch, &theirs]);
-        set_setting(&conn, "lan_cursor_tombstones", &chrono::Local::now().to_rfc3339());
         candidate_hint = theirs.peer_hint.clone().filter(|h|
             !h.is_empty() && h != &peer && h.starts_with("100.")
         );
@@ -344,6 +388,9 @@ pub async fn spawn_lan_sync_server(app: AppHandle) {
             return Err((StatusCode::UNAUTHORIZED, "bad key".into()));
         }
         apply_batch(&conn, &SyncBatch { rows: req.rows, tombs: req.tombs, peer_hint: None });
+        if req.push_only {
+            return Ok(Json(SyncBatch { rows: vec![], tombs: vec![], peer_hint: detect_my_tailscale_addr() }));
+        }
         let mut batch = gather(&conn, &req.cursors, &req.tomb_cursor);
         batch.peer_hint = detect_my_tailscale_addr();
         Ok(Json(batch))

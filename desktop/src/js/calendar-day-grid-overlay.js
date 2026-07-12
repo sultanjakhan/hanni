@@ -259,21 +259,29 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
       .filter(b => b.source_type === 'schedule' && b.source_id != null)
       .map(b => b.source_id)
   );
-  // Show what was actually DONE on this calendar day, keyed by completed_at:
-  // regular ticks live under `date`; "marks previous day" reflections done today
-  // live under yesterday's date. Merge both, keep only ones completed on `date`,
-  // dedup by schedule (a re-tick can leave a row under each date).
+  // A completion's semantic `date` can be yesterday (reflection), while its
+  // marker belongs to the moment the user pressed ✓/✗ today. `marked_at`
+  // preserves that distinction. Old skipped rows fall back to updated_at.
   const byId = new Map();
-  for (const c of [...(completions || []), ...(prevCompletions || [])]) {
-    if (!c.completed || !c.completed_at || !c.completed_at.startsWith(date)) continue;
+  const dated = [
+    ...(completions || []).map(c => ({ ...c, completion_date: date })),
+    ...(prevCompletions || []).map(c => ({ ...c, completion_date: prevDate })),
+  ];
+  for (const c of dated) {
+    const closed = c.completed || c.status === 'skipped';
+    const markedAt = c.marked_at || c.completed_at || c.updated_at;
+    if (!closed || !markedAt || !markedAt.startsWith(date)) continue;
     if (blockedSchedIds.has(c.schedule_id)) continue;
+    c.marker_at = markedAt;
     const prev = byId.get(c.schedule_id);
-    if (!prev || c.completed_at > prev.completed_at) byId.set(c.schedule_id, c);
+    if (!prev || markedAt > prev.marker_at) byId.set(c.schedule_id, c);
   }
-  const doneChecks = [...byId.values()];
+  const closedChecks = [...byId.values()];
+  const doneChecks = closedChecks.filter(c => c.completed);
+  const skippedChecks = closedChecks.filter(c => c.status === 'skipped');
 
   const reflections = doneChecks.filter(c => c.marks_previous_day);
-  const regulars    = doneChecks.filter(c => !c.marks_previous_day);
+  const regulars    = [...doneChecks.filter(c => !c.marks_previous_day), ...skippedChecks];
   const reflSchedules = (allSchedules || []).filter(s => s.marks_previous_day && s.is_active !== false);
 
   // Each completion-group is drawn as a clear box (like an event): the first
@@ -283,25 +291,34 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   const pendingGroups = [];
   const buildTaskGroups = (list) => {
     const pts = list
-      .map(c => ({ c, min: parseHM(timestampToHM(c.completed_at)) }))
+      .map(c => ({ c, min: parseHM(timestampToHM(c.marker_at)) }))
       .filter(p => p.min != null)
-      .filter(p => !foldInto(p.min, { title: p.c.title, time: timestampToHM(p.c.completed_at), scheduleId: p.c.schedule_id, undoDate: date }))
+      .filter(p => !foldInto(p.min, {
+        title: p.c.title, time: timestampToHM(p.c.marker_at), skipped: p.c.status === 'skipped',
+        scheduleId: p.c.schedule_id, undoDate: p.c.completion_date,
+      }))
       .sort((a, b) => a.min - b.min);
     let grp = [];
     const flush = () => {
       if (!grp.length) return;
       const first = grp[0];
+      const firstSkipped = first.c.status === 'skipped';
       pendingGroups.push({
         top: minToPx(first.min),
-        icon: SCH_CAT_ICONS[first.c.category] || '◽',
+        icon: firstSkipped ? '❌' : (SCH_CAT_ICONS[first.c.category] || '◽'),
         title: first.c.title,
         badge: grp.length > 1 ? `+${grp.length - 1}` : '',
-        hm: timestampToHM(first.c.completed_at),
-        items: grp.map(p => ({
-          title: p.c.title, subtitle: timestampToHM(p.c.completed_at), accent: '#c084fc',
-          rows: [{ text: '✓ Выполнено', done: true }],
-          toggle: { scheduleId: p.c.schedule_id, date, done: true },
-        })),
+        hm: timestampToHM(first.c.marker_at),
+        skipped: firstSkipped,
+        items: grp.map(p => {
+          const skipped = p.c.status === 'skipped';
+          return {
+            title: p.c.title, subtitle: timestampToHM(p.c.marker_at),
+            accent: skipped ? 'var(--color-red)' : '#c084fc',
+            rows: [skipped ? { text: '✗ Не выполнено' } : { text: '✓ Выполнено', done: true }],
+            toggle: skipped ? null : { scheduleId: p.c.schedule_id, date: p.c.completion_date, done: true },
+          };
+        }),
       });
       grp = [];
     };
@@ -317,15 +334,15 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // (e.g. 12/29); the pager browses the completed ones (the rest are managed in
   // the schedule list, not on the "what I did" timeline).
   const doneRefl = reflections
-    .map(c => ({ c, min: parseHM(timestampToHM(c.completed_at)) }))
+    .map(c => ({ c, min: parseHM(timestampToHM(c.marker_at)) }))
     .filter(p => p.min != null)
-    .filter(p => !foldInto(p.min, { title: p.c.title, time: timestampToHM(p.c.completed_at), isReflection: true, scheduleId: p.c.schedule_id, undoDate: prevDate }))
+    .filter(p => !foldInto(p.min, { title: p.c.title, time: timestampToHM(p.c.marker_at), isReflection: true, scheduleId: p.c.schedule_id, undoDate: prevDate }))
     .sort((a, b) => a.min - b.min);
   if (doneRefl.length) {
     const doneIds = new Set(doneRefl.map(p => p.c.schedule_id));
     const items = [
       ...doneRefl.map(p => ({
-        title: p.c.title, subtitle: timestampToHM(p.c.completed_at), accent: '#f59e0b',
+        title: p.c.title, subtitle: timestampToHM(p.c.marker_at), accent: '#f59e0b',
         rows: [{ text: '📝 Рефлексия за вчера', muted: true }, { text: '✓ Выполнено', done: true }],
         toggle: { scheduleId: p.c.schedule_id, date: prevDate, done: true },
       })),
@@ -340,7 +357,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
       icon: '📝',
       title: 'Рефлексия за вчера',
       badge: `${doneRefl.length}/${Math.max(reflSchedules.length, doneRefl.length)}`,
-      hm: timestampToHM(doneRefl[0].c.completed_at),
+      hm: timestampToHM(doneRefl[0].c.marker_at),
       items,
       reflection: true,
     });
@@ -353,7 +370,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     const top = Math.max(g.top, lastBottom + 3);
     lastBottom = top + 28;
     const box = document.createElement('div');
-    box.className = 'day-tl-group' + (g.reflection ? ' day-tl-group-refl' : '');
+    box.className = 'day-tl-group' + (g.reflection ? ' day-tl-group-refl' : '') + (g.skipped ? ' day-tl-group-skipped' : '');
     box.style.cssText = `top:${top}px;`;
     box.title = g.items.map(it => `• ${it.title}`).join('\n');
     box.innerHTML = `<span class="day-tl-group-ico">${g.icon}</span><span class="day-tl-group-title">${escapeHtml(g.title)}</span>${g.badge ? `<span class="day-tl-group-count">${g.badge}</span>` : ''}<span class="day-tl-group-time">${g.hm}</span>`;
@@ -373,14 +390,19 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     blk.__evtGroup = [{ ...eventPagerItem(box.ev), accent: box.ev.color }, ...items.map(it => ({
       title: it.title,
       subtitle: it.time,
-      accent: it.isReflection ? '#f59e0b' : '#c084fc',
-      rows: [it.isReflection ? { text: '📝 Рефлексия за вчера', muted: true } : null, { text: '✓ Выполнено', done: true }].filter(Boolean),
-      toggle: { scheduleId: it.scheduleId, date: it.undoDate, done: true },
+      accent: it.skipped ? 'var(--color-red)' : it.isReflection ? '#f59e0b' : '#c084fc',
+      rows: [
+        it.isReflection ? { text: '📝 Рефлексия за вчера', muted: true } : null,
+        it.skipped ? { text: '✗ Не выполнено' } : { text: '✓ Выполнено', done: true },
+      ].filter(Boolean),
+      toggle: it.skipped ? null : { scheduleId: it.scheduleId, date: it.undoDate, done: true },
     }))];
     const badge = document.createElement('span');
     badge.className = 'day-event-count';
-    badge.textContent = `✓ ${items.length}`;
-    badge.title = `${items.length} выполненных задач рядом — нажмите, чтобы листать`;
+    const doneCount = items.filter(it => !it.skipped).length;
+    const skipCount = items.length - doneCount;
+    badge.textContent = [doneCount && `✓ ${doneCount}`, skipCount && `✗ ${skipCount}`].filter(Boolean).join(' ');
+    badge.title = `${items.length} отметок рядом — нажмите, чтобы листать`;
     (blk.querySelector('.day-event-block-head') || blk).appendChild(badge);
   }
 }

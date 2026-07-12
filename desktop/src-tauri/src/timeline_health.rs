@@ -12,12 +12,6 @@ pub fn sync_health_to_timeline(date: String, db: tauri::State<'_, HanniDb>) -> R
     let sleep_id = get_type_id(&conn, "Сон")?;
     let sport_id = get_type_id(&conn, "Спорт")?;
 
-    // Remove old auto_health blocks for this date
-    conn.execute(
-        "DELETE FROM timeline_blocks WHERE date=?1 AND source='auto_health'",
-        rusqlite::params![date],
-    ).ok();
-
     // Sync sleep sessions → timeline blocks
     count += sync_sleep(&conn, &date, sleep_id);
 
@@ -42,11 +36,24 @@ fn sync_sleep(conn: &rusqlite::Connection, date: &str, type_id: i64) -> i64 {
         let s = normalize_time(&start);
         let e = normalize_time(&end);
         if s == e || dur < 5 { continue; }
-        conn.execute(
-            "INSERT INTO timeline_blocks (type_id,date,start_time,end_time,duration_minutes,source,notes)
-             VALUES (?1,?2,?3,?4,?5,'auto_health','Samsung Health')",
-            rusqlite::params![type_id, date, s, e, dur],
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM timeline_blocks
+             WHERE date=?1 AND type_id=?2 AND start_time=?3 AND source='auto_health'
+             ORDER BY id LIMIT 1",
+            rusqlite::params![date, type_id, &s], |r| r.get(0),
         ).ok();
+        if let Some(id) = existing {
+            conn.execute(
+                "UPDATE timeline_blocks SET end_time=?1,duration_minutes=?2,notes='Samsung Health' WHERE id=?3",
+                rusqlite::params![e, dur, id],
+            ).ok();
+        } else {
+            conn.execute(
+                "INSERT INTO timeline_blocks (type_id,date,start_time,end_time,duration_minutes,source,notes)
+                 VALUES (?1,?2,?3,?4,?5,'auto_health','Samsung Health')",
+                rusqlite::params![type_id, date, s, e, dur],
+            ).ok();
+        }
         count += 1;
     }
     count
@@ -88,11 +95,24 @@ fn sync_exercise(conn: &rusqlite::Connection, date: &str, type_id: i64) -> i64 {
         // visually off into the next day; duration stays correct.
         let display_end = end_min.min(1439);
         let end = format!("{:02}:{:02}", display_end / 60, display_end % 60);
-        conn.execute(
-            "INSERT INTO timeline_blocks (type_id,date,start_time,end_time,duration_minutes,source,notes)
-             VALUES (?1,?2,?3,?4,?5,'auto_health',?6)",
-            rusqlite::params![type_id, date, start, end, dur_min as i64, notes],
+        let existing: Option<i64> = conn.query_row(
+            "SELECT id FROM timeline_blocks
+             WHERE date=?1 AND type_id=?2 AND start_time=?3 AND source='auto_health' AND notes=?4
+             ORDER BY id LIMIT 1",
+            rusqlite::params![date, type_id, &start, &notes], |r| r.get(0),
         ).ok();
+        if let Some(id) = existing {
+            conn.execute(
+                "UPDATE timeline_blocks SET end_time=?1,duration_minutes=?2 WHERE id=?3",
+                rusqlite::params![end, dur_min as i64, id],
+            ).ok();
+        } else {
+            conn.execute(
+                "INSERT INTO timeline_blocks (type_id,date,start_time,end_time,duration_minutes,source,notes)
+                 VALUES (?1,?2,?3,?4,?5,'auto_health',?6)",
+                rusqlite::params![type_id, date, start, end, dur_min as i64, notes],
+            ).ok();
+        }
         count += 1;
     }
     count

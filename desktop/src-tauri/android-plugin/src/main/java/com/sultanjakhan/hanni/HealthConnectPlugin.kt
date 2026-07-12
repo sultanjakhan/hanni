@@ -71,14 +71,18 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun withClient(invoke: Invoke, block: suspend (HealthConnectClient) -> Unit) {
+    private fun withClient(
+        invoke: Invoke,
+        permission: String,
+        block: suspend (HealthConnectClient) -> Unit,
+    ) {
         val client = healthClient
         if (client == null) { invoke.reject("Health Connect not available"); return }
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val granted = client.permissionController.getGrantedPermissions()
-                if (!granted.containsAll(requiredPermissions)) {
-                    invoke.reject("Health permissions not granted"); return@launch
+                if (!granted.contains(permission)) {
+                    invoke.reject("Health permission not granted: $permission"); return@launch
                 }
                 block(client)
             } catch (e: Exception) {
@@ -149,7 +153,9 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun readSleep(invoke: Invoke) = withClient(invoke) { client ->
+    fun readSleep(invoke: Invoke) = withClient(
+        invoke, HealthPermission.getReadPermission(SleepSessionRecord::class)
+    ) { client ->
         val (start, end) = last30Days()
         val ret = JSObject()
         ret.put("sessions", readSleepSessions(client, start, end))
@@ -157,7 +163,9 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun readSteps(invoke: Invoke) = withClient(invoke) { client ->
+    fun readSteps(invoke: Invoke) = withClient(
+        invoke, HealthPermission.getReadPermission(StepsRecord::class)
+    ) { client ->
         val (start, end) = last30Days()
         val ret = JSObject()
         ret.put("days", readDailySteps(client, start, end))
@@ -165,7 +173,9 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun readHeartRate(invoke: Invoke) = withClient(invoke) { client ->
+    fun readHeartRate(invoke: Invoke) = withClient(
+        invoke, HealthPermission.getReadPermission(HeartRateRecord::class)
+    ) { client ->
         val (start, end) = last30Days()
         val ret = JSObject()
         ret.put("samples", readHeartRateSamples(client, start, end))
@@ -173,7 +183,9 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun readExercise(invoke: Invoke) = withClient(invoke) { client ->
+    fun readExercise(invoke: Invoke) = withClient(
+        invoke, HealthPermission.getReadPermission(ExerciseSessionRecord::class)
+    ) { client ->
         val (start, end) = last30Days()
         val ret = JSObject()
         ret.put("sessions", readExerciseSessions(client, start, end))

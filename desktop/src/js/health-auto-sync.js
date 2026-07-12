@@ -39,11 +39,15 @@ export async function autoImportHealth(opts = {}) {
         // it (Settings button) — we don't want to spam the system dialog
         // on every periodic poll.
         const firstLaunch = !localStorage.getItem(LS_KEY);
-        if (!firstLaunch && !opts.force) return false;
-        const ok = await invoke('health_request_permissions').catch(() => false);
-        if (!ok) return false;
+        if (firstLaunch || opts.force) {
+          // A user may intentionally grant only some data types. Request the
+          // missing permissions once, then import every type that is available
+          // instead of disabling Health Connect as a whole.
+          await invoke('health_request_permissions').catch(() => false);
+        }
       }
-      await invoke('import_health_connect_all');
+      const imported = await invoke('import_health_connect_all');
+      if (!imported?.successful_types?.length) return false;
       const dates = Array.from({ length: 7 }, (_, i) => localDate(-i));
       await Promise.all(dates.flatMap(date => [
         invoke('sync_health_to_calendar', { date }).catch(() => {}),

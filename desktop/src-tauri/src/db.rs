@@ -4336,6 +4336,75 @@ pub fn migrate_dedup_auto_health_events(conn: &rusqlite::Connection) {
     ).ok();
 }
 
+/// Repair data produced by the old Health Connect importer. It recreated
+/// sleep stages and derived timeline rows on every poll, while LAN tombstones
+/// could not represent their TEXT ids. Run once on every device before normal
+/// sync resumes; stable natural-key indexes prevent the pile-up returning.
+pub fn migrate_health_sync_cleanup_v1(conn: &rusqlite::Connection) {
+    let _ = conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY)", []);
+    let done = conn.prepare(
+        "SELECT 1 FROM _migrations WHERE name='health_sync_cleanup_v1'"
+    ).ok().and_then(|mut s| s.exists([]).ok()).unwrap_or(false);
+    if done { return; }
+
+    let result = conn.execute_batch(
+        "BEGIN IMMEDIATE;
+         DROP TRIGGER IF EXISTS sleep_stages_tombstone;
+         DROP TRIGGER IF EXISTS sleep_sessions_tombstone;
+         DROP TRIGGER IF EXISTS health_log_tombstone;
+         DROP TRIGGER IF EXISTS timeline_blocks_tombstone;
+         DROP TRIGGER IF EXISTS events_tombstone;
+
+         DELETE FROM sleep_stages WHERE id NOT IN (
+           SELECT MIN(id) FROM sleep_stages
+           GROUP BY session_id,start_time,end_time,stage
+         );
+         DELETE FROM sleep_sessions
+         WHERE source='health_connect'
+           AND NOT EXISTS (SELECT 1 FROM sleep_stages WHERE session_id=sleep_sessions.id)
+           AND EXISTS (
+             SELECT 1 FROM sleep_sessions AS other
+             WHERE other.date=sleep_sessions.date AND other.source='health_connect'
+               AND other.id<>sleep_sessions.id
+               AND EXISTS (SELECT 1 FROM sleep_stages WHERE session_id=other.id)
+           );
+         DELETE FROM health_log WHERE health_log.type='steps' AND EXISTS (
+           SELECT 1 FROM health_log AS b WHERE b.type='steps' AND b.date=health_log.date
+             AND (COALESCE(b.updated_at,'')>COALESCE(health_log.updated_at,'') OR
+                  (COALESCE(b.updated_at,'')=COALESCE(health_log.updated_at,'') AND b.id<health_log.id))
+         );
+         DELETE FROM health_log WHERE health_log.type='exercise' AND EXISTS (
+           SELECT 1 FROM health_log AS b WHERE b.type='exercise' AND b.date=health_log.date
+             AND COALESCE(b.start_time,'')=COALESCE(health_log.start_time,'') AND b.notes=health_log.notes
+             AND (COALESCE(b.updated_at,'')>COALESCE(health_log.updated_at,'') OR
+                  (COALESCE(b.updated_at,'')=COALESCE(health_log.updated_at,'') AND b.id<health_log.id))
+         );
+         DELETE FROM timeline_blocks WHERE timeline_blocks.source='auto_health' AND EXISTS (
+           SELECT 1 FROM timeline_blocks AS b WHERE b.source='auto_health'
+             AND b.date=timeline_blocks.date AND b.type_id=timeline_blocks.type_id AND b.start_time=timeline_blocks.start_time
+             AND COALESCE(b.notes,'')=COALESCE(timeline_blocks.notes,'') AND b.id<timeline_blocks.id
+         );
+         DELETE FROM events WHERE events.source='auto_health' AND EXISTS (
+           SELECT 1 FROM events AS b WHERE b.source='auto_health'
+             AND b.date=events.date AND b.title=events.title AND b.time=events.time AND b.id>events.id
+         );
+
+         DELETE FROM sync_tombstones WHERE table_name IN ('sleep_sessions','sleep_stages','health_log');
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_sleep_stage_natural
+           ON sleep_stages(session_id,start_time,end_time,stage);
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_health_steps_date
+           ON health_log(date) WHERE type='steps';
+         CREATE UNIQUE INDEX IF NOT EXISTS uq_health_exercise_natural
+           ON health_log(date,COALESCE(start_time,''),notes) WHERE type='exercise';
+         INSERT OR IGNORE INTO _migrations(name) VALUES ('health_sync_cleanup_v1');
+         COMMIT;"
+    );
+    if let Err(e) = result {
+        let _ = conn.execute_batch("ROLLBACK;");
+        eprintln!("[migrate_health_sync_cleanup_v1] failed: {e}");
+    }
+}
+
 /// Shopping list — items the user adds from fridge / freely to buy next time.
 /// Used by the "🛒 Закупка" event template (multi-select picker fills the
 /// event description with selected items and marks them bought_at on save).

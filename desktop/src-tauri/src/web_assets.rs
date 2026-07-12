@@ -10,6 +10,8 @@
 // all platforms (no-op-ish on desktop, which keeps its tauri-plugin-updater).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{Manager, Runtime};
 
 /// Written last by `apply` once an extract is complete + validated. Its absence
@@ -22,6 +24,20 @@ pub const TRIAL_MARKER: &str = ".trial";
 /// Set on the first boot that serves a trial bundle; if it survives to the next
 /// boot the trial never confirmed (white-screened) → the bundle is reverted.
 const PENDING_MARKER: &str = ".trial_pending";
+
+/// Per-launch flag the frontend flips via `web_ota_boot_ok` once it has actually
+/// painted. The boot watchdog reads it: if it stays false past the window while
+/// an OTA bundle is live, the bundle white-screened → revert. In-memory (not a
+/// file) so it resets every launch, independent of the persisted trial markers
+/// (those can be cleared eagerly; this is the authoritative "did we paint?" bit).
+#[derive(Default)]
+pub struct BootGuard(pub Arc<AtomicBool>);
+
+/// How long to wait for the frontend to confirm a real paint before assuming the
+/// served OTA bundle white-screened. Generous so a slow cold start never trips it
+/// (the confirm fires as soon as the tab bar paints, typically well under 2s).
+#[cfg(any(target_os = "android", target_os = "macos"))]
+const WATCHDOG_SECS: u64 = 12;
 
 /// Custom scheme for OTA-served frontend.
 #[cfg(any(target_os = "android", target_os = "macos"))]
@@ -356,9 +372,56 @@ pub fn reconcile_native_baseline<R: Runtime>(app: &tauri::AppHandle<R>) {
 /// bundle by clearing its markers so it's kept permanently. No-op otherwise.
 #[tauri::command]
 pub fn web_ota_boot_ok<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    // Cancel the boot watchdog: the frontend confirmed a real paint, so the
+    // served bundle is good — don't revert it.
+    if let Some(g) = app.try_state::<BootGuard>() {
+        g.0.store(true, Ordering::SeqCst);
+    }
     let current = current_dir(&app);
     let _ = std::fs::remove_file(current.join(TRIAL_MARKER));
     let _ = std::fs::remove_file(current.join(PENDING_MARKER));
+    Ok(())
+}
+
+/// Arm a one-shot watchdog after navigating to the OTA bundle. If the frontend
+/// hasn't confirmed a real paint (`web_ota_boot_ok` → `BootGuard`) within
+/// `WATCHDOG_SECS` while an OTA bundle is actually live, the bundle white-screened
+/// → delete it and reload so embedded assets serve (same-launch recovery, no
+/// reinstall/wipe). No-op when embedded assets already serve (nothing to revert),
+/// so it can never loop. The trial marker (next-launch revert) stays as a backstop.
+#[cfg(any(target_os = "android", target_os = "macos"))]
+#[allow(dead_code)] // armed on Android only; compiled on macOS so cargo check covers it
+pub fn arm_boot_watchdog<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if !current_dir(app).join(READY_MARKER).exists() {
+        return; // embedded assets are the floor — nothing to fall back to
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(WATCHDOG_SECS));
+        let alive = handle
+            .try_state::<BootGuard>()
+            .map(|g| g.0.load(Ordering::SeqCst))
+            .unwrap_or(true);
+        if alive || !current_dir(&handle).join(READY_MARKER).exists() {
+            return;
+        }
+        let _ = std::fs::remove_dir_all(current_dir(&handle));
+        eprintln!("[hanni] web_assets: boot watchdog — OTA bundle never painted, reverted to embedded");
+        let h = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if let Some(win) = h.get_webview_window("main") {
+                let _ = win.eval("window.location.reload()");
+            }
+        });
+    });
+}
+
+/// Emergency reset: drop any applied OTA bundle so the next load serves the
+/// embedded assets. Manual recovery path for a device stuck on a bad bundle.
+#[tauri::command]
+pub fn web_reset_bundle<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(current_dir(&app));
+    let _ = std::fs::remove_file(version_file(&app));
     Ok(())
 }
 

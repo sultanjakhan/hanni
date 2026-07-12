@@ -4,17 +4,17 @@ import { renderSleepAnalysis } from './health-analysis.js';
 
 export async function renderHealthDash(paneEl) {
   const today = new Date();
-  const fmt = d => d.toISOString().slice(0, 10);
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const todayStr = fmt(today);
   const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
   const weekStr = fmt(weekAgo);
 
-  const [summary, sleepSessions, steps7, hr7] = await Promise.all([
+  const [summary, sleepSessions, hr7] = await Promise.all([
     invoke('get_health_summary', { days: 7 }).catch(() => ({})),
     invoke('get_sleep_sessions', { from: weekStr, to: todayStr }).catch(() => []),
-    getStepsWeek(weekStr, todayStr),
     invoke('get_heart_rate_samples', { from: weekStr, to: todayStr }).catch(() => []),
   ]);
+  const steps7 = summary.steps || [];
 
   const avgSleepH = Math.floor((summary.avg_sleep_minutes || 0) / 60);
   const avgSleepM = Math.round((summary.avg_sleep_minutes || 0) % 60);
@@ -78,14 +78,6 @@ export async function renderHealthDash(paneEl) {
   if (analysisEl) renderSleepAnalysis(analysisEl);
 }
 
-async function getStepsWeek(from, to) {
-  try {
-    const rows = await invoke('get_health_today');
-    // get_health_today only returns today — for weekly, query health_log
-    return [];
-  } catch { return []; }
-}
-
 function calcSleepScore(session) {
   if (!session.stages?.length) return null;
   const totalMin = session.duration_minutes || 1;
@@ -105,19 +97,26 @@ function calcSleepScore(session) {
 }
 
 function stageDur(st) {
-  try {
-    const s = new Date(st.start_time), e = new Date(st.end_time);
-    return Math.max(0, (e - s) / 60000);
-  } catch { return 0; }
+  const s = clockToMinutes(st.start_time);
+  let e = clockToMinutes(st.end_time);
+  if (s === null || e === null) return 0;
+  if (e < s) e += 1440;
+  return Math.max(0, e - s);
 }
 
-function timeToMin(iso) {
-  try {
-    const d = new Date(iso);
-    let m = d.getHours() * 60 + d.getMinutes();
-    if (m > 720) m -= 1440; // normalize: 23:00 = -60, 01:00 = 60
-    return m;
-  } catch { return 0; }
+function clockToMinutes(value) {
+  const match = String(value || '').match(/(?:T|^)(\d{2}):(\d{2})/);
+  if (!match) return null;
+  const hour = Number(match[1]), minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function timeToMin(value) {
+  let m = clockToMinutes(value);
+  if (m === null) return 0;
+  if (m > 720) m -= 1440; // normalize: 23:00 = -60, 01:00 = 60
+  return m;
 }
 
 function calcStdDev(arr) {
@@ -131,9 +130,12 @@ function renderSleepBars(sessions) {
   const bars = sessions.slice(0, 7).reverse().map(s => {
     const h = s.duration_minutes / 60;
     const pct = Math.min(100, (h / 10) * 100);
-    const color = h >= 7 ? 'var(--color-green)' : h >= 6 ? 'var(--color-yellow)' : 'var(--color-red)';
+    const barHeight = Math.max(2, Math.round(pct * 0.76));
+    const color = h >= 7 ? '#448361' : h >= 6 ? '#cb8a05' : '#d44c47';
     return `<div class="health-bar-col">
-      <div class="health-bar-fill" style="height:${pct}%;background:${color}"></div>
+      <svg width="28" height="76" viewBox="0 0 28 76" aria-hidden="true" style="display:block;flex:none;margin-top:auto">
+        <rect x="0" y="${76 - barHeight}" width="28" height="${barHeight}" rx="4" fill="${color}"></rect>
+      </svg>
       <div class="health-bar-label">${s.date.slice(5)}</div>
     </div>`;
   }).join('');
@@ -146,8 +148,11 @@ function renderStepsBars(steps) {
   const max = Math.max(...steps.map(s => s.value), 10000);
   const bars = steps.slice(-7).map(s => {
     const pct = Math.min(100, (s.value / max) * 100);
+    const barHeight = Math.max(2, Math.round(pct * 0.76));
     return `<div class="health-bar-col">
-      <div class="health-bar-fill" style="height:${pct}%;background:var(--accent-blue)"></div>
+      <svg width="28" height="76" viewBox="0 0 28 76" aria-hidden="true" style="display:block;flex:none;margin-top:auto">
+        <rect x="0" y="${76 - barHeight}" width="28" height="${barHeight}" rx="4" fill="#2383e2"></rect>
+      </svg>
       <div class="health-bar-label">${s.date?.slice(5) || ''}</div>
     </div>`;
   }).join('');

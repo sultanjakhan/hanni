@@ -34,7 +34,10 @@ android {
     compileSdk = 36
     namespace = "com.sultanjakhan.hanni"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        // LAN sync uses an authenticated HTTP endpoint on the user's local or
+        // Tailscale network. Release builds must allow that connection too;
+        // otherwise WorkManager imports health data locally but cannot push it.
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.sultanjakhan.hanni"
         minSdk = 26
         targetSdk = 36
@@ -97,7 +100,7 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
     // Health Connect (Samsung Health integration)
-    implementation("androidx.health.connect:connect-client:1.1.0-alpha10")
+    implementation("androidx.health.connect:connect-client:1.1.0")
     // Coroutines for Health Connect async calls
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // WorkManager — periodic background pull from Health Connect even when

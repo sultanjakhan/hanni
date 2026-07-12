@@ -77,6 +77,15 @@ export async function openCloudShareModal() {
       <div id="ls-msg" style="min-height:18px;font-size:12px;margin-top:6px"></div>
     </div>
 
+    <div style="border:1px solid var(--border-subtle);border-radius:8px;padding:12px;margin-top:16px">
+      <div style="font-weight:600;margin-bottom:6px">🩹 Аварийное восстановление</div>
+      <p style="color:var(--text-muted);font-size:12px;margin:0 0 10px">
+        Если после обновления интерфейс не загружается — сбрось веб-обновление: приложение вернётся на встроенную версию.
+      </p>
+      <button class="btn-secondary" id="cs-web-reset">Сбросить веб-обновление</button>
+      <div id="cs-web-reset-msg" style="min-height:18px;font-size:12px;margin-top:6px"></div>
+    </div>
+
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn-secondary" id="cs-close">Закрыть</button>
     </div>
@@ -92,6 +101,16 @@ export async function openCloudShareModal() {
   }
   overlay.addEventListener('click', (e) => { if (e.target === overlay) teardown(); });
   overlay.querySelector('#cs-close').onclick = () => teardown();
+
+  overlay.querySelector('#cs-web-reset').onclick = async () => {
+    const msg = overlay.querySelector('#cs-web-reset-msg');
+    if (!confirm('Сбросить веб-обновление и перезагрузить на встроенную версию?')) return;
+    msg.textContent = 'Сброс…';
+    try {
+      await invoke('web_reset_bundle');
+      location.reload();
+    } catch (e) { msg.textContent = 'Ошибка: ' + (e?.message || e); }
+  };
 
   const googleBox  = overlay.querySelector('#cs-google');
   const syncSection = overlay.querySelector('#cs-sync-section');

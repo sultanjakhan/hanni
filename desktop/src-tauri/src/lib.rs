@@ -270,6 +270,10 @@ fn init_database() -> HanniDb {
     // Health Connect imports and LAN sync keep re-creating, heal routine-node
     // references re-dirtied by sync.
     commands_timeline_today::auto_close_orphan_blocks(&conn);
+    db::migrate_health_sync_cleanup_v1(&conn);
+    // The cleanup temporarily drops delete triggers to avoid generating more
+    // than 160k meaningless tombstones; recreate them after the transaction.
+    db::migrate_sync_meta(&conn);
     db::migrate_dedup_health_exercise(&conn);
     db::migrate_dedup_auto_health_events(&conn);
     db::backfill_routine_nodes_source_id(&conn);
@@ -410,6 +414,7 @@ pub fn run() {
         .manage(mcp::McpState::empty())
         .manage(commands_meta::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
         .manage(share_tunnel::ShareTunnel::default())
+        .manage(web_assets::BootGuard::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -936,6 +941,7 @@ pub fn run() {
             web_assets::web_ota_check,
             web_assets::web_ota_apply,
             web_assets::web_ota_boot_ok,
+            web_assets::web_reset_bundle,
             web_assets::web_ls_export,
             web_assets::web_ls_import,
             web_assets::web_origin_ok,
@@ -1027,6 +1033,9 @@ pub fn run() {
                         Err(e) => eprintln!("[hanni] web_assets bad url: {e}"),
                     }
                 }
+                // Same-launch safety net: if a served OTA bundle never paints
+                // within the window, revert it and reload onto embedded assets.
+                web_assets::arm_boot_watchdog(app.handle());
             }
 
             // macOS OTA web-assets: in release builds, serve the frontend via
