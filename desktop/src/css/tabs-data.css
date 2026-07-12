@@ -573,13 +573,22 @@
 /* Current time line (red, like Apple Calendar) */
 .wk-now-line {
   position: absolute; left: 0; right: 0; height: 2px;
-  background: var(--color-red); z-index: 1;
+  background: var(--color-red); z-index: 5; pointer-events: none;
 }
 .wk-now-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--color-red);
   position: absolute; left: -4px; top: -3px;
 }
+.wk-now-time {
+  position: absolute; left: 8px; bottom: 4px;
+  padding: 1px 5px; border-radius: 8px;
+  background: var(--color-red); color: #fff;
+  font-size: 10px; font-weight: 600; line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.wk-now-time-below { top: 4px; bottom: auto; }
 
 /* ── Day view ── */
 .day-timeline {

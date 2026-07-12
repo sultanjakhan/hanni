@@ -30,11 +30,55 @@ let calDayScrolled = false;
 // callback into the imported module.
 window.addEventListener('hanni:calendar-refresh', () => { refreshCalendarInner().catch(() => {}); });
 
+// Keep the red current-time marker accurate without re-rendering the calendar.
+// Re-rendering every minute would re-query events and can disturb transient UI;
+// moving this one DOM node is enough, including across an hour boundary.
+let nowLineTimer = null;
+function currentTimeLabel(now) {
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+function currentTimeBadge(now) {
+  const below = now.getMinutes() < 15 ? ' wk-now-time-below' : '';
+  return `<span class="wk-now-time${below}">${currentTimeLabel(now)}</span>`;
+}
+function updateNowLine() {
+  const inner = document.getElementById('calendar-inner-content');
+  if (!inner) return;
+  const v = S._calendarInner || 'month';
+  if (v !== 'day' && v !== 'week') return;
+  if (getViewMode(v) === 'list') return;
+
+  const now = new Date();
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const selector = v === 'day'
+    ? `.day-hour-content[data-date="${date}"][data-hour="${now.getHours()}"]`
+    : `.wk-cell[data-date="${date}"][data-hour="${now.getHours()}"]`;
+  inner.querySelectorAll('.wk-now-line').forEach(line => line.remove());
+  const target = inner.querySelector(selector);
+  if (!target) return;
+
+  const line = document.createElement('div');
+  line.className = 'wk-now-line';
+  line.style.top = `${(now.getMinutes() / 60) * 100}%`;
+  line.innerHTML = `<div class="wk-now-dot"></div>${currentTimeBadge(now)}`;
+  target.appendChild(line);
+}
+function startNowLineTimer() {
+  if (nowLineTimer) return;
+  // Align the first tick to the next minute boundary so the line moves at :00.
+  const msToNextMinute = 60000 - (Date.now() % 60000);
+  nowLineTimer = setTimeout(() => {
+    updateNowLine();
+    nowLineTimer = setInterval(updateNowLine, 60000);
+  }, msToNextMinute);
+}
+
 // ── Calendar (unified layout) ──
 async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
   if (!tabLoaders.openCalendarAddEvent) tabLoaders.openCalendarAddEvent = showEventModal;
+  startNowLineTimer();
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'calendar', {
@@ -588,7 +632,7 @@ async function renderWeekCalendar(el, events) {
       let nowLine = '';
       if (isToday && isCurrentWeek && h === currentHour) {
         const pct = (currentMin / 60) * 100;
-        nowLine = `<div class="wk-now-line" style="top:${pct}%"><div class="wk-now-dot"></div></div>`;
+        nowLine = `<div class="wk-now-line" style="top:${pct}%"><div class="wk-now-dot"></div>${currentTimeBadge(today)}</div>`;
       }
       gridHtml += `<div class="wk-cell${isToday ? ' wk-col-today' : ''}" data-date="${dateStr}" data-hour="${h}">${nowLine}</div>`;
     }
@@ -730,7 +774,7 @@ async function renderDayCalendar(el, events) {
 
   // Grid: one row per hour — labels, lines, click-to-add target, now-line.
   const timelineHtml = hours.map(h => {
-    const nowLine = (isViewingToday && h === curHour) ? `<div class="wk-now-line" style="top:${(curMin/60)*100}%"><div class="wk-now-dot"></div></div>` : '';
+    const nowLine = (isViewingToday && h === curHour) ? `<div class="wk-now-line" style="top:${(curMin/60)*100}%"><div class="wk-now-dot"></div>${currentTimeBadge(today)}</div>` : '';
     return `<div class="day-hour-row">
       <div class="day-hour-label">${String(h).padStart(2,'0')}:00</div>
       <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}">${nowLine}</div>
@@ -1039,4 +1083,3 @@ window.addEventListener('task-state-changed', () => {
   const innerEl = document.getElementById('calendar-inner-content');
   if (innerEl) refreshCalendarInner();
 });
-
