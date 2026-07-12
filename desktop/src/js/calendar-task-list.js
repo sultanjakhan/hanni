@@ -204,6 +204,42 @@ function setHideDone(v) {
   try { localStorage.setItem('hanni_cal_hide_done', v ? '1' : '0'); } catch {}
 }
 
+function parseBlockStartedAt(el) {
+  const created = el.dataset.startedAt || '';
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(created)) {
+    const parsed = Date.parse(created.replace(' ', 'T') + 'Z');
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  const fallback = Date.parse(`${el.dataset.startDate}T${el.dataset.startTime || '00:00'}:00`);
+  return Number.isNaN(fallback) ? Date.now() : fallback;
+}
+
+function updateLiveTimers(el) {
+  if (!el.isConnected) {
+    clearInterval(el.__ctlLiveTimer);
+    el.__ctlLiveTimer = null;
+    return;
+  }
+  const now = Date.now();
+  el.querySelectorAll('[data-ctl-live-timer]').forEach(timer => {
+    const seconds = Math.max(0, Math.floor((now - parseBlockStartedAt(timer)) / 1000));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    timer.textContent = h > 0
+      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  });
+}
+
+function startLiveTimers(el) {
+  clearInterval(el.__ctlLiveTimer);
+  updateLiveTimers(el);
+  if (el.querySelector('[data-ctl-live-timer]')) {
+    el.__ctlLiveTimer = setInterval(() => updateLiveTimers(el), 1000);
+  }
+}
+
 function wire(el) {
   el.querySelectorAll('[data-view-toggle="day"] [data-view-mode]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -385,4 +421,5 @@ export async function renderCalendarTaskList(el, opts) {
         : SECTION_DEFS.map(def => renderSection(def, groups[def.key], date)).join(''));
   el.innerHTML = renderToolbar(dayLabel, isToday) + `<div class="ctl-body">${bodyHtml}</div>`;
   wire(el);
+  startLiveTimers(el);
 }

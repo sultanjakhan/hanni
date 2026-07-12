@@ -76,7 +76,7 @@ pub fn get_timeline_blocks(date: String, db: tauri::State<'_, HanniDb>) -> Resul
     let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT b.id, b.type_id, b.date, b.start_time, b.end_time, b.duration_minutes, b.source, b.notes, t.name, t.color, t.icon,
-                COALESCE(b.is_active,0), b.source_type, CAST(b.source_id AS TEXT), COALESCE(b.quality,0), b.reflection, b.mood
+                COALESCE(b.is_active,0), b.source_type, CAST(b.source_id AS TEXT), COALESCE(b.quality,0), b.reflection, b.mood, b.created_at
          FROM timeline_blocks b JOIN timeline_activity_types t ON t.id = b.type_id
          WHERE b.date=?1 ORDER BY b.start_time"
     ).map_err(|e| format!("DB error: {}", e))?;
@@ -99,6 +99,7 @@ pub fn get_timeline_blocks(date: String, db: tauri::State<'_, HanniDb>) -> Resul
             "quality": row.get::<_, i64>(14)?,
             "reflection": row.get::<_, Option<String>>(15)?,
             "mood": row.get::<_, Option<String>>(16)?,
+            "created_at": row.get::<_, String>(17)?,
         }))
     }).map_err(|e| format!("Query error: {}", e))?.filter_map(|r| r.ok()).collect();
     Ok(rows)

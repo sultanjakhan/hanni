@@ -45,6 +45,15 @@ function nextRoundedTime() {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+function localNowParts() {
+  const d = new Date();
+  return {
+    date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+    time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+    value: d,
+  };
+}
+
 const PRIORITY_LEVELS = [
   { v: 0, label: 'Нет',          hex: 'var(--bg-hover)',     text: 'var(--text-secondary)' },
   { v: 1, label: '1 · низкий',   hex: 'var(--color-green)',  text: '#fff' },
@@ -154,7 +163,9 @@ export async function showEventModal(eventId = null) {
     </details>
     <div class="modal-actions evm-actions">
       <button class="evm-cancel-link" id="evm-cancel">Отмена</button>
-      <button class="btn-primary evm-save-btn" id="evm-save">${isEdit ? 'Сохранить' : 'Создать'}</button>
+      ${isEdit
+        ? '<button class="btn-primary evm-save-btn" id="evm-save">Сохранить</button>'
+        : '<button class="btn-secondary evm-save-btn" id="evm-save">Создать</button><button class="btn-primary evm-start-now-btn" id="evm-start-now">▶ Создать и начать</button>'}
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -239,17 +250,20 @@ export async function showEventModal(eventId = null) {
     } catch (err) { alert('Ошибка: ' + err); }
   });
 
-  overlay.querySelector('#evm-save')?.addEventListener('click', async () => {
+  const submitEvent = async (startNow) => {
     const title = overlay.querySelector('#evm-title')?.value?.trim();
     if (!title) return;
-    const date = overlay.querySelector('#evm-date')?.value || '';
-    const time = overlay.querySelector('#evm-time')?.value || '';
+    const now = startNow ? localNowParts() : null;
+    const date = now?.date || overlay.querySelector('#evm-date')?.value || '';
+    const time = now?.time || overlay.querySelector('#evm-time')?.value || '';
     const dur = parseInt(overlay.querySelector('#evm-dur')?.value || '60', 10) || 60;
     const cat = overlay.querySelector('#evm-cat')?.value || 'general';
     const pri = parseInt(overlay.querySelector('.evm-priority')?.dataset.evmPriority || '0', 10);
     const desc = overlay.querySelector('#evm-desc')?.value || '';
     const linkedTab = overlay.querySelector('#evm-linked-tab')?.value || '';
     const catColor = (cats.find(c => c.name === cat)?.color) || '#9B9B9B';
+    const actionButtons = overlay.querySelectorAll('#evm-save, #evm-start-now');
+    actionButtons.forEach(btn => { btn.disabled = true; });
 
     try {
       if (isEdit) {
@@ -260,16 +274,42 @@ export async function showEventModal(eventId = null) {
           completed: null, priority: pri, linkedTab,
         });
       } else {
-        await invoke('create_event', {
+        const eventId = await invoke('create_event', {
           title, description: desc, date, time,
           durationMinutes: dur, category: cat, color: catColor, priority: pri, linkedTab,
         });
+        if (startNow) {
+          try {
+            await invoke('start_task_block', { sourceType: 'event', sourceId: String(eventId) });
+          } catch (startErr) {
+            overlay.remove();
+            window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
+            alert(`Событие создано, но таймер не запущен: ${startErr}`);
+            return;
+          }
+          S.selectedCalendarDate = date;
+          S.calDayDate = date;
+          S.calendarMonth = now.value.getMonth();
+          S.calendarYear = now.value.getFullYear();
+          S._calendarInner = 'day';
+          if (!S.calViewMode) S.calViewMode = {};
+          S.calViewMode.day = 'list';
+          try { localStorage.setItem('hanni_calendar_view_mode_day', 'list'); } catch {}
+          document.querySelectorAll('[data-calview]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.calview === 'day');
+          });
+        }
         if (ctx.shoppingPickedIds?.length) {
           await markBought(ctx.shoppingPickedIds).catch(() => {});
         }
       }
       overlay.remove();
       window.dispatchEvent(new CustomEvent('hanni:calendar-refresh'));
-    } catch (err) { alert('Ошибка: ' + err); }
-  });
+    } catch (err) {
+      actionButtons.forEach(btn => { btn.disabled = false; });
+      alert('Ошибка: ' + err);
+    }
+  };
+  overlay.querySelector('#evm-save')?.addEventListener('click', () => submitEvent(false));
+  overlay.querySelector('#evm-start-now')?.addEventListener('click', () => submitEvent(true));
 }

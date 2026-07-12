@@ -34,7 +34,9 @@ export function renderItemRow(item, dateStr) {
   const actual = item.actualMinutes || 0;
   const targetReached = target > 0 && actual >= target;
   const cls = ['ctl-row', done && 'ctl-done', skipped && 'ctl-skipped', active && 'ctl-active', pr > 0 && `ctl-pr-${pr}`, item.overdueDate && 'ctl-overdue', effBucket > 0 && `ctl-eff-${effBucket}`, item._isTopEff && !done && 'ctl-top-eff'].filter(Boolean).join(' ');
-  const durBadge = active && item.block?.duration_minutes ? `<span class="ctl-duration">${item.block.duration_minutes} мин</span>` : '';
+  const liveTimer = active
+    ? `<span class="ctl-live-timer" data-ctl-live-timer data-started-at="${escapeHtml(item.block.created_at || '')}" data-start-date="${escapeHtml(item.block.date || dateStr || '')}" data-start-time="${escapeHtml(item.block.start_time || '')}">00:00</span>`
+    : '';
   const progressBadge = target > 0
     ? `<span class="ctl-progress${targetReached ? ' ctl-progress-done' : ''}">${actual} / ${target} мин</span>`
     : '';
@@ -47,8 +49,8 @@ export function renderItemRow(item, dateStr) {
   const isInstant = item.trackingMode === 'check';
   const showStart = !isInstant && !active && (!done || (target > 0 && !targetReached));
   const trackBtns = active
-    ? `<button class="ctl-track ctl-pause" data-ctl-pause="${item.block.id}" title="Пауза">⏸</button>
-       <button class="ctl-track ctl-finish" data-ctl-finish="${item.block.id}" title="Готово">✓</button>`
+    ? `<button class="ctl-track ctl-track-action ctl-pause" data-ctl-pause="${item.block.id}">⏸ Пауза</button>
+       <button class="ctl-track ctl-track-action ctl-finish" data-ctl-finish="${item.block.id}">✓ Завершить</button>`
     : (showStart ? `<button class="ctl-track ctl-start" data-ctl-start title="${done && target > 0 ? 'Продолжить' : 'Запустить'}">▶</button>` : '');
   // "Не выполнено" — red ✗ box paired with the ✓ check (schedule-only). Hidden
   // only while a timer runs. Lets a reflection / overdue task be closed honestly
@@ -67,7 +69,7 @@ export function renderItemRow(item, dateStr) {
     ${item._isTopEff && !done ? '<span class="ctl-top-badge" title="Топ важности на сегодня">🔥</span>' : ''}
     ${overdueBadge}
     ${progressBadge}
-    ${durBadge}
+    ${liveTimer}
     ${trackBtns}
   </div>`;
 }
