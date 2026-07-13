@@ -228,7 +228,8 @@ const DAY_ZOOM_LEVELS = [32, 48, 72, 96, 144];
 const DAY_ZOOM_DEFAULT = 48;
 
 function getDayZoom() {
-  if (S.calDayZoom != null) return S.calDayZoom;
+  const cached = Number(S.calDayZoom);
+  if (DAY_ZOOM_LEVELS.includes(cached)) return cached;
   let v = DAY_ZOOM_DEFAULT;
   try { v = parseInt(localStorage.getItem('hanni_calendar_day_zoom')) || DAY_ZOOM_DEFAULT; } catch {}
   if (!DAY_ZOOM_LEVELS.includes(v)) v = DAY_ZOOM_DEFAULT;
@@ -770,7 +771,6 @@ async function renderDayCalendar(el, events) {
   const isViewingToday = S.calDayDate === `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   const curHour = today.getHours(), curMin = today.getMinutes();
   const pxPerHour = getDayZoom();
-  const pxPerMin = pxPerHour / 60;
 
   // Grid: one row per hour — labels, lines, click-to-add target, now-line.
   const timelineHtml = hours.map(h => {
@@ -784,7 +784,7 @@ async function renderDayCalendar(el, events) {
   // Timed events as proportional blocks: top by start time, height by duration.
   // An event crossing midnight is clipped at 24:00 and continued on the next day.
   const hhmmLabel = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
-  const eventBlock = (e, top, height, label, continued) => {
+  const eventBlock = (e, startMinute, visibleMinutes, label, continued) => {
     const isManual = !e.source || e.source === 'manual';
     const pri = Number(e.priority || 0);
     const done = !!e.completed;
@@ -796,9 +796,14 @@ async function renderDayCalendar(el, events) {
     // data-evt-pop on every block opens the read-only details popover; manual
     // events also keep data-event-id (edit lives behind the popover's button).
     const idAttr = `data-evt-pop="${e.id}"${isManual ? ` data-event-id="${e.id}"` : ''}`;
-    const h = Math.max(Math.round(height), 30);
+    const h = Math.max(Math.round(visibleMinutes * (pxPerHour / 60)), 30);
+    // Position against the full 24-hour layer, not against the JS zoom value.
+    // If a stale/corrupt zoom leaks into state, a valid 03:25 must never collapse
+    // to top:0. Percentage geometry follows the actual rendered hour rows.
+    const topPct = (startMinute / 1440) * 100;
+    const heightPct = (visibleMinutes / 1440) * 100;
     const titleStyle = done ? ' style="text-decoration:line-through;"' : '';
-    const baseStyle = `top:${Math.round(top)}px;height:${h}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};cursor:pointer;${done ? 'opacity:0.55;' : ''}`;
+    const baseStyle = `top:${topPct.toFixed(6)}%;height:max(${h}px,${heightPct.toFixed(6)}%);border-left:3px solid ${e.color || 'var(--text-secondary)'};cursor:pointer;${done ? 'opacity:0.55;' : ''}`;
     // Short events can't fit head+title+duration (≥50px); render a compact single
     // row instead — time · title (ellipsis) · ✓ — so the title stays readable.
     if (h < 50) {
@@ -820,7 +825,7 @@ async function renderDayCalendar(el, events) {
     const startMin = hh * 60 + mm;
     const endMin = startMin + (e.duration_minutes || 60);
     const visEnd = Math.min(endMin, 1440);
-    blocks.push(eventBlock(e, startMin * pxPerMin, (visEnd - startMin) * pxPerMin,
+    blocks.push(eventBlock(e, startMin, visEnd - startMin,
       `${e.time} – ${hhmmLabel(endMin % 1440)}`, false));
   }
   // Continuation of events that started the day before and cross into today.
@@ -829,7 +834,7 @@ async function renderDayCalendar(el, events) {
     const endMin = hh * 60 + mm + (e.duration_minutes || 60);
     if (endMin <= 1440) continue;
     const leftover = endMin - 1440;
-    blocks.push(eventBlock(e, 0, leftover * pxPerMin, `00:00 – ${hhmmLabel(leftover)}`, true));
+    blocks.push(eventBlock(e, 0, leftover, `00:00 – ${hhmmLabel(leftover)}`, true));
   }
   const eventLayerHtml = `<div class="day-event-layer">${blocks.join('')}</div>`;
 
