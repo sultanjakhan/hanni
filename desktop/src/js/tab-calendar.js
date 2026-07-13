@@ -797,22 +797,21 @@ async function renderDayCalendar(el, events) {
     // events also keep data-event-id (edit lives behind the popover's button).
     const idAttr = `data-evt-pop="${e.id}"${isManual ? ` data-event-id="${e.id}"` : ''}`;
     const h = Math.max(Math.round(visibleMinutes * (pxPerHour / 60)), 30);
-    // Position against the full 24-hour layer, not against the JS zoom value.
-    // If a stale/corrupt zoom leaks into state, a valid 03:25 must never collapse
-    // to top:0. Percentage geometry follows the actual rendered hour rows.
-    const topPct = (startMinute / 1440) * 100;
-    const heightPct = (visibleMinutes / 1440) * 100;
     const titleStyle = done ? ' style="text-decoration:line-through;"' : '';
-    const baseStyle = `top:${topPct.toFixed(6)}%;height:max(${h}px,${heightPct.toFixed(6)}%);border-left:3px solid ${e.color || 'var(--text-secondary)'};cursor:pointer;${done ? 'opacity:0.55;' : ''}`;
+    // Initial pixel geometry prevents a flash at 00:00. After insertion we
+    // measure the real rendered hour-row height and overwrite both values —
+    // that is authoritative across desktop/mobile zoom and WebView layout.
+    const baseStyle = `top:${(startMinute * pxPerHour / 60).toFixed(2)}px;height:${h}px;border-left:3px solid ${e.color || 'var(--text-secondary)'};cursor:pointer;${done ? 'opacity:0.55;' : ''}`;
+    const layoutAttr = `data-start-minute="${startMinute}" data-visible-minutes="${visibleMinutes}"`;
     // Short events can't fit head+title+duration (≥50px); render a compact single
     // row instead — time · title (ellipsis) · ✓ — so the title stays readable.
     if (h < 50) {
-      return `<div class="day-event day-event-block day-event-compact${done ? ' day-event-done' : ''}" ${idAttr} style="${baseStyle}">
+      return `<div class="day-event day-event-block day-event-compact${done ? ' day-event-done' : ''}" ${idAttr} ${layoutAttr} style="${baseStyle}">
         ${priBar}<span class="day-event-time">${label}</span>
         <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>
       </div>`;
     }
-    return `<div class="day-event day-event-block${done ? ' day-event-done' : ''}" ${idAttr} style="${baseStyle}">
+    return `<div class="day-event day-event-block${done ? ' day-event-done' : ''}" ${idAttr} ${layoutAttr} style="${baseStyle}">
       <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}</div>
       <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>
       <span class="day-event-dur">${continued ? '↳ ' : ''}${e.duration_minutes || 60} мин</span>
@@ -883,6 +882,18 @@ async function renderDayCalendar(el, events) {
     ${mealPlanHtml}
     ${allDayHtml}
     <div class="day-timeline" style="--day-hour-px:${pxPerHour}px">${timelineHtml}${eventLayerHtml}</div>`;
+
+  // Percentage positioning is unreliable here because an absolutely-positioned
+  // layer with height:100% sits inside an auto-height timeline; WebKit can
+  // resolve that percentage against zero. Measure a real hour row instead.
+  const renderedHourPx = el.querySelector('.day-hour-row')?.getBoundingClientRect().height || pxPerHour;
+  el.querySelectorAll('.day-event-block[data-start-minute]').forEach(block => {
+    const startMinute = Number(block.dataset.startMinute);
+    const visibleMinutes = Number(block.dataset.visibleMinutes);
+    if (!Number.isFinite(startMinute) || !Number.isFinite(visibleMinutes)) return;
+    block.style.top = `${startMinute * renderedHourPx / 60}px`;
+    block.style.height = `${Math.max(visibleMinutes * renderedHourPx / 60, 30)}px`;
+  });
 
   // Overlay actual timeline blocks (real durations) on top of planned slots
   import('./calendar-day-grid-overlay.js').then(m => m.injectTimelineOverlay(el.querySelector('.day-timeline'), S.calDayDate, dayEvents, getDayZoom())).catch(err => console.error('overlay:', err));
