@@ -38,7 +38,7 @@ export function renderItemRow(item, dateStr) {
     ? `<span class="ctl-live-timer" data-ctl-live-timer data-started-at="${escapeHtml(item.block.created_at || '')}" data-start-date="${escapeHtml(item.block.date || dateStr || '')}" data-start-time="${escapeHtml(item.block.start_time || '')}">00:00</span>`
     : '';
   const progressBadge = target > 0
-    ? `<span class="ctl-progress${targetReached ? ' ctl-progress-done' : ''}">${actual} / ${target} мин</span>`
+    ? `<span class="ctl-progress${targetReached ? ' ctl-progress-done' : ''}">${item.kind === 'event' ? `план ${target} мин` : `${actual} / ${target} мин`}</span>`
     : '';
   const overdueBadge = item.overdueDate
     ? `<span class="ctl-overdue-badge" title="Срок: ${escapeHtml(item.overdueDate)}">${fmtOverdue(item.overdueDate, dateStr)}</span>`

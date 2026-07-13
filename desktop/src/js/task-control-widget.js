@@ -44,7 +44,7 @@ function render() {
   if (activeBlock) {
     btn.classList.add('tw-active');
     btn.innerHTML = STOP_SVG;
-    const label = activeBlock.notes || activeBlock.type_name || 'таск';
+    const label = activeEvent?.title || activeBlock.notes || activeBlock.type_name || 'таск';
     btn.title = `Идёт: ${label} с ${activeBlock.start_time}`;
   } else {
     btn.classList.remove('tw-active');
@@ -227,7 +227,7 @@ async function openStartDropdown(preserveScroll = false) {
 function openActiveActions() {
   closeDropdown();
   if (!activeBlock) return;
-  const label = activeBlock.notes || activeBlock.type_name || 'таск';
+  const label = activeEvent?.title || activeBlock.notes || activeBlock.type_name || 'таск';
   panel = document.createElement('div');
   panel.className = 'tw-panel tw-panel-actions';
   panel.innerHTML = `
