@@ -108,7 +108,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // Event pixel boxes (+ the event obj) so a completion that lands on a planned
   // event folds into it as a "+N" badge and a click-through pager, instead of
   // being drawn as its own marker competing for the same row.
-  const EV_SOURCE = { manual: 'Вручную', apple: 'Apple Calendar', auto_health: 'Apple Health', google: 'Google Calendar' };
+  const EV_SOURCE = { manual: 'Вручную', apple: 'Apple Calendar', auto_health: 'Samsung Health', google: 'Google Calendar' };
   const toHM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const MARKER_PX = 16;
   const evBoxes = (plannedEvents || [])
@@ -153,11 +153,21 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // A tracked block that exactly matches a planned event (same start + end) is
   // the same activity drawn twice — keep the planned event, drop the overlay.
   const plannedKeys = new Set(eventIntervals.map(iv => `${iv.startMin}:${iv.endMin}`));
+  // Sleep is mirrored into both `events` (calendar rendering, including
+  // cross-midnight continuation) and `timeline_blocks` (Timeline statistics).
+  // Exact start/end matching used to hide the second copy, but a corrected
+  // Health Connect duration could leave the two rows a minute apart and draw
+  // sleep twice. If the calendar already has Health sleep for this day, its
+  // event blocks are authoritative here; keep the timeline copy for Timeline.
+  const hasCalendarSleep = (plannedEvents || []).some(e =>
+    e.source === 'auto_health' && String(e.title || '').trim().startsWith('Сон')
+  );
 
   // Decorate with parsed minutes + sort by start_time for cluster building
   const positioned = completed
     .map(b => ({ block: b, startMin: parseHM(b.start_time), endMin: parseHM(b.end_time) }))
     .filter(x => x.startMin != null && x.endMin != null && x.endMin > x.startMin)
+    .filter(x => !(hasCalendarSleep && x.block.source === 'auto_health' && x.block.type_name === 'Сон'))
     .filter(x => !plannedKeys.has(`${x.startMin}:${x.endMin}`))
     .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
 
