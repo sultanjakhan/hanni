@@ -37,11 +37,10 @@ function renderProjectPicker(current) {
   </select>`;
 }
 
-// Default time: now rounded UP to nearest 5 minutes (so it isn't already past).
-function nextRoundedTime() {
+// Default time is the exact current local minute. Rounding made a modal opened
+// at 08:09 misleadingly show 08:10 even though "Создать и начать" starts now.
+function currentLocalTime() {
   const d = new Date();
-  d.setMinutes(d.getMinutes() + (5 - d.getMinutes() % 5) % 5);
-  if (d.getMinutes() === new Date().getMinutes()) d.setMinutes(d.getMinutes() + 5);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
@@ -111,7 +110,7 @@ export async function showEventModal(eventId = null) {
   }
 
   const initDate = event?.date || S.selectedCalendarDate || new Date().toISOString().split('T')[0];
-  const initTime = event?.time || (isEdit ? '' : nextRoundedTime());
+  const initTime = event?.time || (isEdit ? '' : currentLocalTime());
   const initTitle = event?.title || '';
   const initDesc = event?.description || '';
   const initCat = event?.category || 'general';

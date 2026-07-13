@@ -113,7 +113,7 @@ async function loadDayItems(date) {
   for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
     const bi = blockInfo('event', e.id);
     const done = !!e.completed;
-    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, category: e.category, planned_time: e.time, completionDate: e.date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
+    groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, category: e.category, planned_time: e.time, completionDate: e.date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: e.duration_minutes || null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
   }
   for (const t of (tasks || []).filter(t => t.due_date === date)) {
     const bi = blockInfo('note', t.id);
@@ -342,6 +342,19 @@ function wire(el) {
         await invoke('pause_task_block', { blockId });
         if (kind === 'schedule') await maybeAutoCheckSchedule(id, cdate);
       } catch (err) { console.error('ctl pause:', err); }
+      renderCalendarTaskList(el);
+    });
+    row.querySelector('[data-ctl-extend]')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const button = e.currentTarget;
+      button.disabled = true;
+      const durationMinutes = (parseInt(row.dataset.target || '0', 10) || 0) + 15;
+      try {
+        await invoke('update_event', {
+          id, title: null, description: null, date: null, time: null,
+          durationMinutes, category: null, color: null, completed: null,
+        });
+      } catch (err) { console.error('ctl extend:', err); }
       renderCalendarTaskList(el);
     });
     row.querySelector('[data-ctl-finish]')?.addEventListener('click', async (e) => {

@@ -47,9 +47,10 @@ export function renderItemRow(item, dateStr) {
   // Check-mode schedules ("выпил воды", reflections) never open a timer block —
   // showing ▶ for them lures users into a meaningless start/stop cycle.
   const isInstant = item.trackingMode === 'check';
-  const showStart = !isInstant && !active && (!done || (target > 0 && !targetReached));
+  const showStart = !isInstant && !active && (!done || (item.kind === 'schedule' && target > 0 && !targetReached));
   const trackBtns = active
-    ? `<button class="ctl-track ctl-track-action ctl-pause" data-ctl-pause="${item.block.id}">⏸ Пауза</button>
+    ? `${item.kind === 'event' ? '<button class="ctl-track ctl-track-action ctl-extend" data-ctl-extend title="Продлить план события на 15 минут">+15 мин</button>' : ''}
+       <button class="ctl-track ctl-track-action ctl-pause" data-ctl-pause="${item.block.id}">⏸ Пауза</button>
        <button class="ctl-track ctl-track-action ctl-finish" data-ctl-finish="${item.block.id}">✓ Завершить</button>`
     : (showStart ? `<button class="ctl-track ctl-start" data-ctl-start title="${done && target > 0 ? 'Продолжить' : 'Запустить'}">▶</button>` : '');
   // "Не выполнено" — red ✗ box paired with the ✓ check (schedule-only). Hidden

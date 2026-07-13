@@ -11,6 +11,7 @@ import { isDanKoePractice, openDanKoeModal } from './dankoe-quick-modal.js';
 let widget = null;
 let panel = null;
 let activeBlock = null;
+let activeEvent = null;
 let pollTimer = null;
 
 const PLUS_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -28,6 +29,11 @@ function localDate() {
 async function refreshState() {
   const blocks = await invoke('get_timeline_blocks', { date: localDate() }).catch(() => []);
   activeBlock = blocks.find(b => b.is_active) || null;
+  activeEvent = null;
+  if (activeBlock?.source_type === 'event') {
+    const events = await invoke('get_all_events').catch(() => []);
+    activeEvent = events.find(e => String(e.id) === String(activeBlock.source_id)) || null;
+  }
   render();
 }
 
@@ -232,6 +238,11 @@ function openActiveActions() {
         <span class="tw-action-label">Пауза</span>
         <span class="tw-action-hint">блок закрывается, статус не меняется</span>
       </button>
+      ${activeEvent ? `<button class="tw-action tw-action-extend" data-action="extend">
+        <span class="tw-action-icon">＋</span>
+        <span class="tw-action-label">Продлить на 15 мин</span>
+        <span class="tw-action-hint">план: ${Number(activeEvent.duration_minutes) || 0} мин</span>
+      </button>` : ''}
       <button class="tw-action tw-action-finish" data-action="finish">
         <span class="tw-action-icon">✓</span>
         <span class="tw-action-label">Завершить</span>
@@ -254,6 +265,13 @@ function openActiveActions() {
         if (action === 'pause') await invoke('pause_task_block', { blockId: id });
         else if (action === 'finish') await invoke('complete_task_block', { blockId: id });
         else if (action === 'cancel') await invoke('delete_timeline_block', { id });
+        else if (action === 'extend' && activeEvent) {
+          await invoke('update_event', {
+            id: Number(activeEvent.id), title: null, description: null, date: null, time: null,
+            durationMinutes: (Number(activeEvent.duration_minutes) || 0) + 15,
+            category: null, color: null, completed: null,
+          });
+        }
       } catch (err) { console.error('tw action:', err); }
       closeDropdown();
       window.dispatchEvent(new Event('task-state-changed'));
