@@ -392,27 +392,27 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     });
   }
 
-  // Place group boxes top-down, nudging overlaps downward so none sits on another.
+  // A completion is a moment, not a duration. Keep an exact-time anchor on the
+  // timeline and render the card as a compact callout above it. This avoids a
+  // 10:58 completion looking like either a 10:25–11:00 event or an 11:00 item.
   pendingGroups.sort((a, b) => a.top - b.top);
   let lastBottom = -Infinity;
-  let lastHour = -1;
   const groupHeight = 28;
+  const anchorGap = 4;
   for (const g of pendingGroups) {
-    const hour = Math.floor(g.min / 60);
-    if (hour !== lastHour) {
-      lastBottom = -Infinity;
-      lastHour = hour;
-    }
-    const hourTop = minToPx(hour * 60);
-    const hourBottom = minToPx((hour + 1) * 60);
-    // A marker at 10:58 must remain visually inside the 10:00 row. Anchoring
-    // the card's top at 10:58 put almost its entire 28px body below 11:00.
-    const withinHour = Math.max(hourTop, Math.min(g.top, hourBottom - groupHeight));
-    const top = Math.max(withinHour, lastBottom + 3);
+    const anchor = document.createElement('div');
+    anchor.className = 'day-tl-group-anchor' + (g.reflection ? ' day-tl-group-anchor-refl' : '') + (g.skipped ? ' day-tl-group-anchor-skipped' : '');
+    anchor.style.cssText = `top:${g.top}px;`;
+    anchor.setAttribute('aria-hidden', 'true');
+    markerLayer.appendChild(anchor);
+
+    const idealTop = Math.max(0, g.top - groupHeight - anchorGap);
+    const top = Math.max(idealTop, lastBottom + 3);
     lastBottom = top + groupHeight;
     const box = document.createElement('div');
     box.className = 'day-tl-group' + (g.reflection ? ' day-tl-group-refl' : '') + (g.skipped ? ' day-tl-group-skipped' : '');
     box.style.cssText = `top:${top}px;`;
+    box.dataset.markerMinute = String(g.min);
     box.title = g.items.map(it => `• ${it.title}`).join('\n');
     box.innerHTML = `<span class="day-tl-group-ico">${g.icon}</span><span class="day-tl-group-title">${escapeHtml(g.title)}</span>${g.badge ? `<span class="day-tl-group-count">${g.badge}</span>` : ''}<span class="day-tl-group-time">${g.hm}</span>`;
     box.addEventListener('click', (ev) => { ev.stopPropagation(); showPagerPopover(g.items, ev.clientX, ev.clientY); });

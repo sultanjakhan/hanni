@@ -385,10 +385,28 @@
   font-size: 10px; color: var(--text-muted);
 }
 
-/* Completed-task box pinned to completed_at — a clear card (like an event):
-   icon + first task name + "+N" badge; click pages through the rest. */
-.day-tl-group {
+/* A completed task is a point in time, not an event duration. The thin anchor
+   marks the exact completed_at minute; the compact card is only its callout. */
+.day-tl-group-anchor {
   position: absolute; left: 4px; right: 4px;
+  height: 0; box-sizing: border-box;
+  border-top: 2px solid rgba(192, 132, 252, 0.58);
+  pointer-events: none;
+}
+.day-tl-group-anchor::before {
+  content: '';
+  position: absolute; left: -1px; top: -5px;
+  width: 8px; height: 8px;
+  border-radius: 50%; background: #c084fc;
+  box-shadow: 0 0 0 2px var(--bg-primary);
+}
+.day-tl-group-anchor-refl { border-top-color: rgba(245, 158, 11, 0.58); }
+.day-tl-group-anchor-refl::before { background: #f59e0b; }
+.day-tl-group-anchor-skipped { border-top-color: rgba(239, 68, 68, 0.58); }
+.day-tl-group-anchor-skipped::before { background: var(--color-red); }
+.day-tl-group {
+  position: absolute; right: 4px;
+  width: min(520px, calc(100% - 24px));
   height: 28px; box-sizing: border-box;
   display: flex; align-items: center; gap: 8px;
   padding: 0 10px;
@@ -397,6 +415,7 @@
   border-radius: var(--radius-md);
   font-size: 12px; color: var(--text-primary);
   pointer-events: auto; cursor: pointer; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .day-tl-group:hover { border-color: var(--accent-blue); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
