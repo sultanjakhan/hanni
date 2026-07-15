@@ -110,7 +110,6 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // being drawn as its own marker competing for the same row.
   const EV_SOURCE = { manual: 'Вручную', apple: 'Apple Calendar', auto_health: 'Samsung Health', google: 'Google Calendar' };
   const toHM = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  const MARKER_PX = 16;
   const evBoxes = (plannedEvents || [])
     .filter(e => e.time && e.id != null)
     .map(e => {
@@ -123,8 +122,13 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // Fold a completion at `min` into the event it overlaps (if any). Returns true
   // when folded — caller then skips drawing it as a standalone marker.
   const foldInto = (min, item) => {
-    const top = minToPx(min);
-    const hit = evBoxes.find(b => top < b.bottom && top + MARKER_PX > b.top);
+    // Group by real time, not by painted rectangles. A 16px marker at 10:58
+    // visually reaches past 11:04 at compact zoom, but it still belongs before
+    // an event that starts at 11:04.
+    const hit = evBoxes.find(b => {
+      const start = parseHM(b.ev.time);
+      return start != null && min >= start && min < start + (b.ev.duration_minutes || 60);
+    });
     if (!hit) return false;
     if (!groups.has(hit.id)) groups.set(hit.id, []);
     groups.get(hit.id).push(item);

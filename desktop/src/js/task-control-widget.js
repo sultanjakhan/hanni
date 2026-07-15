@@ -13,6 +13,7 @@ let panel = null;
 let activeBlock = null;
 let activeEvent = null;
 let pollTimer = null;
+let displayTimer = null;
 
 const PLUS_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
   stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -43,18 +44,37 @@ function render() {
   if (!btn) return;
   if (activeBlock) {
     btn.classList.add('tw-active');
-    btn.innerHTML = STOP_SVG;
     const label = activeEvent?.title || activeBlock.notes || activeBlock.type_name || 'таск';
+    widget.classList.add('tw-running');
+    btn.innerHTML = `<span class="tw-active-copy"><span class="tw-active-time">${elapsedLabel(activeBlock.start_time)}</span><span class="tw-active-title">${escapeHtml(label)}</span></span>${STOP_SVG}`;
     btn.title = `Идёт: ${label} с ${activeBlock.start_time}`;
   } else {
+    widget.classList.remove('tw-running');
     btn.classList.remove('tw-active');
     btn.innerHTML = PLUS_SVG;
     btn.title = 'Запустить таск';
   }
 }
 
+function elapsedLabel(startTime) {
+  const match = String(startTime || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '00:00';
+  const start = Number(match[1]) * 60 + Number(match[2]);
+  const now = new Date();
+  let elapsed = now.getHours() * 60 + now.getMinutes() - start;
+  if (elapsed < 0) elapsed += 24 * 60;
+  return `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
+}
+
 function closeDropdown() {
   if (panel) { panel.remove(); panel = null; }
+}
+
+function wirePanelClose() {
+  panel?.querySelector('.tw-panel-close')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeDropdown();
+  });
 }
 
 async function openStartDropdown(preserveScroll = false) {
@@ -125,12 +145,13 @@ async function openStartDropdown(preserveScroll = false) {
   panel = document.createElement('div');
   panel.className = 'tw-panel';
   panel.innerHTML = `
-    <div class="tw-panel-header"><span>Запустить таск</span></div>
+    <div class="tw-panel-header"><span>Запустить таск</span><button type="button" class="tw-panel-close" aria-label="Закрыть">×</button></div>
     <div class="tw-panel-body">${bodyHtml}</div>
     <div class="tw-add-row">
       <input class="tw-add-input" type="text" placeholder="+ Новая задача на сегодня" maxlength="200">
     </div>`;
   widget.appendChild(panel);
+  wirePanelClose();
   if (savedScroll > 0) panel.scrollTop = savedScroll;
 
   const addInput = panel.querySelector('.tw-add-input');
@@ -231,7 +252,7 @@ function openActiveActions() {
   panel = document.createElement('div');
   panel.className = 'tw-panel tw-panel-actions';
   panel.innerHTML = `
-    <div class="tw-panel-header">Идёт: ${escapeHtml(label)} с ${activeBlock.start_time}</div>
+    <div class="tw-panel-header"><span>Идёт: ${escapeHtml(label)} с ${activeBlock.start_time}</span><button type="button" class="tw-panel-close" aria-label="Закрыть">×</button></div>
     <div class="tw-panel-body">
       <button class="tw-action tw-action-pause" data-action="pause">
         <span class="tw-action-icon">⏸</span>
@@ -255,6 +276,7 @@ function openActiveActions() {
       </button>
     </div>`;
   widget.appendChild(panel);
+  wirePanelClose();
 
   panel.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -311,4 +333,6 @@ export function initTaskControlWidget() {
   refreshState();
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(refreshState, 30000);
+  if (displayTimer) clearInterval(displayTimer);
+  displayTimer = setInterval(render, 10000);
 }

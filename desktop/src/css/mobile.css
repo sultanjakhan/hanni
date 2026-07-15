@@ -348,6 +348,17 @@ body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 .mobile #task-control-widget {
   right: 6px;
 }
+.mobile .task-widget.tw-running,
+.mobile #task-control-widget.tw-running {
+  top: calc(env(safe-area-inset-top, 0px) + var(--space-2));
+  bottom: auto;
+  margin-bottom: 0;
+}
+.mobile .tw-running .tw-btn.tw-active {
+  width: auto;
+  max-width: calc(100vw - var(--space-4));
+  opacity: 1;
+}
 /* Apply opacity to the FAB *trigger* only — not the whole widget, or
    the popover/panel inherits the fade and becomes unreadable. The
    open popover must be fully opaque. */
