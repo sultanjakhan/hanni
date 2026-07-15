@@ -12,8 +12,10 @@ let widget = null;
 let panel = null;
 let activeBlock = null;
 let activeEvent = null;
+let activePlannedMinutes = null;
 let pollTimer = null;
 let displayTimer = null;
+let lifecycleWired = false;
 
 const PLUS_SVG = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
   stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -31,9 +33,15 @@ async function refreshState() {
   const blocks = await invoke('get_timeline_blocks', { date: localDate() }).catch(() => []);
   activeBlock = blocks.find(b => b.is_active) || null;
   activeEvent = null;
+  activePlannedMinutes = null;
   if (activeBlock?.source_type === 'event') {
     const events = await invoke('get_all_events').catch(() => []);
     activeEvent = events.find(e => String(e.id) === String(activeBlock.source_id)) || null;
+    activePlannedMinutes = Number(activeEvent?.duration_minutes) || null;
+  } else if (activeBlock?.source_type === 'schedule') {
+    const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
+    const schedule = schedules.find(s => String(s.id) === String(activeBlock.source_id));
+    activePlannedMinutes = Number(schedule?.target_minutes) || null;
   }
   render();
 }
@@ -45,9 +53,10 @@ function render() {
   if (activeBlock) {
     btn.classList.add('tw-active');
     const label = activeEvent?.title || activeBlock.notes || activeBlock.type_name || 'таск';
+    const timer = taskTimerLabel(activeBlock, activePlannedMinutes);
     widget.classList.add('tw-running');
-    btn.innerHTML = `<span class="tw-active-copy"><span class="tw-active-time">${elapsedLabel(activeBlock.start_time)}</span><span class="tw-active-title">${escapeHtml(label)}</span></span>${STOP_SVG}`;
-    btn.title = `Идёт: ${label} с ${activeBlock.start_time}`;
+    btn.innerHTML = `<span class="tw-active-copy"><span class="tw-active-time">${timer.text}</span><span class="tw-active-title">${escapeHtml(label)}</span></span>${STOP_SVG}`;
+    btn.title = `${timer.hint}: ${label} · с ${activeBlock.start_time}`;
   } else {
     widget.classList.remove('tw-running');
     btn.classList.remove('tw-active');
@@ -56,14 +65,31 @@ function render() {
   }
 }
 
-function elapsedLabel(startTime) {
-  const match = String(startTime || '').match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return '00:00';
-  const start = Number(match[1]) * 60 + Number(match[2]);
-  const now = new Date();
-  let elapsed = now.getHours() * 60 + now.getMinutes() - start;
-  if (elapsed < 0) elapsed += 24 * 60;
-  return `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
+function taskTimerLabel(block, plannedMinutes) {
+  const start = new Date(`${block?.date || localDate()}T${block?.start_time || '00:00'}:00`);
+  const elapsedSeconds = Number.isNaN(start.getTime())
+    ? 0
+    : Math.max(0, Math.floor((Date.now() - start.getTime()) / 1000));
+  if (plannedMinutes && plannedMinutes > 0) {
+    const remaining = plannedMinutes * 60 - elapsedSeconds;
+    if (remaining >= 0) return { text: formatTimer(remaining), hint: 'Осталось' };
+    return { text: `+${formatTimer(-remaining)}`, hint: 'Сверх плана' };
+  }
+  return { text: `↑${formatTimer(elapsedSeconds)}`, hint: 'Прошло' };
+}
+
+function formatTimer(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
+}
+
+function resyncTimer() {
+  if (document.visibilityState === 'hidden') return;
+  refreshState();
+  render();
 }
 
 function closeDropdown() {
@@ -334,5 +360,11 @@ export function initTaskControlWidget() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(refreshState, 30000);
   if (displayTimer) clearInterval(displayTimer);
-  displayTimer = setInterval(render, 10000);
+  displayTimer = setInterval(render, 1000);
+  if (!lifecycleWired) {
+    lifecycleWired = true;
+    window.addEventListener('focus', resyncTimer);
+    window.addEventListener('pageshow', resyncTimer);
+    document.addEventListener('visibilitychange', resyncTimer);
+  }
 }

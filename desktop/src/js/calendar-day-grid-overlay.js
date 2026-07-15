@@ -77,7 +77,7 @@ function gapHtml(startMin, endMin, minToPx) {
   </div>`;
 }
 
-export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], hourPx = DEFAULT_HOUR_PX) {
+export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], hourPx = DEFAULT_HOUR_PX, suppliedBlocks = null) {
   if (!rootEl) return;
   const minToPx = (m) => Math.round(m * (hourPx / 60));
 
@@ -87,7 +87,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   const dayIsPast = date < todayStr;
   const nowMin = (date === todayStr) ? now.getHours() * 60 + now.getMinutes() : null;
-  const blocks = await invoke('get_timeline_blocks', { date }).catch(() => []);
+  const blocks = suppliedBlocks || await invoke('get_timeline_blocks', { date }).catch(() => []);
   const completed = (blocks || []).filter(b => !b.is_active && b.start_time && b.end_time && b.duration_minutes > 0);
   const titles = await loadSourceTitles(completed);
 
@@ -138,10 +138,17 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     const s = parseHM(e.time);
     const dur = e.duration_minutes || 0;
     const rows = [];
-    if (dur) rows.push({ text: `⏱ ${e.source === 'auto_health' ? 'Факт' : 'Длительность'}: ${fmtDur(dur)}` });
+    const hasActual = !!(e.completed && e.actual_start && e.actual_end);
+    if (hasActual) rows.push({ text: `План: ${e.time} – ${toHM(s + dur)}`, muted: true });
+    const shownDur = hasActual ? e.actual_duration_minutes : dur;
+    if (shownDur) rows.push({ text: `⏱ ${hasActual || e.source === 'auto_health' ? 'Факт' : 'Длительность'}: ${fmtDur(shownDur)}` });
     rows.push({ text: EV_SOURCE[e.source] || 'Вручную', muted: true });
     rows.push(e.completed ? { text: '✓ Выполнено', done: true } : { text: '○ Не отмечено', muted: true });
-    return { title: e.title || 'Событие', subtitle: s != null ? `${e.time} – ${toHM(s + dur)}` : (e.time || ''), rows };
+    return {
+      title: e.title || 'Событие',
+      subtitle: hasActual ? `Факт: ${e.actual_start} – ${e.actual_end}` : (s != null ? `${e.time} – ${toHM(s + dur)}` : (e.time || '')),
+      rows,
+    };
   };
 
   // Container fills the full day height of .day-timeline (24 * hourPx).
@@ -166,12 +173,18 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   const hasCalendarSleep = (plannedEvents || []).some(e =>
     e.source === 'auto_health' && String(e.title || '').trim().startsWith('Сон')
   );
+  const integratedActualEventIds = new Set(
+    (plannedEvents || [])
+      .filter(e => e.completed && e.actual_start && e.actual_end)
+      .map(e => String(e.id))
+  );
 
   // Decorate with parsed minutes + sort by start_time for cluster building
   const positioned = completed
     .map(b => ({ block: b, startMin: parseHM(b.start_time), endMin: parseHM(b.end_time) }))
     .filter(x => x.startMin != null && x.endMin != null && x.endMin > x.startMin)
     .filter(x => !(hasCalendarSleep && x.block.source === 'auto_health' && x.block.type_name === 'Сон'))
+    .filter(x => !(x.block.source_type === 'event' && integratedActualEventIds.has(String(x.block.source_id))))
     .filter(x => !plannedKeys.has(`${x.startMin}:${x.endMin}`))
     .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
 
@@ -319,6 +332,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
       const firstSkipped = first.c.status === 'skipped';
       pendingGroups.push({
         top: minToPx(first.min),
+        min: first.min,
         icon: firstSkipped ? '❌' : (SCH_CAT_ICONS[first.c.category] || '◽'),
         title: first.c.title,
         badge: grp.length > 1 ? `+${grp.length - 1}` : '',
@@ -368,6 +382,7 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
     ];
     pendingGroups.push({
       top: minToPx(doneRefl[0].min),
+      min: doneRefl[0].min,
       icon: '📝',
       title: 'Рефлексия за вчера',
       badge: `${doneRefl.length}/${Math.max(reflSchedules.length, doneRefl.length)}`,
@@ -380,9 +395,21 @@ export async function injectTimelineOverlay(rootEl, date, plannedEvents = [], ho
   // Place group boxes top-down, nudging overlaps downward so none sits on another.
   pendingGroups.sort((a, b) => a.top - b.top);
   let lastBottom = -Infinity;
+  let lastHour = -1;
+  const groupHeight = 28;
   for (const g of pendingGroups) {
-    const top = Math.max(g.top, lastBottom + 3);
-    lastBottom = top + 28;
+    const hour = Math.floor(g.min / 60);
+    if (hour !== lastHour) {
+      lastBottom = -Infinity;
+      lastHour = hour;
+    }
+    const hourTop = minToPx(hour * 60);
+    const hourBottom = minToPx((hour + 1) * 60);
+    // A marker at 10:58 must remain visually inside the 10:00 row. Anchoring
+    // the card's top at 10:58 put almost its entire 28px body below 11:00.
+    const withinHour = Math.max(hourTop, Math.min(g.top, hourBottom - groupHeight));
+    const top = Math.max(withinHour, lastBottom + 3);
+    lastBottom = top + groupHeight;
     const box = document.createElement('div');
     box.className = 'day-tl-group' + (g.reflection ? ' day-tl-group-refl' : '') + (g.skipped ? ' day-tl-group-skipped' : '');
     box.style.cssText = `top:${top}px;`;

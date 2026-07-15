@@ -13,6 +13,8 @@ mod voice;
 mod voice;
 mod proactive;
 mod macos;
+#[cfg(target_os = "macos")]
+mod menu_bar_timer;
 mod android_update;
 mod web_assets;
 mod calendar;
@@ -982,6 +984,9 @@ pub fn run() {
             google_auth::google_auth_start_signin,
         ])
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            menu_bar_timer::setup(app)?;
+
             // Android: resolve data dir from Tauri, then init DB
             #[cfg(target_os = "android")]
             {

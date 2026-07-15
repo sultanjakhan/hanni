@@ -538,6 +538,7 @@ _shared:
       - desktop/src-tauri/src/commands_data.rs
       - desktop/src-tauri/src/commands_shopping.rs
       - desktop/src-tauri/src/macos.rs
+      - desktop/src-tauri/src/menu_bar_timer.rs
       - desktop/src-tauri/src/window_state.rs
       - desktop/src-tauri/src/dashboard.rs
       - desktop/src-tauri/src/mcp.rs

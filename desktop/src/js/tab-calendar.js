@@ -807,9 +807,31 @@ async function renderDayCalendar(el, events) {
       events = (fresh || []).filter(e => e.time && e.time.trim());
     }
   } catch (_) {}
+  const timelineBlocks = await invoke('get_timeline_blocks', { date: S.calDayDate }).catch(() => []);
+  const actualByEvent = new Map();
+  for (const block of timelineBlocks || []) {
+    if (block.is_active || block.source_type !== 'event' || block.source_id == null) continue;
+    if (!block.start_time || !block.end_time || block.end_time === '--:--') continue;
+    const key = String(block.source_id);
+    const current = actualByEvent.get(key) || {
+      start: block.start_time.slice(0, 5),
+      end: block.end_time.slice(0, 5),
+      duration: 0,
+    };
+    if (block.start_time.slice(0, 5) < current.start) current.start = block.start_time.slice(0, 5);
+    if (block.end_time.slice(0, 5) > current.end) current.end = block.end_time.slice(0, 5);
+    current.duration += Number(block.duration_minutes) || 0;
+    actualByEvent.set(key, current);
+  }
   const dayEvents = events.filter(e => e.date === S.calDayDate).map(e => {
     if (e.time && /^\d:\d{2}$/.test(e.time)) e.time = '0' + e.time;
-    return e;
+    const actual = actualByEvent.get(String(e.id));
+    return actual ? {
+      ...e,
+      actual_start: actual.start,
+      actual_end: actual.end,
+      actual_duration_minutes: actual.duration,
+    } : e;
   }).sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   const d = new Date(S.calDayDate + 'T00:00:00');
   const dayNames = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
@@ -877,18 +899,21 @@ async function renderDayCalendar(el, events) {
     return `<div class="day-event day-event-block${done ? ' day-event-done' : ''}" ${idAttr} ${layoutAttr} style="${baseStyle}">
       <div class="day-event-block-head">${priBar}<span class="day-event-time">${label}</span>${srcBadge}</div>
       <span class="day-event-title"${titleStyle}>${escapeHtml(e.title)}</span>
-      <span class="day-event-dur">${continued ? '↳ ' : ''}${e.duration_minutes || 60} мин</span>
+      <span class="day-event-dur">${continued ? '↳ ' : ''}${e.actual_duration_minutes ? `факт ${e.actual_duration_minutes}` : (e.duration_minutes || 60)} мин</span>
     </div>`;
   };
   const blocks = [];
   for (const e of dayEvents) {
     if (!e.time) continue;
-    const [hh, mm] = e.time.split(':').map(Number);
+    const showActual = !!(e.completed && e.actual_start && e.actual_end);
+    const [hh, mm] = (showActual ? e.actual_start : e.time).split(':').map(Number);
     const startMin = hh * 60 + mm;
-    const endMin = startMin + (e.duration_minutes || 60);
+    const endMin = showActual
+      ? (() => { const [eh, em] = e.actual_end.split(':').map(Number); return eh * 60 + em; })()
+      : startMin + (e.duration_minutes || 60);
     const visEnd = Math.min(endMin, 1440);
     blocks.push(eventBlock(e, startMin, visEnd - startMin,
-      `${e.time} – ${hhmmLabel(endMin % 1440)}`, false));
+      showActual ? `${e.actual_start} – ${e.actual_end}` : `${e.time} – ${hhmmLabel(endMin % 1440)}`, false));
   }
   // Continuation of events that started the day before and cross into today.
   for (const e of events.filter(e => e.date === prevDate && e.time)) {
@@ -962,7 +987,7 @@ async function renderDayCalendar(el, events) {
   if (nowLine) nowLine.style.top = `${(curHour * 60 + curMin) * renderedHourPx / 60}px`;
 
   // Overlay actual timeline blocks (real durations) on top of planned slots
-  import('./calendar-day-grid-overlay.js').then(m => m.injectTimelineOverlay(el.querySelector('.day-timeline'), S.calDayDate, dayEvents, getDayZoom())).catch(err => console.error('overlay:', err));
+  import('./calendar-day-grid-overlay.js').then(m => m.injectTimelineOverlay(el.querySelector('.day-timeline'), S.calDayDate, dayEvents, getDayZoom(), timelineBlocks)).catch(err => console.error('overlay:', err));
 
   // Auto-scroll to current time on first render, restore position on re-renders
   if (!calDayScrolled && isViewingToday) {

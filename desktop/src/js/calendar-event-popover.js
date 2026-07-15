@@ -62,13 +62,22 @@ function mountPopover(innerHtml, x, y, accent) {
 export function showEventPopover(event, x, y, { onEdit } = {}) {
   const isManual = !event.source || event.source === 'manual';
   const dur = event.duration_minutes || 0;
+  const hasActual = !!(event.completed && event.actual_start && event.actual_end);
 
   let timeRow = '';
-  if (event.time) {
+  let planRow = '';
+  if (hasActual) {
+    timeRow = `<div class="cal-pop-row">🕐 Факт: ${event.actual_start} – ${event.actual_end}</div>`;
+    if (event.time) {
+      const [h, m] = event.time.split(':').map(Number);
+      planRow = `<div class="cal-pop-row cal-pop-muted">План: ${event.time} – ${hhmm(h * 60 + m + dur)}</div>`;
+    }
+  } else if (event.time) {
     const [h, m] = event.time.split(':').map(Number);
     timeRow = `<div class="cal-pop-row">🕐 ${event.time} – ${hhmm(h * 60 + m + dur)}</div>`;
   }
-  const durLabel = event.source === 'auto_health' ? 'Факт' : 'Длительность';
+  const shownDur = hasActual ? event.actual_duration_minutes : dur;
+  const durLabel = hasActual || event.source === 'auto_health' ? 'Факт' : 'Длительность';
   const srcLabel = SOURCE_LABEL[event.source] || (isManual ? 'Вручную' : event.source);
   const doneRow = event.completed
     ? '<div class="cal-pop-row cal-pop-done">✓ Выполнено</div>'
@@ -82,7 +91,8 @@ export function showEventPopover(event, x, y, { onEdit } = {}) {
     ${CLOSE_BTN}
     <div class="cal-pop-title">${escapeHtml(event.title || 'Событие')}</div>
     ${timeRow}
-    ${dur ? `<div class="cal-pop-row">⏱ ${durLabel}: ${fmtDur(dur)}</div>` : ''}
+    ${planRow}
+    ${shownDur ? `<div class="cal-pop-row">⏱ ${durLabel}: ${fmtDur(shownDur)}</div>` : ''}
     <div class="cal-pop-row cal-pop-muted">${escapeHtml(srcLabel)}</div>
     ${doneRow}
     ${descRow}
