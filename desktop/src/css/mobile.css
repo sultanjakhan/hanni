@@ -78,7 +78,10 @@ body:has(#tab-bar.drawer-open) #focus-widget,
 body:has(#tab-bar.drawer-open) #chat-overlay { display: none !important; }
 
 /* Day-grid: tighter rows on mobile so labels don't wrap into 3 lines */
-.mobile .day-timeline { --day-hour-px: 44px; }
+.mobile .day-timeline { --day-hour-px: 44px; --day-label-width: 32px; }
+.mobile .day-now-line .wk-now-time {
+  left: var(--space-2); right: auto;
+}
 .mobile .day-hour-label {
   font-size: 10px; min-width: 32px; max-width: 32px;
   padding-left: 4px; padding-right: 2px;

@@ -151,7 +151,8 @@ async function addManualSleep(el) {
 
 async function importFromHealthConnect(el) {
   try {
-    await invoke('import_health_connect_sleep');
+    const imported = await autoImportHealth({ force: true });
+    if (!imported) throw new Error('Health Connect не вернул доступные данные');
     renderSleepPane(el);
   } catch(e) { alert(e); }
 }

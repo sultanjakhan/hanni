@@ -336,14 +336,14 @@
 /* Day-grid timeline overlay (actual completed blocks shown above planned chips) */
 /* Absolute overlay layer covering the full 24h column (offset by hour-label width) */
 .day-tl-layer {
-  position: absolute; top: 0; left: 56px; right: 0;
+  position: absolute; top: 0; left: var(--day-label-width, 56px); right: 0;
   pointer-events: none;
   z-index: 2;
 }
 /* Thin completion markers sit above event blocks (z:3) so they stay visible
    and clickable when a tick lands at the same time as an event. */
 .day-tl-marker-layer {
-  position: absolute; top: 0; left: 56px; right: 0;
+  position: absolute; top: 0; left: var(--day-label-width, 56px); right: 0;
   pointer-events: none;
   z-index: 4;
 }
@@ -607,6 +607,16 @@
      below the sticky nav bars so scrolled blocks never bleed over the header. */
   z-index: 0;
   --day-hour-px: 48px;
+  --day-label-width: 56px;
+}
+.day-now-line { left: var(--day-label-width); }
+.day-now-line .wk-now-time {
+  left: auto; right: calc(100% + var(--space-2));
+  top: 50%; bottom: auto; transform: translateY(-50%);
+  color: var(--user-msg-color);
+}
+.day-now-line .wk-now-dot {
+  box-shadow: 0 0 0 2px var(--bg-page);
 }
 .day-hour-row {
   display: flex;
@@ -617,7 +627,7 @@
   overflow: hidden;
 }
 .day-hour-label {
-  width: 56px; flex-shrink: 0; padding: 6px 8px;
+  width: var(--day-label-width, 56px); flex-shrink: 0; padding: 6px 8px;
   font-size: 11px; color: var(--text-muted); text-align: right;
 }
 .day-hour-content {
@@ -640,7 +650,7 @@
 }
 /* Day-view: proportional event blocks — top by start, height by duration */
 .day-event-layer {
-  position: absolute; top: 0; left: 56px; right: 0; height: 100%;
+  position: absolute; top: 0; left: var(--day-label-width); right: 0; height: 100%;
   pointer-events: none; z-index: 3;
 }
 .day-event-block {

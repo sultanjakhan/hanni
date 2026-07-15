@@ -34,6 +34,7 @@ window.addEventListener('hanni:calendar-refresh', () => { refreshCalendarInner()
 // Re-rendering every minute would re-query events and can disturb transient UI;
 // moving this one DOM node is enough, including across an hour boundary.
 let nowLineTimer = null;
+let nowLineListenersBound = false;
 function currentTimeLabel(now) {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
@@ -50,27 +51,47 @@ function updateNowLine() {
 
   const now = new Date();
   const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const selector = v === 'day'
-    ? `.day-hour-content[data-date="${date}"][data-hour="${now.getHours()}"]`
-    : `.wk-cell[data-date="${date}"][data-hour="${now.getHours()}"]`;
   inner.querySelectorAll('.wk-now-line').forEach(line => line.remove());
-  const target = inner.querySelector(selector);
+  const target = v === 'day'
+    ? inner.querySelector(`.day-timeline[data-date="${date}"]`)
+    : inner.querySelector(`.wk-cell[data-date="${date}"][data-hour="${now.getHours()}"]`);
   if (!target) return;
 
   const line = document.createElement('div');
-  line.className = 'wk-now-line';
-  line.style.top = `${(now.getMinutes() / 60) * 100}%`;
+  line.className = `wk-now-line${v === 'day' ? ' day-now-line' : ''}`;
+  if (v === 'day') {
+    const hourPx = target.querySelector('.day-hour-row')?.getBoundingClientRect().height || getDayZoom();
+    line.style.top = `${(now.getHours() * 60 + now.getMinutes()) * hourPx / 60}px`;
+  } else {
+    line.style.top = `${(now.getMinutes() / 60) * 100}%`;
+  }
   line.innerHTML = `<div class="wk-now-dot"></div>${currentTimeBadge(now)}`;
   target.appendChild(line);
 }
-function startNowLineTimer() {
-  if (nowLineTimer) return;
-  // Align the first tick to the next minute boundary so the line moves at :00.
-  const msToNextMinute = 60000 - (Date.now() % 60000);
+function scheduleNextNowLineUpdate() {
+  const msToNextMinute = 60000 - (Date.now() % 60000) + 50;
   nowLineTimer = setTimeout(() => {
     updateNowLine();
-    nowLineTimer = setInterval(updateNowLine, 60000);
+    scheduleNextNowLineUpdate();
   }, msToNextMinute);
+}
+function resyncNowLine() {
+  if (nowLineTimer) clearTimeout(nowLineTimer);
+  updateNowLine();
+  scheduleNextNowLineUpdate();
+}
+function startNowLineTimer() {
+  if (nowLineTimer) return;
+  scheduleNextNowLineUpdate();
+  if (nowLineListenersBound) return;
+  nowLineListenersBound = true;
+  // WebKit throttles timers while the app is hidden or the Mac is asleep.
+  // Re-sync immediately on return instead of leaving a stale marker visible.
+  window.addEventListener('focus', resyncNowLine);
+  window.addEventListener('pageshow', resyncNowLine);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) resyncNowLine();
+  });
 }
 
 // ── Calendar (unified layout) ──
@@ -732,6 +753,46 @@ async function renderWeekCalendar(el, events) {
 }
 
 // ── Day View ──
+function layoutOverlappingDayEvents(root) {
+  const items = [...root.querySelectorAll('.day-event-block[data-start-minute]')]
+    .map(el => {
+      const start = Number(el.dataset.startMinute);
+      const end = start + Number(el.dataset.visibleMinutes);
+      return { el, start, end, lane: 0 };
+    })
+    .filter(x => Number.isFinite(x.start) && Number.isFinite(x.end))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const clusters = [];
+  let cluster = [], clusterEnd = -1;
+  for (const item of items) {
+    if (cluster.length && item.start >= clusterEnd) {
+      clusters.push(cluster); cluster = []; clusterEnd = -1;
+    }
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.end);
+  }
+  if (cluster.length) clusters.push(cluster);
+
+  for (const group of clusters) {
+    const laneEnds = [];
+    for (const item of group) {
+      const freeLane = laneEnds.findIndex(end => end <= item.start);
+      item.lane = freeLane < 0 ? laneEnds.length : freeLane;
+      laneEnds[item.lane] = item.end;
+    }
+    const lanes = laneEnds.length;
+    if (lanes < 2) continue;
+    for (const item of group) {
+      const leftPct = item.lane * 100 / lanes;
+      const rightPct = (lanes - item.lane - 1) * 100 / lanes;
+      const leftGap = item.lane ? 'var(--space-1)' : 'var(--space-2)';
+      const rightGap = item.lane === lanes - 1 ? 'var(--space-2)' : '0px';
+      item.el.style.left = `calc(${leftPct}% + ${leftGap})`;
+      item.el.style.right = `calc(${rightPct}% + ${rightGap})`;
+    }
+  }
+}
+
 async function renderDayCalendar(el, events) {
   events = (events || []).filter(e => e.time && e.time.trim());
   const today = new Date();
@@ -772,14 +833,16 @@ async function renderDayCalendar(el, events) {
   const curHour = today.getHours(), curMin = today.getMinutes();
   const pxPerHour = getDayZoom();
 
-  // Grid: one row per hour — labels, lines, click-to-add target, now-line.
+  // Grid: one row per hour — labels, lines and click-to-add targets.
   const timelineHtml = hours.map(h => {
-    const nowLine = (isViewingToday && h === curHour) ? `<div class="wk-now-line" style="top:${(curMin/60)*100}%"><div class="wk-now-dot"></div>${currentTimeBadge(today)}</div>` : '';
     return `<div class="day-hour-row">
       <div class="day-hour-label">${String(h).padStart(2,'0')}:00</div>
-      <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}">${nowLine}</div>
+      <div class="day-hour-content" data-date="${S.calDayDate}" data-hour="${h}"></div>
     </div>`;
   }).join('');
+  const nowLineHtml = isViewingToday
+    ? `<div class="wk-now-line day-now-line" style="top:${(curHour * 60 + curMin) * pxPerHour / 60}px"><div class="wk-now-dot"></div>${currentTimeBadge(today)}</div>`
+    : '';
 
   // Timed events as proportional blocks: top by start time, height by duration.
   // An event crossing midnight is clipped at 24:00 and continued on the next day.
@@ -881,7 +944,7 @@ async function renderDayCalendar(el, events) {
     ${renderViewModeToggle('day', dayMode)}
     ${mealPlanHtml}
     ${allDayHtml}
-    <div class="day-timeline" style="--day-hour-px:${pxPerHour}px">${timelineHtml}${eventLayerHtml}</div>`;
+    <div class="day-timeline" data-date="${S.calDayDate}" style="--day-hour-px:${pxPerHour}px">${timelineHtml}${eventLayerHtml}${nowLineHtml}</div>`;
 
   // Percentage positioning is unreliable here because an absolutely-positioned
   // layer with height:100% sits inside an auto-height timeline; WebKit can
@@ -894,6 +957,9 @@ async function renderDayCalendar(el, events) {
     block.style.top = `${startMinute * renderedHourPx / 60}px`;
     block.style.height = `${Math.max(visibleMinutes * renderedHourPx / 60, 30)}px`;
   });
+  layoutOverlappingDayEvents(el);
+  const nowLine = el.querySelector('.day-now-line');
+  if (nowLine) nowLine.style.top = `${(curHour * 60 + curMin) * renderedHourPx / 60}px`;
 
   // Overlay actual timeline blocks (real durations) on top of planned slots
   import('./calendar-day-grid-overlay.js').then(m => m.injectTimelineOverlay(el.querySelector('.day-timeline'), S.calDayDate, dayEvents, getDayZoom())).catch(err => console.error('overlay:', err));
