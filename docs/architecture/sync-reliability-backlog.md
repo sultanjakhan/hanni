@@ -38,11 +38,19 @@ SQLite primary key и не сообщает ложный успех.
   - Выполнено 2026-07-16: INTEGER, pull и LAN cursors сохраняются; на Mac все
     шесть TEXT-ID cursors уже отсутствуют, поэтому replay стартует с EPOCH.
 
-- [ ] **SR-1.2b — Выполнить native rollout и live replay**
+- [x] **SR-1.2b — Выполнить native rollout и Mac live replay**
   - Доставить Rust-фикс на Mac и Android через release workflow.
-  - Выполнить push/pull на обоих устройствах после резервной копии Mac DB.
-  - Gate: последние строки сна совпадают, повторный sync идемпотентен и
-    возвращает 0 новых изменений.
+  - Выполнить replay на Mac после резервной копии DB.
+  - Gate: все затронутые TEXT-ID cursors дошли до последних строк, следующий
+    replay не находит необработанных строк.
+  - Выполнено 2026-07-16: v1.1.5 установлена на Mac и Android; исходный replay
+    backlog шести TEXT-ID таблиц на Mac был полностью выгружен.
+
+- [ ] **SR-1.2c — Настроить Android owner-sync и проверить GitHub replay**
+  - Android v1.1.5 показывает owner-sync как не настроенный, auto-sync выключен.
+  - Добавить безопасный перенос GitHub owner config либо явный pairing flow.
+  - Gate: Android выполняет GitHub push, Mac pull получает свежий сон, второй
+    push не повторяет уже выгруженные TEXT-ID строки.
 
 ### Epic SR-2 — Надёжный LAN pairing и transport fallback
 
@@ -82,6 +90,8 @@ SQLite primary key и не сообщает ложный успех.
   - Создавать/обновлять производные события сна без зависимости от foreground JS.
   - Сохранить идемпотентность при повторных Health Connect reads и LAN/cloud pull.
   - Gate: одна sleep session создаёт ровно одно событие и один timeline block.
+  - Live finding 2026-07-16: Calendar дедуплицировал новые sleep events, но
+    Timeline оставил дубли за 2026-07-12 и 2026-07-13 после первого LAN pull.
 
 - [ ] **SR-3.3 — End-to-end проверка свежего сна**
   - Проверить Android raw DB → Mac raw DB → Sleep UI → Calendar → Timeline.
@@ -120,3 +130,19 @@ SQLite primary key и не сообщает ложный успех.
 - Share-link mirror автоматически догоняет изменения после перезапуска.
 - `cargo check`, релевантные Rust/JS tests и production build проходят.
 - Прод обновляется только после резервной копии Mac DB и проверки версии Android.
+
+## Live rollout 2026-07-16
+
+- Mac и Android обновлены до v1.1.5 без очистки данных; Mac DB backup прошёл
+  `PRAGMA quick_check = ok`.
+- Android Health Connect worker завершился успешно: `sleep=34`, `exercise=38`,
+  `steps=31`, `hr=54847`.
+- На Android LAN был выключен и не настроен, а ключ отличался от Mac. Оба
+  устройства переведены на Wi-Fi peers с одним ключом; auto-LAN включён.
+- Mac автоматически получил сон: `sleep_sessions` выросли с 90 до 93, последняя
+  сессия — ночь 2026-07-15 → 2026-07-16. Повторные LAN циклы count не изменили.
+- При Android UI в фоне оба WorkManager job завершились успешно; нативный LAN
+  worker сообщил `sent=1009 received=37 deletes=3`. Большой heart-rate backfill
+  продолжает идти пакетами, Mac cloud auto-sync включён как GitHub bridge.
+- Android GitHub owner-sync всё ещё требует отдельного onboarding: текущий UI
+  сообщает «не настроено», поэтому live Android→GitHub replay не подтверждён.
