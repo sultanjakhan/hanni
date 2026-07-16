@@ -11,16 +11,43 @@ use crate::db::SYNC_TABLES;
 use crate::sync_github_api::{
     blob_entry, build_doc, fetch_doc, fetch_tarball, gh_get, gh_head, gh_post, gh_req, resolve_gh,
 };
+use crate::sync_github_replay::prepare_text_id_replay;
 use crate::sync_owner::{get_setting, row_to_json, set_setting, tombstone_row_id, upsert_row};
 use crate::types::HanniDb;
 use reqwest::Method;
+use rusqlite::types::Value as SqlValue;
 use serde_json::{json, Map, Value};
 
 const PUSH_LIMIT: usize = 500;
 const EPOCH_TS: &str = "1970-01-01T00:00:00Z";
 
+fn dirty_rows(conn: &rusqlite::Connection, table: &str, cursor: &str)
+              -> Result<Vec<(SqlValue, String)>, String>
+{
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, updated_at FROM {} WHERE updated_at > ?1 \
+         ORDER BY updated_at ASC LIMIT {}", table, PUSH_LIMIT))
+        .map_err(|e| format!("prep {}: {}", table, e))?;
+    let rows = stmt.query_map(rusqlite::params![cursor], |row|
+        Ok((row.get(0)?, row.get(1)?))
+    ).map_err(|e| format!("dirty {}: {}", table, e))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| format!("dirty row {}: {}", table, e))?;
+    Ok(rows)
+}
+
+fn row_label(table: &str, id: &SqlValue) -> Result<String, String> {
+    let id = match id {
+        SqlValue::Integer(value) => value.to_string(),
+        SqlValue::Text(value) => value.clone(),
+        other => return Err(format!("unsupported primary key for {}: {:?}", table, other)),
+    };
+    Ok(format!("row:{}_{}", table, id))
+}
+
 pub(crate) async fn gh_push(db: &HanniDb) -> Result<Value, String> {
     let c = resolve_gh(db)?;
+    let replayed_text_tables = prepare_text_id_replay(&db.conn(), SYNC_TABLES)?;
     let mut entries: Vec<Value> = Vec::new();
     let mut cursors: Vec<(String, String)> = Vec::new();
     let mut pushed = 0usize;
@@ -30,20 +57,11 @@ pub(crate) async fn gh_push(db: &HanniDb) -> Result<Value, String> {
         for table in SYNC_TABLES {
             let ckey = format!("cloud_owner_gh_push_{}", table);
             let cursor = get_setting(&conn, &ckey).unwrap_or_else(|| EPOCH_TS.into());
-            let mut stmt = conn.prepare(&format!(
-                "SELECT id, updated_at FROM {} WHERE updated_at > ?1 \
-                 ORDER BY updated_at ASC LIMIT {}", table, PUSH_LIMIT))
-                .map_err(|e| format!("prep {}: {}", table, e))?;
-            let dirty: Vec<(i64, String)> = stmt
-                .query_map(rusqlite::params![cursor], |r| Ok((r.get(0)?, r.get(1)?)))
-                .map_err(|e| format!("dirty {}: {}", table, e))?
-                .filter_map(Result::ok).collect();
-            drop(stmt);
+            let dirty = dirty_rows(&conn, table, &cursor)?;
             let mut max = cursor.clone();
             for (id, ts) in &dirty {
-                let idv = rusqlite::types::Value::Integer(*id);
-                if let Some(row) = row_to_json(&conn, table, &idv)? {
-                    entries.push(blob_entry(&c, &format!("row:{}_{}", table, id),
+                if let Some(row) = row_to_json(&conn, table, id)? {
+                    entries.push(blob_entry(&c, &row_label(table, id)?,
                                             &build_doc(&row, &c.device_id, ts, table))?);
                     if ts > &max { max = ts.clone(); }
                     pushed += 1;
@@ -62,7 +80,9 @@ pub(crate) async fn gh_push(db: &HanniDb) -> Result<Value, String> {
         // dropped them all, so tombstones never pushed.
         let tombs: Vec<(String, String, String)> = stmt
             .query_map(rusqlite::params![tcur], |r| Ok((r.get(0)?, r.get::<_, String>(1)?, r.get(2)?)))
-            .map_err(|e| format!("tombstones: {}", e))?.filter_map(Result::ok).collect();
+            .map_err(|e| format!("tombstones: {}", e))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| format!("tombstone row: {}", e))?;
         drop(stmt);
         let mut tmax = tcur.clone();
         for (table, id, ts) in &tombs {
@@ -75,7 +95,9 @@ pub(crate) async fn gh_push(db: &HanniDb) -> Result<Value, String> {
         if tmax != tcur { cursors.push(("cloud_owner_gh_push_tombstones".into(), tmax)); }
     }
 
-    if entries.is_empty() { return Ok(json!({ "pushed": 0 })); }
+    if entries.is_empty() {
+        return Ok(json!({ "pushed": 0, "replayed_text_tables": replayed_text_tables }));
+    }
 
     let client = reqwest::Client::new();
     let (parent, base_tree) = gh_head(&client, &c).await?;
@@ -97,7 +119,8 @@ pub(crate) async fn gh_push(db: &HanniDb) -> Result<Value, String> {
         for (k, val) in &cursors { set_setting(&conn, k, val); }
         set_setting(&conn, "cloud_owner_gh_last_push_ts", &chrono::Utc::now().to_rfc3339());
     }
-    Ok(json!({ "pushed": pushed, "commit": commit_sha }))
+    Ok(json!({ "pushed": pushed, "commit": commit_sha,
+               "replayed_text_tables": replayed_text_tables }))
 }
 
 pub(crate) async fn gh_pull(db: &HanniDb) -> Result<Value, String> {
@@ -189,3 +212,7 @@ fn parse_compare(cmp: Value) -> Vec<(String, String)> {
         Some((f.get("filename")?.as_str()?.to_string(), f.get("sha")?.as_str()?.to_string()))
     }).collect()).unwrap_or_default()
 }
+
+#[cfg(test)]
+#[path = "sync_github_tests.rs"]
+mod tests;

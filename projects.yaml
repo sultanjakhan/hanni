@@ -418,6 +418,8 @@ sync:
     - desktop/src-tauri/src/sync_crypto.rs
     - desktop/src-tauri/src/sync_github_api.rs
     - desktop/src-tauri/src/sync_github.rs
+    - desktop/src-tauri/src/sync_github_replay.rs
+    - desktop/src-tauri/src/sync_github_tests.rs
     - desktop/src-tauri/src/sync_github_cmds.rs
     - desktop/src-tauri/src/sync_share.rs
     - desktop/src-tauri/src/lan_sync.rs

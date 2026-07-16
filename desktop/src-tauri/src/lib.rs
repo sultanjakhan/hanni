@@ -65,6 +65,7 @@ mod sync_owner_auto;
 mod sync_crypto;
 mod sync_github_api;
 mod sync_github;
+mod sync_github_replay;
 mod sync_github_cmds;
 mod lan_sync;
 mod google_auth;

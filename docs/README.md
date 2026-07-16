@@ -15,3 +15,4 @@
 
 ## Что осталось
 - [`architecture/firebase-off-plan.md`](architecture/firebase-off-plan.md) — активный план (firebase-off).
+- [`architecture/sync-reliability-backlog.md`](architecture/sync-reliability-backlog.md) — эпики по восстановлению Mac↔Android sync, сна и share-links.
