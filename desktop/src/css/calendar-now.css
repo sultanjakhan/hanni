@@ -1,0 +1,139 @@
+.calendar-now-card {
+  --calendar-now-accent-text: #fff;
+  margin: 0 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.calendar-now-card__body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: 82px;
+  padding: var(--space-4) var(--space-5);
+}
+
+.calendar-now-card__body--active {
+  border-left: 3px solid var(--color-green);
+}
+
+.calendar-now-card__copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.calendar-now-card__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.calendar-now-card__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent-blue);
+}
+
+.calendar-now-card__body--active .calendar-now-card__dot {
+  background: var(--color-green);
+}
+
+.calendar-now-card__title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-now-card__meta,
+.calendar-now-card__loading {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.calendar-now-card__loading {
+  padding: var(--space-5);
+}
+
+.calendar-now-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.calendar-now-card__button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.calendar-now-card__button:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.calendar-now-card__button--primary {
+  border-color: var(--accent-blue);
+  background: var(--accent-blue);
+  color: var(--calendar-now-accent-text);
+}
+
+.calendar-now-card__button--primary:hover {
+  border-color: var(--accent-blue);
+  background: var(--accent-blue);
+  color: var(--calendar-now-accent-text);
+  filter: brightness(0.94);
+}
+
+.calendar-now-card__button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.mobile .calendar-now-card {
+  margin-bottom: var(--space-2);
+}
+
+.mobile .calendar-now-card__body {
+  align-items: stretch;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.mobile .calendar-now-card__title {
+  white-space: normal;
+}
+
+.mobile .calendar-now-card__actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+}
+
+.mobile .calendar-now-card__button {
+  padding-inline: var(--space-2);
+}
