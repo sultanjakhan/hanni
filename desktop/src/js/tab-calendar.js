@@ -4,6 +4,7 @@ import { S, invoke, tabLoaders } from './state.js';
 import { escapeHtml, renderPageHeader, setupPageHeaderControls, skeletonPage, loadTabBlockEditor } from './utils.js';
 import { showEventModal, priorityHex } from './calendar-event-modal.js';
 import { showEventPopover, showPagerPopover } from './calendar-event-popover.js';
+import { initCalendarNowCard } from './calendar-now-card.js';
 
 // Helper: check if a schedule should appear on a given date
 function scheduleMatchesDate(sch, dateStr) {
@@ -35,12 +36,14 @@ async function loadCalendar(subTab) {
   const el = document.getElementById('calendar-content');
   if (!el) return;
   if (!tabLoaders.openCalendarAddEvent) tabLoaders.openCalendarAddEvent = showEventModal;
+  initCalendarNowCard(el);
 
   const { renderUnifiedLayout } = await import('./db-view/unified-layout.js');
   await renderUnifiedLayout(el, 'calendar', {
     title: 'Calendar',
     subtitle: 'Расписание и события',
     icon: '📅',
+    headerExtra: '<section id="calendar-now-card" class="calendar-now-card" aria-live="polite"></section>',
     renderDash: async (paneEl) => {
       let sub = S.calDashSub;
       if (sub !== 'today' && sub !== 'chart') {

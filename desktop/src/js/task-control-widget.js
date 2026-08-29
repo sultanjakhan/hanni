@@ -2,10 +2,10 @@
 // Idle: + opens dropdown with planned tasks → click = start
 // Active: ■ pulsing red → click = stop
 import { invoke } from './state.js';
-import { escapeHtml } from './utils.js';
 import { renderRoutineSection, wireRoutineSection } from './routine-widget.js';
-import { buildPickerBody, loadCategoryWeights } from './task-picker-view.js';
-import { pickRecommendedTaskId, pickStartChainId, timeToMin } from './task-picker-sort.js';
+import { buildPickerBody } from './task-picker-view.js';
+import { loadTaskRecommendationData } from './task-recommendation-data.js';
+import { createActiveTaskPanel } from './task-control-active-panel.js';
 import { isDanKoePractice, openDanKoeModal } from './dankoe-quick-modal.js';
 
 let widget = null;
@@ -56,64 +56,18 @@ async function openStartDropdown(preserveScroll = false) {
   // preserve scroll position so users don't lose their place after each click.
   const savedScroll = preserveScroll && panel ? panel.scrollTop : 0;
   closeDropdown();
-  const planned = await invoke('get_today_planned', { date: localDate() }).catch(() => []);
-  // visible_from hides not-yet-due evening items from the picker (today only).
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  const notYetVisible = (p) => {
-    const t = p.visible_from ? timeToMin(p.visible_from) : null;
-    return t != null && nowMin < t;
-  };
-  const startable = planned.filter(p => !p.completed && !p.is_active && p.status_extra !== 'done' && p.status_extra !== 'skipped' && !notYetVisible(p));
-
-  const weights = await loadCategoryWeights();
-  const pins = await invoke('get_task_pins').catch(() => []);
-  const avgRows = await invoke('get_task_avg_durations').catch(() => []);
-  const avgDur = Object.fromEntries(avgRows.map(a => [`${a.source_type}:${a.source_id}`, a.avg_minutes]));
-  const chains = await invoke('get_routine_chains').catch(() => []);
-  const now = await invoke('get_routine_now', { date: localDate() }).catch(() => []);
-  const completedChainIds = await invoke('get_completed_routine_chains', { date: localDate() }).catch(() => []);
-  // Time/day-gate chains: a chain's "— начать" shows only when its FIRST step's
-  // schedule is "к месту" now — day matches (frequency) AND now ≥ visible_from.
-  // Derived from the schedules (no chain-level fields). Autonomous first step or
-  // unknown → always shown. Active runs ignore this (handled in renderRoutineSection).
-  const allScheds = await invoke('get_schedules', { category: null }).catch(() => []);
-  const schedById = Object.fromEntries(allScheds.map(s => [String(s.id), s]));
-  const dow = (new Date().getDay()) || 7;
-  const schedDueNow = (s) => {
-    if (!s || !s.is_active) return false;
-    let dayOk;
-    if (s.frequency === 'daily') dayOk = true;
-    else if (s.frequency === 'weekly' || s.frequency === 'custom') dayOk = (s.frequency_days || '').split(',').map(Number).includes(dow);
-    else dayOk = false;
-    if (!dayOk) return false;
-    const vf = s.visible_from ? timeToMin(s.visible_from) : null;
-    return !(vf != null && nowMin < vf);
-  };
-  const chainDueNow = (c) => {
-    // Explicit time trigger gates on the chain's earliest time of day. Multi-time
-    // (meal) chains surface per-slot inside renderRoutineSection, not here.
-    if (c.trigger_type === 'time' && c.trigger_time) {
-      const ts = String(c.trigger_time).split(',').map(s => s.trim()).filter(Boolean).map(timeToMin);
-      return ts.length ? nowMin >= Math.min(...ts) : true;
-    }
-    const start = (c.nodes || []).find(n => n.is_start);
-    const startId = start ? start.id : null;
-    const incoming = {};
-    (c.edges || []).forEach(e => { (incoming[e.to_node_id] = incoming[e.to_node_id] || []).push(e.from_node_id); });
-    const entries = (c.nodes || []).filter(n => !n.is_start &&
-      ((incoming[n.id] || []).length === 0 || (incoming[n.id] || []).every(f => f === startId)));
-    if (!entries.length) return true;
-    return entries.some(n => !n.source_id || schedDueNow(schedById[String(n.source_id)]));
-  };
-  const dueChainIds = new Set((chains || []).filter(chainDueNow).map(c => c.id));
-  // Recommendation precedence: active routine step → start an auto-trigger chain
-  // (wake first; skip completed-today) → top regular task.
-  const routineRecId = pickRecommendedTaskId(now);
-  const chainRecId = routineRecId == null ? pickStartChainId(chains, now, completedChainIds.map(x => x.chain_id)) : null;
-  const routineHtml = await renderRoutineSection(chains, now, routineRecId, chainRecId, completedChainIds, dueChainIds);
+  const data = await loadTaskRecommendationData();
+  const routineHtml = await renderRoutineSection(
+    data.chains, data.runs, data.routineRecId, data.chainRecId,
+    data.completedChains, data.dueChainIds,
+  );
   const { bodyHtml, orderedItems } = await buildPickerBody({
-    startable, weights, pins, avgDur, routineHtml,
-    routineHasRec: routineRecId != null || chainRecId != null,
+    startable: data.startable,
+    weights: data.weights,
+    pins: data.pins,
+    avgDur: data.avgDur,
+    routineHtml,
+    routineHasRec: data.routineRecId != null || data.chainRecId != null,
   });
 
   panel = document.createElement('div');
@@ -221,45 +175,12 @@ async function openStartDropdown(preserveScroll = false) {
 function openActiveActions() {
   closeDropdown();
   if (!activeBlock) return;
-  const label = activeBlock.notes || activeBlock.type_name || 'таск';
-  panel = document.createElement('div');
-  panel.className = 'tw-panel tw-panel-actions';
-  panel.innerHTML = `
-    <div class="tw-panel-header">Идёт: ${escapeHtml(label)} с ${activeBlock.start_time}</div>
-    <div class="tw-panel-body">
-      <button class="tw-action tw-action-pause" data-action="pause">
-        <span class="tw-action-icon">⏸</span>
-        <span class="tw-action-label">Пауза</span>
-        <span class="tw-action-hint">блок закрывается, статус не меняется</span>
-      </button>
-      <button class="tw-action tw-action-finish" data-action="finish">
-        <span class="tw-action-icon">✓</span>
-        <span class="tw-action-label">Завершить</span>
-        <span class="tw-action-hint">отметить как сделано</span>
-      </button>
-      <button class="tw-action tw-action-cancel" data-action="cancel">
-        <span class="tw-action-icon">✕</span>
-        <span class="tw-action-label">Отмена</span>
-        <span class="tw-action-hint">удалить блок без зачёта времени</span>
-      </button>
-    </div>`;
-  widget.appendChild(panel);
-
-  panel.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!activeBlock) return;
-      const id = activeBlock.id;
-      const action = btn.dataset.action;
-      try {
-        if (action === 'pause') await invoke('pause_task_block', { blockId: id });
-        else if (action === 'finish') await invoke('complete_task_block', { blockId: id });
-        else if (action === 'cancel') await invoke('delete_timeline_block', { id });
-      } catch (err) { console.error('tw action:', err); }
-      closeDropdown();
-      window.dispatchEvent(new Event('task-state-changed'));
-      await refreshState();
-    });
+  panel = createActiveTaskPanel(activeBlock, async () => {
+    closeDropdown();
+    window.dispatchEvent(new Event('task-state-changed'));
+    await refreshState();
   });
+  widget.appendChild(panel);
 }
 
 async function onBtnClick(e) {
@@ -289,6 +210,11 @@ export function initTaskControlWidget() {
   });
 
   window.addEventListener('task-state-changed', refreshState);
+  window.addEventListener('hanni:task-control-open', async () => {
+    if (panel) return;
+    if (activeBlock) openActiveActions();
+    else await openStartDropdown();
+  });
 
   refreshState();
   if (pollTimer) clearInterval(pollTimer);

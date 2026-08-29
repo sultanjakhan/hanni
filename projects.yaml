@@ -80,6 +80,8 @@ calendar:
     - desktop/src/js/calendar-chart-filters.js
     - desktop/src/js/calendar-chart-stats.js
     - desktop/src/js/calendar-day-grid-overlay.js
+    - desktop/src/js/calendar-now-card.js
+    - desktop/src/css/calendar-now.css
   rust:
     - desktop/src-tauri/src/calendar.rs
     - desktop/src-tauri/src/event_categories.rs
@@ -561,7 +563,10 @@ _shared:
     files:
       - desktop/src/js/task-picker-view.js
       - desktop/src/js/task-picker-sort.js
+      - desktop/src/js/task-recommendation-data.js
+      - desktop/src/js/task-control-active-panel.js
       - desktop/src/js/task-control-widget.js
+      - desktop/tests/task-recommendation-data.test.mjs
       - desktop/src/js/notification-widget.js
       - desktop/src/js/dashboard-editor.js
       - desktop/src/js/dashboard-builder.js
