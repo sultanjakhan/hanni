@@ -24,10 +24,11 @@ export function renderCard(r, onIngrClick, onDuplicate) {
   const badgesHtml = tags.map(t => {
     const c = MEAL_COLORS[t] || 'gray';
     const label = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', universal: 'Универсал' }[t] || t;
-    return `<span class="badge badge-${c}">${label}</span>`;
+    return `<span class="badge badge-${c}">${escapeHtml(label)}</span>`;
   }).join('');
   const totalTime = (r.prep_time || 0) + (r.cook_time || 0);
-  const diffLabel = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' }[r.difficulty] || 'Лёгкий';
+  const difficulty = ['easy', 'medium', 'hard'].includes(r.difficulty) ? r.difficulty : 'easy';
+  const diffLabel = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' }[difficulty];
   const ingrNames = getIngrNames(r);
   const ingrHtml = ingrNames.slice(0, 5).map(n => {
     const cat = catalogCat(n); const cls = cat ? ` ingr-cat-${cat}` : '';
@@ -53,7 +54,7 @@ export function renderCard(r, onIngrClick, onDuplicate) {
     <div class="recipe-card-meta">
       ${totalTime ? `<span>⏱ ${totalTime} мин</span>` : ''}
       <span>👥 ${r.servings || 1}</span>
-      <span class="recipe-diff recipe-diff-${r.difficulty || 'easy'}">${diffLabel}</span>
+      <span class="recipe-diff recipe-diff-${difficulty}">${diffLabel}</span>
       <span>❤${r.health_score || 5}</span><span>💰${r.price_score || 5}</span>
     </div>
     <div class="recipe-card-cooked${r.last_cooked ? '' : ' is-never'}">${

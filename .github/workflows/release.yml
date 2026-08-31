@@ -5,46 +5,151 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: hanni-native-release
+  queue: max
+  cancel-in-progress: false
+
 jobs:
   release:
     permissions:
+      actions: read
       contents: write
-    runs-on: macos-latest
+    runs-on: macos-15
+    environment: hanni-production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify embedded updater public key
+        run: python3 scripts/verify-updater-public-key.py
+
+      - name: Validate production tag and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid production release tag" >&2
+            exit 1
+          fi
+          test "$GITHUB_REF" = "refs/tags/$TAG"
+          MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$GITHUB_SHA" = "$MAIN_SHA"
+          VERSION="${TAG#v}"
+          python3 - "$VERSION" <<'PY'
+          import json, pathlib, re, sys
+
+          expected = sys.argv[1]
+          tauri = json.loads(pathlib.Path("desktop/src-tauri/tauri.conf.json").read_text())
+          cargo_text = pathlib.Path("desktop/src-tauri/Cargo.toml").read_text()
+          cargo_match = re.search(
+              r'(?ms)^\[package\]\s*$.*?^version\s*=\s*"([^"]+)"', cargo_text
+          )
+          if not cargo_match:
+              raise SystemExit("Cargo.toml package version not found")
+          actual = {
+              "tauri.conf.json": tauri.get("version"),
+              "Cargo.toml": cargo_match.group(1),
+          }
+          mismatched = {name: value for name, value in actual.items() if value != expected}
+          if mismatched:
+              raise SystemExit(f"release tag version {expected!r} does not match {mismatched!r}")
+          PY
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Create or validate protected draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "true"
+          else
+            gh release create "$TAG" --draft --verify-tag \
+              --title "Hanni $TAG" --notes "See the assets for download."
+          fi
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-09-01
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: desktop/src-tauri
 
+      - name: Verify committed Cargo lockfile
+        run: cargo metadata --locked --manifest-path desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
+
       - name: Install system dependencies
-        run: brew install cmake
+        run: brew install cmake nasm minisign
 
       - name: Install dependencies
         working-directory: desktop
-        run: npm install
+        run: npm ci
+
+      - name: Import Apple Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for required in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!required:-}" ]; then
+              echo "Missing required Apple signing/notarization secret: $required" >&2
+              exit 1
+            fi
+          done
+          CERTIFICATE_PATH="$RUNNER_TEMP/hanni-developer-id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/hanni-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
+          chmod 600 "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -k "$KEYCHAIN_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          rm -f "$CERTIFICATE_PATH"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)
+          if [ -z "$IDENTITY" ]; then
+            echo "Developer ID Application identity not found in imported certificate" >&2
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          UPDATER_GITHUB_TOKEN: ${{ secrets.UPDATER_GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Hanni ${{ github.ref_name }}'
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: 'Hanni ${{ env.RELEASE_TAG }}'
           releaseBody: 'See the assets for download.'
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           projectPath: desktop
         # tauri-action publishes the release with the latest.json asset; the
@@ -52,26 +157,299 @@ jobs:
         # (see tauri.conf.json). No gist mirror step — that separate API call was
         # a silent single point of failure (rate-limit/PAT could freeze updates).
 
+      - name: Notarize and verify Apple artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP=$(find desktop/src-tauri/target/release/bundle -type d -name '*.app' -print -quit)
+          DMG=$(find desktop/src-tauri/target/release/bundle -type f -name '*.dmg' -print -quit)
+          UPDATER_ARCHIVE=$(find desktop/src-tauri/target/release/bundle -type f -name '*.app.tar.gz' -print -quit)
+          UPDATER_SIGNATURE="${UPDATER_ARCHIVE}.sig"
+          test -n "$APP"
+          test -n "$DMG"
+          test -n "$UPDATER_ARCHIVE"
+          test -s "$UPDATER_SIGNATURE"
+          bash scripts/verify-tauri-signature.sh \
+            "$UPDATER_ARCHIVE" "$UPDATER_SIGNATURE" desktop/src-tauri/updater.pub
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -Fq 'Authority=Developer ID Application:'
+          spctl --assess --type execute --verbose=4 "$APP"
+          xcrun stapler validate "$APP"
+          # Tauri 2.10 notarizes/staples the .app before creating the signed DMG.
+          # Submit the final DMG separately, then replace only its draft asset.
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          codesign --verify --strict --verbose=2 "$DMG"
+          test "$(gh release view "$RELEASE_TAG" --json isDraft -q .isDraft)" = "true"
+          gh release upload "$RELEASE_TAG" "$DMG" --clobber
+          VERIFY_DMG="$RUNNER_TEMP/hanni-dmg-verify"
+          rm -rf "$VERIFY_DMG"
+          mkdir -p "$VERIFY_DMG"
+          gh release download "$RELEASE_TAG" --pattern "$(basename "$DMG")" --dir "$VERIFY_DMG"
+          cmp "$DMG" "$VERIFY_DMG/$(basename "$DMG")"
+          VERIFY_UPDATER="$RUNNER_TEMP/hanni-native-updater-verify"
+          rm -rf "$VERIFY_UPDATER"
+          mkdir -p "$VERIFY_UPDATER"
+          gh release download "$RELEASE_TAG" \
+            --pattern "$(basename "$UPDATER_ARCHIVE")" \
+            --pattern "$(basename "$UPDATER_SIGNATURE")" \
+            --pattern latest.json \
+            --dir "$VERIFY_UPDATER"
+          REMOTE_ARCHIVE="$VERIFY_UPDATER/$(basename "$UPDATER_ARCHIVE")"
+          REMOTE_SIGNATURE="$VERIFY_UPDATER/$(basename "$UPDATER_SIGNATURE")"
+          cmp "$UPDATER_ARCHIVE" "$REMOTE_ARCHIVE"
+          cmp "$UPDATER_SIGNATURE" "$REMOTE_SIGNATURE"
+          bash scripts/verify-tauri-signature.sh \
+            "$REMOTE_ARCHIVE" "$REMOTE_SIGNATURE" desktop/src-tauri/updater.pub
+          python3 - "$VERIFY_UPDATER/latest.json" "$REMOTE_ARCHIVE" "$REMOTE_SIGNATURE" \
+            "$RELEASE_TAG" "$GITHUB_REPOSITORY" <<'PY'
+          import json, pathlib, sys, urllib.parse
+
+          latest_path, archive_path, signature_path = map(pathlib.Path, sys.argv[1:4])
+          tag, repository = sys.argv[4:]
+          latest = json.loads(latest_path.read_text(encoding="utf-8"))
+          archive_name = archive_path.name
+          signature = signature_path.read_text(encoding="utf-8").strip()
+          if latest.get("version") != tag.removeprefix("v"):
+              raise SystemExit("latest.json version does not match the release tag")
+          platforms = latest.get("platforms")
+          if not isinstance(platforms, dict) or not platforms:
+              raise SystemExit("latest.json does not contain updater platforms")
+          expected_path = f"/{repository}/releases/download/{tag}/{archive_name}"
+          for platform, entry in platforms.items():
+              if not isinstance(entry, dict):
+                  raise SystemExit(f"latest.json platform is not an object: {platform}")
+              parsed = urllib.parse.urlparse(entry.get("url", ""))
+              if (
+                  parsed.scheme != "https"
+                  or parsed.netloc != "github.com"
+                  or urllib.parse.unquote(parsed.path) != expected_path
+                  or parsed.params
+                  or parsed.query
+                  or parsed.fragment
+              ):
+                  raise SystemExit(f"latest.json updater URL mismatch: {platform}")
+              if entry.get("signature") != signature:
+                  raise SystemExit(f"latest.json updater signature mismatch: {platform}")
+          PY
+
       # OTA web-asset bundle: HTML/JS/CSS only (excludes the big rarely-changing
       # sounds/ + assets/, which fall back to the embedded copies per-file). Both
-      # macOS and Android read this same web-manifest.json from releases/latest,
+      # macOS and Android read the same signed, versioned web manifest,
       # so it's published ONCE here (the desktop job, which creates the release)
       # — NOT also from release-android.yml: two `tar` runs embed different
       # mtimes → different sha256 → a --clobber race could leave a bundle whose
       # bytes don't match the manifest sha. Web-only pushes use the same logic in
-      # scripts/publish-web-update.sh.
+      # the protected publish-web-ota workflow.
       - name: Build + upload web-asset bundle (seed web OTA channel)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          TAG="${{ github.ref_name }}"
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
           VERSION="${TAG#v}"
-          BUNDLE="web-${VERSION}.tar.gz"
-          tar czf "$BUNDLE" -C desktop/src --exclude=./sounds --exclude=./assets .
+          SOURCE_SHA="${GITHUB_SHA}"
+          SHORT_SHA="${SOURCE_SHA:0:12}"
+          WORK="$RUNNER_TEMP/hanni-seed-web-ota"
+          STAGE="$WORK/src"
+          BUNDLE="$WORK/web-${VERSION}-${SHORT_SHA}.tar.gz"
+          MANIFEST="$WORK/web-manifest-${VERSION}.json"
+          rm -rf "$WORK"
+          mkdir -p "$STAGE"
+          git archive "$GITHUB_SHA":desktop/src | tar -x -C "$STAGE"
+          python3 scripts/package-web-assets.py "$STAGE" "$BUNDLE"
           SHA=$(shasum -a 256 "$BUNDLE" | cut -d' ' -f1)
+          SIZE=$(stat -f%z "$BUNDLE")
           # min_native = this release: the bundle is built against this native
           # shell, so it's the safe floor (older shells get the full update).
-          printf '{"web_version":"%s","min_native_version":"%s","sha256":"%s","asset":"%s"}\n' \
-            "$VERSION" "$VERSION" "$SHA" "$BUNDLE" > web-manifest.json
-          ls -la "$BUNDLE" web-manifest.json
-          gh release upload "$TAG" "$BUNDLE" web-manifest.json --clobber
+          python3 - "$TAG" "$VERSION" "$SOURCE_SHA" "$(basename "$MANIFEST")" \
+            "$(basename "$BUNDLE")" "$SIZE" "$SHA" > "$MANIFEST" <<'PY'
+          import json, sys
+          tag, version, source, manifest, asset, size, sha = sys.argv[1:]
+          doc = {
+              "schema": "hanni.web-ota.v1",
+              "repository": "sultanjakhan/hanni",
+              "channel": "stable",
+              "release_tag": tag,
+              "min_native_version": version,
+              "web_version": version,
+              "sequence": 0,
+              "source_commit": source,
+              "manifest_asset": manifest,
+              "asset": asset,
+              "asset_size": int(size),
+              "asset_sha256": sha,
+          }
+          print(json.dumps(doc, separators=(",", ":")))
+          PY
+          npm --prefix desktop run tauri -- signer sign "$MANIFEST"
+          test -s "${MANIFEST}.sig"
+          bash scripts/verify-tauri-signature.sh \
+            "$MANIFEST" "${MANIFEST}.sig" desktop/src-tauri/updater.pub
+          ls -la "$BUNDLE" "$MANIFEST" "${MANIFEST}.sig"
+          test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "true"
+          bash scripts/recover-starter-release-assets.sh \
+            "$TAG" "$(basename "$BUNDLE")" "$(basename "$MANIFEST")" \
+            "$(basename "$MANIFEST").sig"
+          REMOTE_NAMES="$WORK/remote-assets.txt"
+          gh release view "$TAG" --json assets --jq '.assets[].name' > "$REMOTE_NAMES"
+          EXISTING_WEB="$WORK/existing"
+          FINAL_WEB="$WORK/final"
+          mkdir -p "$EXISTING_WEB" "$FINAL_WEB"
+          UPLOADS=()
+          BUNDLE_NAME=$(basename "$BUNDLE")
+          MANIFEST_NAME=$(basename "$MANIFEST")
+          SIGNATURE_NAME="${MANIFEST_NAME}.sig"
+          if grep -Fqx "$BUNDLE_NAME" "$REMOTE_NAMES"; then
+            gh release download "$TAG" --pattern "$BUNDLE_NAME" --dir "$EXISTING_WEB"
+            cmp "$BUNDLE" "$EXISTING_WEB/$BUNDLE_NAME"
+          else
+            UPLOADS+=("$BUNDLE")
+          fi
+          if grep -Fqx "$MANIFEST_NAME" "$REMOTE_NAMES"; then
+            gh release download "$TAG" --pattern "$MANIFEST_NAME" --dir "$EXISTING_WEB"
+            cmp "$MANIFEST" "$EXISTING_WEB/$MANIFEST_NAME"
+          else
+            UPLOADS+=("$MANIFEST")
+          fi
+          if grep -Fqx "$SIGNATURE_NAME" "$REMOTE_NAMES"; then
+            gh release download "$TAG" --pattern "$SIGNATURE_NAME" --dir "$EXISTING_WEB"
+            bash scripts/verify-tauri-signature.sh \
+              "$MANIFEST" "$EXISTING_WEB/$SIGNATURE_NAME" desktop/src-tauri/updater.pub
+          else
+            UPLOADS+=("${MANIFEST}.sig")
+          fi
+          if [ "${#UPLOADS[@]}" -gt 0 ]; then
+            gh release upload "$TAG" "${UPLOADS[@]}"
+          fi
+          gh release download "$TAG" \
+            --pattern "$BUNDLE_NAME" \
+            --pattern "$MANIFEST_NAME" \
+            --pattern "$SIGNATURE_NAME" \
+            --dir "$FINAL_WEB"
+          cmp "$BUNDLE" "$FINAL_WEB/$BUNDLE_NAME"
+          cmp "$MANIFEST" "$FINAL_WEB/$MANIFEST_NAME"
+          bash scripts/verify-tauri-signature.sh \
+            "$FINAL_WEB/$MANIFEST_NAME" "$FINAL_WEB/$SIGNATURE_NAME" \
+            desktop/src-tauri/updater.pub
+
+      - name: Wait for verified Android run, then publish atomically
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$RELEASE_TAG"
+          VERSION="${TAG#v}"
+          EXPECTED_APK="hanni-${VERSION}-android.apk"
+          for i in $(seq 1 320); do
+            ANDROID_STATE=$(gh run list \
+              --workflow release-android.yml \
+              --event push \
+              --commit "$GITHUB_SHA" \
+              --limit 100 \
+              --json databaseId,headBranch,headSha,status,conclusion \
+              | python3 -c '
+          import json, sys
+          tag, sha = sys.argv[1:]
+          runs = [
+              run for run in json.load(sys.stdin)
+              if run.get("headBranch") == tag and run.get("headSha") == sha
+          ]
+          if any(run.get("conclusion") == "success" for run in runs):
+              print("success")
+          elif any(run.get("status") != "completed" for run in runs):
+              print("active")
+          elif runs:
+              print("failed")
+          else:
+              print("missing")
+          ' "$TAG" "$GITHUB_SHA")
+            if [ "$ANDROID_STATE" = success ]; then
+              if ! gh release view "$TAG" --json assets \
+                --jq '.assets[].name' | grep -Fqx "$EXPECTED_APK"; then
+                echo "Successful Android workflow did not leave the expected immutable APK" >&2
+                exit 1
+              fi
+              break
+            fi
+            if [ "$ANDROID_STATE" = failed ]; then
+              echo "Exact Android workflow failed; release remains a draft" >&2
+              exit 1
+            fi
+            if [ "$i" -eq 320 ]; then
+              echo "Exact Android workflow did not succeed; release remains a draft" >&2
+              exit 1
+            fi
+            echo "Waiting for verified Android run (state=$ANDROID_STATE, attempt $i/320)"
+            sleep 15
+          done
+          RELEASE_JSON="$RUNNER_TEMP/hanni-release-assets.json"
+          gh release view "$TAG" --json isDraft,assets > "$RELEASE_JSON"
+          python3 - "$RELEASE_JSON" "$VERSION" "$GITHUB_SHA" <<'PY'
+          import json, pathlib, sys
+
+          path, version, source = sys.argv[1:]
+          release = json.loads(pathlib.Path(path).read_text())
+          if release.get("isDraft") is not True:
+              raise SystemExit("release became public before verification completed")
+          names = {asset["name"] for asset in release.get("assets", [])}
+          short = source[:12]
+          required = {
+              "latest.json",
+              f"hanni-{version}-android.apk",
+              f"web-{version}-{short}.tar.gz",
+              f"web-manifest-{version}.json",
+              f"web-manifest-{version}.json.sig",
+          }
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"release assets missing: {missing}")
+          suffixes = (".dmg", ".app.tar.gz", ".app.tar.gz.sig")
+          absent = [suffix for suffix in suffixes if not any(name.endswith(suffix) for name in names)]
+          if absent:
+              raise SystemExit(f"desktop release assets missing suffixes: {absent}")
+          PY
+          MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          test "$GITHUB_SHA" = "$MAIN_SHA"
+          REMOTE_TAG_SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          test "$GITHUB_SHA" = "$REMOTE_TAG_SHA"
+          REMOTE_TAGS="$RUNNER_TEMP/hanni-production-tags.txt"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/tags?per_page=100" \
+            --jq '.[].name' > "$REMOTE_TAGS"
+          LATEST_TAG=$(gh release view --json tagName -q .tagName)
+          python3 - "$REMOTE_TAGS" "$TAG" "$LATEST_TAG" <<'PY'
+          import pathlib, re, sys
+
+          tags_path, current_tag, latest_tag = sys.argv[1:]
+
+          def version(tag):
+              match = re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)", tag)
+              if not match:
+                  raise SystemExit(f"invalid production tag: {tag}")
+              return tuple(map(int, match.groups()))
+
+          current = version(current_tag)
+          tags = []
+          for tag in pathlib.Path(tags_path).read_text(encoding="utf-8").splitlines():
+              match = re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag)
+              if match:
+                  tags.append((version(tag), tag))
+          if not tags or max(tags)[1] != current_tag:
+              raise SystemExit("a newer production tag exists; refusing to publish an older release")
+          if current <= version(latest_tag):
+              raise SystemExit("production version is not newer than the current public latest")
+          PY
+          test "$(git rev-list -n 1 "$TAG")" = "$GITHUB_SHA"
+          test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "true"
+          gh release edit "$TAG" --draft=false --latest
+          test "$(gh release view --json tagName -q .tagName)" = "$TAG"
+          test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "false"

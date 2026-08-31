@@ -4,9 +4,23 @@
 // Also opens the in-page panel from the context menu, the Alt+H command and
 // the toolbar popup.
 
-// Zero-config token: token.local.js (generated from api_token.txt, gitignored)
-// wins over whatever was pasted by hand — the file is the source of truth.
+// A Jobs-only token is loaded from a gitignored file when present. The master
+// automation token must never enter the extension.
+importScripts('api-policy.js');
 try { importScripts('token.local.js'); } catch { /* file absent — manual token */ }
+
+const storageReady = (async () => {
+  // Chrome Sync used to contain the master token. Remove it from every synced
+  // profile and deliberately do not migrate it into another store.
+  const legacy = await chrome.storage.sync.get(['port']);
+  if (legacy.port === 8235 || legacy.port === 8236) {
+    await chrome.storage.local.set({ port: legacy.port });
+  }
+  await chrome.storage.sync.remove(['port', 'token']);
+  await chrome.storage.local.remove(['token']);
+  await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+})().catch(() => {});
 
 // Open the panel in the tab; if the page was loaded before the extension was
 // installed/reloaded, the content script isn't there yet (sendMessage has no
@@ -43,7 +57,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
   if (command === 'hanni-mark' && tab && tab.id != null) showPanel(tab.id);
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'hanni-mark-active-tab') {
     (async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -54,18 +68,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (!msg || msg.type !== 'hanni-api') return;
   (async () => {
-    const stored = await chrome.storage.sync.get(['port', 'token']);
-    const port = stored.port || 8235;
-    const token = ((self.HANNI_LOCAL_TOKEN || '') || stored.token || '').trim();
+    await storageReady;
+    if (sender.id !== chrome.runtime.id) {
+      sendResponse({ ok: false, status: 403, error: 'Forbidden sender' });
+      return;
+    }
+    const [{ port = 8235 }, { jobToken = '' }] = await Promise.all([
+      chrome.storage.local.get(['port']),
+      chrome.storage.session.get(['jobToken']),
+    ]);
+    const token = ((self.HANNI_LOCAL_JOB_TOKEN || '') || jobToken || '').trim();
+    if (!token) {
+      sendResponse({ ok: false, status: 401, error: 'Jobs token is not configured' });
+      return;
+    }
 
     async function call(p) {
-      const res = await fetch(`http://127.0.0.1:${p}${msg.path}`, {
-        method: msg.method || 'GET',
+      const request = self.HanniApiPolicy.validateApiMessage(msg, p);
+      if (!request) return { ok: false, status: 403, error: 'API request is not allowed' };
+      const res = await fetch(request.url, {
+        method: request.method,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: msg.body ? JSON.stringify(msg.body) : undefined,
+        body: request.body ? JSON.stringify(request.body) : undefined,
       });
       const data = await res.json().catch(() => null);
       return { ok: res.ok, status: res.status, data };
@@ -73,9 +100,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     // Configured port first; on 404 (build without the route, e.g. old prod)
     // or no server, fall back to the other one — dev and prod share the DB.
-    const fallbackPort = Number(port) === 8236 ? 8235 : 8236;
+    const configuredPort = self.HanniApiPolicy.ALLOWED_PORTS.has(Number(port)) ? Number(port) : 8235;
+    const fallbackPort = configuredPort === 8236 ? 8235 : 8236;
     try {
-      const out = await call(port);
+      const out = await call(configuredPort);
+      if (out.status === 403) { sendResponse(out); return; }
       if (out.status !== 404) { sendResponse(out); return; }
     } catch { /* server down on the configured port */ }
     try {

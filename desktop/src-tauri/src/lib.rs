@@ -429,7 +429,9 @@ pub fn run() {
     // updates land without a full app download. On macOS it becomes the main
     // window's source only in release builds (dev keeps its :1430 hot-reload).
     #[cfg(any(target_os = "android", target_os = "macos"))]
-    let builder = web_assets::register(builder);
+    let builder = web_assets::register(builder).on_page_load(|webview, payload| {
+        web_assets::note_page_load(webview, payload);
+    });
 
     // Plugin restores MAXIMIZED/FULLSCREEN/DECORATIONS/VISIBLE only.
     // POSITION/SIZE are handled in window_state.rs (sync atomic write to a
@@ -1021,19 +1023,29 @@ pub fn run() {
                 // default tauri.localhost origin, bypassing the hanniweb scheme
                 // (breaks OTA serving). The black flash is handled by the white
                 // android:windowBackground (themes.xml), not by reordering this.
-                web_assets::verify_trial_on_boot(app.handle());
+                let ota_owner = web_assets::acquire_ota_process_lease(app.handle());
+                if ota_owner {
+                    web_assets::reject_failed_trial_on_startup(app.handle());
                 // Drop a stale OTA bundle older than this (possibly just-updated)
                 // native shell so embedded assets aren't shadowed + we don't
                 // re-download an identical bundle.
                 web_assets::reconcile_native_baseline(app.handle());
+                web_assets::promote_next_bundle(app.handle());
+                    // A newly promoted bundle gets its durable first-boot marker
+                    // before any request can resolve into it.
+                    web_assets::prepare_current_trial_for_boot(app.handle());
+                    web_assets::begin_boot_session(app.handle());
+                }
+                let mut ota_navigated = false;
                 if let Some(win) = app.get_webview_window("main") {
-                    let url = format!("http://{}.localhost/index.html", web_assets::SCHEME);
+                    let url = web_assets::nav_url(app.handle());
                     match url.parse::<tauri::Url>() {
                         Ok(u) => {
                             if let Err(e) = win.navigate(u) {
                                 eprintln!("[hanni] web_assets navigate failed: {e}");
                             } else {
-                                eprintln!("[hanni] web_assets: main window -> {url}");
+                                eprintln!("[hanni] web_assets: main window -> signed web origin");
+                            ota_navigated = true;
                             }
                         }
                         Err(e) => eprintln!("[hanni] web_assets bad url: {e}"),
@@ -1041,7 +1053,10 @@ pub fn run() {
                 }
                 // Same-launch safety net: if a served OTA bundle never paints
                 // within the window, revert it and reload onto embedded assets.
+                if ota_navigated {
                 web_assets::arm_boot_watchdog(app.handle());
+            }
+
             }
 
             // macOS OTA web-assets: in release builds, serve the frontend via
@@ -1053,14 +1068,23 @@ pub fn run() {
             // to boot (serves embedded assets after one bad launch).
             #[cfg(all(target_os = "macos", not(debug_assertions)))]
             {
-                web_assets::verify_trial_on_boot(app.handle());
+                let ota_owner = web_assets::acquire_ota_process_lease(app.handle());
+                if ota_owner {
+                    web_assets::reject_failed_trial_on_startup(app.handle());
                 web_assets::reconcile_native_baseline(app.handle());
-                if web_assets::prepare_origin(app.handle()) {
+                }
+                if ota_owner && web_assets::prepare_origin(app.handle()) {
+                    web_assets::promote_next_bundle(app.handle());
+                    web_assets::prepare_current_trial_for_boot(app.handle());
+                    web_assets::begin_boot_session(app.handle());
                     if let Some(win) = app.get_webview_window("main") {
-                        let url = web_assets::nav_url();
+                        let url = web_assets::nav_url(app.handle());
                         match url.parse::<tauri::Url>() {
                             Ok(u) => match win.navigate(u) {
-                                Ok(()) => eprintln!("[hanni] web_assets: main window -> {url}"),
+                                Ok(()) => {
+                                    eprintln!("[hanni] web_assets: main window -> signed web origin");
+                                    web_assets::arm_boot_watchdog(app.handle());
+                                }
                                 Err(e) => eprintln!("[hanni] web_assets navigate failed: {e}"),
                             },
                             Err(e) => eprintln!("[hanni] web_assets bad url: {e}"),
@@ -1113,8 +1137,9 @@ pub fn run() {
             // HTTP API server (Phase 4)
             let api_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                spawn_api_server(api_handle).await;
-            });
+                if let Err(e) = spawn_api_server(api_handle).await{
+                    eprintln!("Failed to start API server: {e}");
+            }});
 
             // LAN sync — direct device↔device server (0.0.0.0:8244) + auto loop
             let lan_handle = app.handle().clone();

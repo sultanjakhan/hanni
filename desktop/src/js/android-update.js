@@ -20,17 +20,15 @@ export async function checkAndroidUpdate() {
 
 // Silently pull a newer web-asset bundle (HTML/JS/CSS) in the background so
 // JS/CSS-only changes don't need a full ~106MB APK reinstall. Downloaded +
-// verified + applied to app_data_dir/web/current; the custom protocol serves
-// it on the next launch. Gated by min_native_version (the bundle must be
-// compatible with the installed native shell). No-op until CI ships a
-// web-manifest.json in the release, and harmless if anything fails (the
-// protocol falls back to the APK-embedded assets).
+// verified + staged in app_data_dir/web/next; startup promotes one immutable
+// version before navigation. Gated by min_native_version and a signed,
+// versioned manifest. Failures fall back to the APK-embedded assets.
 export async function checkWebUpdate() {
   if (!IS_ANDROID) return;
   try {
     const u = await invoke('web_ota_check');
     if (!u?.available) return;
-    await invoke('web_ota_apply', { url: u.url, webVersion: u.web_version, sha256: u.sha256 });
+    await invoke('web_ota_apply');
     // Applied — the custom protocol serves the new bundle on next launch.
   } catch (e) {
     console.warn('[hanni] web ota failed', e);
@@ -44,15 +42,36 @@ export async function checkWebUpdate() {
 // for a real frame, then check the tab bar rendered nodes; if it never did, we
 // skip the confirm and let the watchdog fall back to the embedded assets.
 export async function confirmWebBoot() {
-  if (!IS_ANDROID) return;
+  const customOrigin = !location.port && (
+    (location.protocol === 'hanniweb:' && location.hostname === 'localhost')
+    || (location.protocol === 'http:' && location.hostname === 'hanniweb.localhost')
+  );
+  if (!customOrigin) return false;
   const painted = await new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const bar = document.getElementById('tab-bar');
       resolve(!!bar && bar.children.length > 0);
     }));
   });
-  if (!painted) return;
-  try { await invoke('web_ota_boot_ok'); } catch {}
+  if (!painted) return false;
+  const match = /^#hanni-ota-boot=([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(location.hash);
+  const nonce = match?.[1];
+  // A custom-origin page can legitimately be backed by the native embedded
+  // assets (for example after rollback). It may continue startup, but only an
+  // OTA index receives the per-launch nonce that is allowed to commit a trial.
+  if (!nonce) return true;
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await invoke('web_ota_boot_ok', { nonce });
+      return true;
+    } catch (e) {
+      lastError = e;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  console.warn('[hanni] web ota boot confirmation failed', lastError);
+  return false;
 }
 
 // Both platforms: when an OTA web bundle was applied since the last launch, show
@@ -105,10 +124,10 @@ export async function desktopWebOTA() {
   }
   if (proto !== 'hanniweb:') return; // dev server / non-macOS → nothing to do
 
-  // New origin: reaching here means the custom-scheme serve booted. Confirm it
-  // (keeps the switch + any trial bundle) so a white screen self-reverts.
+  // Confirm both transitions only after two rendered frames and a populated
+  // tab bar. Merely executing this module is not proof against a white screen.
+  if (!await confirmWebBoot()) return;
   try { await invoke('web_origin_ok'); } catch {}
-  try { await invoke('web_ota_boot_ok'); } catch {}
 
   // One-time: repopulate the localStorage exported under the old origin.
   if (!localStorage.getItem('__ls_migrated')) {
@@ -127,7 +146,7 @@ export async function desktopWebOTA() {
   // Pull a newer web bundle if one shipped (applied on next launch).
   try {
     const u = await invoke('web_ota_check');
-    if (u?.available) await invoke('web_ota_apply', { url: u.url, webVersion: u.web_version, sha256: u.sha256 });
+    if (u?.available) await invoke('web_ota_apply');
   } catch (e) { console.warn('[hanni] web ota failed', e); }
 }
 

@@ -13,7 +13,7 @@ export async function renderMealPlanBlock(date) {
     const label = MEAL_LABELS[m.meal_type] || m.meal_type;
     const color = MEAL_COLORS[m.meal_type] || 'var(--text-secondary)';
     return `<div class="meal-plan-item" data-meal-id="${m.id}">
-      <span class="meal-plan-type" style="color:${color};">${label}</span>
+      <span class="meal-plan-type" style="color:${color};">${escapeHtml(label)}</span>
       <span class="meal-plan-name">${escapeHtml(m.recipe_name)}</span>
       <span class="meal-plan-cal">${m.calories || '—'} kcal</span>
       <button class="meal-plan-del" data-del-id="${m.id}" title="Убрать">&times;</button>

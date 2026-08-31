@@ -4,12 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "vendor:check": "node scripts/check-vendor.mjs",
+    "test:security": "node --test tests/security.test.mjs && node ../apps/jobs-extension/api-policy.test.js"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "jsdom": "29.1.1"
   },
   "dependencies": {
+    "dompurify": "3.4.14",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.3",
     "three": "^0.183.2"

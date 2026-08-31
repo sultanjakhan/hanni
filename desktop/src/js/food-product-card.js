@@ -19,7 +19,7 @@ export function renderProductCard(product, opts = {}) {
   div.dataset.blValue = product.name;
   div.dataset.blId = product.id;
   const color = CAT_COLORS[product.category] || 'gray';
-  const label = CAT_LABELS[product.category] || product.category;
+  const label = CAT_LABELS[product.category] || CAT_LABELS.other;
   const catCls = blockedCategory ? ' product-card-tag--blocked' : '';
   const tagsHtml = (product.tags || '').split(',').filter(Boolean)
     .map(t => {
@@ -32,9 +32,12 @@ export function renderProductCard(product, opts = {}) {
     : productLevel === 'love' ? '<span class="product-card-blocked-icon" title="Люблю">💚</span>' : '';
   div.innerHTML = `
     <div class="product-card-name">${blockIcon}${esc(product.name)}</div>
-    <div class="product-card-tags"><span class="product-card-cat product-cat-${color}${catCls}">${label}</span>${tagsHtml}</div>
+    <div class="product-card-tags"><span class="product-card-cat product-cat-${color}${catCls}">${esc(label)}</span>${tagsHtml}</div>
     <button class="bl-quick" title="В блэклист">⊘</button>`;
   return div;
 }
 
-function esc(s) { return s.replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}

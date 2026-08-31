@@ -1002,6 +1002,10 @@ pub fn api_token_path() -> PathBuf {
     hanni_data_dir().join("api_token.txt")
 }
 
+pub fn jobs_api_token_path() -> PathBuf {
+    hanni_data_dir().join("jobs_api_token.txt")
+}
+
 /// Write a secret to `path` with owner-only perms applied atomically at
 /// creation (mode 0600), closing the brief world-readable window the old
 /// write-then-chmod sequence left. set_permissions still runs to repair any
@@ -1079,22 +1083,71 @@ pub fn list_automation_log(limit: Option<i64>, db: tauri::State<'_, HanniDb>) ->
     Ok(out)
 }
 
-pub fn get_or_create_api_token() -> String {
-    let path = api_token_path();
-    if path.exists() {
-        if let Ok(token) = std::fs::read_to_string(&path) {
-            let token = token.trim().to_string();
-            if !token.is_empty() {
-                return token;
-            }
+fn get_or_create_token(path: PathBuf) -> Result<String, String> {
+    match read_token_file(&path ) {
+        Ok(token) => return Ok(token),
+        Err(_) if !path.exists() => {
         }
+        Err(e) => return Err(e),
     }
     let token = uuid::Uuid::new_v4().to_string();
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
-    let _ = write_secret_file(&path, &token);
-    token
+    match create_secret_file(&path, &token) {
+            Ok(()) => Ok(token ),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_token_file(&path),
+        Err(e) => Err(format!("write {}: {e}", path.display())),
+    }
+}
+
+fn create_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+            #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    if let Err(e) = file
+        .write_all(contents.as_bytes())
+        .and_then(|_| file.sync_all() )
+    {
+                drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+fn read_token_file(path: &std::path::Path) -> Result<String, String> {
+    let token = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let token = token.trim();
+    if token
+.is_empty() {
+        return Err(format!("token file is empty: {}", path.display()));
+    }
+    let parsed = uuid::Uuid::parse_str(token)
+        .map_err(|_| format!("token file is not a canonical UUID: {}", path.display()))?;
+    let canonical = parsed.hyphenated().to_string();
+    if token != canonical {
+        return Err(format!("token file is not canonical: {}", path.display()));
+    }
+    Ok(canonical)
+}
+
+pub fn get_or_create_api_token() -> Result<String, String> {
+    get_or_create_token(api_token_path())
+}
+
+pub fn get_or_create_jobs_api_token() -> Result<String, String> {
+    get_or_create_token(jobs_api_token_path())
 }
 
 /// Shared state of the local HTTP API (:8236 dev / :8235 prod).
@@ -1103,6 +1156,9 @@ pub fn get_or_create_api_token() -> String {
 pub struct ApiState {
     pub app: AppHandle,
     pub token: String,
+    /// Least-privilege credential accepted only by the Jobs vacancy routes.
+    /// It must never authenticate `/auto/eval` or the general local API.
+    pub jobs_token: String,
     // (count, window_start_epoch_secs) keyed by source IP.
     pub rate_limit: std::sync::Arc<std::sync::Mutex<HashMap<String, (u32, i64)>>>,
 }
@@ -1126,16 +1182,18 @@ pub fn check_auth(headers: &axum::http::HeaderMap, token: &str) -> Result<(), (a
     }
 }
 
-pub async fn spawn_api_server(app_handle: AppHandle) {
+pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
     use axum::{Router, routing::{get, post}, extract::{State as AxumState, Query, DefaultBodyLimit}, Json, http::{StatusCode, HeaderMap}};
     use std::sync::{Arc, Mutex};
 
-    let api_token = get_or_create_api_token();
+    let api_token = get_or_create_api_token()?;
+    let jobs_api_token = get_or_create_jobs_api_token()?;
 
     // /auto/eval body cap: a single eval script over this size is almost
     // certainly malicious or a runaway log dump. 256 KiB matches the
     // share-server body limit (share_auth::BODY_LIMIT_BYTES).
     const AUTO_EVAL_BODY_LIMIT: usize = 256 * 1024;
+    const JOBS_API_BODY_LIMIT: usize = 16 * 1024;
     // Rate-limit per IP: same posture as share_auth::RATE_LIMIT_PER_MINUTE.
     // Server is loopback-only so the IP is effectively always 127.0.0.1,
     // but keying by IP keeps the door open for future tunneling.
@@ -1146,6 +1204,7 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
     let state = ApiState {
         app: app_handle.clone(),
         token: api_token,
+        jobs_token: jobs_api_token,
         rate_limit: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -1450,7 +1509,7 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         .route("/api/chat", post(api_chat))
         .route("/api/memory/search", get(api_memory_search))
         .route("/api/memory", post(api_memory_add))
-        .route("/api/vacancy", get(crate::api_jobs::api_vacancy_lookup).post(crate::api_jobs::api_vacancy_save))
+        .route("/api/vacancy", get(crate::api_jobs::api_vacancy_lookup).post(crate::api_jobs::api_vacancy_save).layer(DefaultBodyLimit::max(JOBS_API_BODY_LIMIT)))
         .route(
             "/auto/eval",
             post(auto_eval).layer(DefaultBodyLimit::max(AUTO_EVAL_BODY_LIMIT)),
@@ -1459,15 +1518,8 @@ pub async fn spawn_api_server(app_handle: AppHandle) {
         .with_state(state);
 
     let port = if cfg!(debug_assertions) { 8236 } else { 8235 };
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await;
-    match listener {
-        Ok(listener) => {
-            let _ = axum::serve(listener, app).await;
-        }
-        Err(e) => {
-            eprintln!("Failed to start API server: {}", e);
-        }
-    }
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.map_err(|e| format!("API server bind: {e}") )?;
+    axum::serve(listener, app).await.map_err(|e| format!("API server: {e}"))
 }
 
 pub fn find_python() -> Option<String> {
@@ -1594,29 +1646,6 @@ fn updater_log(msg: &str) {
     }
 }
 
-// Walk up from the current executable to find the enclosing `.app` bundle.
-// Returns None when not running from a bundle (e.g. `cargo run`).
-fn current_app_bundle() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let mut cur = exe.parent()?;
-    loop {
-        if cur.extension().and_then(|s| s.to_str()) == Some("app") {
-            return Some(cur.to_path_buf());
-        }
-        cur = cur.parent()?;
-    }
-}
-
-// Strip quarantine xattr from the bundle so Gatekeeper doesn't block the
-// freshly-replaced ad-hoc-signed app (we have no Apple Developer ID).
-fn clear_quarantine(bundle: &std::path::Path) {
-    let status = Command::new("xattr")
-        .args(["-dr", "com.apple.quarantine"])
-        .arg(bundle)
-        .status();
-    updater_log(&format!("xattr -dr com.apple.quarantine {} -> {:?}", bundle.display(), status));
-}
-
 async fn run_update(
     app: &AppHandle,
     update: tauri_plugin_updater::Update,
@@ -1671,9 +1700,6 @@ async fn run_update(
     match res {
         Ok(()) => {
             updater_log(&format!("install ok: v{}", version));
-            if let Some(bundle) = current_app_bundle() {
-                clear_quarantine(&bundle);
-            }
             let _ = app.emit("update-ready", &version);
             Ok(format!("Готово — перезапусти Hanni для v{}.", version))
         }
@@ -1739,4 +1765,3 @@ pub async fn auto_check_on_startup(app: AppHandle) {
         Err(e) => updater_log(&format!("auto: check error: {}", e)),
     }
 }
-

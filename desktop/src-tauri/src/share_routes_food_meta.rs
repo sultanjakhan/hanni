@@ -5,6 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use tauri::Manager;
@@ -14,6 +15,52 @@ use crate::share_auth::{
 };
 use crate::share_server::ShareServerState;
 use crate::types::HanniDb;
+
+pub(crate) const CATALOG_CATEGORIES: [&str; 13] = [
+    "meat", "fish", "veg", "fruit", "grain", "dairy", "legumes", "nuts", "spice", "oil", "bakery",
+    "drinks", "other",
+];
+
+fn contains_unsafe_text(value: &str) -> bool {
+    value
+        .chars()
+        .any(|c| c.is_control() || "<>&\"'".contains(c))
+}
+
+fn validate_cuisine_fields(
+    code: &str,
+    name: &str,
+    emoji: &str,
+) -> Result<(String, String, String), (StatusCode, String)> {
+    let (code, name, emoji) = (code.trim(), name.trim(), emoji.trim());
+    if code.is_empty()
+        || code.len() > 32
+        || !code
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err((StatusCode::BAD_REQUEST, "invalid cuisine code".into()));
+    }
+    if name.is_empty() || name.chars().count() > 80 || contains_unsafe_text(name) {
+        return Err((StatusCode::BAD_REQUEST, "invalid cuisine name".into()));
+    }
+    if emoji.is_empty() || emoji.chars().count() > 16 || contains_unsafe_text(emoji) {
+        return Err((StatusCode::BAD_REQUEST, "invalid cuisine emoji".into()));
+    }
+    Ok((code.to_string(), name.to_string(), emoji.to_string()))
+}
+
+fn validated_catalog_category(value: Option<&str>) -> Result<String, (StatusCode, String)> {
+    let category = value.unwrap_or("other").trim();
+    if CATALOG_CATEGORIES.contains(&category) {
+        Ok(category.to_string())
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            "invalid ingredient category".into(),
+        ))
+    }
+}
 
 fn check_food_recipes_scope(ctx: &crate::share_auth::LinkCtx) -> Result<(), (StatusCode, String)> {
     if ctx.tab != "food" || !ctx.has_scope("recipes") {
@@ -113,12 +160,22 @@ pub async fn create_blacklist_item(
     }
     let req: AddBlacklistReq = serde_json::from_slice(&body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
-    if !["tag", "product", "category", "keyword"].contains(&req.entry_type.as_str()) {
-        return Err((StatusCode::BAD_REQUEST, "type must be tag|product|category|keyword".into()));
+    if !["tag", "product", "category"].contains(&req.entry_type.as_str()) {
+        return Err((StatusCode::BAD_REQUEST, "type must be tag|product|category".into()));
     }
     let value = req.value.trim().to_lowercase();
-    if value.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "value is required".into()));
+    if value.is_empty() || value.len() > 200 || value.chars().any(char::is_control) {
+        return Err((StatusCode::BAD_REQUEST, "value is invalid or too long".into(),
+        ));
+    }
+    if req.entry_type == "category" && !CATALOG_CATEGORIES.contains(&value.as_str()) {
+        return Err((StatusCode::BAD_REQUEST, "unknown catalog category".into()));
+    }
+    if req.entry_type != "product" && req.catalog_id.is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "catalog_id is valid only for product entries".into(),
+        ));
     }
     let (ua, ip) = ua_ip(&headers, &addr);
 
@@ -130,7 +187,33 @@ pub async fn create_blacklist_item(
 
     // Mirror Hanni's add_food_blacklist: auto-resolve catalog_id for type=product.
     let cat_id: Option<i64> = match req.catalog_id {
-        Some(id) => Some(id),
+        Some(id) if id > 0 => {
+            let catalog_name: Option<String> = conn
+                .query_row(
+                    "SELECT name FROM ingredient_catalog WHERE id=?1",
+                    rusqlite::params![id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            if catalog_name
+                .as_deref()
+                .map(crate::db::normalize_name)
+                .as_deref()
+                != Some(value.as_str())
+            {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "catalog_id does not match product value".into(),
+                ));
+            }
+            Some(id)}
+        Some(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+        "catalog_id must be positive".into(),
+            ))
+        }
         None if req.entry_type == "product" => crate::db::resolve_catalog_id_by_name(&conn, &value),
         None => None,
     };
@@ -218,9 +301,8 @@ pub async fn create_cuisine(
     }
     let req: AddCuisineReq = serde_json::from_slice(&body)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
-    if req.code.trim().is_empty() || req.name.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "code + name required".into()));
-    }
+    let (code, name, em)=
+        validate_cuisine_fields(&req.code, &req.name, req.emoji.as_deref() .unwrap_or("🌍"))?;
     let (ua, ip) = ua_ip(&headers, &addr);
 
     let db = state.app.state::<HanniDb>();
@@ -228,13 +310,12 @@ pub async fn create_cuisine(
     let ctx = load_link(&conn, &token)?;
     require_perm(&ctx, "add")?;
     check_food_recipes_scope(&ctx)?;
-    let em = req.emoji.unwrap_or_else(|| "🌍".into());
     conn.execute(
         "INSERT OR IGNORE INTO custom_cuisines (code, name, emoji, is_default) VALUES (?1,?2,?3,0)",
-        rusqlite::params![req.code, req.name, em],
+        rusqlite::params![&code, &name, &em],
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     log_activity(&conn, ctx.id, "add_cuisine",
-        &serde_json::json!({ "code": req.code, "name": req.name }).to_string(), &ip, &ua);
+        &serde_json::json!({ "code": code, "name": name }).to_string(), &ip, &ua);
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -269,8 +350,11 @@ pub async fn create_catalog_item(
     if ctx.tab != "food" || !(ctx.has_scope("recipes") || ctx.has_scope("products")) {
         return Err((StatusCode::FORBIDDEN, "Scope does not include recipes or products".into()));
     }
-    let cat = req.category.unwrap_or_else(|| "other".into());
+    let cat = validated_catalog_category(req.category.as_deref())?;
     let trimmed = req.name.trim();
+    if trimmed.chars().count() > 120 || trimmed.chars().any(|c| c.is_control()) {
+        return Err((StatusCode::BAD_REQUEST, "invalid ingredient name".into()));
+    }
     conn.execute(
         "INSERT OR IGNORE INTO ingredient_catalog (name, category, tags) VALUES (?1,?2,'')",
         rusqlite::params![trimmed, cat],
@@ -283,4 +367,23 @@ pub async fn create_catalog_item(
         &serde_json::json!({ "name": req.name, "category": cat }).to_string(), &ip, &ua);
     crate::sync_share::mark_dirty(&conn, "ingredient_catalog");
     Ok(Json(serde_json::json!({ "id": id, "status": "ok" })))
+}
+#[cfg(test)]
+mod food_meta_security_tests {
+    use super::*;
+
+    #[test]
+    fn cuisine_fields_reject_markup_and_control_characters() {
+        assert!(validate_cuisine_fields("kz", "Казахская", "🇰🇿").is_ok());
+        assert!(validate_cuisine_fields("x", "X", "<img onerror=x>").is_err());
+        assert!(validate_cuisine_fields("x\" y", "X", "🌍").is_err());
+        assert!(validate_cuisine_fields("x", "bad\nname", "🌍").is_err());
+    }
+
+    #[test]
+    fn catalog_category_is_an_enum() {
+        assert_eq!(validated_catalog_category(Some("veg")).unwrap(), "veg");
+        assert_eq!(validated_catalog_category(None).unwrap(), "other");
+        assert!(validated_catalog_category(Some("x\" onfocus=\"alert(1)")).is_err());
+    }
 }

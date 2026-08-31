@@ -2,7 +2,7 @@
 // Runs on 127.0.0.1:8239 (prod) / 8240 (dev). Cloudflare Tunnel exposes it to the internet.
 
 use axum::{
-    extract::{Path, Request, State as AxumState},
+    extract::{DefaultBodyLimit, Path, Request, State as AxumState},
     http::{HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{Html, Response},
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-use crate::share_auth::{html_escape, load_link, rate_limit_check};
+use crate::share_auth::{html_escape, load_link, rate_limit_check, BODY_LIMIT_BYTES};
 use crate::share_routes_comments::{create_comment, list_comments};
 use crate::share_routes_food_meta::{create_blacklist_item, create_catalog_item, create_cuisine, delete_blacklist_item, list_blacklist, list_cuisines, list_fridge};
 use crate::share_routes_meal_plan::{create_meal_plan, delete_meal_plan, list_meal_plan};
@@ -76,6 +76,9 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .route("/s/{token}/assets/fridge-shared.js", get(asset_js_fridge_shared))
         .route("/s/{token}/assets/guest_fridge.js", get(asset_js_fridge))
         .with_state(state)
+        // Reject oversized bodies before Bytes/Json extractors allocate them.
+        // Handler-level checks remain as defense in depth.
+        .layer(DefaultBodyLimit::max(BODY_LIMIT_BYTES))
         // Strip Referer on outbound navigation — share-link tokens live in
         // URL paths, leaking them via the Referer header to any external
         // page a guest happens to open is a token-exposure risk.

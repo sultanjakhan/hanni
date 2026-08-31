@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "=2.11.1", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-updater = "2"
@@ -34,16 +34,19 @@ uuid = { version = "1", features = ["v4", "v5", "v7"] }
 tempfile = "3"
 sqlite-vec = "0.1"
 rmcp = { version = "1.2", features = ["client", "transport-child-process"] }
-jsonwebtoken = "9"          # Firebase service-account JWT signing for cloud-share
+jsonwebtoken = { version = "=10.3.0", features = ["aws_lc_rs"] } # Firebase service-account JWT signing
 sha2 = "0.10"               # owner_uid derivation from service-account email (Stage C)
 hex = "0.4"
 percent-encoding = "2"      # URL-encode OAuth params (Stage C.1 Google Auth)
 subtle = "2.5"              # constant-time byte comparison for API token (AUTO-001)
+shlex = "=1.3.0"            # tokenize the restricted run_shell language without a shell
 chacha20poly1305 = "0.10"   # XChaCha20-Poly1305 AEAD for owner-sync E2E (Tier 3)
 hmac = "0.12"               # HMAC-SHA256 for opaque sync file names (Tier 3)
 base64 = "0.22"             # encode E2E blobs for GitHub Git Data API (Tier 3)
-tar = "0.4"                 # extract OTA web-asset bundle (Android, web_assets.rs)
+minisign-verify = "=0.2.4"  # verify signed web-OTA manifests before parsing
+tar = "=0.4.46"             # extract OTA web-asset bundle (Android, web_assets.rs)
 flate2 = "1"                # gunzip OTA web-asset bundle (Android, web_assets.rs)
+libc = "0.2"                # terminate the complete restricted-command process group on Unix
 
 # Desktop-only dependencies (not available on Android)
 [target.'cfg(not(target_os = "android"))'.dependencies]

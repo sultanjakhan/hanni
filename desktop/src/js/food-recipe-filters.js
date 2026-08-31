@@ -41,7 +41,7 @@ export function catalogCat(name) {
   if (!_catalogCache) return '';
   const lc = name.toLowerCase();
   const item = _catalogCache.find(c => c.name.toLowerCase() === lc);
-  return item ? item.category : '';
+  return item && CAT_ORDER.includes(item.category) ? item.category : '';
 }
 
 let _blacklistCache = null;

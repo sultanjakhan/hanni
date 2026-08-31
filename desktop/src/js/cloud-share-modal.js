@@ -108,8 +108,11 @@ export async function openCloudShareModal() {
     msg.textContent = 'Сброс…';
     try {
       await invoke('web_reset_bundle');
+    } catch (e) {
+      msg.textContent = 'Ошибка: ' + (e?.message || e);
+    } finally {
       location.reload();
-    } catch (e) { msg.textContent = 'Ошибка: ' + (e?.message || e); }
+    }
   };
 
   const googleBox  = overlay.querySelector('#cs-google');

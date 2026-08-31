@@ -234,7 +234,7 @@ export async function showCookWhatModal(date, onSaved, searchSeed) {
 
   function renderCats() {
     overlay.querySelector('#cw-cats').innerHTML = ['all', ...usedCats].map(c =>
-      `<button type="button" class="rf-chip ${cat === c ? 'active' : ''}" data-cw-cat="${c}">${c === 'all' ? 'Все' : escapeHtml(CW_CAT_LABELS[c] || c)}</button>`).join('');
+      `<button type="button" class="rf-chip ${cat === c ? 'active' : ''}" data-cw-cat="${escapeHtml(c)}">${c === 'all' ? 'Все' : escapeHtml(CW_CAT_LABELS[c] || c)}</button>`).join('');
     overlay.querySelectorAll('[data-cw-cat]').forEach(b => b.onclick = () => { cat = b.dataset.cwCat; renderCats(); renderList(); });
   }
   function renderList() {

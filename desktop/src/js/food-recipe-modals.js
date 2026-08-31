@@ -2,21 +2,12 @@
 import { invoke } from './state.js';
 import { escapeHtml, confirmModal, toast } from './utils.js';
 import { loadCuisines, catalogCat, CAT_LABELS } from './food-recipe-filters.js';
+import { parseRecipeSteps } from './recipe-step-security.js';
 
 // instructions holds either a JSON array of {text,min,ingredients} (new) or
 // legacy newline-separated text. Normalise both to a step array.
 export function parseSteps(raw) {
-  const s = (raw || '').trim();
-  if (s.startsWith('[')) {
-    try {
-      const arr = JSON.parse(s);
-      if (Array.isArray(arr)) return arr
-        .map(x => ({ text: String(x.text || ''), min: x.min || 0, ingredients: Array.isArray(x.ingredients) ? x.ingredients : [] }))
-        .filter(x => x.text);
-    } catch { /* fall through to legacy */ }
-  }
-  return s.split('\n').map(l => l.trim()).filter(Boolean)
-    .map(l => ({ text: l.replace(/^\d+\.\s*/, ''), min: 0, ingredients: [] }));
+  return parseRecipeSteps(raw);
 }
 
 function stepsHtml(steps) {
@@ -68,9 +59,10 @@ export async function showRecipeDetail(id, reloadFn) {
   // meta-tags from chip rendering — `shared-by:guest` is metadata, not UX.
   const mealHtml = (recipe.tags || '').split(/[,\s]+/).map(t => t.trim()).filter(Boolean)
     .filter(t => !t.startsWith('shared-by:'))
-    .map(t => `<span class="rd-tag rd-tag--meal">${MEAL_LABELS[t] || t}</span>`).join('');
+    .map(t => `<span class="rd-tag rd-tag--meal">${escapeHtml(MEAL_LABELS[t] || t)}</span>`).join('');
   const cuisines = await loadCuisines();
   const cuisineLabel = cuisines.find(c => c.id === recipe.cuisine)?.label || '🌍 Другая';
+  const imageSrc = window.HanniRecipe?.image?.safeSrc(recipe.image) || '';
   let isFav = recipe.favorite === 1;
   const p = recipe.protein || 0, f = recipe.fat || 0, c = recipe.carbs || 0;
   const bjuHtml = (p || f || c) ? `<span class="rd-tag">Белки ${p}г · Жиры ${f}г · Углеводы ${c}г (на 100 г)</span>` : '';
@@ -88,7 +80,7 @@ export async function showRecipeDetail(id, reloadFn) {
       </div>
     </div>
     ${recipe.description ? `<p style="color:var(--text-secondary);font-size:13px;margin:0 0 12px;">${escapeHtml(recipe.description)}</p>` : ''}
-    ${recipe.image ? `<img class="rd-photo" src="${recipe.image}" alt="">` : ''}
+    ${imageSrc ? `<img class="rd-photo" src="${imageSrc}" alt="">` : ''}
     <div class="rd-stats">
       <div class="rd-stat"><div class="rd-stat-val">${totalTime || '—'}</div><div class="rd-stat-lbl">минут</div></div>
       <div class="rd-stat">
@@ -99,7 +91,7 @@ export async function showRecipeDetail(id, reloadFn) {
     </div>
     <div class="rd-tags">
       ${mealHtml}
-      <span class="rd-tag">${cuisineLabel}</span>
+      <span class="rd-tag">${escapeHtml(cuisineLabel)}</span>
       <span class="rd-tag">Сложность: ${diffLabel}</span>
       <span class="rd-tag">❤ Полезность ${recipe.health_score || 5}/10</span>
       <span class="rd-tag">💰 Бюджет ${recipe.price_score || 5}/10</span>

@@ -3,7 +3,7 @@
 // resolve to a competency node by name. Plain [текст](url) links are
 // untouched and keep opening in the browser.
 
-import { renderMarkdown, escapeHtml } from './utils.js';
+import { renderMarkdown, sanitizeRenderedHtml, escapeHtml } from './utils.js';
 
 const WIKI_LINK_RE = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g;
 const TOKEN_RE = /\{\{\{WIKI(\d+)\}\}\}/g;
@@ -28,13 +28,17 @@ export function renderWikiMarkdown(text, nodeIndex) {
     links.push({ target: name.trim(), display: (label || name).trim() });
     return `{{{WIKI${links.length - 1}}}}`;
   });
-  return renderMarkdown(staged).replace(TOKEN_RE, (_, i) => {
-    const { target, display } = links[Number(i)];
+  const expanded = renderMarkdown(staged).replace(TOKEN_RE, (token, i) => {
+    const link = links[Number(i)];
+    if (!link) return escapeHtml(token);
+    const { target, display } = link;
     const id = nodeIndex && nodeIndex.get(target.toLowerCase());
-    if (id != null) {
-      return `<a class="wiki-link" data-node-id="${id}">${escapeHtml(display)}</a>`;
+    const numericId = Number(id);
+    if (Number.isSafeInteger(numericId) && numericId >= 0) {
+      return `<a class="wiki-link" data-node-id="${numericId}">${escapeHtml(display)}</a>`;
     }
     return `<a class="wiki-link wiki-link-red" data-node-name="${escapeHtml(target)}"`
       + ` title="Нажмите, чтобы создать страницу «${escapeHtml(target)}»">${escapeHtml(display)}</a>`;
   });
+  return sanitizeRenderedHtml(expanded, staged);
 }

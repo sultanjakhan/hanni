@@ -993,7 +993,7 @@ function renderVacanciesTable(el, vacancies) {
     fixedColumns: [
       { key: 'position', label: 'Позиция', editable: true, editType: 'text', render: r => `<span class="data-table-title">${escapeHtml(r.company && r.position ? `${r.company} — ${r.position}` : r.position || r.company || '')}</span>` },
       { key: 'stage', label: 'Этап', editable: true, editType: 'select', editOptions: stageOptions, render: r => `<span class="badge ${stageColors[r.stage] || 'badge-gray'}">${stageLabels[r.stage] || r.stage}</span>` },
-      { key: 'url', label: 'Ссылка', editable: true, editType: 'text', render: r => r.url ? `<a href="#" onclick="event.preventDefault();window.__TAURI__.core.invoke('open_url',{url:'${r.url.replace(/'/g, "\\'")}'});return false;" class="text-link">Открыть</a>` : '—' },
+      { key: 'url', label: 'Ссылка', editable: true, editType: 'text', render: r => r.url ? `<a href="#" data-open-url="${escapeHtml(r.url)}" class="text-link">Открыть</a>` : '—' },
       { key: 'contact', label: 'Контакт', editable: true, editType: 'text', render: r => {
         const c = r.contact || '';
         if (!c) return '—';
@@ -1002,7 +1002,7 @@ function renderVacanciesTable(el, vacancies) {
           const raw = urlMatch[0];
           const full = raw.startsWith('http') ? raw : 'https://' + raw;
           const name = c.replace(raw, '').replace(/[—\-,]/g, '').trim();
-          return `<a href="#" onclick="event.preventDefault();window.__TAURI__.core.invoke('open_url',{url:'${full.replace(/'/g, "\\'")}'});return false;" class="text-link">${escapeHtml(name || raw)}</a>`;
+          return `<a href="#" data-open-url="${escapeHtml(full)}" class="text-link">${escapeHtml(name || raw)}</a>`;
         }
         return escapeHtml(c);
       } },

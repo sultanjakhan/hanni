@@ -3,6 +3,7 @@ use crate::types::*;
 use crate::prompts::SYSTEM_PROMPT;
 use crate::commands_meta::{start_focus, stop_focus};
 use chrono::Timelike;
+use rusqlite::OptionalExtension;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -2786,7 +2787,7 @@ pub fn add_food_blacklist(
     catalog_id: Option<i64>,
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
-    if !["tag","product","category","keyword","recipe"].contains(&entry_type.as_str()) {
+    if !["tag","product","category","recipe"].contains(&entry_type.as_str()) {
         return Err("invalid type".into());
     }
     let lvl = level.unwrap_or_else(|| "hard".into());
@@ -2795,17 +2796,44 @@ pub fn add_food_blacklist(
     }
     let conn = db.conn();
     let v = value.trim().to_lowercase();
-    if v.is_empty() { return Err("empty value".into()); }
+    if v.is_empty() || v.len() > 200 || v.chars().any(char::is_control) { return Err("invalid or too-long value".into()); }
+    if entry_type == "category"
+        && !crate::share_routes_food_meta::CATALOG_CATEGORIES.contains(&v.as_str())
+    {
+        return Err("unknown catalog category".into());
+    }
+    if entry_type != "product" && catalog_id.is_some() {
+        return Err("catalog_id is valid only for product entries".into());
+    }
+    let normalized_value = crate::db::normalize_name(&v);
     // Auto-resolve catalog_id for type=product when not provided.
     let cat_id: Option<i64> = match catalog_id {
-        Some(id) => Some(id),
+        Some(id) if id > 0 => {
+            let catalog_name: Option<String> = conn
+                .query_row(
+                    "SELECT name FROM ingredient_catalog WHERE id=?1",
+                    rusqlite::params![id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| format!("DB error: {e}"))?;
+            if catalog_name
+                .as_deref()
+                .map(crate::db::normalize_name)
+                .as_deref()
+                != Some(normalized_value.as_str())
+            {
+                return Err("catalog_id does not match product value".into());
+            }
+            Some(id)}
+        Some(_) => return Err("catalog_id must be positive".into()),
         None if entry_type == "product" => crate::db::resolve_catalog_id_by_name(&conn, &v),
         None => None,
     };
     // Upsert: re-adding an existing entry switches its level (hard ↔ soft).
     conn.execute(
         "INSERT INTO food_blacklist (type, value, level, catalog_id) VALUES (?1, ?2, ?3, ?4) \
-         ON CONFLICT(type, value) DO UPDATE SET level=excluded.level",
+         ON CONFLICT(type, value) DO UPDATE SET level=excluded.level, catalog_id=excluded.catalog_id",
         rusqlite::params![entry_type, v, lvl, cat_id],
     ).map_err(|e| format!("DB error: {}", e))?;
     let id: i64 = conn.query_row("SELECT id FROM food_blacklist WHERE type=?1 AND value=?2",
@@ -3001,6 +3029,9 @@ pub fn get_expiring_products(days: Option<i64>, db: tauri::State<'_, HanniDb>) -
 
 #[tauri::command]
 pub fn plan_meal(date: String, meal_type: String, recipe_id: i64, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<i64, String> {
+    if !["breakfast", "lunch", "dinner", "snack"].contains(&meal_type.as_str()) {
+        return Err("meal_type must be breakfast|lunch|dinner|snack".into());
+    }
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
     conn.execute(

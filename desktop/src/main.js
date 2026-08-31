@@ -428,7 +428,7 @@ document.addEventListener('keydown', (e) => {
     // One-time: ensure background HC read permission so the worker above can
     // actually read in the background (else HC auto-revokes sleep access).
     maybeRequestHealthBackground();
-    confirmWebBoot(); // current OTA bundle booted OK → keep it (no-op on desktop)
+    await confirmWebBoot(); // bind confirmation before any next-version download
     checkAndroidUpdate(); // GitHub Releases → APK update banner (no-op on desktop)
     checkWebUpdate(); // OTA web-asset bundle → applied for next launch (no-op on desktop)
   }

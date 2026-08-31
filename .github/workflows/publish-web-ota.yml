@@ -1,0 +1,207 @@
+name: Publish signed web OTA
+run-name: Publish web OTA ${{ inputs.web_version }} from ${{ inputs.source_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact commit from main to package
+        required: true
+        type: string
+      base_tag:
+        description: Latest native release tag, for example v1.1.6
+        required: true
+        type: string
+      web_version:
+        description: New immutable web version, for example 1.1.6.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hanni-web-ota-stable
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: macos-15
+    environment: hanni-production
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Verify immutable inputs and current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_TAG: ${{ inputs.base_tag }}
+          WEB_VERSION: ${{ inputs.web_version }}
+        run: |
+          python3 scripts/verify-updater-public-key.py
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$SOURCE_SHA" = "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$BASE_TAG" = "$(gh release view --json tagName -q .tagName)"
+          git merge-base --is-ancestor "$BASE_TAG" "$SOURCE_SHA"
+          python3 - "$BASE_TAG" "$WEB_VERSION" "$SOURCE_SHA" <<'PY'
+          import re, subprocess, sys
+          tag, web, source = sys.argv[1:]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+              raise SystemExit("invalid base_tag")
+          if not re.fullmatch(r"[0-9a-f]{40}", source):
+              raise SystemExit("invalid source_sha")
+          base = tag[1:]
+          m = re.fullmatch(re.escape(base) + r"\.([1-9][0-9]*)", web)
+          if not m:
+              raise SystemExit("web_version must be a strictly positive sequence on base_tag")
+
+          changed = subprocess.check_output(
+              ["git", "diff", "--name-only", tag, source], text=True
+          ).splitlines()
+          web_files = []
+          invalid = []
+          for path in changed:
+              if path.startswith(("desktop/src/sounds/", "desktop/src/assets/")):
+                  invalid.append(path)
+              elif path.startswith("desktop/src/"):
+                  web_files.append(path)
+              elif path.startswith(("docs/", ".claude/", ".github/", "scripts/")):
+                  pass
+              elif path.endswith("/CLAUDE.md") or path in {
+                  "README.md", "TASKS.md", "projects.yaml"
+              }:
+                  pass
+              else:
+                  invalid.append(path)
+          if invalid:
+              raise SystemExit(
+                  "native or unclassified changes cannot ship as web OTA:\n"
+                  + "\n".join(invalid)
+              )
+          if not web_files:
+              raise SystemExit("no web files changed since base_tag")
+          PY
+
+      - name: Install locked signing CLI
+        run: |
+          brew install minisign
+          npm --prefix desktop ci
+
+      - name: Build and sign immutable assets
+        id: build
+        env:
+          BASE_TAG: ${{ inputs.base_tag }}
+          WEB_VERSION: ${{ inputs.web_version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BASE_VER="${BASE_TAG#v}"
+          SEQUENCE="${WEB_VERSION##*.}"
+          SHORT_SHA="${SOURCE_SHA:0:12}"
+          WORK="$RUNNER_TEMP/hanni-web-ota"
+          STAGE="$WORK/src"
+          BUNDLE="$WORK/web-${WEB_VERSION}-${SHORT_SHA}.tar.gz"
+          MANIFEST="$WORK/web-manifest-${WEB_VERSION}.json"
+          rm -rf "$WORK"
+          mkdir -p "$STAGE"
+          git archive HEAD:desktop/src | tar -x -C "$STAGE"
+          python3 scripts/package-web-assets.py "$STAGE" "$BUNDLE"
+          SHA=$(shasum -a 256 "$BUNDLE" | cut -d' ' -f1)
+          SIZE=$(stat -f%z "$BUNDLE")
+          python3 - "$BASE_TAG" "$BASE_VER" "$WEB_VERSION" "$SEQUENCE" "$SOURCE_SHA" \
+            "$(basename "$MANIFEST")" "$(basename "$BUNDLE")" "$SIZE" "$SHA" > "$MANIFEST" <<'PY'
+          import json, sys
+          tag, native, web, sequence, source, manifest, asset, size, sha = sys.argv[1:]
+          doc = {
+              "schema": "hanni.web-ota.v1",
+              "repository": "sultanjakhan/hanni",
+              "channel": "stable",
+              "release_tag": tag,
+              "min_native_version": native,
+              "web_version": web,
+              "sequence": int(sequence),
+              "source_commit": source,
+              "manifest_asset": manifest,
+              "asset": asset,
+              "asset_size": int(size),
+              "asset_sha256": sha,
+          }
+          print(json.dumps(doc, separators=(",", ":")))
+          PY
+          npm --prefix desktop run tauri -- signer sign "$MANIFEST"
+          test -s "${MANIFEST}.sig"
+          bash scripts/verify-tauri-signature.sh \
+            "$MANIFEST" "${MANIFEST}.sig" desktop/src-tauri/updater.pub
+          echo "bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+          echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
+
+      - name: Upload once or resume exact immutable assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_TAG: ${{ inputs.base_tag }}
+          BUNDLE: ${{ steps.build.outputs.bundle }}
+          MANIFEST: ${{ steps.build.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          VERIFY="$RUNNER_TEMP/hanni-web-ota-verify"
+          rm -rf "$VERIFY"
+          mkdir -p "$VERIFY"
+          bash scripts/recover-starter-release-assets.sh \
+            "$BASE_TAG" "$(basename "$BUNDLE")" "$(basename "$MANIFEST")" \
+            "$(basename "$MANIFEST").sig"
+          REMOTE_NAMES="$VERIFY/remote-assets.txt"
+          gh release view "$BASE_TAG" --json assets --jq '.assets[].name' > "$REMOTE_NAMES"
+          EXISTING="$VERIFY/existing"
+          FINAL="$VERIFY/final"
+          mkdir -p "$EXISTING" "$FINAL"
+          UPLOADS=()
+          BUNDLE_NAME=$(basename "$BUNDLE")
+          MANIFEST_NAME=$(basename "$MANIFEST")
+          SIGNATURE_NAME="${MANIFEST_NAME}.sig"
+          if grep -Fqx "$BUNDLE_NAME" "$REMOTE_NAMES"; then
+            gh release download "$BASE_TAG" --pattern "$BUNDLE_NAME" --dir "$EXISTING"
+            cmp "$BUNDLE" "$EXISTING/$BUNDLE_NAME"
+          else
+            UPLOADS+=("$BUNDLE")
+          fi
+          if grep -Fqx "$MANIFEST_NAME" "$REMOTE_NAMES"; then
+            gh release download "$BASE_TAG" --pattern "$MANIFEST_NAME" --dir "$EXISTING"
+            cmp "$MANIFEST" "$EXISTING/$MANIFEST_NAME"
+          else
+            UPLOADS+=("$MANIFEST")
+          fi
+          if grep -Fqx "$SIGNATURE_NAME" "$REMOTE_NAMES"; then
+            gh release download "$BASE_TAG" --pattern "$SIGNATURE_NAME" --dir "$EXISTING"
+            bash scripts/verify-tauri-signature.sh \
+              "$MANIFEST" "$EXISTING/$SIGNATURE_NAME" desktop/src-tauri/updater.pub
+          else
+            UPLOADS+=("${MANIFEST}.sig")
+          fi
+          if [ "${#UPLOADS[@]}" -gt 0 ]; then
+            gh release upload "$BASE_TAG" "${UPLOADS[@]}"
+          fi
+          gh release download "$BASE_TAG" \
+            --pattern "$BUNDLE_NAME" \
+            --pattern "$MANIFEST_NAME" \
+            --pattern "$SIGNATURE_NAME" \
+            --dir "$FINAL"
+          cmp "$BUNDLE" "$FINAL/$BUNDLE_NAME"
+          cmp "$MANIFEST" "$FINAL/$MANIFEST_NAME"
+          bash scripts/verify-tauri-signature.sh \
+            "$FINAL/$MANIFEST_NAME" "$FINAL/$SIGNATURE_NAME" \
+            desktop/src-tauri/updater.pub

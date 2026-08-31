@@ -17,7 +17,7 @@
   }
 
   function chip(id, label, active) {
-    return `<button type="button" class="rf-chip${active ? ' active' : ''}" data-val="${id}">${esc(label)}</button>`;
+    return `<button type="button" class="rf-chip${active ? ' active' : ''}" data-val="${esc(id)}">${esc(label)}</button>`;
   }
   function acc(title, field, content, open) {
     return `<div class="rf-acc" data-field="${field}">
@@ -65,7 +65,7 @@
         <div class="form-group"><label class="form-label">Сложность</label><div class="add-chips" data-field="diff">${diffsHtml}</div></div>
         <div class="form-group"><label class="form-label">Кухня</label>
           <div style="position:relative;">
-            <input class="form-input" id="r-cuisine-input" placeholder="Поиск кухни..." value="${defC ? `${defC.emoji} ${esc(defC.name)}` : ''}" autocomplete="off">
+            <input class="form-input" id="r-cuisine-input" placeholder="Поиск кухни..." value="${defC ? esc(`${defC.emoji} ${defC.name}`) : ''}" autocomplete="off">
             <div class="ingr-autocomplete" id="r-cuisine-dd" style="display:none;width:100%;"></div>
           </div>
           <div id="new-cuisine-form" style="display:none;margin-top:6px;"></div>
@@ -207,7 +207,7 @@
       const lc = q.toLowerCase();
       const matches = lc ? cuisines.filter(c => c.name.toLowerCase().includes(lc)) : cuisines;
       dd.innerHTML = matches.map(c =>
-        `<div class="ingr-autocomplete-item" data-id="${esc(c.code)}">${c.emoji} ${esc(c.name)}</div>`).join('')
+        `<div class="ingr-autocomplete-item" data-id="${esc(c.code)}">${esc(c.emoji)} ${esc(c.name)}</div>`).join('')
         + `<div class="ingr-autocomplete-item ingr-autocomplete-create" data-id="__new__">+ Новая кухня</div>`;
       dd.style.display = '';
       dd.querySelectorAll('.ingr-autocomplete-item').forEach(opt => {
@@ -233,7 +233,8 @@
       form.querySelector('#nc-save').onclick = async () => {
         const n = form.querySelector('#nc-name')?.value?.trim(); if (!n) return;
         const em = form.querySelector('#nc-emoji')?.value?.trim() || '🌍';
-        const code = n.toLowerCase().replace(/\s+/g, '_').slice(0, 20);
+        const code = n.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 20)
+          || `cuisine_${Date.now()}`;
         try {
           await backend.addCuisine({ code, name: n, emoji: em });
           cuisines.push({ id: code, code, name: n, emoji: em });

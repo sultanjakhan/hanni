@@ -2,6 +2,7 @@
 
 import { invoke, S, TAB_REGISTRY, TAB_SETTINGS_DEFS, saveTabCustom, getTabDesc, loadTabSetting, saveTabSetting, tabLoaders } from './state.js';
 import { showEmojiPicker } from './emoji-picker.js';
+import { sanitizeMarkdownHtml } from './markdown-security.js';
 
 // ── Markdown rendering setup ──
 const markedInstance = new marked.Marked({
@@ -21,16 +22,27 @@ markedInstance.use({
         ? hljs.highlight(text, { language: lang }).value
         : hljs.highlightAuto(text).value;
       const langLabel = escapeHtml(lang || 'code');
-      return `<div class="code-block"><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent)">Копировать</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
+      return `<div class="code-block"><div class="code-header"><span>${langLabel}</span><button class="code-copy-btn" type="button">Копировать</button></div><pre><code class="hljs">${highlighted}</code></pre></div>`;
     },
     link({ href, text }) {
       return `<a href="#" class="md-link" data-href="${escapeHtml(href)}">${text}</a>`;
     },
+    // Marked deliberately preserves raw HTML. Hanni renders model and synced
+    // chat content inside a privileged Tauri WebView, so raw HTML is data, not
+    // markup. The DOMPurify pass below remains the final defense in depth.
+    html({ text }) {
+      return escapeHtml(text);
+    },
   },
 });
 
+export function sanitizeRenderedHtml(html, sourceFallback = '') {
+  return sanitizeMarkdownHtml(html, sourceFallback, window.DOMPurify);
+}
+
 export function renderMarkdown(text) {
-  return markedInstance.parse(text || '');
+  const source = text || '';
+  return sanitizeRenderedHtml(markedInstance.parse(source), source);
 }
 
 export function escapeHtml(text) {
@@ -82,7 +94,7 @@ export function escAttr(s) {
 export function chips(items, cur, group, filterAll = false) {
   const list = filterAll ? items.filter(o => o.id !== 'all') : items;
   return list.map(o =>
-    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${group}" data-val="${o.id}">${o.label}</button>`
+    `<button class="rf-chip${cur === o.id ? ' active' : ''}" data-group="${escapeHtml(group)}" data-val="${escapeHtml(String(o.id))}">${escapeHtml(String(o.label))}</button>`
   ).join('');
 }
 
@@ -390,10 +402,23 @@ export function migrateTextToBlocks(text) {
 
 // Delegated click handler for markdown links (safe — no inline onclick)
 document.addEventListener('click', (e) => {
+  const copy = e.target.closest('.code-copy-btn');
+  if (copy) {
+    const code = copy.closest('.code-block')?.querySelector('code')?.textContent || '';
+    navigator.clipboard.writeText(code).catch(() => {});
+    return;
+  }
   const link = e.target.closest('.md-link');
   if (link) {
     e.preventDefault();
     const url = link.dataset.href;
+    if (url) invoke('open_url', { url });
+    return;
+  }
+  const external = e.target.closest('[data-open-url]');
+  if (external) {
+    e.preventDefault();
+    const url = external.dataset.openUrl;
     if (url) invoke('open_url', { url });
   }
 });

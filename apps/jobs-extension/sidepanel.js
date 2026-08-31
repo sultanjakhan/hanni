@@ -93,11 +93,11 @@ function renderPort(port) {
   for (const b of portButtons) b.classList.toggle('active', b.dataset.port === String(port));
 }
 
-// token.local.js (generated from api_token.txt) is the source of truth when
-// present; manual paste is only the fallback. Hanni tokens are UUIDs, so on
+// token.local.js (generated from jobs_api_token.txt) is the source of truth
+// when present; manual paste is only the fallback. Hanni tokens are UUIDs, so on
 // manual input we extract the UUID from whatever was pasted around it.
 const UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
-const fileToken = (self.HANNI_LOCAL_TOKEN || '').trim();
+const fileToken = (self.HANNI_LOCAL_JOB_TOKEN || '').trim();
 
 function renderTokenState(token) {
   const el = $('token-state');
@@ -124,7 +124,9 @@ async function saveSettings() {
     token = m ? m[0] : raw.trim();
     if (m && raw.trim() !== m[0]) $('token').value = m[0];
   }
-  await chrome.storage.sync.set({ port: selectedPort(), token });
+  await chrome.storage.local.set({ port: selectedPort() });
+  if (fileToken || !token) await chrome.storage.session.remove('jobToken');
+  else await chrome.storage.session.set({ jobToken: token });
   renderTokenState(token);
 }
 
@@ -156,12 +158,15 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 });
 
 (async function init() {
-  const { port = 8235, token = '' } = await chrome.storage.sync.get(['port', 'token']);
+  await chrome.storage.sync.remove(['port', 'token']);
+  const [{ port = 8235 }, { jobToken: token = '' }] = await Promise.all([
+    chrome.storage.local.get(['port']),
+    chrome.storage.session.get(['jobToken']),
+  ]);
   renderPort(port);
   if (fileToken) {
     $('token').value = fileToken;
     $('token').disabled = true;
-    await chrome.storage.sync.set({ token: fileToken });
     renderTokenState(fileToken);
     refresh();
     return;
@@ -170,7 +175,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   renderTokenState(token);
   if (!token) {
     $('settings').open = true;
-    setStatus('Вставь токен из api_token.txt в настройках ниже', 'error');
+    setStatus('Вставь токен из jobs_api_token.txt в настройках ниже', 'error');
     return;
   }
   refresh();

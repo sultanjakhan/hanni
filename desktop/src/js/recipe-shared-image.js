@@ -3,6 +3,14 @@
 // window.HanniRecipe.image.compress(file) → Promise<dataURL>. The recipe photo
 // is stored as a JPEG data URL in the DB (no Rust file handling needed).
 (function () {
+  const MAX_IMAGE_DATA_URL = 512 * 1024;
+
+  function safeSrc(value) {
+    const src = typeof value === 'string' ? value.trim() : '';
+    if (!src || src.length > MAX_IMAGE_DATA_URL) return '';
+    return /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(src) ? src : '';
+  }
+
   function compress(file, max = 900, quality = 0.8) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -23,10 +31,9 @@
   }
 
   // Photo field markup for the wizard's step 1 (preview + pick button).
-  function fieldHtml(r) {
-    const img = (r && r.image) || '';
+  function fieldHtml() {
     return `<div class="form-group rw-photo">
-      <img class="rw-photo-img"${img ? '' : ' style="display:none"'} src="${img}">
+      <img class="rw-photo-img" style="display:none" alt="">
       <label class="btn-secondary rw-photo-btn">📷 Фото<input type="file" accept="image/*" id="r-photo" hidden></label>
     </div>`;
   }
@@ -35,17 +42,24 @@
   function attach(overlay, state) {
     const inp = overlay.querySelector('#r-photo');
     if (!inp) return;
+    const preview = overlay.querySelector('.rw-photo-img');
+    const initial = safeSrc(state.image);
+    state.image = initial;
+    if (preview && initial) {
+      preview.src = initial;
+      preview.style.display = '';
+    }
     inp.onchange = async () => {
       const f = inp.files && inp.files[0];
       if (!f) return;
       try {
-        state.image = await compress(f);
+        state.image = safeSrc(await compress(f));
         const im = overlay.querySelector('.rw-photo-img');
-        if (im) { im.src = state.image; im.style.display = ''; }
+        if (im && state.image) { im.src = state.image; im.style.display = ''; }
       } catch { /* ignore bad image */ }
     };
   }
 
   window.HanniRecipe = window.HanniRecipe || {};
-  window.HanniRecipe.image = { compress, fieldHtml, attach };
+  window.HanniRecipe.image = { compress, safeSrc, fieldHtml, attach };
 })();

@@ -7,16 +7,31 @@
   const MEAL_LABELS = { breakfast: 'Завтрак', lunch: 'Обед', dinner: 'Ужин', universal: 'Универсал' };
   const MEAL_COLORS = { breakfast: 'green', lunch: 'yellow', dinner: 'red', universal: 'blue' };
   const DIFF_LABELS = { easy: 'Лёгкий', medium: 'Средний', hard: 'Сложный' };
+  const CATEGORIES = new Set(['meat', 'fish', 'veg', 'fruit', 'grain', 'dairy', 'legumes', 'nuts', 'spice', 'oil', 'bakery', 'drinks', 'other']);
   const CUISINES = { kz: '🇰🇿 Казахская', ru: '🇷🇺 Русская', it: '🇮🇹 Итальянская', jp: '🇯🇵 Японская', cn: '🇨🇳 Китайская', other: '🌍 Другое' };
 
   // instructions = JSON array of {text,min,ingredients} (new) | legacy lines.
+  function normalizeMinutes(value) {
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes)) return 0;
+    return Math.min(24 * 60, Math.max(0, Math.trunc(minutes)));
+  }
   function parseSteps(raw) {
-    const s = (raw || '').trim();
+    const s = String(raw || '').trim();
     if (s.startsWith('[')) {
       try {
         const arr = JSON.parse(s);
         if (Array.isArray(arr)) return arr
-          .map(x => ({ text: String(x.text || ''), min: x.min || 0, ingredients: Array.isArray(x.ingredients) ? x.ingredients : [] }))
+          .map(value => {
+            const x = value && typeof value === 'object' ? value : {};
+            return {
+              text: String(x.text || '').trim(),
+              min: normalizeMinutes(x.min),
+              ingredients: Array.isArray(x.ingredients)
+                ? x.ingredients.map(n => String(n ?? '').trim()).filter(Boolean).slice(0, 100)
+                : [],
+            };
+          })
           .filter(x => x.text);
       } catch { /* legacy */ }
     }
@@ -64,7 +79,9 @@
         const data = await fetchListAndCatalog();
         state.recipes = data.recipes || [];
         state.catalog = {};
-        (data.catalog || []).forEach(c => { state.catalog[(c.name || '').toLowerCase()] = c.category; });
+        (data.catalog || []).forEach(c => {
+          state.catalog[(c.name || '').toLowerCase()] = CATEGORIES.has(c.category) ? c.category : 'other';
+        });
       }
       state.view = 'list';
       render();
@@ -104,7 +121,7 @@
 
   function cardHtml(r) {
     const total = (r.prep_time || 0) + (r.cook_time || 0);
-    const diff = r.difficulty || 'easy';
+    const diff = Object.hasOwn(DIFF_LABELS, r.difficulty) ? r.difficulty : 'easy';
     const tags = tagList(r);
     const badges = tags.map(t => `<span class="badge badge-${MEAL_COLORS[t] || 'gray'}">${esc(MEAL_LABELS[t])}</span>`).join('');
     const names = ingrNames(r);
@@ -180,7 +197,7 @@
   function detailHtml() {
     const r = state.current;
     const total = (r.prep_time || 0) + (r.cook_time || 0);
-    const diff = r.difficulty || 'easy';
+    const diff = Object.hasOwn(DIFF_LABELS, r.difficulty) ? r.difficulty : 'easy';
     const items = (r.ingredient_items || []).filter(i => i.name);
     const ingrHtml = items.length
       ? items.map(i => {

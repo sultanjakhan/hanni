@@ -75,7 +75,7 @@ export function renderSubgroupGrid(el, catalog, category, blacklist, onPick) {
     const lvl = sg ? tagBlockLevel(sg, blacklist) : '';
     const tile = document.createElement('div');
     tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
-    tile.innerHTML = `<div class="sg-tile-name">${label}${blkIcon(lvl)}</div>
+    tile.innerHTML = `<div class="sg-tile-name">${esc(label)}${blkIcon(lvl)}</div>
       <div class="sg-tile-count">${list.length}</div>${sg ? BL_BTN : ''}`;
     if (sg) { tile.dataset.blType = 'tag'; tile.dataset.blValue = sg; }
     tile.onclick = (e) => { if (!e.target.closest('.bl-quick')) onPick(sg); };
@@ -169,7 +169,7 @@ export function renderParentGrid(el, catalog, category, blacklist, onPick) {
       const lvl = sg ? tagBlockLevel(sg, blacklist) : '';
       const tile = document.createElement('div');
       tile.className = 'sg-tile' + blkCls(lvl, 'sg-tile');
-      tile.innerHTML = `<div class="sg-tile-name">${label}${blkIcon(lvl)}</div>
+      tile.innerHTML = `<div class="sg-tile-name">${esc(label)}${blkIcon(lvl)}</div>
         <div class="sg-tile-count">${list.length}</div>${sg ? BL_BTN : ''}`;
       if (sg) { tile.dataset.blType = 'tag'; tile.dataset.blValue = sg; }
       tile.onclick = (e) => { if (!e.target.closest('.bl-quick')) onPick({ orphanSubgroup: sg, name: label }); };

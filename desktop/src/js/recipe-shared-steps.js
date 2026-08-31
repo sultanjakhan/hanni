@@ -25,13 +25,27 @@
   }
 
   // Parse stored instructions: JSON array of {text,min,ingredients} or [] for legacy/empty.
+  function normalizeMinutes(value) {
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes)) return 0;
+    return Math.min(24 * 60, Math.max(0, Math.trunc(minutes)));
+  }
   function parseSteps(raw) {
-    const s = (raw || '').trim();
+    const s = String(raw || '').trim();
     if (!s.startsWith('[')) return [];
     try {
       const arr = JSON.parse(s);
       if (Array.isArray(arr)) return arr
-        .map(x => ({ text: String(x.text || ''), min: x.min || 0, ingredients: Array.isArray(x.ingredients) ? x.ingredients : [] }))
+        .map(value => {
+          const x = value && typeof value === 'object' ? value : {};
+          return {
+            text: String(x.text || '').trim(),
+            min: normalizeMinutes(x.min),
+            ingredients: Array.isArray(x.ingredients)
+              ? x.ingredients.map(n => String(n ?? '').trim()).filter(Boolean).slice(0, 100)
+              : [],
+          };
+        })
         .filter(x => x.text);
     } catch { /* ignore */ }
     return [];

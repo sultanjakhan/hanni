@@ -1,110 +1,158 @@
 #!/usr/bin/env bash
-# publish-web-update.sh — push a JS/CSS/HTML-only OTA web-asset update WITHOUT
-# rebuilding/redistributing the ~106MB APK / ~128MB .app. On next launch the app
-# (Android + macOS) pulls this few-MB bundle (web_assets.rs hanniweb:// protocol)
-# and serves it over the embedded assets. Big rarely-changing files (sounds/,
-# assets/) are excluded and fall back to the embedded copies per-file.
-#
-# The bundle attaches to the LATEST GitHub release — the one clients read via
-# releases/latest — WITHOUT a new tag or native-version bump, so the native
-# updater stays silent and only the web OTA channel fires.
-#
-# Use for frontend-only changes. If you changed Rust/Kotlin/native assets, cut a
-# full release instead: scripts/release.sh native <X.Y.Z>. Normally you don't
-# call this directly — scripts/release.sh web does (after classifying the diff).
-#
-# Usage: scripts/publish-web-update.sh [web_version]
-#   web_version  optional; auto-derived from the latest release's web-manifest.json
-#                (A.B.C -> A.B.C.1 ; A.B.C.N -> A.B.C.(N+1)). Pass to override.
-# Env:
-#   MIN_NATIVE   override min_native_version (default: the latest release version,
-#                i.e. the native shell this bundle is built against — safe floor).
+# Dispatch a signed web-only update from the sole integration branch.
+# Packaging, production-key access and immutable release upload happen only in
+# the protected GitHub workflow; this local entrypoint never publishes bytes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# Base = the release clients actually read (releases/latest). NOT `git describe`,
-# which can point at a tag that never produced a release (CI failure / drift).
-BASE_TAG="$(gh release view --json tagName -q .tagName)"
-BASE_VER="${BASE_TAG#v}"
-
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
-
-# Pull the current web-manifest from that release to derive the next web_version.
-CUR_WEB=""
-if gh release download "$BASE_TAG" --pattern web-manifest.json --dir "$WORK" --clobber 2>/dev/null; then
-  CUR_WEB="$(python3 -c "import json;print(json.load(open('$WORK/web-manifest.json')).get('web_version',''))" 2>/dev/null || true)"
-fi
-
-derive_next() {
-  python3 - "$BASE_VER" "${CUR_WEB}" <<'PY'
-import sys
-base, cur = sys.argv[1], sys.argv[2]
-def parts(s):
-    return [int(x) if x.isdigit() else 0 for x in s.split('.')] if s else []
-def gte(x, y):
-    xs, ys = parts(x), parts(y)
-    for i in range(max(len(xs), len(ys))):
-        a = xs[i] if i < len(xs) else 0
-        d = ys[i] if i < len(ys) else 0
-        if a != d:
-            return a > d
-    return True
-b = parts(base)
-if not cur:
-    nxt = base + ".1"
-else:
-    c = parts(cur)
-    if c[:len(b)] != b:                       # manifest base must match the release
-        sys.exit("REFUSE: manifest web_version %r base != release %r" % (cur, base))
-    if len(c) == len(b):                      # cur == base (A.B.C) -> A.B.C.1
-        nxt = base + ".1"
-    else:                                     # cur == base.N... -> bump last part
-        nxt = ".".join(map(str, c[:-1] + [c[-1] + 1]))
-ref = cur if cur else base
-if not (gte(nxt, ref) and nxt != ref):
-    sys.exit("REFUSE: derived %r not strictly newer than %r" % (nxt, ref))
-print(nxt)
-PY
-}
-
-WEB_VERSION="${1:-$(derive_next)}"
-MIN_NATIVE="${MIN_NATIVE:-$BASE_VER}"   # bundle built against BASE native -> safe floor
-
-BUNDLE="web-${WEB_VERSION}.tar.gz"
-OUT="$WORK/$BUNDLE"
-
-# Build from the committed tree (HEAD), NOT the working tree, so what we ship
-# equals what release.sh classified. Flat tarball (index.html at root); exclude
-# the heavy static dirs (they fall back to the embedded copies per-file).
-STAGE="$WORK/src"; mkdir -p "$STAGE"
-git archive HEAD:desktop/src | tar -x -C "$STAGE"
-tar czf "$OUT" -C "$STAGE" --exclude=./sounds --exclude=./assets .
-SHA="$(shasum -a 256 "$OUT" | cut -d' ' -f1)"
-printf '{"web_version":"%s","min_native_version":"%s","sha256":"%s","asset":"%s"}\n' \
-  "$WEB_VERSION" "$MIN_NATIVE" "$SHA" "$BUNDLE" > "$WORK/web-manifest.json"
-
-echo "base release : $BASE_TAG (native $BASE_VER)"
-echo "current web  : ${CUR_WEB:-<none>}"
-echo "new web_ver  : $WEB_VERSION (min_native $MIN_NATIVE)"
-echo "bundle       : $BUNDLE ($(du -h "$OUT" | cut -f1)) sha256=$SHA"
-echo "manifest     : $(cat "$WORK/web-manifest.json")"
-
-# DRY=1 → preview only: show what would ship, upload nothing.
-if [ -n "${DRY:-}" ]; then
-  echo "(DRY) would: gh release upload $BASE_TAG $BUNDLE web-manifest.json --clobber — skipped"
-  exit 0
-fi
-
-gh release upload "$BASE_TAG" "$OUT" "$WORK/web-manifest.json" --clobber
-
-# Read the manifest back to catch a clobber race (e.g. a concurrent CI run that
-# re-published the bare-version bundle over ours).
-gh release download "$BASE_TAG" --pattern web-manifest.json --dir "$WORK/verify" --clobber
-GOT="$(python3 -c "import json;print(json.load(open('$WORK/verify/web-manifest.json'))['web_version'])")"
-if [ "$GOT" != "$WEB_VERSION" ]; then
-  echo "ERROR: manifest on release is $GOT, expected $WEB_VERSION (clobber race?)" >&2
+PYTHON=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 \
+     && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))' \
+          >/dev/null 2>&1; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+if [ -z "$PYTHON" ]; then
+  echo "REFUSE: a working Python 3.9+ interpreter is required" >&2
   exit 1
 fi
-echo "✓ published web update $WEB_VERSION to release $BASE_TAG (verified)"
+
+WEB_VERSION="${1:-}"
+if [ -z "$WEB_VERSION" ]; then
+  echo "usage: scripts/publish-web-update.sh <A.B.C.N>" >&2
+  exit 2
+fi
+
+if ! command -v minisign >/dev/null 2>&1; then
+  echo "REFUSE: minisign is required to verify the published signature" >&2
+  echo "Install it first (macOS: brew install minisign)." >&2
+  exit 1
+fi
+
+if [ "$(git branch --show-current)" != "main" ]; then
+  echo "REFUSE: web OTA may be dispatched only from main" >&2
+  exit 1
+fi
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "REFUSE: working tree must be clean" >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+  echo "REFUSE: untracked files are present" >&2
+  exit 1
+fi
+
+git fetch --quiet origin main
+SOURCE_SHA="$(git rev-parse HEAD)"
+REMOTE_MAIN="$(git rev-parse origin/main)"
+if [ "$SOURCE_SHA" != "$REMOTE_MAIN" ]; then
+  echo "REFUSE: HEAD must equal origin/main" >&2
+  exit 1
+fi
+
+BASE_TAG="$(gh release view --json tagName -q .tagName)"
+"$PYTHON" - "$BASE_TAG" "$WEB_VERSION" <<'PY'
+import re, sys
+tag, web = sys.argv[1:]
+if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+    raise SystemExit("REFUSE: latest release tag is not vA.B.C")
+base = tag[1:]
+if not re.fullmatch(re.escape(base) + r"\.([1-9][0-9]*)", web):
+    raise SystemExit("REFUSE: web version must be A.B.C.N for latest native tag, N > 0")
+PY
+
+SHORT_SHA="${SOURCE_SHA:0:12}"
+BUNDLE="web-${WEB_VERSION}-${SHORT_SHA}.tar.gz"
+MANIFEST="web-manifest-${WEB_VERSION}.json"
+if gh release view "$BASE_TAG" --json assets --jq '.assets[].name' \
+    | grep -Fqx -e "$BUNDLE" -e "$MANIFEST" -e "${MANIFEST}.sig"; then
+  echo "REFUSE: one or more immutable assets for $WEB_VERSION already exist" >&2
+  exit 1
+fi
+
+RUN_TITLE="Publish web OTA $WEB_VERSION from $SOURCE_SHA"
+BEFORE_MAX="$(gh run list --workflow publish-web-ota.yml --limit 100 \
+  --json databaseId --jq 'map(.databaseId) | max // 0')"
+
+gh workflow run publish-web-ota.yml \
+  --ref main \
+  -f source_sha="$SOURCE_SHA" \
+  -f base_tag="$BASE_TAG" \
+  -f web_version="$WEB_VERSION"
+
+RUN_ID=""
+for _ in $(seq 1 90); do
+  RUN_ID="$(gh run list --workflow publish-web-ota.yml --event workflow_dispatch \
+    --branch main --limit 30 \
+    --json databaseId,displayTitle,headSha \
+    | "$PYTHON" -c '
+import json, sys
+title, sha, floor = sys.argv[1], sys.argv[2], int(sys.argv[3])
+matches = [r for r in json.load(sys.stdin)
+           if r["databaseId"] > floor
+           and r["displayTitle"] == title
+           and r["headSha"] == sha]
+print(max((r["databaseId"] for r in matches), default=""))
+' "$RUN_TITLE" "$SOURCE_SHA" "$BEFORE_MAX")"
+  [ -n "$RUN_ID" ] && break
+  sleep 2
+done
+if [ -z "$RUN_ID" ]; then
+  echo "ERROR: dispatched workflow run was not observed" >&2
+  exit 1
+fi
+
+echo "Waiting for signed web OTA workflow run $RUN_ID..."
+gh run watch "$RUN_ID" --exit-status
+
+VERIFY="$(mktemp -d)"
+trap 'rm -rf "$VERIFY"' EXIT
+gh release download "$BASE_TAG" \
+  --pattern "$BUNDLE" \
+  --pattern "$MANIFEST" \
+  --pattern "${MANIFEST}.sig" \
+  --dir "$VERIFY"
+"$PYTHON" - "$VERIFY/$MANIFEST" "$VERIFY/$BUNDLE" "$VERIFY/${MANIFEST}.sig" \
+  "$BASE_TAG" "$WEB_VERSION" "$SOURCE_SHA" "$MANIFEST" "$BUNDLE" <<'PY'
+import base64, hashlib, json, pathlib, sys
+manifest_path, bundle_path, signature_path = map(pathlib.Path, sys.argv[1:4])
+tag, web_version, source_sha, manifest_name, bundle_name = sys.argv[4:]
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+expected = {
+    "schema": "hanni.web-ota.v1",
+    "repository": "sultanjakhan/hanni",
+    "channel": "stable",
+    "release_tag": tag,
+    "min_native_version": tag[1:],
+    "web_version": web_version,
+    "sequence": int(web_version.rsplit(".", 1)[1]),
+    "source_commit": source_sha,
+    "manifest_asset": manifest_name,
+    "asset": bundle_name,
+}
+for key, value in expected.items():
+    if doc.get(key) != value:
+        raise SystemExit(f"remote manifest mismatch: {key}")
+bundle = bundle_path.read_bytes()
+if doc.get("asset_size") != len(bundle):
+    raise SystemExit("remote bundle size mismatch")
+if doc.get("asset_sha256") != hashlib.sha256(bundle).hexdigest():
+    raise SystemExit("remote bundle hash mismatch")
+encoded = signature_path.read_text(encoding="utf-8").strip()
+decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+lines = decoded.splitlines()
+if len(lines) != 4 or not lines[2].startswith("trusted comment: timestamp:") \
+        or not lines[2].endswith("\tfile:" + manifest_name):
+    raise SystemExit("remote signature envelope mismatch")
+PY
+bash "$ROOT/scripts/verify-tauri-signature.sh" \
+  "$VERIFY/$MANIFEST" "$VERIFY/${MANIFEST}.sig" \
+  "$ROOT/desktop/src-tauri/updater.pub"
+
+rm -rf "$VERIFY"
+trap - EXIT
+echo "Verified signed web OTA $WEB_VERSION in $BASE_TAG (run $RUN_ID)."

@@ -1,0 +1,2 @@
+*.sh text eol=lf
+desktop/src-tauri/updater.pub text eol=lf
