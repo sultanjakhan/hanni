@@ -3,7 +3,7 @@
 // Orchestration (cursors, push/pull flow) lives in sync_github.rs.
 
 use crate::sync_crypto::{doc_name, open, seal};
-use crate::sync_owner::get_setting;
+use crate::sync_owner::get_setting_checked;
 use crate::types::HanniDb;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -22,13 +22,16 @@ pub(crate) struct GhCreds {
 
 pub(crate) fn resolve_gh(db: &HanniDb) -> Result<GhCreds, String> {
     let conn = db.conn();
-    let pat = get_setting(&conn, "cloud_owner_gh_pat").ok_or("GitHub sync: PAT not set")?;
-    let repo = get_setting(&conn, "cloud_owner_gh_repo").ok_or("GitHub sync: repo not set")?;
-    let key_hex = get_setting(&conn, "cloud_owner_gh_key")
+    let pat = get_setting_checked(&conn, "cloud_owner_gh_pat")?
+        .ok_or("GitHub sync: PAT not set")?;
+    let repo = get_setting_checked(&conn, "cloud_owner_gh_repo")?
+        .ok_or("GitHub sync: repo not set")?;
+    let key_hex = get_setting_checked(&conn, "cloud_owner_gh_key")?
         .ok_or("GitHub sync: shared key not set")?;
     let key: [u8; 32] = hex::decode(&key_hex).ok().and_then(|b| b.try_into().ok())
         .ok_or("GitHub sync: key must be 32-byte hex")?;
-    let device_id = get_setting(&conn, "device_id").unwrap_or_else(|| "unknown".into());
+    let device_id = get_setting_checked(&conn, "device_id")?
+        .unwrap_or_else(|| "unknown".into());
     Ok(GhCreds { pat, repo, key, device_id })
 }
 

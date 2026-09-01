@@ -448,7 +448,17 @@ mod windows_acl {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use windows::Win32::Security::Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW;
+        use windows::Win32::{
+            Foundation::{ERROR_ACCESS_DENIED, LUID},
+            Security::Authorization::{
+                AuthzAccessCheck, AuthzInitializeContextFromSid, AuthzInitializeResourceManager,
+                ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertStringSidToSidW,
+                AUTHZ_ACCESS_CHECK_FLAGS, AUTHZ_ACCESS_REPLY, AUTHZ_ACCESS_REQUEST,
+                AUTHZ_CLIENT_CONTEXT_HANDLE, AUTHZ_GENERATE_RESULTS,
+                AUTHZ_RESOURCE_MANAGER_HANDLE, AUTHZ_RM_FLAG_NO_AUDIT, AUTHZ_SKIP_TOKEN_GROUPS,
+            },
+            Storage::FileSystem::FILE_GENERIC_READ,
+        };
 
         fn descriptor_sddl(handle: HANDLE) -> io::Result<String> {
             let mut descriptor = PSECURITY_DESCRIPTOR::default();
@@ -565,6 +575,104 @@ mod windows_acl {
             assert_restricted(&file, false);
             super::apply(temp.path(), true).expect("secure directory");
             assert_restricted(temp.path(), true);
+        }
+
+        #[test]
+        fn applied_file_dacl_denies_generic_read_to_unlisted_sid() {
+            let temp = tempfile::tempdir().expect("temp dir");
+            let file = temp.path().join("secret.txt");
+            std::fs::write(&file, b"synthetic secret").expect("write fixture");
+
+            super::apply(&file, false).expect("secure file");
+            assert_restricted(&file, false);
+            let handle = open_object(&file).expect("open secured file");
+
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            unsafe {
+                GetSecurityInfo(
+                    *handle,
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(&mut descriptor),
+                )
+            }
+            .ok()
+            .expect("read applied descriptor");
+            let _descriptor = unsafe { Owned::<HLOCAL>::new(HLOCAL(descriptor.0)) };
+
+            let mut synthetic_sid = PSID::default();
+            unsafe {
+                ConvertStringSidToSidW(
+                    windows::core::w!("S-1-5-21-42424242-42424242-42424242-4242"),
+                    &mut synthetic_sid,
+                )
+            }
+            .expect("build synthetic SID");
+            let _synthetic_sid = unsafe { Owned::<HLOCAL>::new(HLOCAL(synthetic_sid.0)) };
+
+            let mut resource_manager = AUTHZ_RESOURCE_MANAGER_HANDLE::default();
+            unsafe {
+                AuthzInitializeResourceManager(
+                    AUTHZ_RM_FLAG_NO_AUDIT.0,
+                    None,
+                    None,
+                    None,
+                    PCWSTR::null(),
+                    &mut resource_manager,
+                )
+            }
+            .expect("initialize Authz resource manager");
+            let resource_manager = unsafe { Owned::new(resource_manager) };
+
+            let mut context = AUTHZ_CLIENT_CONTEXT_HANDLE::default();
+            unsafe {
+                AuthzInitializeContextFromSid(
+                    AUTHZ_SKIP_TOKEN_GROUPS,
+                    synthetic_sid,
+                    *resource_manager,
+                    None,
+                    LUID::default(),
+                    None,
+                    &mut context,
+                )
+            }
+            .expect("initialize synthetic Authz context");
+            let context = unsafe { Owned::new(context) };
+
+            let request = AUTHZ_ACCESS_REQUEST {
+                DesiredAccess: FILE_GENERIC_READ.0,
+                ..Default::default()
+            };
+            let mut granted_access = u32::MAX;
+            let mut sacl_evaluation = AUTHZ_GENERATE_RESULTS::default();
+            let mut access_error = u32::MAX;
+            let mut reply = AUTHZ_ACCESS_REPLY {
+                ResultListLength: 1,
+                GrantedAccessMask: &mut granted_access,
+                SaclEvaluationResults: &mut sacl_evaluation,
+                Error: &mut access_error,
+            };
+
+            unsafe {
+                AuthzAccessCheck(
+                    AUTHZ_ACCESS_CHECK_FLAGS::default(),
+                    *context,
+                    &request,
+                    None,
+                    descriptor,
+                    None,
+                    &mut reply,
+                    None,
+                )
+            }
+            .expect("evaluate applied DACL");
+
+            assert_eq!(access_error, ERROR_ACCESS_DENIED.0);
+            assert_eq!(granted_access & FILE_GENERIC_READ.0, 0);
         }
 
         #[test]

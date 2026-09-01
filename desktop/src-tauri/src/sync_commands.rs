@@ -4,7 +4,7 @@ use crate::types::HanniDb;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SyncConfig {
     pub enabled: bool,
     pub relay_url: String,
@@ -24,34 +24,29 @@ pub struct SyncStatus {
     pub device_name: String,
 }
 
-fn load_sync_config(db: &HanniDb) -> SyncConfig {
+fn load_sync_config(db: &HanniDb) -> Result<SyncConfig, String> {
     let conn = db.conn();
-    let get = |key: &str, default: &str| -> String {
-        conn.query_row(
-            "SELECT value FROM app_settings WHERE key=?1",
-            [key], |r| r.get(0),
-        ).unwrap_or_else(|_| default.to_string())
+    let get = |key: &str, default: &str| -> Result<String, String> {
+        Ok(crate::secret_store::get_setting(&conn, key)?
+            .unwrap_or_else(|| default.to_string()))
     };
-    SyncConfig {
-        enabled: get("sync_enabled", "false") == "true",
-        relay_url: get("sync_relay_url", ""),
-        device_token: get("sync_device_token", ""),
-        device_name: get("sync_device_name", ""),
-        auto_sync_secs: get("sync_auto_secs", "30").parse().unwrap_or(30),
-    }
+    Ok(SyncConfig {
+        enabled: get("sync_enabled", "false")? == "true",
+        relay_url: get("sync_relay_url", "")?,
+        device_token: get("sync_device_token", "")?,
+        device_name: get("sync_device_name", "")?,
+        auto_sync_secs: get("sync_auto_secs", "30")?.parse().unwrap_or(30),
+    })
 }
 
-fn save_sync_setting(db: &HanniDb, key: &str, value: &str) {
+fn save_sync_setting(db: &HanniDb, key: &str, value: &str) -> Result<(), String> {
     let conn = db.conn();
-    conn.execute(
-        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
-        [key, value],
-    ).ok();
+    crate::secret_store::set_setting(&conn, key, value)
 }
 
 #[tauri::command]
-pub fn get_sync_status(db: State<'_, HanniDb>) -> SyncStatus {
-    let config = load_sync_config(&db);
+pub fn get_sync_status(db: State<'_, HanniDb>) -> Result<SyncStatus, String> {
+    let config = load_sync_config(&db)?;
     let conn = db.conn();
     let site_id = get_site_id(&conn);
     let last_push: i64 = conn.query_row(
@@ -68,7 +63,7 @@ pub fn get_sync_status(db: State<'_, HanniDb>) -> SyncStatus {
         [], |r| r.get(0),
     ).ok();
 
-    SyncStatus {
+    Ok(SyncStatus {
         enabled: config.enabled,
         last_sync,
         last_push_version: last_push,
@@ -76,7 +71,7 @@ pub fn get_sync_status(db: State<'_, HanniDb>) -> SyncStatus {
         pending_changes: pending,
         site_id,
         device_name: config.device_name,
-    }
+    })
 }
 
 #[tauri::command]
@@ -84,16 +79,16 @@ pub fn set_sync_config(
     db: State<'_, HanniDb>,
     enabled: bool, relay_url: String, device_token: String,
     device_name: String,
-) {
-    save_sync_setting(&db, "sync_enabled", if enabled { "true" } else { "false" });
-    save_sync_setting(&db, "sync_relay_url", &relay_url);
-    save_sync_setting(&db, "sync_device_token", &device_token);
-    save_sync_setting(&db, "sync_device_name", &device_name);
+) -> Result<(), String> {
+    save_sync_setting(&db, "sync_enabled", if enabled { "true" } else { "false" })?;
+    save_sync_setting(&db, "sync_relay_url", &relay_url)?;
+    save_sync_setting(&db, "sync_device_token", &device_token)?;
+    save_sync_setting(&db, "sync_device_name", &device_name)
 }
 
 #[tauri::command]
 pub async fn sync_now(db: State<'_, HanniDb>) -> Result<String, String> {
-    let config = load_sync_config(&db);
+    let config = load_sync_config(&db)?;
     if !config.enabled || config.relay_url.is_empty() {
         return Err("Sync not configured".into());
     }
@@ -118,7 +113,7 @@ pub async fn sync_now(db: State<'_, HanniDb>) -> Result<String, String> {
             db_version: db_ver,
         };
         push_changes(&config.relay_url, &config.device_token, &payload).await?;
-        save_sync_setting(&db, "sync_last_push_ver", &db_ver.to_string());
+        save_sync_setting(&db, "sync_last_push_ver", &db_ver.to_string())?;
     }
 
     // 2. Pull remote changes
@@ -137,12 +132,12 @@ pub async fn sync_now(db: State<'_, HanniDb>) -> Result<String, String> {
         let conn = db.conn();
         apply_remote_changes(&conn, &pull_resp.changes)?;
         drop(conn);
-        save_sync_setting(&db, "sync_last_pull_ver", &pull_resp.server_version.to_string());
+        save_sync_setting(&db, "sync_last_pull_ver", &pull_resp.server_version.to_string())?;
     }
 
     // Update last sync time
     let now = chrono::Utc::now().to_rfc3339();
-    save_sync_setting(&db, "sync_last_time", &now);
+    save_sync_setting(&db, "sync_last_time", &now)?;
 
     Ok(format!("Synced: pushed {} ver, pulled {} changes", db_ver, pull_resp.changes.len()))
 }

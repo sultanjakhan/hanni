@@ -77,3 +77,27 @@ test('structured recipe minutes are numeric and bounded before rendering', () =>
   assert.equal(typeof step.min, 'number');
   assert.equal(parseRecipeSteps('[{"text":"Wait","min":999999}]')[0].min, 1440);
 });
+
+test('secret provisioning paths stay encrypted and redacted at UI boundaries', async () => {
+  const [store, meta, google, share, lan] = await Promise.all([
+    readFile(new URL('../src-tauri/src/secret_store.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/commands_meta.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/google_auth.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/sync_share.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/lan_sync.rs', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(store, /CryptProtectData/);
+  assert.match(store, /CryptUnprotectData/);
+  assert.match(meta, /sensitive settings cannot be read through the generic settings API/);
+  assert.doesNotMatch(google, /missing id_token:\s*\{\}\",\s*google_resp/);
+  assert.doesNotMatch(google, /missing localId:\s*\{\}\",\s*fb_resp/);
+  assert.match(share, /Ok\(redact_config\(cfg\)\)/);
+
+  const getConfig = lan.slice(
+    lan.indexOf('pub fn lan_sync_get_config'),
+    lan.indexOf('pub fn lan_sync_set_config')
+  );
+  assert.match(getConfig, /"key_set"/);
+  assert.doesNotMatch(getConfig, /"key"\s*:/);
+});

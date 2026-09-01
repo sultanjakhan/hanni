@@ -40,6 +40,9 @@ export async function renderSecuritySection() {
   let preview = '—';
   try { preview = await invoke('get_api_token_preview'); }
   catch (_) { /* missing token file is fine — show placeholder */ }
+  let jobsPreview = '—';
+  try { jobsPreview = await invoke('get_jobs_api_token_preview'); }
+  catch (_) { /* missing token file is fine — show placeholder */ }
 
   let logRows = [];
   try { logRows = await invoke('list_automation_log', { limit: 100 }) || []; }
@@ -55,10 +58,19 @@ export async function renderSecuritySection() {
         </span>
       </div>
       <div class="settings-row">
-        <span class="settings-hint">Используется внешними клиентами (Claude Code, скрипты) для доступа к /auto/eval и /api/*. Хранится в ~/Library/Application&nbsp;Support/Hanni/api_token.txt (0600).</span>
+        <span class="settings-hint">Используется внешними клиентами для доступа к локальному API. На Windows хранится зашифрованным через DPAPI; полный токен выдаётся и копируется только при явном перевыпуске.</span>
       </div>
       <div class="settings-row" style="justify-content:flex-end;">
-        <button class="btn-smallall" id="security-rotate-btn">Перевыпустить токен</button>
+        <button class="btn-smallall" id="security-rotate-btn">Перевыпустить и скопировать</button>
+      </div>
+      <div class="settings-row">
+        <span class="settings-label">Jobs-токен</span>
+        <span class="settings-value">
+          <code class="security-jobs-token-preview">${escapeHtml(jobsPreview)}</code>
+        </span>
+      </div>
+      <div class="settings-row" style="justify-content:flex-end;">
+        <button class="btn-smallall" id="security-rotate-jobs-btn">Перевыпустить и скопировать Jobs-токен</button>
       </div>
     </div>
 
@@ -85,38 +97,56 @@ async function refreshLog(el) {
 }
 
 export function wireSecurityControls(el) {
-  const rotateBtn = el.querySelector('#security-rotate-btn');
-  if (rotateBtn) {
+  const wireRotate = (selector, command, previewCommand, previewSelector, label, buttonLabel) => {
+    const rotateBtn = el.querySelector(selector);
+    if (!rotateBtn) return;
     rotateBtn.addEventListener('click', async () => {
       const ok = await confirmModal(
-        'Перевыпустить API-токен? Текущие внешние клиенты (Claude Code, скрипты) перестанут работать до перезапуска Hanni и обновления токена.',
+        `Перевыпустить ${label}? Текущие внешние клиенты перестанут работать до перезапуска Hanni и обновления токена.`,
         'Перевыпустить'
       );
       if (!ok) return;
       rotateBtn.disabled = true;
       rotateBtn.textContent = 'Перевыпускаем…';
       try {
-        await invoke('rotate_api_token');
-        const preview = el.querySelector('.security-token-preview');
+        const token = await invoke(command);
+        await navigator.clipboard.writeText(token);
+        const preview = el.querySelector(previewSelector);
         if (preview) {
-          const newPreview = await invoke('get_api_token_preview').catch(() => '—');
+          const newPreview = await invoke(previewCommand).catch(() => '—');
           preview.textContent = newPreview;
         }
-        rotateBtn.textContent = 'Готово (нужен перезапуск Hanni)';
+        rotateBtn.textContent = 'Скопирован (нужен перезапуск Hanni)';
         setTimeout(() => {
-          rotateBtn.textContent = 'Перевыпустить токен';
+          rotateBtn.textContent = buttonLabel;
           rotateBtn.disabled = false;
         }, 4000);
-      } catch (e) {
+      } catch (_) {
         rotateBtn.textContent = 'Ошибка';
-        console.error('rotate token:', e);
         setTimeout(() => {
-          rotateBtn.textContent = 'Перевыпустить токен';
+          rotateBtn.textContent = buttonLabel;
           rotateBtn.disabled = false;
         }, 3000);
       }
     });
-  }
+  };
+
+  wireRotate(
+    '#security-rotate-btn',
+    'rotate_api_token',
+    'get_api_token_preview',
+    '.security-token-preview',
+    'API-токен',
+    'Перевыпустить и скопировать'
+  );
+  wireRotate(
+    '#security-rotate-jobs-btn',
+    'rotate_jobs_api_token',
+    'get_jobs_api_token_preview',
+    '.security-jobs-token-preview',
+    'Jobs-токен',
+    'Перевыпустить и скопировать Jobs-токен'
+  );
 
   const refreshBtn = el.querySelector('#security-log-refresh');
   if (refreshBtn) {

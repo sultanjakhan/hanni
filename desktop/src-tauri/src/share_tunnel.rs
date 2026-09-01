@@ -236,9 +236,16 @@ pub async fn ensure_running(app: AppHandle, port: u16) -> Result<String, String>
                 let id: Option<String> = conn.query_row(
                     "SELECT value FROM app_settings WHERE key='share_gist_id'",
                     [], |r| r.get(0)).ok();
-                let tok: Option<String> = conn.query_row(
-                    "SELECT value FROM app_settings WHERE key='share_gist_token'",
-                    [], |r| r.get(0)).ok();
+                let tok: Option<String> = match crate::secret_store::get_setting(
+                    &conn,
+                    "share_gist_token",
+                ) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        eprintln!("[share_tunnel] gist credential store unavailable");
+                        None
+                    }
+                };
                 match (id, tok) {
                     (Some(i), Some(t)) if !i.is_empty() && !t.is_empty() => Some((i, t)),
                     _ => None,

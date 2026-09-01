@@ -27,7 +27,7 @@ const FIRESTORE_HOST: &str = "https://firestore.googleapis.com/v1";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const SCOPE: &str = "https://www.googleapis.com/auth/datastore";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CloudShareConfig {
     pub project_id: String,
     pub api_key: String,
@@ -37,7 +37,7 @@ pub struct CloudShareConfig {
     pub service_account_json: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ServiceAccount {
     client_email: String,
     private_key: String,
@@ -54,7 +54,7 @@ struct JwtClaims<'a> {
     exp: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct TokenResponse {
     access_token: String,
     expires_in: u64,
@@ -72,26 +72,22 @@ fn token_cache() -> &'static std::sync::RwLock<Option<(String, u64)>> {
 
 pub(crate) fn firestore_host() -> &'static str { FIRESTORE_HOST }
 
-pub fn load_config(conn: &rusqlite::Connection) -> Option<CloudShareConfig> {
+pub fn load_config(conn: &rusqlite::Connection) -> Result<Option<CloudShareConfig>, String> {
     if let Ok(g) = cfg_cache().read() {
-        if let Some(c) = g.as_ref() { return Some(c.clone()); }
+        if let Some(c) = g.as_ref() { return Ok(Some(c.clone())); }
     }
-    let raw: String = conn.query_row(
-        "SELECT value FROM app_settings WHERE key=?1",
-        rusqlite::params![SETTING_KEY], |r| r.get(0),
-    ).ok()?;
-    let cfg: CloudShareConfig = serde_json::from_str(&raw).ok()?;
+    let Some(raw) = crate::secret_store::get_setting(conn, SETTING_KEY)? else {
+        return Ok(None);
+    };
+    let cfg: CloudShareConfig = serde_json::from_str(&raw)
+        .map_err(|_| "cloud-share config is invalid".to_string())?;
     if let Ok(mut g) = cfg_cache().write() { *g = Some(cfg.clone()); }
-    Some(cfg)
+    Ok(Some(cfg))
 }
 
 fn save_config(conn: &rusqlite::Connection, cfg: &CloudShareConfig) -> Result<(), String> {
     let json = serde_json::to_string(cfg).map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
-         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        rusqlite::params![SETTING_KEY, json],
-    ).map_err(|e| e.to_string())?;
+    crate::secret_store::set_setting(conn, SETTING_KEY, &json)?;
     if let Ok(mut g) = cfg_cache().write() { *g = Some(cfg.clone()); }
     if let Ok(mut g) = token_cache().write() { *g = None; }
     Ok(())
@@ -394,7 +390,7 @@ pub fn cloud_share_set_config(
         Some(parsed.client_email)
     } else { None };
     let conn = db.conn();
-    let existing = load_config(&conn);
+    let existing = load_config(&conn)?;
     let prev_uid = existing.as_ref().map(|c| c.owner_uid.clone());
     // Owner UID priority: deterministic from email (if SA provided) >
     // existing UID (preserve) > random fallback (true fresh install).
@@ -416,7 +412,7 @@ pub fn cloud_share_set_config(
     if prev_uid.as_deref() != Some(owner_uid.as_str()) {
         reset_sync_bookmarks(&conn);
     }
-    Ok(cfg)
+    Ok(redact_config(cfg))
 }
 
 /// Manually override owner_uid (UID-import flow: paste UID copied from
@@ -427,7 +423,7 @@ pub fn cloud_owner_set_uid(uid: String, db: State<'_, HanniDb>) -> Result<String
     let uid = uid.trim().to_string();
     if uid.is_empty() { return Err("uid is empty".into()); }
     let conn = db.conn();
-    let mut cfg = load_config(&conn)
+    let mut cfg = load_config(&conn)?
         .ok_or_else(|| "cloud-share not configured (set project_id/api_key first)".to_string())?;
     if cfg.owner_uid == uid { return Ok(uid); }
     cfg.owner_uid = uid.clone();
@@ -437,20 +433,42 @@ pub fn cloud_owner_set_uid(uid: String, db: State<'_, HanniDb>) -> Result<String
 }
 
 #[tauri::command]
-pub fn cloud_owner_get_uid(db: State<'_, HanniDb>) -> Option<String> {
-    load_config(&db.conn()).map(|c| c.owner_uid)
+pub fn cloud_owner_get_uid(db: State<'_, HanniDb>) -> Result<Option<String>, String> {
+    Ok(load_config(&db.conn())?.map(|c| c.owner_uid))
+}
+
+fn redact_config(mut cfg: CloudShareConfig) -> CloudShareConfig {
+    if cfg.service_account_json.is_some() {
+        cfg.service_account_json = Some("<set>".into());
+    }
+    cfg
 }
 
 #[tauri::command]
-pub fn cloud_share_get_config(db: State<'_, HanniDb>) -> Option<CloudShareConfig> {
+pub fn cloud_share_get_config(db: State<'_, HanniDb>) -> Result<Option<CloudShareConfig>, String> {
     // Strip the service-account JSON from the response so it never leaves the
     // backend — the UI just needs to know it's set.
-    load_config(&db.conn()).map(|mut c| {
-        if c.service_account_json.is_some() {
-            c.service_account_json = Some("<set>".into());
-        }
-        c
-    })
+    Ok(load_config(&db.conn())?.map(redact_config))
+}
+
+#[cfg(test)]
+mod config_redaction_tests {
+    use super::*;
+
+    #[test]
+    fn public_config_never_contains_service_account_json() {
+        let canary = "{\"private_key\":\"hanni-secret-canary\"}";
+        let redacted = redact_config(CloudShareConfig {
+            project_id: "project".into(),
+            api_key: "public-api-key".into(),
+            owner_uid: "owner".into(),
+            service_account_json: Some(canary.into()),
+        });
+        let serialized = serde_json::to_string(&redacted).expect("serialize config");
+        assert!(!serialized.contains(canary));
+        assert!(!serialized.contains("hanni-secret-canary"));
+        assert_eq!(redacted.service_account_json.as_deref(), Some("<set>"));
+    }
 }
 
 #[tauri::command]
@@ -459,7 +477,7 @@ pub async fn cloud_share_push(
     dry_run: Option<bool>,
     db: State<'_, HanniDb>,
 ) -> Result<serde_json::Value, String> {
-    let cfg = load_config(&db.conn())
+    let cfg = load_config(&db.conn())?
         .ok_or_else(|| "cloud-share not configured".to_string())?;
     let snapshot = build_snapshot(db.inner(), share_id)?;
 
@@ -687,7 +705,7 @@ pub(crate) async fn mirror_pending(db: &HanniDb) -> Result<serde_json::Value, St
         return Ok(serde_json::json!({ "status": "no-active-links", "dirty": dirty }));
     }
 
-    let cfg = match load_config(&db.conn()) {
+    let cfg = match load_config(&db.conn())? {
         Some(c) if c.service_account_json.is_some() => c,
         _ => return Ok(serde_json::json!({ "status": "not-configured" })),
     };

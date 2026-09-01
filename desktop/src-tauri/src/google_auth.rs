@@ -22,7 +22,7 @@ const SETTING_CONFIG: &str = "google_auth_config";
 const SETTING_SESSION: &str = "google_auth_session";
 const SETTING_PENDING_STATE: &str = "google_auth_pending_state";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GoogleAuthConfig {
     pub client_id: String,
     pub client_secret: String,
@@ -37,35 +37,35 @@ pub struct GoogleAuthSession {
     pub email: String,
 }
 
-fn get_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
-    conn.query_row("SELECT value FROM app_settings WHERE key=?1",
-        rusqlite::params![key], |r| r.get(0)).ok()
+fn get_setting(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>, String> {
+    crate::secret_store::get_setting(conn, key)
 }
 
-fn set_setting(conn: &rusqlite::Connection, key: &str, value: &str) {
-    let _ = conn.execute(
-        "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
-         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        rusqlite::params![key, value],
-    );
+fn set_setting(conn: &rusqlite::Connection, key: &str, value: &str) -> Result<(), String> {
+    crate::secret_store::set_setting(conn, key, value)
 }
 
-fn del_setting(conn: &rusqlite::Connection, key: &str) {
-    let _ = conn.execute("DELETE FROM app_settings WHERE key=?1", rusqlite::params![key]);
+fn del_setting(conn: &rusqlite::Connection, key: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM app_settings WHERE key=?1", rusqlite::params![key])
+        .map_err(|error| format!("delete Google auth setting: {error}"))?;
+    Ok(())
 }
 
-pub fn load_config(conn: &rusqlite::Connection) -> Option<GoogleAuthConfig> {
-    get_setting(conn, SETTING_CONFIG).and_then(|s| serde_json::from_str(&s).ok())
+pub fn load_config(conn: &rusqlite::Connection) -> Result<Option<GoogleAuthConfig>, String> {
+    get_setting(conn, SETTING_CONFIG)?
+        .map(|raw| serde_json::from_str(&raw).map_err(|_| "Google auth config is invalid".to_string()))
+        .transpose()
 }
 
-pub fn load_session(conn: &rusqlite::Connection) -> Option<GoogleAuthSession> {
-    get_setting(conn, SETTING_SESSION).and_then(|s| serde_json::from_str(&s).ok())
+pub fn load_session(conn: &rusqlite::Connection) -> Result<Option<GoogleAuthSession>, String> {
+    get_setting(conn, SETTING_SESSION)?
+        .map(|raw| serde_json::from_str(&raw).map_err(|_| "Google auth session is invalid".to_string()))
+        .transpose()
 }
 
 fn save_session(conn: &rusqlite::Connection, sess: &GoogleAuthSession) -> Result<(), String> {
     let json = serde_json::to_string(sess).map_err(|e| e.to_string())?;
-    set_setting(conn, SETTING_SESSION, &json);
-    Ok(())
+    set_setting(conn, SETTING_SESSION, &json)
 }
 
 fn now_secs() -> i64 {
@@ -105,11 +105,11 @@ pub struct GoogleAuthStatus {
 }
 
 #[tauri::command]
-pub fn google_auth_status(db: State<'_, HanniDb>) -> GoogleAuthStatus {
+pub fn google_auth_status(db: State<'_, HanniDb>) -> Result<GoogleAuthStatus, String> {
     let conn = db.conn();
-    let cfg = load_config(&conn);
-    let session = load_session(&conn);
-    GoogleAuthStatus {
+    let cfg = load_config(&conn)?;
+    let session = load_session(&conn)?;
+    Ok(GoogleAuthStatus {
         configured: cfg.is_some(),
         authenticated: session.is_some(),
         email: session.as_ref().map(|s| s.email.clone()),
@@ -117,7 +117,7 @@ pub fn google_auth_status(db: State<'_, HanniDb>) -> GoogleAuthStatus {
         expires_at: session.as_ref().map(|s| s.expires_at),
         project_id: cfg.map(|c| c.project_id),
         redirect_uri: redirect_uri(),
-    }
+    })
 }
 
 #[tauri::command]
@@ -130,15 +130,14 @@ pub fn google_auth_set_config(
 ) -> Result<(), String> {
     let cfg = GoogleAuthConfig { client_id, client_secret, project_id, api_key };
     let json = serde_json::to_string(&cfg).map_err(|e| e.to_string())?;
-    set_setting(&db.conn(), SETTING_CONFIG, &json);
-    Ok(())
+    set_setting(&db.conn(), SETTING_CONFIG, &json)
 }
 
 #[tauri::command]
 pub fn google_auth_signout(db: State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    del_setting(&conn, SETTING_SESSION);
-    del_setting(&conn, SETTING_PENDING_STATE);
+    del_setting(&conn, SETTING_SESSION)?;
+    del_setting(&conn, SETTING_PENDING_STATE)?;
     // Reset sync bookmarks — next sync starts fresh under whatever uid signs in next.
     let _ = conn.execute(
         "DELETE FROM app_settings WHERE key IN \
@@ -153,9 +152,9 @@ pub fn google_auth_signout(db: State<'_, HanniDb>) -> Result<(), String> {
 #[tauri::command]
 pub fn google_auth_start_signin(db: State<'_, HanniDb>) -> Result<String, String> {
     let conn = db.conn();
-    let cfg = load_config(&conn).ok_or_else(|| "Google Auth not configured".to_string())?;
+    let cfg = load_config(&conn)?.ok_or_else(|| "Google Auth not configured".to_string())?;
     let state = uuid::Uuid::new_v4().to_string();
-    set_setting(&conn, SETTING_PENDING_STATE, &state);
+    set_setting(&conn, SETTING_PENDING_STATE, &state)?;
     // cloud-platform scope: Firestore Admin REST + Firebase Management REST.
     // Lets us create/configure Firestore databases & rules without UI.
     let scopes = "openid email profile https://www.googleapis.com/auth/cloud-platform";
@@ -186,10 +185,10 @@ pub async fn handle_oauth_callback(
 ) -> Result<(), String> {
     let cfg = {
         let conn = db.conn();
-        let pending = get_setting(&conn, SETTING_PENDING_STATE)
+        let pending = get_setting(&conn, SETTING_PENDING_STATE)?
             .ok_or_else(|| "no pending oauth state — start sign-in again".to_string())?;
         if pending != state { return Err("oauth state mismatch — replay or CSRF".into()); }
-        load_config(&conn).ok_or_else(|| "Google Auth not configured".to_string())?
+        load_config(&conn)?.ok_or_else(|| "Google Auth not configured".to_string())?
     };
 
     let client = http_client();
@@ -206,7 +205,7 @@ pub async fn handle_oauth_callback(
         .json().await.map_err(|e| format!("google token parse: {}", e))?;
     let google_id_token = google_resp.get("id_token").and_then(|v| v.as_str())
         .ok_or_else(|| {
-            eprintln!("[google_auth] code-exchange missing id_token: {}", google_resp);
+            eprintln!("[google_auth] code-exchange response missing id_token");
             "Google sign-in failed — see app logs".to_string()
         })?;
 
@@ -226,7 +225,7 @@ pub async fn handle_oauth_callback(
 
     let local_id = fb_resp.get("localId").and_then(|v| v.as_str())
         .ok_or_else(|| {
-            eprintln!("[google_auth] signInWithIdp missing localId: {}", fb_resp);
+            eprintln!("[google_auth] signInWithIdp response missing localId");
             "Google sign-in failed — see app logs".to_string()
         })?;
     let email = fb_resp.get("email").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -242,7 +241,7 @@ pub async fn handle_oauth_callback(
     {
         let conn = db.conn();
         save_session(&conn, &session)?;
-        del_setting(&conn, SETTING_PENDING_STATE);
+        del_setting(&conn, SETTING_PENDING_STATE)?;
         // Reset bookmarks so first sync after sign-in re-pushes everything
         // under the new (Firebase) uid.
         let _ = conn.execute(

@@ -246,23 +246,33 @@ fn read_cursors(conn: &rusqlite::Connection) -> (Map<String, Value>, String) {
 // ── Config ───────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn lan_sync_get_config(db: State<'_, HanniDb>) -> Value {
+pub fn lan_sync_get_config(db: State<'_, HanniDb>) -> Result<Value, String> {
     let conn = db.conn();
-    json!({
+    let key_set = crate::sync_owner::get_setting_checked(&conn, "lan_sync_key")?
+        .is_some_and(|key| !key.is_empty());
+    Ok(json!({
         "peer": get_setting(&conn, "lan_sync_peer").unwrap_or_default(),
-        "key":  get_setting(&conn, "lan_sync_key").unwrap_or_default(),
+        "key_set": key_set,
         "enabled": get_setting(&conn, "lan_sync_enabled").as_deref() == Some("true"),
         "port": LAN_PORT,
-    })
+    }))
 }
 
 #[tauri::command]
-pub fn lan_sync_set_config(peer: String, key: String, enabled: bool,
+pub fn lan_sync_set_config(peer: String, key: Option<String>, clear_key: Option<bool>, enabled: bool,
                            db: State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    set_setting(&conn, "lan_sync_peer", peer.trim());
-    set_setting(&conn, "lan_sync_key", key.trim());
-    set_setting(&conn, "lan_sync_enabled", if enabled { "true" } else { "false" });
+    crate::sync_owner::set_setting_checked(&conn, "lan_sync_peer", peer.trim())?;
+    if clear_key.unwrap_or(false) {
+        crate::sync_owner::set_setting_checked(&conn, "lan_sync_key", "")?;
+    } else if let Some(key) = key.filter(|value| !value.trim().is_empty()) {
+        crate::sync_owner::set_setting_checked(&conn, "lan_sync_key", key.trim())?;
+    }
+    crate::sync_owner::set_setting_checked(
+        &conn,
+        "lan_sync_enabled",
+        if enabled { "true" } else { "false" },
+    )?;
     Ok(())
 }
 
@@ -274,7 +284,8 @@ pub async fn lan_sync_now(db: State<'_, HanniDb>) -> Result<Value, String> {
     let (peer, key, mine, cursors, tomb_cursor) = {
         let conn = db.conn();
         let peer = get_setting(&conn, "lan_sync_peer").unwrap_or_default();
-        let key = get_setting(&conn, "lan_sync_key").unwrap_or_default();
+        let key = crate::sync_owner::get_setting_checked(&conn, "lan_sync_key")?
+            .unwrap_or_default();
         if peer.is_empty() { return Err("LAN peer not configured".into()); }
         let (cursors, tomb_cursor) = read_cursors(&conn);
         let mine = gather(&conn, &cursors, &tomb_cursor);
@@ -383,7 +394,9 @@ pub async fn spawn_lan_sync_server(app: AppHandle) {
     ) -> Result<Json<SyncBatch>, (StatusCode, String)> {
         let db = app.state::<HanniDb>();
         let conn = db.conn();
-        let want = get_setting(&conn, "lan_sync_key").unwrap_or_default();
+        let want = crate::sync_owner::get_setting_checked(&conn, "lan_sync_key")
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "secret store unavailable".into()))?
+            .unwrap_or_default();
         if want.is_empty() || req.key != want {
             return Err((StatusCode::UNAUTHORIZED, "bad key".into()));
         }

@@ -39,11 +39,11 @@ use tauri::State;
 async fn resolve_creds(db: &HanniDb) -> Result<(String, String, String), String> {
     let (cfg, uid, project_id) = {
         let conn = db.conn();
-        let cfg = load_share_config(&conn)
+        let cfg = load_share_config(&conn)?
             .ok_or_else(|| "cloud-share not configured (need service account)".to_string())?;
-        let session = load_google_session(&conn)
+        let session = load_google_session(&conn)?
             .ok_or_else(|| "Sign in with Google first".to_string())?;
-        let google_cfg = load_google_config(&conn)
+        let google_cfg = load_google_config(&conn)?
             .ok_or_else(|| "Google auth not configured".to_string())?;
         (cfg, session.uid, google_cfg.project_id)
     };
@@ -67,18 +67,21 @@ pub struct OwnerSyncStatus {
 // ── Settings helpers ─────────────────────────────────────────────────────
 
 pub(crate) fn get_setting(conn: &Connection, key: &str) -> Option<String> {
-    conn.query_row(
-        "SELECT value FROM app_settings WHERE key=?1",
-        rusqlite::params![key], |r| r.get(0),
-    ).ok()
+    get_setting_checked(conn, key).ok().flatten()
+}
+
+pub(crate) fn get_setting_checked(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    crate::secret_store::get_setting(conn, key)
 }
 
 pub(crate) fn set_setting(conn: &Connection, key: &str, value: &str) {
-    let _ = conn.execute(
-        "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
-         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        rusqlite::params![key, value],
-    );
+    if let Err(error) = set_setting_checked(conn, key, value) {
+        eprintln!("[sync_owner] setting write failed for {key}: {error}");
+    }
+}
+
+pub(crate) fn set_setting_checked(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    crate::secret_store::set_setting(conn, key, value)
 }
 
 fn device_id(conn: &Connection) -> String {
@@ -704,16 +707,16 @@ pub async fn debug_owner_list(table: String, db: State<'_, HanniDb>)
 }
 
 #[tauri::command]
-pub fn cloud_owner_status(db: State<'_, HanniDb>) -> OwnerSyncStatus {
+pub fn cloud_owner_status(db: State<'_, HanniDb>) -> Result<OwnerSyncStatus, String> {
     let conn = db.conn();
-    let session = load_google_session(&conn);
-    let cfg = load_google_config(&conn);
+    let session = load_google_session(&conn)?;
+    let cfg = load_google_config(&conn)?;
     let configured = cfg.is_some() && session.is_some();
-    OwnerSyncStatus {
+    Ok(OwnerSyncStatus {
         configured,
         device_id: device_id(&conn),
         last_push_ts: get_setting(&conn, "cloud_owner_v2_last_push_ts"),
         last_pull_ts: get_setting(&conn, "cloud_owner_v2_last_pull_ts"),
         owner_uid: session.map(|s| s.uid),
-    }
+    })
 }

@@ -126,7 +126,7 @@ pub async fn chat_openclaw(app: &AppHandle, messages: Vec<serde_json::Value>, _c
     let openclaw_token: String = {
         let db = app.state::<HanniDb>();
         let conn = db.conn();
-        conn.query_row("SELECT value FROM app_settings WHERE key='openclaw_token'", [], |r| r.get(0))
+        crate::secret_store::get_setting(&conn, "openclaw_token")?
             .unwrap_or_default()
     };
     if openclaw_token.is_empty() {

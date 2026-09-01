@@ -25,7 +25,7 @@
 ## HTTP API (automation)
 - `127.0.0.1:8235` (prod), `127.0.0.1:8236` (dev, `cfg!(debug_assertions)`).
 - Endpoint `POST /auto/eval` — DOM-eval, используется `screenshot.sh` и Claude.
-- Токен: `~/Library/Application Support/Hanni/api_token.txt`.
+- Токен: macOS — `~/Library/Application Support/Hanni/api_token.txt`; Windows — явное «Перевыпустить и скопировать» в Hanni → Настройки → Безопасность (файл защищён DPAPI).
 
 ## MCP / сервисы
 - **MCP hanni**: Python-сервер `desktop/hanni-mcp/server.py` — CRUD по той же SQLite (facts, events, SQL).

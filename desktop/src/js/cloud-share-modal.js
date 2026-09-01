@@ -63,7 +63,7 @@ export async function openCloudShareModal() {
                  style="width:100%;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px;margin-top:2px">
         </label>
         <label style="font-size:12px;color:var(--text-muted)">Pre-shared key (одинаковый на обоих устройствах)
-          <input id="ls-key" type="text" placeholder="hanni-lan-2026"
+          <input id="ls-key" type="password" autocomplete="new-password" placeholder="Введите новый ключ"
                  style="width:100%;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px;margin-top:2px">
         </label>
         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
@@ -72,6 +72,7 @@ export async function openCloudShareModal() {
       </div>
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn-primary" id="ls-save">Сохранить</button>
+        <button class="btn-secondary" id="ls-clear-key">Удалить ключ</button>
         <button class="btn-secondary" id="ls-sync-now">🔄 Sync now</button>
       </div>
       <div id="ls-msg" style="min-height:18px;font-size:12px;margin-top:6px"></div>

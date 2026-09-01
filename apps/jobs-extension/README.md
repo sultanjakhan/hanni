@@ -14,12 +14,14 @@ Djinni, GeekJob, а на незнакомых страницах поля мож
 4. Токен подхватывается **автоматически** из `token.local.js` (gitignored,
    уже создан). В настройках панели будет зелёное «Токен из token.local.js ✓».
    Это отдельный Jobs-токен: он не даёт доступ к automation API. Если файл
-   пересоздан — перегенерируй локальную копию и перезагрузи расширение:
-   и перезагрузи расширение:
+   пересоздан — перегенерируй локальную копию и перезагрузи расширение.
+   На macOS:
    ```sh
    cd apps/jobs-extension && printf "self.HANNI_LOCAL_JOB_TOKEN = '%s';\n" \
      "$(cat ~/Library/Application\ Support/Hanni/jobs_api_token.txt)" > token.local.js
    ```
+   На Windows файл зашифрован DPAPI: открой **Hanni → Настройки → Безопасность**,
+   нажми «Перевыпустить и скопировать Jobs-токен», затем вставь его в панель.
    Fallback без файла: вставить токен руками в настройках панели — из
    вставленного автоматически вычленяется UUID (лишний мусор отбрасывается).
 5. Порт (чипы): **8235** — обычный Hanni, **8236** — dev-сборка (`cargo tauri dev`).
@@ -61,7 +63,7 @@ Djinni, GeekJob, а на незнакомых страницах поля мож
 - `background.js` — service worker, ходит в Hanni API
   (`GET/POST http://127.0.0.1:<port>/api/vacancy`, Bearer-токен; фоллбэк
   порта при 404/недоступности)
-- `token.local.js` — ограниченный токен из `jobs_api_token.txt` (генерится командой выше,
-  gitignored); имеет приоритет над введённым вручную
+- `token.local.js` — ограниченный локальный токен (на macOS генерируется командой
+  выше, gitignored); имеет приоритет над введённым вручную
 - Rust-сторона: `desktop/src-tauri/src/api_jobs.rs` — lookup по URL и
   upsert в таблицу `job_vacancies` (этап `applied` проставляет `applied_at`)

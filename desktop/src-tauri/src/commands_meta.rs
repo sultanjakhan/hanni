@@ -296,10 +296,7 @@ pub fn delete_goal(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String>
 #[tauri::command]
 pub fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
-    conn.execute(
-        "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",
-        rusqlite::params![key, value],
-    ).map_err(|e| format!("DB error: {}", e))?;
+    crate::secret_store::set_setting(&conn, &key, &value)?;
     // Sync calendar toggle to static flag
     if key == "apple_calendar_enabled" {
         APPLE_CALENDAR_DISABLED.store(value == "false", Ordering::Relaxed);
@@ -312,11 +309,11 @@ pub fn set_app_setting(key: String, value: String, db: tauri::State<'_, HanniDb>
 
 #[tauri::command]
 pub fn get_app_setting(key: String, db: tauri::State<'_, HanniDb>) -> Result<Option<String>, String> {
+    if crate::secret_store::is_sensitive_setting(&key) {
+        return Err("sensitive settings cannot be read through the generic settings API".into());
+    }
     let conn = db.read();
-    let result: Option<String> = conn.query_row(
-        "SELECT value FROM app_settings WHERE key=?1", rusqlite::params![key], |row| row.get(0),
-    ).ok();
-    Ok(result)
+    crate::secret_store::get_setting(&conn, &key)
 }
 
 // ── Home Items ──
@@ -1006,36 +1003,6 @@ pub fn jobs_api_token_path() -> PathBuf {
     hanni_data_dir().join("jobs_api_token.txt")
 }
 
-/// Write a secret to `path` with owner-only perms applied atomically at
-/// creation (mode 0600), closing the brief world-readable window the old
-/// write-then-chmod sequence left. set_permissions still runs to repair any
-/// pre-existing file created before this change.
-fn write_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut f = std::fs::OpenOptions::new()
-            .write(true).create(true).truncate(true).mode(0o600).open(path)?;
-        f.write_all(contents.as_bytes())?;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        crate::secure_fs::restrict_file(path)
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, contents)?;
-        crate::secure_fs::restrict_file(path)
-    }
-}
-
-fn prepare_secret_path(path: &std::path::Path) -> std::io::Result<()> {
-    let parent = path.parent().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret path has no parent")
-    })?;
-    crate::secure_fs::ensure_private_dir(parent)?;
-    crate::secure_fs::restrict_file_if_present(path)
-}
-
 /// Replace the API token file with a fresh UUID. The running server keeps
 /// the old token in memory, so a process restart is required for the new
 /// one to take effect. Returns the new token so the UI can show it once.
@@ -1043,21 +1010,32 @@ fn prepare_secret_path(path: &std::path::Path) -> std::io::Result<()> {
 pub fn rotate_api_token() -> Result<String, String> {
     let path = api_token_path();
     let token = uuid::Uuid::new_v4().to_string();
-    prepare_secret_path(&path).map_err(|e| format!("secure token path: {e}"))?;
-    write_secret_file(&path, &token).map_err(|e| format!("write: {}", e))?;
+    crate::secret_store::write_file(&path, &token)?;
+    Ok(token)
+}
+
+#[tauri::command]
+pub fn rotate_jobs_api_token() -> Result<String, String> {
+    let path = jobs_api_token_path();
+    let token = uuid::Uuid::new_v4().to_string();
+    crate::secret_store::write_file(&path, &token)?;
     Ok(token)
 }
 
 /// Returns the current API token (first 8 chars + ellipsis) for display
-/// in Settings. We don't ship the full token to JS to keep it out of
-/// devtools history — the UI only needs a preview to confirm rotation.
+/// in Settings. Outside the explicit rotate-and-copy action, the full token
+/// never crosses the backend/UI boundary.
 #[tauri::command]
 pub fn get_api_token_preview() -> Result<String, String> {
-    let path = api_token_path();
-    prepare_secret_path(&path).map_err(|e| format!("secure token path: {e}"))?;
-    let token = std::fs::read_to_string(&path).map_err(|e| format!("read: {}", e))?;
-    let token = token.trim();
+    let token = read_token_file(&api_token_path())?;
     if token.len() < 8 { return Ok(token.to_string()); }
+    Ok(format!("{}…", &token[..8]))
+}
+
+#[tauri::command]
+pub fn get_jobs_api_token_preview() -> Result<String, String> {
+    let token = read_token_file(&jobs_api_token_path())?;
+    if token.len() < 8 { return Ok(token); }
     Ok(format!("{}…", &token[..8]))
 }
 
@@ -1094,17 +1072,15 @@ pub fn list_automation_log(limit: Option<i64>, db: tauri::State<'_, HanniDb>) ->
 }
 
 fn get_or_create_token(path: PathBuf) -> Result<String, String> {
-    prepare_secret_path(&path).map_err(|e| format!("secure token path: {e}"))?;
-    match read_token_file(&path ) {
+    match read_token_file(&path) {
         Ok(token) => return Ok(token),
-        Err(_) if !path.exists() => {
-        }
+        Err(_) if !path.exists() => {}
         Err(e) => return Err(e),
     }
     let token = uuid::Uuid::new_v4().to_string();
-    match create_secret_file(&path, &token) {
-            Ok(()) => Ok(token ),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+    match crate::secret_store::create_file(&path, &token) {
+        Ok(()) => Ok(token),
+        Err(_) if path.exists() => {
             crate::secure_fs::restrict_file(&path)
                 .map_err(|error| format!("secure {}: {error}", path.display()))?;
             read_token_file(&path)
@@ -1113,41 +1089,10 @@ fn get_or_create_token(path: PathBuf) -> Result<String, String> {
     }
 }
 
-fn create_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-            #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    if let Err(e) = file
-        .write_all(contents.as_bytes())
-        .and_then(|_| file.sync_all() )
-    {
-                drop(file);
-        let _ = std::fs::remove_file(path);
-        return Err(e);
-    }
-    if let Err(error) = crate::secure_fs::restrict_file(path) {
-        drop(file);
-        let _ = std::fs::remove_file(path);
-        return Err(error);
-    }
-    #[cfg(unix)]
-    if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)?.sync_all()?;
-    }
-    Ok(())
-}
-
 fn read_token_file(path: &std::path::Path) -> Result<String, String> {
-    let token = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let token = crate::secret_store::read_file(path)?;
     let token = token.trim();
-    if token
-.is_empty() {
+    if token.is_empty() {
         return Err(format!("token file is empty: {}", path.display()));
     }
     let parsed = uuid::Uuid::parse_str(token)

@@ -1,7 +1,7 @@
 // sync_github_cmds.rs — Tauri commands to configure GitHub owner-sync (Tier 3).
 // Provisioning: PAT + repo, the shared E2E key, and the backend feature-flag.
 
-use crate::sync_owner::set_setting;
+use crate::sync_owner::set_setting_checked;
 use crate::types::HanniDb;
 use rand::RngCore;
 use tauri::State;
@@ -10,8 +10,8 @@ use tauri::State;
 pub fn cloud_owner_gh_set_config(pat: String, repo: String, db: State<'_, HanniDb>)
                                  -> Result<(), String> {
     let conn = db.conn();
-    set_setting(&conn, "cloud_owner_gh_pat", pat.trim());
-    set_setting(&conn, "cloud_owner_gh_repo", repo.trim());
+    set_setting_checked(&conn, "cloud_owner_gh_pat", pat.trim())?;
+    set_setting_checked(&conn, "cloud_owner_gh_repo", repo.trim())?;
     Ok(())
 }
 
@@ -22,7 +22,7 @@ pub fn cloud_owner_gh_gen_key(db: State<'_, HanniDb>) -> Result<String, String> 
     let mut k = [0u8; 32];
     rand::rng().fill_bytes(&mut k);
     let hx = hex::encode(k);
-    set_setting(&db.conn(), "cloud_owner_gh_key", &hx);
+    set_setting_checked(&db.conn(), "cloud_owner_gh_key", &hx)?;
     Ok(hx)
 }
 
@@ -34,7 +34,7 @@ pub fn cloud_owner_gh_set_key(key_hex: String, db: State<'_, HanniDb>) -> Result
     if bytes.len() != 32 {
         return Err("key must be 32 bytes (64 hex chars)".into());
     }
-    set_setting(&db.conn(), "cloud_owner_gh_key", h);
+    set_setting_checked(&db.conn(), "cloud_owner_gh_key", h)?;
     Ok(())
 }
 
@@ -44,6 +44,6 @@ pub fn cloud_owner_backend_set(backend: String, db: State<'_, HanniDb>) -> Resul
     if backend != "firestore" && backend != "github" {
         return Err("backend must be 'firestore' or 'github'".into());
     }
-    set_setting(&db.conn(), "cloud_owner_backend", &backend);
+    set_setting_checked(&db.conn(), "cloud_owner_backend", &backend)?;
     Ok(())
 }

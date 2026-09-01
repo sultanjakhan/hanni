@@ -93,7 +93,8 @@ function renderPort(port) {
   for (const b of portButtons) b.classList.toggle('active', b.dataset.port === String(port));
 }
 
-// token.local.js (generated from jobs_api_token.txt) is the source of truth
+// token.local.js (generated from the macOS token file or provisioned from
+// Hanni Settings on Windows) is the source of truth
 // when present; manual paste is only the fallback. Hanni tokens are UUIDs, so on
 // manual input we extract the UUID from whatever was pasted around it.
 const UUID_RE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
@@ -175,7 +176,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   renderTokenState(token);
   if (!token) {
     $('settings').open = true;
-    setStatus('Вставь токен из jobs_api_token.txt в настройках ниже', 'error');
+    setStatus('Вставь Jobs-токен из Hanni → Настройки → Безопасность', 'error');
     return;
   }
   refresh();

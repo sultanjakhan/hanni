@@ -35,7 +35,7 @@ SSOT структуры проекта: 17 табов + cross-cutting `share`/`s
 
 ## Hanni app interaction
 - **Скриншот**: `desktop/tools/screenshot.sh /tmp/out.png [port]` → Read. Silent (`-x`), работает свёрнутым (html2canvas).
-- **DOM/eval**: `POST 127.0.0.1:<port>/auto/eval` c `{"script":"…"}` (порты см. Safety). Клик/тайп/навигация — через eval (`element.click()`, `MouseEvent`, `KeyboardEvent`). Сложные скрипты с кавычками — `python3 urllib`. Токен: `cat ~/Library/Application\ Support/Hanni/api_token.txt`.
+- **DOM/eval**: `POST 127.0.0.1:<port>/auto/eval` c `{"script":"…"}` (порты см. Safety). Клик/тайп/навигация — через eval (`element.click()`, `MouseEvent`, `KeyboardEvent`). Сложные скрипты с кавычками — `python3 urllib`. Токен: на macOS `cat ~/Library/Application\ Support/Hanni/api_token.txt`; на Windows — Hanni → Настройки → Безопасность → «Перевыпустить и скопировать» (файл защищён DPAPI и напрямую не читается).
 - **Никогда** MCP screenshot / tauri-automation (виснут на macOS).
 - После UI-правок — скриншот юзеру на сверку.
 

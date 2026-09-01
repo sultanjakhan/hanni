@@ -4,6 +4,7 @@ mod types;
 mod prompts;
 mod db;
 mod secure_fs;
+mod secret_store;
 mod sports_seed;
 mod chat;
 mod memory;
@@ -176,12 +177,6 @@ fn init_database() -> HanniDb {
 
     let db_path = hanni_db_path();
     eprintln!("[hanni] init_database: opening {:?}", db_path);
-    if let Err(error) = backup_db() {
-        if error.is_security() {
-            panic!("Cannot create a securely-permissioned Hanni backup: {error}");
-        }
-        eprintln!("[hanni] DB backup warning: {error}");
-    }
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
 
@@ -192,9 +187,8 @@ fn init_database() -> HanniDb {
     conn.pragma_update(None, "journal_mode", "WAL").ok();
     conn.busy_timeout(std::time::Duration::from_millis(5000)).ok();
 
-    // Harden secrets-at-rest: hanni.db holds plaintext tokens/keys (until the
-    // keychain migration). Lock the data dir to owner-only and the DB + WAL/SHM
-    // sidecars to 0600 so backups / shared-machine users can't read them.
+    // Harden secrets-at-rest in two layers: owner-only ACLs for the data tree
+    // and DPAPI protection for credential values on Windows.
     if let Some(parent) = db_path.parent() {
         db::restrict_dir(parent).expect("Cannot secure Hanni database directory");
     }
@@ -208,6 +202,12 @@ fn init_database() -> HanniDb {
     // EXISTS (idempotent, fast) and the seeds are insert-if-empty; both must
     // run so the recurring data-ops below always have their tables.
     init_db(&conn).expect("Cannot initialize database");
+    secret_store::migrate_sensitive_settings(&conn)
+        .expect("Cannot migrate Hanni secrets to protected storage");
+    secret_store::migrate_token_files(&data_dir)
+        .expect("Cannot migrate Hanni API tokens to protected storage");
+    secret_store::migrate_backup_databases(&data_dir)
+        .expect("Cannot migrate Hanni backup credentials to protected storage");
     seed_ingredient_catalog(&conn);
     seed_default_cuisines(&conn);
 
@@ -334,6 +334,18 @@ fn init_database() -> HanniDb {
         [], |row| row.get::<_, String>(0),
     ) {
         set_llm_model(&val);
+    }
+
+    // Never create a fresh plaintext-secret backup. The security migration
+    // above must finish and its WAL must be checkpointed before backup_db can
+    // copy the database.
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .expect("Cannot checkpoint Hanni database before backup");
+    if let Err(error) = backup_db() {
+        if error.is_security() {
+            panic!("Cannot create a securely-permissioned Hanni backup: {error}");
+        }
+        eprintln!("[hanni] DB backup warning: {error}");
     }
 
     eprintln!("[hanni] init_database: migrations complete");
@@ -901,7 +913,9 @@ pub fn run() {
             // Automation API
             commands_meta::auto_eval_callback,
             commands_meta::rotate_api_token,
+            commands_meta::rotate_jobs_api_token,
             commands_meta::get_api_token_preview,
+            commands_meta::get_jobs_api_token_preview,
             commands_meta::list_automation_log,
             // Body Records (3D Body Tab)
             commands_data::create_body_record,
