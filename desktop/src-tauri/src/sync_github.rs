@@ -12,10 +12,12 @@ use crate::sync_github_api::{
     blob_entry, build_doc, fetch_doc, fetch_tarball, gh_get, gh_head, gh_post, gh_req, resolve_gh,
 };
 use crate::sync_github_replay::prepare_text_id_replay;
-use crate::sync_owner::{get_setting, row_to_json, set_setting, tombstone_row_id, upsert_row};
+use crate::sync_owner::{
+    get_setting, row_to_json, set_setting, tombstone_row_id, upsert_row_fail_closed,
+};
 use crate::types::HanniDb;
 use reqwest::Method;
-use rusqlite::types::Value as SqlValue;
+use rusqlite::{types::Value as SqlValue, OptionalExtension};
 use serde_json::{json, Map, Value};
 
 const PUSH_LIMIT: usize = 500;
@@ -150,23 +152,21 @@ pub(crate) async fn gh_pull(db: &HanniDb) -> Result<Value, String> {
         Some(files) => {
             for (path, blob_sha) in &files {
                 if path.starts_with(&own_prefix) || !path.contains('/') { continue; }
-                let doc = match fetch_doc(&client, &c, path, blob_sha).await {
-                    Ok(d) => d,
-                    Err(e) => { eprintln!("[sync_github] {}: {}", path, e); continue; }
-                };
-                match apply_doc(&db.conn(), &doc) {
-                    Ok(true) => applied += 1,
-                    Ok(false) => {}
-                    Err(e) => eprintln!("[sync_github] apply {}: {}", path, e),
+                let doc = fetch_doc(&client, &c, path, blob_sha).await
+                    .map_err(|e| format!("GitHub fetch {path}: {e}"))?;
+                if apply_doc(&db.conn(), &doc)
+                    .map_err(|e| format!("GitHub apply {path}: {e}"))?
+                {
+                    applied += 1;
                 }
             }
         }
         None => {
             for (path, doc) in fetch_tarball(&client, &c, &head).await? {
-                match apply_doc(&db.conn(), &doc) {
-                    Ok(true) => applied += 1,
-                    Ok(false) => {}
-                    Err(e) => eprintln!("[sync_github] apply {}: {}", path, e),
+                if apply_doc(&db.conn(), &doc)
+                    .map_err(|e| format!("GitHub apply {path}: {e}"))?
+                {
+                    applied += 1;
                 }
             }
         }
@@ -174,34 +174,102 @@ pub(crate) async fn gh_pull(db: &HanniDb) -> Result<Value, String> {
 
     {
         let conn = db.conn();
-        set_setting(&conn, "cloud_owner_gh_pull_sha", &head);
+        save_pull_head(&conn, &head)?;
         set_setting(&conn, "cloud_owner_gh_last_pull_ts", &chrono::Utc::now().to_rfc3339());
     }
     Ok(json!({ "applied": applied }))
 }
 
+fn save_pull_head(conn: &rusqlite::Connection, head: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO app_settings(key,value) VALUES(?1,?2) \
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        rusqlite::params!["cloud_owner_gh_pull_sha", head],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("save GitHub pull head: {e}"))
+}
+
+fn apply_tombstone_lww(
+    conn: &rusqlite::Connection,
+    target: &str,
+    id: &Value,
+    deleted_at: &str,
+) -> Result<bool, String> {
+    if !SYNC_TABLES.contains(&target) {
+        return Err(format!("tombstone: unsupported table {target}"));
+    }
+    if deleted_at.is_empty() {
+        return Err(format!("tombstone {target}: missing _updated_at"));
+    }
+
+    let row_id = tombstone_row_id(Some(id))
+        .ok_or_else(|| format!("tombstone {target}: invalid _row_id"))?;
+    let row_id_text = match &row_id {
+        SqlValue::Integer(value) => value.to_string(),
+        SqlValue::Text(value) => value.clone(),
+        _ => return Err(format!("tombstone {target}: unsupported _row_id")),
+    };
+
+    let known_tombstone: Option<String> = conn.query_row(
+        "SELECT deleted_at FROM sync_tombstones WHERE table_name=?1 AND row_id=?2",
+        rusqlite::params![target, &row_id_text],
+        |row| row.get(0),
+    ).optional().map_err(|e| format!("read tombstone {target}: {e}"))?;
+
+    let effective_deleted_at = match known_tombstone.as_deref() {
+        Some(timestamp) if timestamp > deleted_at => timestamp,
+        _ => deleted_at,
+    };
+
+    let local_updated: Option<String> = conn.query_row(
+        &format!("SELECT updated_at FROM {target} WHERE id=?1"),
+        rusqlite::params![&row_id],
+        |row| row.get(0),
+    ).optional().map_err(|e| format!("read local row {target}: {e}"))?;
+
+    // Delete wins on equal timestamps; only a strictly newer local row survives.
+    if local_updated.as_deref().is_some_and(|timestamp| timestamp > effective_deleted_at) {
+        return Ok(false);
+    }
+
+    let deleted = conn.execute(
+        &format!("DELETE FROM {target} WHERE id=?1"),
+        rusqlite::params![&row_id],
+    ).map_err(|e| format!("delete {target}: {e}"))?;
+
+    // A local DELETE trigger can stamp local wall-clock time. Preserve the
+    // remote logical timestamp so later stale rows cannot resurrect.
+    let wrote_tombstone = known_tombstone.as_deref() != Some(effective_deleted_at);
+    conn.execute(
+        "INSERT INTO sync_tombstones(table_name,row_id,deleted_at) VALUES(?1,?2,?3) \
+         ON CONFLICT(table_name,row_id) DO UPDATE SET deleted_at=excluded.deleted_at",
+        rusqlite::params![target, &row_id_text, effective_deleted_at],
+    )
+    .map_err(|e| format!("persist tombstone {target}: {e}"))?;
+
+    Ok(deleted > 0 || wrote_tombstone)
+}
+
 /// Apply one decrypted doc: tombstone delete or LWW row upsert via the merge
 /// layer. Returns whether a row was changed.
 fn apply_doc(conn: &rusqlite::Connection, doc: &Map<String, Value>) -> Result<bool, String> {
-    let table = doc.get("_table").and_then(|v| v.as_str()).unwrap_or("");
+    let table = doc.get("_table").and_then(Value::as_str)
+        .ok_or("remote document missing _table")?;
     if table == "tombstones" {
-        let target = doc.get("_target_table").and_then(|v| v.as_str()).unwrap_or("");
-        // _row_id is a JSON number in legacy docs and a string since v1.0.8
-        // (covers UUID-keyed tables like schedules); numeric strings bind as
-        // integers so INTEGER-id tables match exactly.
-        if let Some(id) = tombstone_row_id(doc.get("_row_id")) {
-            if SYNC_TABLES.contains(&target) {
-                let _ = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", target),
-                                     rusqlite::params![id]);
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    } else if SYNC_TABLES.contains(&table) {
-        upsert_row(conn, table, doc)
-    } else {
-        Ok(false)
+        let target = doc.get("_target_table").and_then(Value::as_str)
+            .ok_or("tombstone missing _target_table")?;
+        let id = doc.get("_row_id").ok_or("tombstone missing _row_id")?;
+        let deleted_at = doc.get("_updated_at").and_then(Value::as_str)
+            .filter(|timestamp| !timestamp.is_empty())
+            .ok_or("tombstone missing _updated_at")?;
+        return apply_tombstone_lww(conn, target, id, deleted_at);
     }
+
+    if !SYNC_TABLES.contains(&table) {
+        return Err(format!("remote document: unsupported table {table}"));
+    }
+    upsert_row_fail_closed(conn, table, doc)
 }
 
 /// Changed/added blob paths (path, blob_sha) from a `compare` response; git

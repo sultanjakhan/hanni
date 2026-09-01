@@ -20,7 +20,7 @@ use crate::google_auth::{load_session as load_google_session,
 use crate::sync_share::{firestore_host, get_access_token, json_to_field,
                          load_config as load_share_config};
 use crate::types::HanniDb;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::State;
@@ -337,9 +337,34 @@ async fn push_tombstones(db: &HanniDb, client: &reqwest::Client,
 
 // ── Per-table pull ───────────────────────────────────────────────────────
 
-pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Map<String, Value>)
-              -> Result<bool, String>
-{
+#[derive(Clone, Copy, PartialEq)]
+enum UpsertMode {
+    BestEffort,
+    FailClosed,
+}
+
+pub(crate) fn upsert_row(
+    conn: &Connection,
+    table: &str,
+    fields: &serde_json::Map<String, Value>,
+) -> Result<bool, String> {
+    upsert_row_inner(conn, table, fields, UpsertMode::BestEffort)
+}
+
+pub(crate) fn upsert_row_fail_closed(
+    conn: &Connection,
+    table: &str,
+    fields: &serde_json::Map<String, Value>,
+) -> Result<bool, String> {
+    upsert_row_inner(conn, table, fields, UpsertMode::FailClosed)
+}
+
+fn upsert_row_inner(
+    conn: &Connection,
+    table: &str,
+    fields: &serde_json::Map<String, Value>,
+    mode: UpsertMode,
+) -> Result<bool, String> {
     let id_value = fields.get("id").cloned()
         .ok_or_else(|| format!("{}: row missing id", table))?;
     if matches!(id_value, Value::Null) {
@@ -356,16 +381,20 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
     };
     let remote_ts = fields.get("_updated_at").and_then(|v| v.as_str())
         .unwrap_or("");
+    if mode == UpsertMode::FailClosed && remote_ts.is_empty() {
+        return Err(format!("{}: row missing _updated_at", table));
+    }
 
     // event_categories has no stable cross-device id — resolve it by name.
     if table == "event_categories" {
-        return upsert_event_category(conn, fields, remote_ts);
+        return upsert_event_category(conn, fields, remote_ts, mode);
     }
 
     // Tolerate missing tables — devices may diverge if one shipped earlier
     // schema. We still advance the pull cursor so we don't loop forever.
     let cols = match table_columns(conn, table) {
         Ok(c) => c,
+        Err(error) if mode == UpsertMode::FailClosed => return Err(error),
         Err(_) => {
             eprintln!("[sync_owner] skip remote row for missing table {}", table);
             return Ok(false);
@@ -375,26 +404,43 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
     // Don't resurrect locally-deleted rows: skip if a tombstone post-dates the
     // remote write. Without this, a deletion gets clobbered by the next pull of
     // the still-present remote row (LWW alone can't tell delete from absence).
-    let tomb_ts: Option<String> = conn.query_row(
+    let tomb_ts: Option<String> = match conn.query_row(
         "SELECT deleted_at FROM sync_tombstones WHERE table_name=?1 AND row_id=?2",
         rusqlite::params![table, &id_str], |r| r.get(0),
-    ).ok();
+    ).optional() {
+        Ok(value) => value,
+        Err(error) if mode == UpsertMode::FailClosed => {
+            return Err(format!("{}: read tombstone: {}", table, error));
+        }
+        Err(_) => None,
+    };
     if let Some(tomb) = &tomb_ts {
         if tomb.as_str() >= remote_ts { return Ok(false); }
     }
 
     // LWW: skip if local is newer-or-equal.
-    let local_ts: Option<String> = conn.query_row(
+    let local_ts: Option<String> = match conn.query_row(
         &format!("SELECT updated_at FROM {} WHERE id = ?1", table),
         rusqlite::params![&id_sql], |r| r.get(0),
-    ).ok();
+    ).optional() {
+        Ok(value) => value,
+        Err(error) if mode == UpsertMode::FailClosed => {
+            return Err(format!("{}: read local row: {}", table, error));
+        }
+        Err(_) => None,
+    };
     if let Some(local) = &local_ts {
         if local.as_str() >= remote_ts { return Ok(false); }
     }
 
     let cols: Vec<&str> = cols.iter().map(|s| s.as_str())
         .filter(|c| fields.contains_key(*c)).collect();
-    if cols.is_empty() { return Ok(false); }
+    if cols.is_empty() {
+        if mode == UpsertMode::FailClosed {
+            return Err(format!("{}: row has no applicable columns", table));
+        }
+        return Ok(false);
+    }
 
     let placeholders = (1..=cols.len()).map(|i| format!("?{}", i)).collect::<Vec<_>>().join(",");
     let updates = cols.iter().filter(|c| **c != "id")
@@ -410,6 +456,9 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
     }).collect();
     let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
     if let Err(e) = conn.execute(&sql, refs.as_slice()) {
+        if mode == UpsertMode::FailClosed {
+            return Err(format!("{}: upsert row {}: {}", table, id_str, e));
+        }
         // Don't fail the whole pull on one bad row — log and move on.
         eprintln!("[sync_owner] upsert {} #{}: {}", table, id_str, e);
         return Ok(false);
@@ -420,31 +469,50 @@ pub(crate) fn upsert_row(conn: &Connection, table: &str, fields: &serde_json::Ma
 /// event_categories uses an AUTOINCREMENT `id` that diverges across devices,
 /// but `name` is UNIQUE and is what `events.category` references. Sync by name:
 /// ignore the remote id (local AUTOINCREMENT owns it), conflict-resolve on name.
-fn upsert_event_category(conn: &Connection, fields: &serde_json::Map<String, Value>,
-                         remote_ts: &str) -> Result<bool, String>
+fn upsert_event_category(
+    conn: &Connection,
+    fields: &serde_json::Map<String, Value>,
+    remote_ts: &str,
+    mode: UpsertMode,
+) -> Result<bool, String>
 {
     let name = match fields.get("name").and_then(|v| v.as_str()) {
         Some(n) if !n.is_empty() => n,
+        _ if mode == UpsertMode::FailClosed => {
+            return Err("event_categories: row missing name".into());
+        }
         _ => return Ok(false),
     };
 
     // LWW by name: skip if local is newer-or-equal.
-    let local_ts: Option<String> = conn.query_row(
+    let local_ts: Option<String> = match conn.query_row(
         "SELECT updated_at FROM event_categories WHERE name = ?1",
         rusqlite::params![name], |r| r.get(0),
-    ).ok();
+    ).optional() {
+        Ok(value) => value,
+        Err(error) if mode == UpsertMode::FailClosed => {
+            return Err(format!("event_categories: read local row: {}", error));
+        }
+        Err(_) => None,
+    };
     if let Some(local) = &local_ts {
         if local.as_str() >= remote_ts { return Ok(false); }
     }
 
     let table_cols = match table_columns(conn, "event_categories") {
         Ok(c) => c,
+        Err(error) if mode == UpsertMode::FailClosed => return Err(error),
         Err(_) => return Ok(false),
     };
     // Drop `id` — the local AUTOINCREMENT owns it.
     let cols: Vec<&str> = table_cols.iter().map(|s| s.as_str())
         .filter(|c| *c != "id" && fields.contains_key(*c)).collect();
-    if cols.is_empty() { return Ok(false); }
+    if cols.is_empty() {
+        if mode == UpsertMode::FailClosed {
+            return Err("event_categories: row has no applicable columns".into());
+        }
+        return Ok(false);
+    }
 
     let placeholders = (1..=cols.len()).map(|i| format!("?{}", i)).collect::<Vec<_>>().join(",");
     let updates = cols.iter().filter(|c| **c != "name")
@@ -460,6 +528,9 @@ fn upsert_event_category(conn: &Connection, fields: &serde_json::Map<String, Val
     }).collect();
     let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
     if let Err(e) = conn.execute(&sql, refs.as_slice()) {
+        if mode == UpsertMode::FailClosed {
+            return Err(format!("event_categories: upsert {}: {}", name, e));
+        }
         eprintln!("[sync_owner] upsert event_categories '{}': {}", name, e);
         return Ok(false);
     }

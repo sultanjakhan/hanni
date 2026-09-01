@@ -90,15 +90,57 @@ pub(crate) async fn gh_head(client: &reqwest::Client, c: &GhCreds)
 }
 
 /// Fetch a blob, undo the double base64 (git's wrapper + our encoding), decrypt.
+pub(crate) fn decode_doc_blob(
+    c: &GhCreds,
+    path: &str,
+    encoded_blob: &[u8],
+) -> Result<Map<String, Value>, String> {
+    let blob = B64.decode(encoded_blob).map_err(|_| "inner base64")?;
+    let plain = open(&c.key, path.as_bytes(), &blob)?;
+    serde_json::from_slice(&plain).map_err(|e| format!("doc parse: {e}"))
+}
+
 pub(crate) async fn fetch_doc(client: &reqwest::Client, c: &GhCreds, path: &str, blob_sha: &str)
                               -> Result<Map<String, Value>, String> {
     let b = gh_get(client, c, &format!("git/blobs/{}", blob_sha)).await?;
     let git_b64: String = b.get("content").and_then(|v| v.as_str()).unwrap_or("")
         .split_whitespace().collect();
     let file_bytes = B64.decode(git_b64).map_err(|_| "git blob base64")?;
-    let blob = B64.decode(&file_bytes).map_err(|_| "inner base64")?;
-    let plain = open(&c.key, path.as_bytes(), &blob)?;
-    serde_json::from_slice(&plain).map_err(|e| format!("doc parse: {}", e))
+    decode_doc_blob(c, path, &file_bytes)
+}
+
+pub(crate) fn decode_tarball(
+    c: &GhCreds,
+    bytes: &[u8],
+) -> Result<Vec<(String, Map<String, Value>)>, String> {
+    let own_prefix = format!("{}/", c.device_id);
+    let gz = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(gz);
+    let mut out = Vec::new();
+
+    for entry in archive.entries().map_err(|e| format!("tar: {e}"))? {
+        let mut entry = entry.map_err(|e| format!("tar entry: {e}"))?;
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+        let raw = entry.path().map_err(|e| format!("tar path: {e}"))?
+            .to_string_lossy().into_owned();
+        let path = match raw.split_once('/') {
+            Some((_, rest)) => rest.to_string(),
+            None => continue,
+        };
+        if !path.contains('/') || path.starts_with(&own_prefix) {
+            continue;
+        }
+
+        let mut file_b64 = Vec::new();
+        entry.read_to_end(&mut file_b64)
+            .map_err(|e| format!("tar read {path}: {e}"))?;
+        let doc = decode_doc_blob(c, &path, &file_b64)
+            .map_err(|e| format!("tar decode {path}: {e}"))?;
+        out.push((path, doc));
+    }
+    Ok(out)
 }
 
 /// Bulk read for the first/large pull: download the whole repo as ONE tarball
@@ -121,35 +163,14 @@ pub(crate) async fn fetch_tarball(client: &reqwest::Client, c: &GhCreds, head: &
     if !(200..300).contains(&status) { return Err(format!("tarball -> {}", status)); }
     let bytes = resp.bytes().await.map_err(|e| format!("tarball body: {}", e))?;
 
-    let own_prefix = format!("{}/", c.device_id);
-    let gz = flate2::read::GzDecoder::new(&bytes[..]);
-    let mut archive = tar::Archive::new(gz);
-    let mut out: Vec<(String, Map<String, Value>)> = Vec::new();
-    for entry in archive.entries().map_err(|e| format!("tar: {}", e))? {
-        let mut entry = entry.map_err(|e| format!("tar entry: {}", e))?;
-        if entry.header().entry_type() != tar::EntryType::Regular { continue; }
-        let raw = entry.path().map_err(|e| format!("tar path: {}", e))?
-            .to_string_lossy().into_owned();
-        // strip GitHub's "{owner}-{repo}-{sha}/" wrapper component
-        let path = match raw.split_once('/') { Some((_, rest)) => rest.to_string(), None => continue };
-        if !path.contains('/') || path.starts_with(&own_prefix) { continue; }
-        let mut file_b64 = Vec::new();
-        if entry.read_to_end(&mut file_b64).is_err() { continue; }
-        // tarball file bytes are our single base64 (git's API base64 wrapper is
-        // not present here, unlike fetch_doc's double-decode).
-        let blob = match B64.decode(&file_b64) { Ok(b) => b, Err(_) => continue };
-        if let Ok(plain) = open(&c.key, path.as_bytes(), &blob) {
-            if let Ok(doc) = serde_json::from_slice::<Map<String, Value>>(&plain) {
-                out.push((path, doc));
-            }
-        }
-    }
-    Ok(out)
+    decode_tarball(c, &bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Cursor;
 
     fn creds() -> GhCreds {
         GhCreds { pat: "x".into(), repo: "o/r".into(), key: [42u8; 32], device_id: "devA".into() }
@@ -181,5 +202,55 @@ mod tests {
         let blob = B64.decode(entry.get("content").unwrap().as_str().unwrap()).unwrap();
         // AAD = path binds ciphertext to its slot: a wrong path must fail to open.
         assert!(open(&c.key, b"devA/wrongname", &blob).is_err());
+    }
+
+    fn tarball(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        for (path, bytes) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o600);
+            header.set_cksum();
+            archive.append_data(&mut header, *path, Cursor::new(bytes)).unwrap();
+        }
+        archive.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[test]
+    fn decode_doc_blob_rejects_wrong_key_and_invalid_json() {
+        let c = creds();
+        let path = "devB/blob";
+
+        let wrong_key = seal(&[7u8; 32], path.as_bytes(), br#"{"id":1}"#).unwrap();
+        let wrong_key = B64.encode(wrong_key);
+        assert!(decode_doc_blob(&c, path, wrong_key.as_bytes()).is_err());
+
+        let invalid_json = seal(&c.key, path.as_bytes(), b"{bad").unwrap();
+        let invalid_json = B64.encode(invalid_json);
+        assert!(decode_doc_blob(&c, path, invalid_json.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn decode_tarball_fails_closed_on_one_bad_foreign_blob() {
+        let c = creds();
+        let good_path = "devB/good";
+        let good_doc = br#"{"_table":"notes","id":1}"#;
+        let good = B64.encode(seal(&c.key, good_path.as_bytes(), good_doc).unwrap()).into_bytes();
+        let bytes = tarball(&[
+            ("repo-root/devB/good", good),
+            ("repo-root/devC/bad", b"not-base64".to_vec()),
+        ]);
+
+        let error = decode_tarball(&c, &bytes).unwrap_err();
+        assert!(error.contains("devC/bad"));
+    }
+
+    #[test]
+    fn decode_tarball_skips_own_malformed_blob() {
+        let c = creds();
+        let bytes = tarball(&[("repo-root/devA/bad", b"not-base64".to_vec())]);
+
+        assert!(decode_tarball(&c, &bytes).unwrap().is_empty());
     }
 }
