@@ -67,6 +67,10 @@ jobs:
         working-directory: desktop
         run: npm run test:security
 
+      - name: Run Issue #34 prototype tests
+        working-directory: desktop
+        run: node --test tests/issue-34-prototype.test.mjs
+
       - name: Run vendor integrity check
         working-directory: desktop
         run: npm run vendor:check

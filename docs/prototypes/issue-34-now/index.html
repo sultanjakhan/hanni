@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Hanni · «Сейчас» · прототип Issue #34</title>
+    <link rel="stylesheet" href="prototype.css">
+    <script src="prototype.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#calendar-main">Перейти к содержимому</a>
+
+    <div class="prototype-shell">
+      <aside class="app-rail" aria-label="Разделы Hanni">
+        <div class="brand-mark" aria-label="Hanni">H</div>
+        <nav class="rail-navigation" aria-label="Основная навигация">
+          <a class="rail-link" href="#calendar-main" aria-current="page" aria-label="Calendar, текущий раздел">
+            <span class="rail-icon" aria-hidden="true">31</span>
+            <span class="rail-label">Calendar</span>
+          </a>
+          <a class="rail-link" href="#day-overview">
+            <span class="rail-icon rail-icon--dot" aria-hidden="true"></span>
+            <span class="rail-label">Сегодня</span>
+          </a>
+          <a class="rail-link" href="#prototype-controls">
+            <span class="rail-icon rail-icon--sliders" aria-hidden="true"></span>
+            <span class="rail-label">Прототип</span>
+          </a>
+        </nav>
+        <button class="icon-button theme-button" id="theme-toggle" type="button" aria-pressed="false" aria-label="Включить тёмную тему">
+          <span class="theme-icon" aria-hidden="true">◐</span>
+          <span class="rail-label" id="theme-label">Тёмная тема</span>
+        </button>
+      </aside>
+
+      <main class="calendar-main" id="calendar-main">
+        <div class="prototype-notice" id="prototype-note">
+          <span class="prototype-notice__mark" aria-hidden="true"></span>
+          <span>Экспериментальный прототип · только синтетические данные</span>
+        </div>
+
+        <header class="calendar-header">
+          <div class="calendar-heading">
+            <div class="calendar-icon" aria-hidden="true">
+              <span>2</span>
+            </div>
+            <div>
+              <p class="section-kicker">Личное пространство</p>
+              <h1>Calendar</h1>
+              <p class="calendar-subtitle">Расписание и события</p>
+            </div>
+          </div>
+          <div class="date-controls" aria-label="Дата в прототипе">
+            <button class="icon-button" id="previous-day" type="button" aria-label="Предыдущий день">←</button>
+            <button class="date-pill" id="today-button" type="button">Сегодня, 2 сентября</button>
+            <button class="icon-button" id="next-day" type="button" aria-label="Следующий день">→</button>
+          </div>
+        </header>
+
+        <section class="now-region" aria-labelledby="now-heading">
+          <article class="now-card" id="now-card" data-state="recommendation" aria-busy="false" aria-labelledby="now-heading now-title" tabindex="-1">
+            <div class="now-accent" aria-hidden="true"></div>
+
+            <div class="loading-state" id="loading-state" hidden>
+              <div class="loading-heading">
+                <span class="skeleton skeleton--eyebrow"></span>
+                <span class="skeleton skeleton--status"></span>
+              </div>
+              <span class="skeleton skeleton--title"></span>
+              <span class="skeleton skeleton--meta"></span>
+              <div class="loading-actions" aria-hidden="true">
+                <span class="skeleton skeleton--button"></span>
+                <span class="skeleton skeleton--button-small"></span>
+              </div>
+              <span class="sr-only">Подбираем задачу на сейчас…</span>
+            </div>
+
+            <div class="now-content" id="now-content">
+              <div class="now-main-row">
+                <div class="now-copy">
+                  <div class="now-heading-row">
+                    <div class="now-eyebrow">
+                      <span class="state-dot" id="state-dot" aria-hidden="true"></span>
+                      <h2 id="now-heading">Сейчас</h2>
+                    </div>
+                    <span class="status-chip" id="now-status-label">Рекомендация</span>
+                  </div>
+                  <p class="now-title" id="now-title">Подготовить вопросы к интервью</p>
+                  <p class="now-meta" id="now-meta">Срок сегодня · около 25 мин</p>
+                  <p class="now-support" id="now-support">Одна задача, которую можно начать без перестройки плана.</p>
+                </div>
+
+                <div class="now-actions" id="now-actions" aria-label="Действия с задачей">
+                  <button class="button button--primary" id="start-action" type="button">Начать</button>
+                  <button class="button button--secondary" id="pause-action" type="button" hidden>Пауза</button>
+                  <button class="button button--secondary" id="finish-action" type="button" hidden>Завершить</button>
+                  <button class="button button--quiet" id="dismiss-action" type="button">Не сейчас</button>
+                  <button
+                    class="button button--quiet"
+                    id="clarify-action"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="clarification-panel"
+                  >Уточнить</button>
+                  <button class="button button--primary" id="restore-action" type="button" hidden>Вернуть</button>
+                  <button class="button button--primary" id="retry-action" type="button" hidden>Попробовать ещё раз</button>
+                </div>
+              </div>
+
+              <div class="error-callout" id="error-callout" role="alert" hidden>
+                <span class="error-callout__icon" aria-hidden="true">!</span>
+                <div>
+                  <strong>Действие не выполнено</strong>
+                  <span id="error-context">Задача осталась на месте — можно повторить.</span>
+                </div>
+              </div>
+
+              <section
+                class="clarification-panel"
+                id="clarification-panel"
+                aria-labelledby="clarification-title"
+                tabindex="-1"
+                hidden
+              >
+                <div class="clarification-heading">
+                  <div>
+                    <p class="section-kicker">Почему сейчас</p>
+                    <h3 id="clarification-title">Задача связана с ближайшим результатом</h3>
+                  </div>
+                  <button class="icon-button" id="close-clarification" type="button" aria-label="Свернуть пояснение">×</button>
+                </div>
+                <dl class="context-grid">
+                  <div>
+                    <dt>Причина</dt>
+                    <dd>Срок сегодня</dd>
+                  </div>
+                  <div>
+                    <dt>Источник</dt>
+                    <dd>План дня · синтетическая задача</dd>
+                  </div>
+                  <div>
+                    <dt>Первый шаг</dt>
+                    <dd>Составить пять коротких вопросов</dd>
+                  </div>
+                </dl>
+                <button class="text-button" id="collapse-clarification" type="button">Свернуть пояснение</button>
+              </section>
+            </div>
+          </article>
+
+          <p class="sr-only" id="now-live" role="status" aria-live="polite" aria-atomic="true"></p>
+        </section>
+
+        <nav class="pane-tabs" aria-label="Представление календаря">
+          <button class="pane-tab pane-tab--active" type="button" aria-current="page">Дашборд</button>
+          <button class="pane-tab" type="button">Таблица</button>
+          <button class="pane-tab" type="button">Рутина</button>
+          <button class="pane-tab" type="button">Цели</button>
+          <button class="pane-tab" type="button">Заметки</button>
+        </nav>
+
+        <section class="day-overview" id="day-overview" aria-labelledby="day-heading">
+          <div class="day-overview__header">
+            <div>
+              <p class="section-kicker">Среда</p>
+              <h2 id="day-heading">План на сегодня</h2>
+            </div>
+            <span class="day-summary">3 пункта · 1 ч 35 мин</span>
+          </div>
+
+          <div class="timeline" aria-label="Синтетический план дня">
+            <article class="timeline-item timeline-item--complete">
+              <time datetime="09:30">09:30</time>
+              <span class="timeline-marker" aria-hidden="true"></span>
+              <div>
+                <h3>Разобрать входящие</h3>
+                <p>Готово · 15 мин</p>
+              </div>
+            </article>
+            <article class="timeline-item timeline-item--current">
+              <time datetime="11:00">11:00</time>
+              <span class="timeline-marker" aria-hidden="true"></span>
+              <div>
+                <h3>Подготовить вопросы к интервью</h3>
+                <p>Срок сегодня · 25 мин</p>
+              </div>
+            </article>
+            <article class="timeline-item">
+              <time datetime="15:00">15:00</time>
+              <span class="timeline-marker" aria-hidden="true"></span>
+              <div>
+                <h3>Проверить черновик отчёта</h3>
+                <p>Запланировано · 55 мин</p>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <aside class="prototype-panel" id="prototype-controls" aria-labelledby="prototype-controls-title">
+        <div class="prototype-panel__sticky">
+          <div class="prototype-panel__heading">
+            <span class="prototype-panel__eyebrow">Только для проверки</span>
+            <h2 id="prototype-controls-title">Управление прототипом</h2>
+            <p>Переключатель не является частью будущего интерфейса Hanni.</p>
+          </div>
+
+          <label class="control-field" for="scenario-select">
+            <span>Сценарий</span>
+            <select id="scenario-select">
+              <option value="loading">Загрузка</option>
+              <option value="recommendation" selected>Рекомендация</option>
+              <option value="clarified">Пояснение открыто</option>
+              <option value="dismissed">Скрыто</option>
+              <option value="active">В работе</option>
+              <option value="paused">Приостановлено</option>
+              <option value="finishPending">Завершение</option>
+              <option value="empty">Пусто</option>
+              <option value="error">Ошибка</option>
+            </select>
+          </label>
+
+          <label class="toggle-control" for="simulate-failure">
+            <input id="simulate-failure" type="checkbox">
+            <span class="toggle-track" aria-hidden="true"><span></span></span>
+            <span>
+              <strong>Сбой следующего действия</strong>
+              <small>Для «Начать», «Продолжить», «Пауза» или «Завершить»</small>
+            </span>
+          </label>
+
+          <button class="button button--secondary button--wide" id="reset-prototype" type="button">Сбросить прототип</button>
+
+          <div class="prototype-contract">
+            <h3>Что проверяем</h3>
+            <ul>
+              <li>Находится ли одно действие за 10 секунд</li>
+              <li>Понятно ли, почему оно предложено</li>
+              <li>Можно ли восстановиться после отказа или ошибки</li>
+            </ul>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </body>
+</html>
