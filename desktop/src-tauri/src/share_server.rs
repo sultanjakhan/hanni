@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
 };
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -39,6 +39,43 @@ pub struct ShareServerState {
 
 pub fn share_port() -> u16 {
     if cfg!(debug_assertions) { 8240 } else { 8239 }
+}
+
+/// Accept browser origins only from an exact loopback host or the Tailscale
+/// CGNAT range (100.64.0.0/10). Prefix checks are unsafe here: hosts such as
+/// `localhost.evil.example` and public `100.128.0.0/9` addresses must not be
+/// treated as trusted local origins.
+fn is_allowed_share_origin(origin: &HeaderValue) -> bool {
+    let Ok(raw) = origin.to_str() else {
+        return false;
+    };
+    let Ok(uri) = raw.parse::<axum::http::Uri>() else {
+        return false;
+    };
+    if uri.scheme_str() != Some("http") || uri.path() != "/" || uri.query().is_some() {
+        return false;
+    }
+    let Some(authority) = uri.authority() else {
+        return false;
+    };
+    if authority.as_str().contains('@') {
+        return false;
+    }
+
+    let host = authority.host().trim_matches(['[', ']']);
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) if ip.is_loopback() => true,
+        Ok(IpAddr::V4(ip)) => {
+            let octets = ip.octets();
+            octets[0] == 100 && (64..=127).contains(&octets[1])
+        }
+        Ok(IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => false,
+    }
 }
 
 pub async fn spawn_share_server(app_handle: AppHandle) {
@@ -89,11 +126,7 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         .layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
-                    origin.to_str().map(|s|
-                        s.starts_with("http://127.0.0.1")
-                        || s.starts_with("http://localhost")
-                        || s.starts_with("http://100.")
-                    ).unwrap_or(false)
+                    is_allowed_share_origin(origin)
                 }))
                 .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
                 .allow_headers([header::CONTENT_TYPE])
@@ -128,6 +161,40 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_share_origin;
+    use axum::http::HeaderValue;
+
+    fn allowed(origin: &'static str) -> bool {
+        is_allowed_share_origin(&HeaderValue::from_static(origin))
+    }
+
+    #[test]
+    fn cors_accepts_exact_loopback_and_tailscale_origins() {
+        assert!(allowed("http://localhost:8239"));
+        assert!(allowed("http://127.0.0.1:8239"));
+        assert!(allowed("http://127.42.0.7"));
+        assert!(allowed("http://[::1]:8239"));
+        assert!(allowed("http://100.64.0.1:8239"));
+        assert!(allowed("http://100.127.255.254"));
+    }
+
+    #[test]
+    fn cors_rejects_prefix_confusion_and_non_tailscale_hosts() {
+        assert!(!allowed("http://localhost.evil.example:8239"));
+        assert!(!allowed("http://127.0.0.1.evil.example"));
+        assert!(!allowed("http://100.63.255.255"));
+        assert!(!allowed("http://100.128.0.1"));
+        assert!(!allowed("http://100.example"));
+        assert!(!allowed("https://localhost:8239"));
+        assert!(!allowed("http://user@localhost:8239"));
+        assert!(!allowed("http://localhost:8239/path"));
+        assert!(!allowed("http://localhost:8239/?q=1"));
+        assert!(!allowed("null"));
+    }
 }
 
 async fn landing(
