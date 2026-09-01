@@ -2905,15 +2905,15 @@ pub fn migrate_event_categories(conn: &rusqlite::Connection) {
 ///    body_records, conversations) and an AFTER UPDATE trigger that keeps it
 ///    fresh. LWW conflict resolution needs a per-row timestamp.
 /// 2. Creates `sync_tombstones (table_name, row_id, deleted_at)` plus
-///    AFTER DELETE triggers on the 7 sync targets so deletes are observable
+///    AFTER DELETE triggers on the sync targets so deletes are observable
 ///    without touching the existing delete handlers.
 /// 3. Generates a stable `device_id` UUID stored in app_settings.
 /// Tables synced by Stage D owner-sync. Every entry must:
-///   - have an INTEGER `id` PK,
+///   - have a stable INTEGER or TEXT `id` PK,
 ///   - own a stable `created_at` (or analogous) text column to backfill from,
 ///   - be `id`-addressable (no composite PKs).
-/// TEXT PK / composite PK tables (page_meta, ui_state, custom_pages, note_tags,
-/// tab_page_blocks) are excluded — they're config-shaped and rarely diverge.
+/// Composite-PK/config tables (page_meta, ui_state, custom_pages, note_tags,
+/// tab_page_blocks) remain excluded.
 pub const SYNC_TABLES: &[&str] = &[
     "facts", "conversations", "activities", "notes", "events",
     "projects", "tasks", "learning_items", "hobbies", "hobby_entries",
@@ -2954,7 +2954,339 @@ pub fn column_is_text(conn: &rusqlite::Connection, table: &str, column: &str) ->
     ).map(|t| t.to_uppercase().contains("TEXT")).unwrap_or(false)
 }
 
-pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
+pub(crate) const SYNC_HLC_GENERATION_MARKER: &str = "sync_hlc_protocol_v1";
+
+fn sync_hlc_millis_ceil(raw: &str) -> Result<i64, String> {
+    let raw = raw.trim();
+    let timestamp = if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(raw) {
+        timestamp.with_timezone(&chrono::Utc)
+    } else {
+        let mut parsed = None;
+        for format in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f"] {
+            if let Ok(timestamp) = chrono::NaiveDateTime::parse_from_str(raw, format) {
+                parsed = Some(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                    timestamp,
+                    chrono::Utc,
+                ));
+                break;
+            }
+        }
+        match parsed {
+            Some(timestamp) => timestamp,
+            None => {
+                let date = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+                    .map_err(|_| "sync HLC timestamp has an unsupported format".to_string())?;
+                let timestamp = date
+                    .and_hms_opt(0, 0, 0)
+                    .ok_or_else(|| "sync HLC timestamp has an invalid date".to_string())?;
+                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+                    timestamp,
+                    chrono::Utc,
+                )
+            }
+        }
+    };
+    if timestamp.timestamp() < 0 {
+        return Err("sync HLC timestamp predates the Unix epoch".into());
+    }
+    let whole_millis = timestamp
+        .timestamp()
+        .checked_mul(1_000)
+        .ok_or_else(|| "sync HLC timestamp overflows milliseconds".to_string())?;
+    let fractional_millis =
+        (i64::from(timestamp.timestamp_subsec_nanos()) + 999_999) / 1_000_000;
+    whole_millis
+        .checked_add(fractional_millis)
+        .ok_or_else(|| "sync HLC timestamp overflows milliseconds".to_string())
+}
+
+pub(crate) fn observe_sync_hlc_timestamp(
+    conn: &rusqlite::Connection,
+    timestamp: &str,
+) -> Result<(), String> {
+    let millis = sync_hlc_millis_ceil(timestamp)?;
+    let changed = conn
+        .execute(
+            "UPDATE sync_hlc_state
+             SET last_millis=MAX(last_millis,?1)
+             WHERE singleton=1",
+            [millis],
+        )
+        .map_err(|error| format!("observe sync HLC timestamp: {error}"))?;
+    if changed != 1 {
+        return Err("sync HLC state row is missing".into());
+    }
+    Ok(())
+}
+
+fn sync_outbound_timestamp_cursor_keys() -> Vec<String> {
+    let mut timestamp_keys = Vec::new();
+    for table in SYNC_TABLES {
+        for prefix in ["cloud_owner_v2_push_", "cloud_owner_gh_push_"] {
+            timestamp_keys.push(format!("{prefix}{table}"));
+        }
+    }
+    for prefix in ["cloud_owner_v2_push_tombstones", "cloud_owner_gh_push_tombstones"] {
+        timestamp_keys.push(prefix.to_string());
+    }
+    timestamp_keys
+}
+
+fn sync_outbound_cursor_keys() -> Vec<String> {
+    let mut cursor_keys = Vec::new();
+    for timestamp_key in sync_outbound_timestamp_cursor_keys() {
+        cursor_keys.push(timestamp_key.clone());
+        if timestamp_key.ends_with("tombstones") {
+            cursor_keys.push(format!("{timestamp_key}_table"));
+            cursor_keys.push(format!("{timestamp_key}_row_id"));
+        } else {
+            cursor_keys.push(format!("{timestamp_key}_id"));
+        }
+    }
+    cursor_keys
+}
+
+fn seed_sync_hlc_state(conn: &rusqlite::Connection) -> Result<(), String> {
+    for table in SYNC_TABLES {
+        if table_columns_in(conn, table).is_err() {
+            continue;
+        }
+        let candidate = conn.query_row(
+            &format!(
+                "SELECT updated_at FROM {table}
+                 WHERE julianday(updated_at) IS NOT NULL
+                 ORDER BY julianday(updated_at) DESC, updated_at DESC
+                 LIMIT 1"
+            ),
+            [],
+            |row| row.get::<_, String>(0),
+        );
+        match candidate {
+            Ok(timestamp) => observe_sync_hlc_timestamp(conn, &timestamp)?,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(error) => return Err(format!("seed sync HLC from {table}: {error}")),
+        }
+    }
+    let tombstone = conn.query_row(
+        "SELECT deleted_at FROM sync_tombstones
+         WHERE julianday(deleted_at) IS NOT NULL
+         ORDER BY julianday(deleted_at) DESC, deleted_at DESC
+         LIMIT 1",
+        [],
+        |row| row.get::<_, String>(0),
+    );
+    match tombstone {
+        Ok(timestamp) => observe_sync_hlc_timestamp(conn, &timestamp)?,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {}
+        Err(error) => return Err(format!("seed sync HLC from tombstones: {error}")),
+    }
+
+    for key in sync_outbound_timestamp_cursor_keys() {
+        let value = conn.query_row(
+            "SELECT value FROM app_settings WHERE key=?1",
+            [&key],
+            |row| row.get::<_, String>(0),
+        );
+        match value {
+            Ok(timestamp) if sync_hlc_millis_ceil(&timestamp).is_ok() => {
+                observe_sync_hlc_timestamp(conn, &timestamp)?;
+            }
+            Ok(_) | Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(error) => return Err(format!("seed sync HLC from cursor {key}: {error}")),
+        }
+    }
+    Ok(())
+}
+
+fn install_sync_hlc_protocol(conn: &rusqlite::Connection) -> Result<(), String> {
+    const SAVEPOINT: &str = "hanni_sync_hlc_protocol";
+    conn.execute_batch(&format!("SAVEPOINT {SAVEPOINT}"))
+        .map_err(|error| format!("start sync HLC migration: {error}"))?;
+    let result = (|| -> Result<(), String> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS sync_hlc_state (
+                 singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton=1),
+                 last_millis INTEGER NOT NULL
+             );
+             INSERT OR IGNORE INTO sync_hlc_state(singleton,last_millis) VALUES(1,0);
+             CREATE TABLE IF NOT EXISTS sync_apply_context (
+                 singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton=1),
+                 remote_apply INTEGER NOT NULL CHECK(remote_apply IN (0,1)),
+                 stamp_depth INTEGER NOT NULL CHECK(stamp_depth >= 0)
+             );
+             INSERT OR IGNORE INTO sync_apply_context(singleton,remote_apply,stamp_depth)
+                 VALUES(1,0,0);
+             UPDATE sync_apply_context SET remote_apply=0,stamp_depth=0 WHERE singleton=1;",
+        )
+        .map_err(|error| format!("create sync HLC metadata: {error}"))?;
+        seed_sync_hlc_state(conn)?;
+
+        // HLC stamps updated_at with an internal UPDATE. Limit external-content
+        // FTS maintenance to indexed business columns so the internal stamp
+        // cannot run an *_au delete before the sibling *_ai insert.
+        if sync_schema_object_exists(conn, "table", "facts_fts")? {
+            conn.execute_batch(
+                "DROP TRIGGER IF EXISTS facts_au;
+                 CREATE TRIGGER facts_au AFTER UPDATE OF category,key,value ON facts BEGIN
+                     INSERT INTO facts_fts(facts_fts,rowid,category,key,value)
+                     VALUES('delete',old.id,old.category,old.key,old.value);
+                     INSERT INTO facts_fts(rowid,category,key,value)
+                     VALUES(new.id,new.category,new.key,new.value);
+                 END;",
+            )
+            .map_err(|error| format!("bind facts FTS to HLC updates: {error}"))?;
+        }
+        if sync_schema_object_exists(conn, "table", "conversations_fts")? {
+            conn.execute_batch(
+                "DROP TRIGGER IF EXISTS conv_au;
+                 CREATE TRIGGER conv_au AFTER UPDATE OF summary,messages ON conversations BEGIN
+                     INSERT INTO conversations_fts(conversations_fts,rowid,summary,messages)
+                     VALUES('delete',old.id,COALESCE(old.summary,''),old.messages);
+                     INSERT INTO conversations_fts(rowid,summary,messages)
+                     VALUES(new.id,COALESCE(new.summary,''),new.messages);
+                 END;",
+            )
+            .map_err(|error| format!("bind conversations FTS to HLC updates: {error}"))?;
+        }
+        if sync_schema_object_exists(conn, "table", "notes_fts")? {
+            conn.execute_batch(
+                "DROP TRIGGER IF EXISTS notes_au;
+                 CREATE TRIGGER notes_au AFTER UPDATE OF title,content,tags ON notes BEGIN
+                     INSERT INTO notes_fts(notes_fts,rowid,title,content,tags)
+                     VALUES('delete',old.id,old.title,old.content,old.tags);
+                     INSERT INTO notes_fts(rowid,title,content,tags)
+                     VALUES(new.id,new.title,new.content,new.tags);
+                 END;",
+            )
+            .map_err(|error| format!("bind notes FTS to HLC updates: {error}"))?;
+        }
+
+        let wall_millis = "(CAST(strftime('%s','now') AS INTEGER)*1000 + \
+             CAST(substr(strftime('%f','now'),4,3) AS INTEGER))";
+        let rendered_hlc = "strftime('%Y-%m-%dT%H:%M:%fZ', \
+             (SELECT last_millis FROM sync_hlc_state WHERE singleton=1)/1000.0, 'unixepoch')";
+        for table in SYNC_TABLES {
+            if table_columns_in(conn, table).is_err() {
+                continue;
+            }
+            let tombstone_row_id = if *table == "event_categories" {
+                "'name:' || OLD.name"
+            } else {
+                "CAST(OLD.id AS TEXT)"
+            };
+            let version_row_id = tombstone_row_id;
+            let triggers = format!(
+                "DROP TRIGGER IF EXISTS {table}_set_updated_at_on_insert; \
+                 CREATE TRIGGER {table}_set_updated_at_on_insert \
+                 AFTER INSERT ON {table} FOR EACH ROW \
+                 WHEN (SELECT remote_apply=0 AND stamp_depth=0 \
+                       FROM sync_apply_context WHERE singleton=1) \
+                 BEGIN \
+                     UPDATE sync_hlc_state \
+                     SET last_millis=MAX(last_millis+1,{wall_millis}) \
+                     WHERE singleton=1; \
+                     UPDATE sync_apply_context SET stamp_depth=stamp_depth+1 \
+                     WHERE singleton=1; \
+                     UPDATE {table} SET updated_at={rendered_hlc} WHERE rowid=NEW.rowid; \
+                     UPDATE sync_apply_context SET stamp_depth=stamp_depth-1 \
+                     WHERE singleton=1; \
+                 END; \
+                 DROP TRIGGER IF EXISTS {table}_bump_updated_at; \
+                 CREATE TRIGGER {table}_bump_updated_at \
+                 AFTER UPDATE ON {table} FOR EACH ROW \
+                 WHEN (SELECT remote_apply=0 AND stamp_depth=0 \
+                       FROM sync_apply_context WHERE singleton=1) \
+                 BEGIN \
+                     UPDATE sync_hlc_state \
+                     SET last_millis=MAX(last_millis+1,{wall_millis}) \
+                     WHERE singleton=1; \
+                     UPDATE sync_apply_context SET stamp_depth=stamp_depth+1 \
+                     WHERE singleton=1; \
+                     UPDATE {table} SET updated_at={rendered_hlc} WHERE rowid=NEW.rowid; \
+                     UPDATE sync_apply_context SET stamp_depth=stamp_depth-1 \
+                     WHERE singleton=1; \
+                 END; \
+                 DROP TRIGGER IF EXISTS {table}_tombstone; \
+                 CREATE TRIGGER {table}_tombstone \
+                 AFTER DELETE ON {table} FOR EACH ROW \
+                 BEGIN \
+                     DELETE FROM sync_row_versions \
+                     WHERE table_name='{table}' AND row_id={version_row_id}; \
+                     UPDATE sync_hlc_state \
+                     SET last_millis=MAX(last_millis+1,{wall_millis}) \
+                     WHERE singleton=1 AND \
+                         (SELECT remote_apply=0 FROM sync_apply_context WHERE singleton=1); \
+                     INSERT OR REPLACE INTO sync_tombstones(table_name,row_id,deleted_at) \
+                     SELECT '{table}',{tombstone_row_id},{rendered_hlc} \
+                     WHERE (SELECT remote_apply=0 FROM sync_apply_context WHERE singleton=1); \
+                 END"
+            );
+            conn.execute_batch(&triggers)
+                .map_err(|error| format!("install sync HLC triggers for {table}: {error}"))?;
+        }
+
+        if table_columns_in(conn, "event_categories").is_ok() {
+            conn.execute_batch(&format!(
+                "DROP TRIGGER IF EXISTS event_categories_name_tombstone; \
+                 CREATE TRIGGER event_categories_name_tombstone \
+                 AFTER UPDATE OF name ON event_categories FOR EACH ROW \
+                 WHEN NEW.name<>OLD.name AND \
+                      (SELECT remote_apply=0 AND stamp_depth=0 \
+                       FROM sync_apply_context WHERE singleton=1) \
+                 BEGIN \
+                     DELETE FROM sync_row_versions \
+                     WHERE table_name='event_categories' AND row_id='name:' || OLD.name; \
+                     UPDATE sync_hlc_state \
+                     SET last_millis=MAX(last_millis+1,{wall_millis}) \
+                     WHERE singleton=1; \
+                     INSERT OR REPLACE INTO sync_tombstones(table_name,row_id,deleted_at) \
+                     VALUES('event_categories','name:' || OLD.name,{rendered_hlc}); \
+                 END"
+            ))
+            .map_err(|error| format!("install event category HLC rename trigger: {error}"))?;
+        }
+
+        let generation_exists = conn
+            .query_row(
+                "SELECT COUNT(*) FROM app_settings WHERE key=?1",
+                [SYNC_HLC_GENERATION_MARKER],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("read sync HLC generation marker: {error}"))?
+            > 0;
+        if !generation_exists {
+            for key in sync_outbound_cursor_keys() {
+                conn.execute("DELETE FROM app_settings WHERE key=?1", [&key])
+                    .map_err(|error| format!("reset outbound cursor {key}: {error}"))?;
+            }
+            conn.execute(
+                "INSERT INTO app_settings(key,value) VALUES(?1,'1')",
+                [SYNC_HLC_GENERATION_MARKER],
+            )
+            .map_err(|error| format!("write sync HLC generation marker: {error}"))?;
+        }
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => conn
+            .execute_batch(&format!("RELEASE {SAVEPOINT}"))
+            .map_err(|error| format!("commit sync HLC migration: {error}")),
+        Err(error) => {
+            let cleanup = conn.execute_batch(&format!(
+                "ROLLBACK TO {SAVEPOINT}; RELEASE {SAVEPOINT}"
+            ));
+            match cleanup {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(format!(
+                    "{error}; rollback sync HLC migration: {cleanup_error}"
+                )),
+            }
+        }
+    }
+}
+
+pub fn migrate_sync_meta(conn: &rusqlite::Connection) -> Result<(), String> {
     // 0. Heal divergent installs that shipped earlier init_db without the
     // projects/tasks tables (e.g. Android v0.73.x). Idempotent for any host
     // that already has them.
@@ -2979,7 +3311,7 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
             completed_at TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(id)
-        );"
+        );",
     ).ok();
 
     // 1. Add `updated_at TEXT NOT NULL DEFAULT ''` everywhere it's missing.
@@ -2999,8 +3331,16 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
     // cursor, which holds chrono RFC3339 values. SQLite datetime('now') yields
     // a space-separated UTC form ("2026-05-19 01:02:03") that sorts *below*
     // RFC3339 ("...T...") — push silently skipped every trigger-stamped row.
-    // Use a 'T'-separated local form so both paths order consistently.
-    let ts_expr = "strftime('%Y-%m-%dT%H:%M:%f','now','localtime')";
+    // Emit one canonical UTC form. Sync also normalizes historical space-form
+    // and offset timestamps before comparing or advancing a cursor.
+    let ts_expr = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+    let bump_ts_expr = format!(
+        "CASE \
+             WHEN julianday({ts_expr}) <= julianday(OLD.updated_at) \
+             THEN strftime('%Y-%m-%dT%H:%M:%fZ', OLD.updated_at, '+0.001 seconds') \
+             ELSE {ts_expr} \
+         END"
+    );
 
     let candidates = ["created_at", "started_at", "date", "logged_at"];
     for table in SYNC_TABLES {
@@ -3019,6 +3359,24 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
             "UPDATE {table} SET updated_at = COALESCE({}) \
              WHERE updated_at = '' OR updated_at IS NULL",
             coalesce_args.join(", ")
+        );
+        conn.execute(&sql, []).ok();
+    }
+
+    // The previous trigger emitted a `T`-separated local wall-clock value with
+    // no offset. Convert that exact legacy shape using this installation's
+    // local timezone before the new UTC trigger/cursors take over. Space-form
+    // `datetime('now')` values are already UTC and intentionally stay as-is.
+    for table in SYNC_TABLES {
+        let sql = format!(
+            "UPDATE {table}
+             SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, 'utc')
+             WHERE length(updated_at) >= 19
+               AND substr(updated_at, 11, 1) = 'T'
+               AND upper(substr(updated_at, -1, 1)) <> 'Z'
+               AND instr(substr(updated_at, 20), '+') = 0
+               AND instr(substr(updated_at, 20), '-') = 0
+               AND julianday(updated_at) IS NOT NULL"
         );
         conn.execute(&sql, []).ok();
     }
@@ -3051,15 +3409,67 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
              FOR EACH ROW \
              WHEN NEW.updated_at = OLD.updated_at \
              BEGIN \
-                 UPDATE {table} SET updated_at = {ts_expr} WHERE rowid = NEW.rowid; \
+                 UPDATE {table} SET updated_at = {bump_ts_expr} WHERE rowid = NEW.rowid; \
              END"
         );
         conn.execute_batch(&trig).ok();
     }
 
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_row_versions (
+            table_name TEXT NOT NULL,
+            row_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            PRIMARY KEY(table_name, row_id)
+        );",
+    )
+    .ok();
+
+    // A locally inserted or edited row belongs to this device, not to the
+    // remote writer recorded by the previous pull. Pull apply records the new
+    // remote version after these triggers finish.
+    for table in SYNC_TABLES {
+        let old_row_id = if *table == "event_categories" {
+            "'name:' || OLD.name"
+        } else {
+            "CAST(OLD.id AS TEXT)"
+        };
+        let new_row_id = if *table == "event_categories" {
+            "'name:' || NEW.name"
+        } else {
+            "CAST(NEW.id AS TEXT)"
+        };
+        let triggers = format!(
+            "DROP TRIGGER IF EXISTS {table}_clear_sync_version_on_insert; \
+             CREATE TRIGGER {table}_clear_sync_version_on_insert \
+             AFTER INSERT ON {table} FOR EACH ROW \
+             BEGIN \
+                 DELETE FROM sync_row_versions \
+                 WHERE table_name='{table}' AND row_id={new_row_id}; \
+             END; \
+             DROP TRIGGER IF EXISTS {table}_clear_sync_version_on_update; \
+             CREATE TRIGGER {table}_clear_sync_version_on_update \
+             AFTER UPDATE ON {table} FOR EACH ROW \
+             BEGIN \
+                 DELETE FROM sync_row_versions \
+                 WHERE table_name='{table}' \
+                   AND row_id IN ({old_row_id}, {new_row_id}); \
+             END"
+        );
+        conn.execute_batch(&triggers).ok();
+    }
+
     // 3. Tombstones table + AFTER DELETE triggers
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS sync_tombstones (
+        "CREATE TABLE IF NOT EXISTS sync_row_versions (
+            table_name TEXT NOT NULL,
+            row_id TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            PRIMARY KEY(table_name, row_id)
+        );
+        CREATE TABLE IF NOT EXISTS sync_tombstones (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             table_name TEXT NOT NULL,
             row_id TEXT NOT NULL,
@@ -3067,7 +3477,7 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
             UNIQUE(table_name, row_id)
         );
         CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted_at
-            ON sync_tombstones(deleted_at);"
+            ON sync_tombstones(deleted_at);",
     ).ok();
     // Migrate row_id from INTEGER to TEXT for installs that shipped the
     // old schema. SQLite stores values per their declared affinity, so an
@@ -3088,22 +3498,66 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
                  FROM sync_tombstones_legacy_int;
              DROP TABLE sync_tombstones_legacy_int;
              CREATE INDEX IF NOT EXISTS idx_sync_tombstones_deleted_at
-                 ON sync_tombstones(deleted_at);"
+                 ON sync_tombstones(deleted_at);",
         ).ok();
     }
+    conn.execute(
+        "UPDATE sync_tombstones
+         SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', deleted_at, 'utc')
+         WHERE length(deleted_at) >= 19
+           AND substr(deleted_at, 11, 1) = 'T'
+           AND upper(substr(deleted_at, -1, 1)) <> 'Z'
+           AND instr(substr(deleted_at, 20), '+') = 0
+           AND instr(substr(deleted_at, 20), '-') = 0
+           AND julianday(deleted_at) IS NOT NULL",
+        [],
+    )
+    .ok();
     for table in SYNC_TABLES {
+        // event_categories converges by UNIQUE name, not by its device-local
+        // AUTOINCREMENT id. Its tombstone must use the same logical identity;
+        // a numeric id can point at a different category on another device.
+        let tombstone_row_id = if *table == "event_categories" {
+            "'name:' || OLD.name"
+        } else {
+            "OLD.id"
+        };
+        let version_row_id = if *table == "event_categories" {
+            "'name:' || OLD.name"
+        } else {
+            "CAST(OLD.id AS TEXT)"
+        };
         let trig = format!(
             "DROP TRIGGER IF EXISTS {table}_tombstone; \
              CREATE TRIGGER {table}_tombstone \
              AFTER DELETE ON {table} \
              FOR EACH ROW \
              BEGIN \
+                 DELETE FROM sync_row_versions \
+                 WHERE table_name='{table}' AND row_id={version_row_id}; \
                  INSERT OR REPLACE INTO sync_tombstones (table_name, row_id, deleted_at) \
-                 VALUES ('{table}', OLD.id, {ts_expr}); \
+                 VALUES ('{table}', {tombstone_row_id}, {ts_expr}); \
              END"
         );
         conn.execute_batch(&trig).ok();
     }
+    // event_categories converges by logical name. A local rename is both an
+    // upsert of the new name and a deletion of the old name on every peer.
+    conn.execute_batch(&format!(
+        "DROP TRIGGER IF EXISTS event_categories_name_tombstone; \
+         CREATE TRIGGER event_categories_name_tombstone \
+         AFTER UPDATE OF name ON event_categories \
+         FOR EACH ROW WHEN NEW.name <> OLD.name \
+         BEGIN \
+             DELETE FROM sync_row_versions \
+             WHERE table_name='event_categories' AND row_id='name:' || OLD.name; \
+             INSERT OR REPLACE INTO sync_tombstones (table_name, row_id, deleted_at) \
+             VALUES ('event_categories', 'name:' || OLD.name, {ts_expr}); \
+         END"
+    ))
+    .ok();
+
+    install_sync_hlc_protocol(conn)?;
 
     // 4. Stable device_id (used by sync to skip echoes from this device)
     let exists: i64 = conn.query_row(
@@ -3117,6 +3571,208 @@ pub fn migrate_sync_meta(conn: &rusqlite::Connection) {
             rusqlite::params![id],
         );
     }
+    Ok(())
+}
+
+fn sync_schema_object_exists(
+    conn: &rusqlite::Connection,
+    object_type: &str,
+    name: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM sqlite_master WHERE type=?1 AND name=?2
+         )",
+        rusqlite::params![object_type, name],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(|error| format!("inspect sync schema object {name}: {error}"))
+}
+
+fn sync_schema_columns(
+    conn: &rusqlite::Connection,
+    table: &str,
+) -> Result<std::collections::HashMap<String, (String, i64)>, String> {
+    if !table
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err(format!("invalid sync schema table name: {table}"));
+    }
+    let mut statement = conn
+        .prepare(&format!(
+            "SELECT name,type,pk FROM pragma_table_info('{table}')"
+        ))
+        .map_err(|error| format!("inspect sync table {table}: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|error| format!("query sync table {table}: {error}"))?;
+    let mut columns = std::collections::HashMap::new();
+    for row in rows {
+        let (name, column_type, primary_key) =
+            row.map_err(|error| format!("decode sync table {table}: {error}"))?;
+        columns.insert(name, (column_type.to_uppercase(), primary_key));
+    }
+    Ok(columns)
+}
+
+fn require_sync_columns(
+    conn: &rusqlite::Connection,
+    table: &str,
+    required: &[&str],
+) -> Result<std::collections::HashMap<String, (String, i64)>, String> {
+    if !sync_schema_object_exists(conn, "table", table)? {
+        return Err(format!("sync schema is missing table {table}"));
+    }
+    let columns = sync_schema_columns(conn, table)?;
+    for column in required {
+        if !columns.contains_key(*column) {
+            return Err(format!("sync schema is missing column {table}.{column}"));
+        }
+    }
+    Ok(columns)
+}
+
+pub(crate) fn verify_sync_schema_for_tables(
+    conn: &rusqlite::Connection,
+    tables: &[&str],
+) -> Result<(), String> {
+    require_sync_columns(conn, "app_settings", &["key", "value"])?;
+    let tombstone_columns = require_sync_columns(
+        conn,
+        "sync_tombstones",
+        &["table_name", "row_id", "deleted_at"],
+    )?;
+    if !tombstone_columns
+        .get("row_id")
+        .is_some_and(|(column_type, _)| column_type.contains("TEXT"))
+    {
+        return Err("sync schema requires sync_tombstones.row_id TEXT".into());
+    }
+    require_sync_columns(
+        conn,
+        "sync_row_versions",
+        &["table_name", "row_id", "updated_at", "device_id"],
+    )?;
+    let hlc_columns =
+        require_sync_columns(conn, "sync_hlc_state", &["singleton", "last_millis"])?;
+    if !hlc_columns
+        .get("last_millis")
+        .is_some_and(|(column_type, _)| column_type.contains("INT"))
+    {
+        return Err("sync schema requires sync_hlc_state.last_millis INTEGER".into());
+    }
+    let hlc_state: (i64, i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN singleton=1 THEN 1 ELSE 0 END),0),
+                    COALESCE(MAX(CASE WHEN singleton=1 THEN last_millis END),-1)
+             FROM sync_hlc_state",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|error| format!("read sync HLC state: {error}"))?;
+    if hlc_state.0 != 1 || hlc_state.1 != 1 || hlc_state.2 < 0 {
+        return Err("sync HLC state must contain one non-negative clock row".into());
+    }
+    require_sync_columns(
+        conn,
+        "sync_apply_context",
+        &["singleton", "remote_apply", "stamp_depth"],
+    )?;
+    let apply_context: (i64, i64, i64, i64) = conn
+        .query_row(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN singleton=1 THEN 1 ELSE 0 END),0),
+                    COALESCE(MAX(CASE WHEN singleton=1 THEN remote_apply END),-1),
+                    COALESCE(MAX(CASE WHEN singleton=1 THEN stamp_depth END),-1)
+             FROM sync_apply_context",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|error| format!("read sync apply context: {error}"))?;
+    if apply_context != (1, 1, 0, 0) {
+        return Err("sync apply context is not idle".into());
+    }
+    let generation_marker: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM app_settings WHERE key=?1",
+            [SYNC_HLC_GENERATION_MARKER],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("read sync HLC generation marker: {error}"))?;
+    if generation_marker != 1 {
+        return Err("sync schema is missing the sync HLC generation marker".into());
+    }
+
+    for table in tables {
+        let columns = require_sync_columns(conn, table, &["id", "updated_at"])?;
+        let (id_type, primary_key) = columns
+            .get("id")
+            .ok_or_else(|| format!("sync schema is missing column {table}.id"))?;
+        if *primary_key == 0 || !(id_type.contains("INT") || id_type.contains("TEXT")) {
+            return Err(format!(
+                "sync schema requires {table}.id to be an INTEGER or TEXT primary key"
+            ));
+        }
+        if !columns
+            .get("updated_at")
+            .is_some_and(|(column_type, _)| column_type.contains("TEXT"))
+        {
+            return Err(format!("sync schema requires {table}.updated_at TEXT"));
+        }
+        for suffix in [
+            "set_updated_at_on_insert",
+            "bump_updated_at",
+            "clear_sync_version_on_insert",
+            "clear_sync_version_on_update",
+            "tombstone",
+        ] {
+            let trigger = format!("{table}_{suffix}");
+            if !sync_schema_object_exists(conn, "trigger", &trigger)? {
+                return Err(format!("sync schema is missing trigger {trigger}"));
+            }
+            if matches!(suffix, "set_updated_at_on_insert" | "bump_updated_at" | "tombstone") {
+                let sql: String = conn
+                    .query_row(
+                        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+                        [&trigger],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("inspect sync trigger {trigger}: {error}"))?;
+                if !sql.contains("sync_hlc_state") || !sql.contains("sync_apply_context") {
+                    return Err(format!("sync trigger {trigger} is not HLC-bound"));
+                }
+            }
+        }
+    }
+    if tables.contains(&"event_categories") {
+        if !sync_schema_object_exists(conn, "trigger", "event_categories_name_tombstone")? {
+            return Err("sync schema is missing trigger event_categories_name_tombstone".into());
+        }
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type='trigger' AND name='event_categories_name_tombstone'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("inspect event category sync trigger: {error}"))?;
+        if !sql.contains("sync_hlc_state") || !sql.contains("sync_apply_context") {
+            return Err("event_categories_name_tombstone is not HLC-bound".into());
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_sync_schema(conn: &rusqlite::Connection) -> Result<(), String> {
+    verify_sync_schema_for_tables(conn, SYNC_TABLES)
 }
 
 /// Phase 1 of UUID-PK migration: replace AUTOINCREMENT INTEGER ids in

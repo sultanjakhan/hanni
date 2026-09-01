@@ -11,7 +11,7 @@
 // re-applying idempotent, so there is no cursor-skip race.
 
 use crate::db::SYNC_TABLES;
-use crate::sync_owner::{get_setting, row_to_json, set_setting, tombstone_row_id, upsert_row};
+use crate::sync_owner::{apply_tombstone_lww, get_setting, row_to_json, set_setting, upsert_row};
 use crate::types::HanniDb;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -155,34 +155,8 @@ fn apply_batch(conn: &rusqlite::Connection, batch: &SyncBatch) -> usize {
     }
     for t in &batch.tombs {
         if !SYNC_TABLES.contains(&t.tt.as_str()) { continue; }
-        let Some(row_id) = tombstone_row_id(Some(&t.id)) else { continue; };
-        // Do not let an old delete win over a row edited later on this device.
-        let local_updated: Option<String> = conn.query_row(
-            &format!("SELECT updated_at FROM {} WHERE id=?1", t.tt),
-            rusqlite::params![&row_id], |r| r.get(0),
-        ).ok();
-        if !t.deleted_at.is_empty()
-            && local_updated.as_deref().is_some_and(|updated| updated > t.deleted_at.as_str()) {
-            continue;
-        }
-        let deleted = conn.execute(
-            &format!("DELETE FROM {} WHERE id = ?1", t.tt),
-            rusqlite::params![&row_id],
-        ).unwrap_or(0);
-        if deleted > 0 { applied += 1; }
-        // The DELETE trigger writes the local clock. Restore the originating
-        // timestamp so tombstone cursors advance to data actually exchanged.
-        if !t.deleted_at.is_empty() {
-            let row_id_text = match &row_id {
-                rusqlite::types::Value::Integer(v) => v.to_string(),
-                rusqlite::types::Value::Text(v) => v.clone(),
-                _ => continue,
-            };
-            let _ = conn.execute(
-                "INSERT OR REPLACE INTO sync_tombstones(table_name,row_id,deleted_at)
-                 VALUES (?1,?2,?3)",
-                rusqlite::params![&t.tt, row_id_text, &t.deleted_at],
-            );
+        if let Ok(true) = apply_tombstone_lww(conn, &t.tt, &t.id, &t.deleted_at) {
+            applied += 1;
         }
     }
     // Phase 3 follow-up: if this batch added schedules from a peer, two
@@ -441,4 +415,135 @@ pub fn start_lan_sync_loop(app: AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sync_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+             INSERT INTO app_settings VALUES('device_id','lan-local');
+             CREATE TABLE notes(id INTEGER PRIMARY KEY,title TEXT NOT NULL,updated_at TEXT NOT NULL);
+             CREATE TABLE sync_tombstones(
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 table_name TEXT NOT NULL,row_id TEXT NOT NULL,deleted_at TEXT NOT NULL,
+                 UNIQUE(table_name,row_id));
+             CREATE TABLE sync_row_versions(
+                 table_name TEXT NOT NULL,row_id TEXT NOT NULL,updated_at TEXT NOT NULL,
+                 device_id TEXT NOT NULL,PRIMARY KEY(table_name,row_id));",
+        )
+        .unwrap();
+        crate::db::migrate_sync_meta(&conn).unwrap();
+        conn
+    }
+
+    fn tombstone(timestamp: &str) -> SyncBatch {
+        SyncBatch {
+            rows: Vec::new(),
+            tombs: vec![TombItem {
+                tt: "notes".into(),
+                id: json!(7),
+                deleted_at: timestamp.into(),
+            }],
+            peer_hint: None,
+        }
+    }
+
+    fn row(timestamp: &str) -> SyncBatch {
+        SyncBatch {
+            rows: vec![RowItem {
+                t: "notes".into(),
+                f: json!({
+                    "id": 7,
+                    "title": "remote",
+                    "updated_at": timestamp,
+                    "_updated_at": timestamp
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+            }],
+            tombs: Vec::new(),
+            peer_hint: None,
+        }
+    }
+
+    #[test]
+    fn lan_future_row_preserves_timestamp_and_observes_global_hlc() {
+        let conn = sync_conn();
+        let remote = "2099-01-01T00:00:00.000000123Z";
+        assert_eq!(apply_batch(&conn, &row(remote)), 1);
+        assert_eq!(
+            conn.query_row("SELECT updated_at FROM notes WHERE id=7", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+            crate::sync_owner::canonical_sync_timestamp(remote, "test").unwrap()
+        );
+
+        conn.execute(
+            "INSERT INTO notes(id,title,updated_at) VALUES(8,'local','2020-01-01')",
+            [],
+        )
+        .unwrap();
+        let local: String = conn
+            .query_row("SELECT updated_at FROM notes WHERE id=8", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            crate::sync_owner::canonical_sync_timestamp(&local, "test").unwrap()
+                > crate::sync_owner::canonical_sync_timestamp(remote, "test").unwrap()
+        );
+    }
+
+    #[test]
+    fn lan_future_tombstone_without_row_observes_global_hlc() {
+        let conn = sync_conn();
+        let remote = "2099-01-01T00:00:00Z";
+        assert_eq!(apply_batch(&conn, &tombstone(remote)), 1);
+        assert_eq!(
+            conn.query_row(
+                "SELECT deleted_at FROM sync_tombstones
+                 WHERE table_name='notes' AND row_id='7'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            crate::sync_owner::canonical_sync_timestamp(remote, "test").unwrap()
+        );
+
+        conn.execute(
+            "INSERT INTO notes(id,title,updated_at) VALUES(8,'local','2020-01-01')",
+            [],
+        )
+        .unwrap();
+        let local: String = conn
+            .query_row("SELECT updated_at FROM notes WHERE id=8", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            crate::sync_owner::canonical_sync_timestamp(&local, "test").unwrap()
+                > crate::sync_owner::canonical_sync_timestamp(remote, "test").unwrap()
+        );
+    }
+
+    #[test]
+    fn lan_older_tombstone_cannot_replace_newer_known_tombstone() {
+        let conn = sync_conn();
+        let newer = "2099-01-02T00:00:00Z";
+        let older = "2099-01-01T00:00:00Z";
+        assert_eq!(apply_batch(&conn, &tombstone(newer)), 1);
+        assert_eq!(apply_batch(&conn, &tombstone(older)), 0);
+        assert_eq!(
+            conn.query_row(
+                "SELECT deleted_at FROM sync_tombstones
+                 WHERE table_name='notes' AND row_id='7'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            crate::sync_owner::canonical_sync_timestamp(newer, "test").unwrap()
+        );
+    }
 }

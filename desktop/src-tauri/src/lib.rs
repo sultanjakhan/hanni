@@ -268,7 +268,7 @@ fn init_database() -> HanniDb {
         db::migrate_event_categories(&conn);
         db::migrate_drop_mindset(&conn);
         db::migrate_dev_matrix(&conn);
-        db::migrate_sync_meta(&conn);
+        db::migrate_sync_meta(&conn).expect("Cannot migrate sync HLC metadata");
         db::migrate_health_log_start_time(&conn);
         db::migrate_shopping_list(&conn);
         db::migrate_sleep_to_uuid_pk(&conn); // Phase 1: UUID PK for sleep_*
@@ -280,7 +280,7 @@ fn init_database() -> HanniDb {
         db::migrate_routine_run_slots(&conn); // multiple runs/day per chain (meal slots)
         db::migrate_routine_ids_deterministic(&conn); // deterministic ids so routines sync (v0.95)
         db::migrate_routine_ids_deterministic_v2(&conn); // content-key the WHOLE graph so chains/nodes/edges converge + sync (v1.0.x)
-        db::migrate_sync_meta(&conn); // re-run: bind updated_at/tombstone triggers to the rebuilt routine tables
+        db::migrate_sync_meta(&conn).expect("Cannot rebind sync HLC metadata"); // re-run after rebuilt routine tables
         let _ = conn.pragma_update(None, "user_version", SCHEMA_VERSION);
     }
 
@@ -292,7 +292,7 @@ fn init_database() -> HanniDb {
     db::migrate_health_sync_cleanup_v1(&conn);
     // The cleanup temporarily drops delete triggers to avoid generating more
     // than 160k meaningless tombstones; recreate them after the transaction.
-    db::migrate_sync_meta(&conn);
+    db::migrate_sync_meta(&conn).expect("Cannot refresh sync HLC metadata");
     db::migrate_dedup_health_exercise(&conn);
     db::migrate_dedup_auto_health_events(&conn);
     db::backfill_routine_nodes_source_id(&conn);

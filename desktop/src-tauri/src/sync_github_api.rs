@@ -31,13 +31,16 @@ pub(crate) fn resolve_gh(db: &HanniDb) -> Result<GhCreds, String> {
     let key: [u8; 32] = hex::decode(&key_hex).ok().and_then(|b| b.try_into().ok())
         .ok_or("GitHub sync: key must be 32-byte hex")?;
     let device_id = get_setting_checked(&conn, "device_id")?
-        .unwrap_or_else(|| "unknown".into());
-    Ok(GhCreds { pat, repo, key, device_id })
+        .filter(|value| !value.is_empty())
+        .ok_or("GitHub sync: device_id not set")?;
+    Ok(GhCreds { pat, repo, key, device_id,
+    })
 }
 
 /// Plain-JSON change-set doc (NOT Firestore field-format — this gets encrypted).
 pub(crate) fn build_doc(row: &Value, device_id: &str, updated_at: &str, table: &str) -> Value {
-    let mut obj = match row { Value::Object(m) => m.clone(), _ => Map::new() };
+    let mut obj = match row { Value::Object(m) => m.clone(), _ => Map::new(),
+    };
     obj.insert("_device_id".into(), json!(device_id));
     obj.insert("_updated_at".into(), json!(updated_at));
     obj.insert("_synced_at".into(), json!(chrono::Utc::now().to_rfc3339()));
@@ -53,7 +56,8 @@ pub(crate) fn blob_entry(c: &GhCreds, label: &str, doc: &Value) -> Result<Value,
 }
 
 pub(crate) async fn gh_req(client: &reqwest::Client, c: &GhCreds, method: Method, path: &str,
-                           body: Option<&Value>) -> Result<(u16, Value), String> {
+                           body: Option<&Value>,
+) -> Result<(u16, Value), String> {
     let url = format!("{}/repos/{}/{}", API, c.repo, path);
     let mut rb = client.request(method, &url)
         .header("User-Agent", "Hanni")
@@ -67,13 +71,15 @@ pub(crate) async fn gh_req(client: &reqwest::Client, c: &GhCreds, method: Method
     Ok((status, val))
 }
 
-pub(crate) async fn gh_get(client: &reqwest::Client, c: &GhCreds, path: &str)
+pub(crate) async fn gh_get(client: &reqwest::Client, c: &GhCreds, path: &str,
+)
                            -> Result<Value, String> {
     let (s, v) = gh_req(client, c, Method::GET, path, None).await?;
     if (200..300).contains(&s) { Ok(v) } else { Err(format!("GET {} -> {}: {}", path, s, v)) }
 }
 
-pub(crate) async fn gh_post(client: &reqwest::Client, c: &GhCreds, path: &str, body: &Value)
+pub(crate) async fn gh_post(client: &reqwest::Client, c: &GhCreds, path: &str, body: &Value,
+)
                             -> Result<Value, String> {
     let (s, v) = gh_req(client, c, Method::POST, path, Some(body)).await?;
     if (200..300).contains(&s) { Ok(v) } else { Err(format!("POST {} -> {}: {}", path, s, v)) }
@@ -81,7 +87,8 @@ pub(crate) async fn gh_post(client: &reqwest::Client, c: &GhCreds, path: &str, b
 
 /// (parent_commit_sha, base_tree_sha). The repo is seeded with an initial
 /// commit, so the ref always exists.
-pub(crate) async fn gh_head(client: &reqwest::Client, c: &GhCreds)
+pub(crate) async fn gh_head(client: &reqwest::Client, c: &GhCreds,
+)
                             -> Result<(String, String), String> {
     let r = gh_get(client, c, "git/ref/heads/main").await?;
     let commit_sha = r.pointer("/object/sha").and_then(|v| v.as_str())
@@ -103,7 +110,8 @@ pub(crate) fn decode_doc_blob(
     serde_json::from_slice(&plain).map_err(|e| format!("doc parse: {e}"))
 }
 
-pub(crate) async fn fetch_doc(client: &reqwest::Client, c: &GhCreds, path: &str, blob_sha: &str)
+pub(crate) async fn fetch_doc(client: &reqwest::Client, c: &GhCreds, path: &str, blob_sha: &str,
+)
                               -> Result<Map<String, Value>, String> {
     let b = gh_get(client, c, &format!("git/blobs/{}", blob_sha)).await?;
     let git_b64: String = b.get("content").and_then(|v| v.as_str()).unwrap_or("")
@@ -153,7 +161,8 @@ pub(crate) fn decode_tarball(
 /// own-device and non-blob entries are skipped. The tarball endpoint 302s to a
 /// token-bearing codeload URL, so the redirect downloads even private repos
 /// without the (cross-host-stripped) Authorization header.
-pub(crate) async fn fetch_tarball(client: &reqwest::Client, c: &GhCreds, head: &str)
+pub(crate) async fn fetch_tarball(client: &reqwest::Client, c: &GhCreds, head: &str,
+)
                                   -> Result<Vec<(String, Map<String, Value>)>, String> {
     let url = format!("{}/repos/{}/tarball/{}", API, c.repo, head);
     let resp = client.get(&url)
@@ -176,7 +185,8 @@ mod tests {
     use std::io::Cursor;
 
     fn creds() -> GhCreds {
-        GhCreds { pat: "x".into(), repo: "o/r".into(), key: [42u8; 32], device_id: "devA".into() }
+        GhCreds { pat: "x".into(), repo: "o/r".into(), key: [42u8; 32], device_id: "devA".into(),
+        }
     }
 
     #[test]
