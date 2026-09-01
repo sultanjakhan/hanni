@@ -211,7 +211,12 @@ pub(crate) fn dirty_rows_after(
         .prepare(&format!("SELECT id, updated_at FROM {table}"))
         .map_err(|error| format!("prepare dirty rows for {table}: {error}"))?;
     let mapped = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, SqlValue>(0)?,
+                row.get::<_, String>(1)?,
+            ))
+        })
         .map_err(|error| format!("query dirty rows for {table}: {error}"))?;
     let mut rows = Vec::new();
     for row in mapped {
