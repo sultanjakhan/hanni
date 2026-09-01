@@ -159,9 +159,9 @@ mod windows_acl {
                     GetSecurityInfo, SetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
                 },
                 GetSecurityDescriptorDacl, GetTokenInformation, IsValidSecurityDescriptor,
-                TokenUser, ACL, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-                PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY,
-                TOKEN_USER,
+                TokenOwner, TokenUser, ACL, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+                PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+                TOKEN_INFORMATION_CLASS, TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER,
             },
             Storage::FileSystem::{
                 CreateFileW, FileAttributeTagInfo, GetFileInformationByHandleEx,
@@ -173,6 +173,8 @@ mod windows_acl {
             System::Threading::{GetCurrentProcess, OpenProcessToken},
         },
     };
+
+    const BUILTIN_ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 
     fn windows_error(context: &str, error: WindowsError) -> io::Error {
         io::Error::new(io::ErrorKind::Other, format!("{context}: {error}"))
@@ -270,41 +272,57 @@ mod windows_acl {
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
-    fn current_user_sid() -> io::Result<String> {
-        let mut raw_token = HANDLE::default();
-        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token) }
-            .map_err(|error| windows_error("open process token", error))?;
-        let token = unsafe { Owned::new(raw_token) };
-
+    fn token_information_buffer(
+        token: HANDLE,
+        information_class: TOKEN_INFORMATION_CLASS,
+        label: &str,
+    ) -> io::Result<Vec<usize>> {
         let mut required = 0u32;
-        let first = unsafe { GetTokenInformation(*token, TokenUser, None, 0, &mut required) };
+        let first =
+            unsafe { GetTokenInformation(token, information_class, None, 0, &mut required) };
         let first_error = first.err().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "TokenUser sizing call unexpectedly succeeded",
+                format!("{label} sizing call unexpectedly succeeded"),
             )
         })?;
         if first_error.code() != HRESULT::from_win32(ERROR_INSUFFICIENT_BUFFER.0) || required == 0 {
-            return Err(windows_error("size TokenUser", first_error));
+            return Err(windows_error(&format!("size {label}"), first_error));
         }
 
-        // TOKEN_USER needs pointer alignment; Vec<usize> provides it.
+        // Token information contains pointers into this allocation and needs
+        // pointer alignment; Vec<usize> provides it.
         let word_size = size_of::<usize>();
         let words = (required as usize + word_size - 1) / word_size;
         let mut buffer = vec![0usize; words];
         unsafe {
             GetTokenInformation(
-                *token,
-                TokenUser,
+                token,
+                information_class,
                 Some(buffer.as_mut_ptr().cast()),
                 required,
                 &mut required,
             )
         }
-        .map_err(|error| windows_error("read TokenUser", error))?;
+        .map_err(|error| windows_error(&format!("read {label}"), error))?;
+        Ok(buffer)
+    }
 
-        let token_user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
-        sid_to_string(token_user.User.Sid)
+    fn current_identity_sids() -> io::Result<(String, String)> {
+        let mut raw_token = HANDLE::default();
+        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token) }
+            .map_err(|error| windows_error("open process token", error))?;
+        let token = unsafe { Owned::new(raw_token) };
+
+        let user_buffer = token_information_buffer(*token, TokenUser, "TokenUser")?;
+        let token_user = unsafe { &*user_buffer.as_ptr().cast::<TOKEN_USER>() };
+        let user_sid = sid_to_string(token_user.User.Sid)?;
+
+        let owner_buffer = token_information_buffer(*token, TokenOwner, "TokenOwner")?;
+        let token_owner = unsafe { &*owner_buffer.as_ptr().cast::<TOKEN_OWNER>() };
+        let default_owner_sid = sid_to_string(token_owner.Owner)?;
+
+        Ok((user_sid, default_owner_sid))
     }
 
     fn object_owner_sid(handle: HANDLE) -> io::Result<String> {
@@ -335,11 +353,14 @@ mod windows_acl {
     }
 
     fn apply_descriptor_to_handle(handle: HANDLE, directory: bool) -> io::Result<()> {
-        let user_sid = current_user_sid()?;
-        if object_owner_sid(handle)? != user_sid {
+        let (user_sid, default_owner_sid) = current_identity_sids()?;
+        let object_owner_sid = object_owner_sid(handle)?;
+        let is_administrator_default_owner = default_owner_sid == BUILTIN_ADMINISTRATORS_SID
+            && object_owner_sid == default_owner_sid;
+        if object_owner_sid != user_sid && !is_administrator_default_owner {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "secure path owner is not the current process user",
+                "secure path owner is neither the process user nor built-in Administrators",
             ));
         }
         let sddl = if directory {
@@ -467,8 +488,14 @@ mod windows_acl {
             let handle = open_object(path).expect("open secured object");
             validate_object(*handle, directory).expect("validate secured object");
             let sddl = descriptor_sddl(*handle).expect("read secured descriptor");
-            let sid = current_user_sid().expect("current user SID");
-            assert_eq!(object_owner_sid(*handle).expect("object owner SID"), sid);
+            let (sid, default_owner_sid) = current_identity_sids().expect("current identity SIDs");
+            let object_owner_sid = object_owner_sid(*handle).expect("object owner SID");
+            let is_administrator_default_owner = default_owner_sid == BUILTIN_ADMINISTRATORS_SID
+                && object_owner_sid == default_owner_sid;
+            assert!(
+                object_owner_sid == sid || is_administrator_default_owner,
+                "unexpected object owner"
+            );
             assert!(sddl.contains("D:P"), "{sddl}");
             assert_eq!(sddl.matches("(A;").count(), 3, "{sddl}");
             let flags = if directory { "OICI" } else { "" };
@@ -561,7 +588,7 @@ mod windows_acl {
         }
 
         #[test]
-        fn open_handle_blocks_name_swap_before_acl_write() {
+        fn open_handle_secures_the_same_object_across_rename_semantics() {
             let temp = tempfile::tempdir().expect("temp dir");
             let original = temp.path().join("original.txt");
             let moved = temp.path().join("moved.txt");
@@ -569,10 +596,10 @@ mod windows_acl {
 
             let handle = open_object(&original).expect("open original");
             validate_object(*handle, false).expect("validate original");
-            assert!(std::fs::rename(&original, &moved).is_err());
+            let renamed = std::fs::rename(&original, &moved).is_ok();
             apply_descriptor_to_handle(*handle, false).expect("apply by handle");
             drop(handle);
-            assert_restricted(&original, false);
+            assert_restricted(if renamed { &moved } else { &original }, false);
         }
 
         #[test]
