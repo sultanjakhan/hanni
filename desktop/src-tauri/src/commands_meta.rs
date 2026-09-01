@@ -1019,10 +1019,21 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<
             .write(true).create(true).truncate(true).mode(0o600).open(path)?;
         f.write_all(contents.as_bytes())?;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        Ok(())
+        crate::secure_fs::restrict_file(path)
     }
     #[cfg(not(unix))]
-    { std::fs::write(path, contents) }
+    {
+        std::fs::write(path, contents)?;
+        crate::secure_fs::restrict_file(path)
+    }
+}
+
+fn prepare_secret_path(path: &std::path::Path) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret path has no parent")
+    })?;
+    crate::secure_fs::ensure_private_dir(parent)?;
+    crate::secure_fs::restrict_file_if_present(path)
 }
 
 /// Replace the API token file with a fresh UUID. The running server keeps
@@ -1032,9 +1043,7 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result<
 pub fn rotate_api_token() -> Result<String, String> {
     let path = api_token_path();
     let token = uuid::Uuid::new_v4().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {}", e))?;
-    }
+    prepare_secret_path(&path).map_err(|e| format!("secure token path: {e}"))?;
     write_secret_file(&path, &token).map_err(|e| format!("write: {}", e))?;
     Ok(token)
 }
@@ -1045,6 +1054,7 @@ pub fn rotate_api_token() -> Result<String, String> {
 #[tauri::command]
 pub fn get_api_token_preview() -> Result<String, String> {
     let path = api_token_path();
+    prepare_secret_path(&path).map_err(|e| format!("secure token path: {e}"))?;
     let token = std::fs::read_to_string(&path).map_err(|e| format!("read: {}", e))?;
     let token = token.trim();
     if token.len() < 8 { return Ok(token.to_string()); }
@@ -1084,6 +1094,7 @@ pub fn list_automation_log(limit: Option<i64>, db: tauri::State<'_, HanniDb>) ->
 }
 
 fn get_or_create_token(path: PathBuf) -> Result<String, String> {
+    prepare_secret_path(&path).map_err(|e| format!("secure token path: {e}"))?;
     match read_token_file(&path ) {
         Ok(token) => return Ok(token),
         Err(_) if !path.exists() => {
@@ -1091,12 +1102,13 @@ fn get_or_create_token(path: PathBuf) -> Result<String, String> {
         Err(e) => return Err(e),
     }
     let token = uuid::Uuid::new_v4().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
-    }
     match create_secret_file(&path, &token) {
             Ok(()) => Ok(token ),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_token_file(&path),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            crate::secure_fs::restrict_file(&path)
+                .map_err(|error| format!("secure {}: {error}", path.display()))?;
+            read_token_file(&path)
+        }
         Err(e) => Err(format!("write {}: {e}", path.display())),
     }
 }
@@ -1118,6 +1130,11 @@ fn create_secret_file(path: &std::path::Path, contents: &str) -> std::io::Result
                 drop(file);
         let _ = std::fs::remove_file(path);
         return Err(e);
+    }
+    if let Err(error) = crate::secure_fs::restrict_file(path) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(error);
     }
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
@@ -1637,12 +1654,28 @@ fn updater_log(msg: &str) {
     use std::io::Write;
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let line = format!("[{}] {}\n", ts, msg);
-    if let Ok(mut f) = std::fs::OpenOptions::new()
+    let path = hanni_data_dir().join("updater.log");
+    if let Err(error) = prepare_secret_path(&path) {
+        eprintln!("[updater] secure log path failed: {error}");
+        return;
+    }
+    let mut f = match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(hanni_data_dir().join("updater.log"))
+        .open(&path)
     {
-        let _ = f.write_all(line.as_bytes());
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("[updater] open log failed: {error}");
+            return;
+        }
+    };
+    if let Err(error) = crate::secure_fs::restrict_file(&path) {
+        eprintln!("[updater] secure log file failed: {error}");
+        return;
+    }
+    if let Err(error) = f.write_all(line.as_bytes()) {
+        eprintln!("[updater] write log failed: {error}");
     }
 }
 

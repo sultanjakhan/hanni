@@ -2,135 +2,243 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use crate::types::hanni_data_dir;
+use crate::secure_fs;
 use chrono;
 
 /// Migrate data from old ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
 #[cfg(not(target_os = "android"))]
-pub fn migrate_old_data_dir() {
+pub fn migrate_old_data_dir() -> Result<(), String> {
     let new_dir = hanni_data_dir();
+    secure_fs::ensure_private_dir(&new_dir)
+        .map_err(|e| format!("secure data directory: {e}"))?;
     let marker = new_dir.join(".migrated");
-    if marker.exists() { return; } // already migrated — skip without touching ~/Documents
+    if marker.exists() { return Ok(()); } // already migrated — skip without touching ~/Documents
     let old_dir = dirs::home_dir().unwrap_or_default().join("Documents/Hanni");
     if !old_dir.exists() {
         // No old data, create marker so we never check ~/Documents again
-        let _ = std::fs::create_dir_all(&new_dir);
-        let _ = std::fs::write(&marker, "migrated");
-        return;
+        std::fs::write(&marker, "migrated")
+            .map_err(|e| format!("write migration marker: {e}"))?;
+        return Ok(());
     }
-    let _ = std::fs::create_dir_all(&new_dir);
     let old_db = old_dir.join("hanni.db");
     let new_db = new_dir.join("hanni.db");
-    // If old DB exists, copy it over (replaces empty DB created by init_db)
-    if old_db.exists() {
-        let _ = std::fs::copy(&old_db, &new_db);
-    }
-    // Copy other files (settings, audio, etc.)
-    if let Ok(entries) = std::fs::read_dir(&old_dir) {
-        for entry in entries.flatten() {
-            if entry.file_name() == "hanni.db" { continue; } // already handled
-            let dest = new_dir.join(entry.file_name());
-            if !dest.exists() {
-                if entry.path().is_dir() {
-                    let _ = copy_dir_recursive(&entry.path(), &dest);
-                } else {
-                    let _ = std::fs::copy(&entry.path(), &dest);
-                }
+    // Never overwrite a destination produced by an earlier partial migration.
+    match std::fs::symlink_metadata(&old_db) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!(
+                "legacy database symlink requires manual review: {}",
+                old_db.display()
+            ));
+        }
+        Ok(metadata) if metadata.is_file() => {
+            if destination_is_absent(&new_db)
+                .map_err(|e| format!("inspect migrated database destination: {e}"))?
+            {
+                std::fs::copy(&old_db, &new_db)
+                    .map_err(|e| format!("copy legacy database: {e}"))?;
             }
         }
+        Ok(_) => return Err(format!("legacy database is not a file: {}", old_db.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("inspect legacy database: {error}")),
     }
-    let _ = std::fs::write(&marker, "migrated");
+    // Copy other files (settings, audio, etc.)
+    let entries = std::fs::read_dir(&old_dir)
+        .map_err(|e| format!("read legacy data directory: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("read legacy data entry: {e}"))?;
+        if entry.file_name() == "hanni.db" { continue; } // already handled
+        let dest = new_dir.join(entry.file_name());
+        let file_type = entry.file_type()
+            .map_err(|e| format!("inspect legacy entry {}: {e}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "legacy symlink requires manual review: {}",
+                entry.path().display()
+            ));
+        }
+        if file_type.is_dir() {
+            // Retry/merge a directory left partial by an earlier failed run.
+            copy_dir_recursive(&entry.path(), &dest)
+                .map_err(|e| format!("copy legacy directory {}: {e}", entry.path().display()))?;
+        } else if file_type.is_file() && destination_is_absent(&dest)
+            .map_err(|e| format!("inspect legacy destination {}: {e}", dest.display()))?
+        {
+            std::fs::copy(entry.path(), &dest)
+                .map_err(|e| format!("copy legacy file {}: {e}", entry.path().display()))?;
+        }
+    }
+    std::fs::write(&marker, "migrated")
+        .map_err(|e| format!("write migration marker: {e}"))?;
     eprintln!("Migrated data from {:?} to {:?}", old_dir, new_dir);
+    Ok(())
 }
 
 #[cfg(not(target_os = "android"))]
 pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
+    match std::fs::symlink_metadata(dst) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("legacy destination is not a real directory: {}", dst.display()),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(dst)?;
+        }
+        Err(error) => return Err(error),
+    }
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let dest = dst.join(entry.file_name());
-        if entry.path().is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("legacy symlink requires manual review: {}", entry.path().display()),
+            ));
+        }
+        if file_type.is_dir() {
             copy_dir_recursive(&entry.path(), &dest)?;
-        } else {
+        } else if file_type.is_file() && destination_is_absent(&dest)? {
             std::fs::copy(&entry.path(), &dest)?;
         }
     }
     Ok(())
 }
 
-/// Restrict a file to owner read/write only (0600) on Unix. No-op elsewhere.
-/// hanni.db and its backups hold plaintext secrets, so they must not be
-/// world/group-readable (Time Machine / shared-machine leak vector).
-pub fn restrict_file(path: &std::path::Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if path.exists() {
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        }
+#[cfg(not(target_os = "android"))]
+fn destination_is_absent(path: &std::path::Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("legacy destination is a symlink: {}", path.display()),
+        )),
+        Ok(metadata) if metadata.is_file() => Ok(false),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("legacy file destination has the wrong type: {}", path.display()),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
     }
-    #[cfg(not(unix))]
-    { let _ = path; }
 }
 
-/// Restrict a directory to owner-only (0700) on Unix. No-op elsewhere.
-pub fn restrict_dir(path: &std::path::Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if path.exists() {
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+pub fn restrict_file(path: &std::path::Path) -> std::io::Result<()> {
+    secure_fs::restrict_file(path)
+}
+
+pub fn restrict_dir(path: &std::path::Path) -> std::io::Result<()> {
+    secure_fs::restrict_dir(path)
+}
+
+#[derive(Debug)]
+pub enum BackupError {
+    Data(String),
+    Security(String),
+}
+
+impl BackupError {
+    pub fn is_security(&self) -> bool {
+        matches!(self, Self::Security(_))
+    }
+}
+
+impl std::fmt::Display for BackupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Data(message) | Self::Security(message) => f.write_str(message),
         }
     }
-    #[cfg(not(unix))]
-    { let _ = path; }
 }
 
 /// Create a timestamped backup of hanni.db, keep last 5
-pub fn backup_db() {
+pub fn backup_db() -> Result<(), BackupError> {
     let data_dir = hanni_data_dir();
     let db_path = data_dir.join("hanni.db");
-    if !db_path.exists() { return; }
+    if !db_path.exists() { return Ok(()); }
     let backup_dir = data_dir.join("backups");
-    let _ = std::fs::create_dir_all(&backup_dir);
-    restrict_dir(&backup_dir);
+    secure_fs::ensure_private_dir(&backup_dir)
+        .map_err(|e| BackupError::Security(format!("secure backup directory: {e}")))?;
     // Throttle to at most one backup per day. Copying the (ever-growing) DB on
     // every launch sat on the Android cold-start hot path for little value.
     let today = chrono::Local::now().format("%Y%m%d").to_string();
-    if let Ok(rd) = std::fs::read_dir(&backup_dir) {
-        let prefix = format!("hanni_{}_", today);
-        for e in rd.flatten() {
-            let n = e.file_name().to_string_lossy().into_owned();
-            if n.starts_with(&prefix) && n.ends_with(".db") { return; }
+    let prefix = format!("hanni_{}_", today);
+    for entry in std::fs::read_dir(&backup_dir)
+        .map_err(|e| BackupError::Data(format!("scan backup directory: {e}")))?
+    {
+        let entry = entry
+            .map_err(|e| BackupError::Data(format!("read backup directory entry: {e}")))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&prefix) && name.ends_with(".db") {
+            return Ok(());
         }
     }
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let dest = backup_dir.join(format!("hanni_{}.db", ts));
-    if let Err(e) = std::fs::copy(&db_path, &dest) {
-        eprintln!("Backup failed: {}", e);
-        return;
+    std::fs::copy(&db_path, &dest).map_err(|error| {
+        let _ = std::fs::remove_file(&dest);
+        BackupError::Data(format!("copy database backup: {error}"))
+    })?;
+    if let Err(error) = restrict_file(&dest) {
+        let cleanup = std::fs::remove_file(&dest)
+            .err()
+            .map(|e| format!("; cleanup failed: {e}"))
+            .unwrap_or_default();
+        return Err(BackupError::Security(format!(
+            "secure database backup: {error}{cleanup}"
+        )));
     }
-    restrict_file(&dest);
     // Also copy WAL if present
     let wal = data_dir.join("hanni.db-wal");
     if wal.exists() {
         let wal_dest = backup_dir.join(format!("hanni_{}.db-wal", ts));
-        let _ = std::fs::copy(&wal, &wal_dest);
-        restrict_file(&wal_dest);
+        if let Err(error) = std::fs::copy(&wal, &wal_dest) {
+            let _ = std::fs::remove_file(&wal_dest);
+            let _ = std::fs::remove_file(&dest);
+            return Err(BackupError::Data(format!("copy WAL backup: {error}")));
+        }
+        if let Err(error) = restrict_file(&wal_dest) {
+            let wal_cleanup = std::fs::remove_file(&wal_dest).err();
+            let db_cleanup = std::fs::remove_file(&dest).err();
+            let cleanup = match (wal_cleanup, db_cleanup) {
+                (None, None) => String::new(),
+                (wal, db) => format!("; cleanup failed: wal={wal:?}, db={db:?}"),
+            };
+            return Err(BackupError::Security(format!(
+                "secure WAL backup: {error}{cleanup}"
+            )));
+        }
     }
     // Keep only last 5 backups
-    let mut backups: Vec<_> = std::fs::read_dir(&backup_dir)
-        .into_iter().flatten().flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with("hanni_") && e.file_name().to_string_lossy().ends_with(".db"))
-        .collect();
+    let mut backups = Vec::new();
+    for entry in std::fs::read_dir(&backup_dir)
+        .map_err(|e| BackupError::Data(format!("scan backup retention directory: {e}")))?
+    {
+        let entry = entry
+            .map_err(|e| BackupError::Data(format!("read backup retention entry: {e}")))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("hanni_") && name.ends_with(".db") {
+            backups.push(entry);
+        }
+    }
     backups.sort_by_key(|e| e.file_name());
     while backups.len() > 5 {
         let old = backups.remove(0);
-        let _ = std::fs::remove_file(old.path());
+        std::fs::remove_file(old.path())
+            .map_err(|e| BackupError::Data(format!("remove old database backup: {e}")))?;
         // Remove matching WAL
         let wal_path = old.path().with_extension("db-wal");
-        let _ = std::fs::remove_file(wal_path);
+        if let Err(error) = std::fs::remove_file(wal_path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(BackupError::Data(format!("remove old WAL backup: {error}")));
+            }
+        }
     }
     eprintln!("DB backup: {}", dest.display());
+    Ok(())
 }
 
 pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {
@@ -4422,5 +4530,39 @@ pub fn migrate_shopping_list(conn: &rusqlite::Connection) {
             CREATE INDEX IF NOT EXISTS idx_shopping_list_open
                 ON shopping_list(bought_at) WHERE bought_at IS NULL;"
         ).ok();
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod migration_copy_tests {
+    use super::*;
+
+    #[test]
+    fn recursive_retry_never_overwrites_existing_destination_files() {
+        let source = tempfile::tempdir().expect("source temp dir");
+        let destination = tempfile::tempdir().expect("destination temp dir");
+        let source_nested = source.path().join("nested");
+        let destination_nested = destination.path().join("nested");
+        std::fs::create_dir(&source_nested).expect("create source nested dir");
+        std::fs::create_dir(&destination_nested).expect("create destination nested dir");
+        std::fs::write(source_nested.join("existing.txt"), b"legacy")
+            .expect("write legacy existing file");
+        std::fs::write(destination_nested.join("existing.txt"), b"current")
+            .expect("write current destination file");
+        std::fs::write(source_nested.join("missing.txt"), b"copy me")
+            .expect("write legacy missing file");
+
+        copy_dir_recursive(source.path(), destination.path()).expect("retry copy");
+
+        assert_eq!(
+            std::fs::read(destination_nested.join("existing.txt"))
+                .expect("read existing destination"),
+            b"current"
+        );
+        assert_eq!(
+            std::fs::read(destination_nested.join("missing.txt"))
+                .expect("read copied destination"),
+            b"copy me"
+        );
     }
 }

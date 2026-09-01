@@ -57,6 +57,15 @@ hound = "3"
 voice_activity_detector = "0.2"
 tauri-plugin-global-shortcut = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+] }
+
 # Release size: the default profile ships an unstripped ~110-127MB binary (mostly
 # debug symbols) → bloated .app/APK and expensive native updates. strip drops the
 # symbols (~3-4× smaller); fat LTO + codegen-units=1 trim a few more MB at the

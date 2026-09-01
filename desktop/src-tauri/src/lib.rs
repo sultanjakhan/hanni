@@ -3,6 +3,7 @@
 mod types;
 mod prompts;
 mod db;
+mod secure_fs;
 mod sports_seed;
 mod chat;
 mod memory;
@@ -150,9 +151,20 @@ fn crsqlite_lib_path() -> std::path::PathBuf {
 /// Initialize SQLite database: register extensions, open connection, run migrations.
 /// Requires set_data_dir() to have been called on Android.
 fn init_database() -> HanniDb {
-    // Migrate data from ~/Documents/Hanni/ (macOS only)
+    // The destination must be private before legacy files or a new database
+    // are created inside it. On Windows this applies a protected DACL.
+    let data_dir = hanni_data_dir();
+    secure_fs::ensure_private_dir(&data_dir)
+        .expect("Cannot create and secure Hanni data directory");
+    secure_fs::startup_repair(&data_dir)
+        .expect("Cannot validate Hanni data paths before migration");
+
+    // Migrate data from the legacy ~/Documents/Hanni/ location.
     #[cfg(not(target_os = "android"))]
-    migrate_old_data_dir();
+    migrate_old_data_dir().expect("Cannot prepare legacy Hanni data");
+
+    secure_fs::startup_repair(&data_dir)
+        .expect("Cannot repair Hanni data permissions");
 
     // Register sqlite-vec extension BEFORE opening any connection
     unsafe {
@@ -164,10 +176,12 @@ fn init_database() -> HanniDb {
 
     let db_path = hanni_db_path();
     eprintln!("[hanni] init_database: opening {:?}", db_path);
-    if let Some(parent) = db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Err(error) = backup_db() {
+        if error.is_security() {
+            panic!("Cannot create a securely-permissioned Hanni backup: {error}");
+        }
+        eprintln!("[hanni] DB backup warning: {error}");
     }
-    backup_db();
     let conn = rusqlite::Connection::open(&db_path)
         .expect("Cannot open hanni.db");
 
@@ -181,10 +195,12 @@ fn init_database() -> HanniDb {
     // Harden secrets-at-rest: hanni.db holds plaintext tokens/keys (until the
     // keychain migration). Lock the data dir to owner-only and the DB + WAL/SHM
     // sidecars to 0600 so backups / shared-machine users can't read them.
-    if let Some(parent) = db_path.parent() { db::restrict_dir(parent); }
-    db::restrict_file(&db_path);
-    db::restrict_file(&db_path.with_extension("db-wal"));
-    db::restrict_file(&db_path.with_extension("db-shm"));
+    if let Some(parent) = db_path.parent() {
+        db::restrict_dir(parent).expect("Cannot secure Hanni database directory");
+    }
+    db::restrict_file(&db_path).expect("Cannot secure hanni.db");
+    secure_fs::startup_repair(&data_dir)
+        .expect("Cannot secure Hanni database sidecars");
 
     load_crsqlite(&conn);
 
@@ -346,15 +362,15 @@ pub fn run() {
     // hooks are bypassed. Suitable for talking to Google/Firestore (which
     // chain to Mozilla-known CAs).
 
-    // Desktop: init DB before builder (dirs crate works on macOS)
+    // Desktop: secure/init DB before loading any data-dir settings.
+    #[cfg(not(target_os = "android"))]
+    let hanni_db = init_database();
+
     #[cfg(not(target_os = "android"))]
     let proactive_settings = load_proactive_settings();
     #[cfg(target_os = "android")]
     let proactive_settings = ProactiveSettings::default();
     let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
-
-    #[cfg(not(target_os = "android"))]
-    let hanni_db = init_database();
 
     // MLX + OpenClaw disabled — см. memory archive/project_llm_disabled.md
 
