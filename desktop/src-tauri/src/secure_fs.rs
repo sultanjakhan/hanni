@@ -484,6 +484,49 @@ mod windows_acl {
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
         }
 
+        fn canonical_sddl_trustee(sid: &str) -> io::Result<String> {
+            let source = format!("D:P(A;;FA;;;{sid})");
+            let mut wide: Vec<u16> = source.encode_utf16().collect();
+            wide.push(0);
+
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    PCWSTR(wide.as_ptr()),
+                    SDDL_REVISION_1,
+                    &mut descriptor,
+                    None,
+                )
+            }
+            .map_err(|error| windows_error("build expected descriptor", error))?;
+            let _descriptor = unsafe { Owned::<HLOCAL>::new(HLOCAL(descriptor.0)) };
+
+            let mut string = PWSTR(ptr::null_mut());
+            unsafe {
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    descriptor,
+                    SDDL_REVISION_1,
+                    DACL_SECURITY_INFORMATION,
+                    &mut string,
+                    None,
+                )
+            }
+            .map_err(|error| windows_error("format expected descriptor", error))?;
+            let _string = unsafe { Owned::<HLOCAL>::new(HLOCAL(string.0.cast())) };
+            let canonical = unsafe { string.to_string() }
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            let (_, trustee_and_suffix) = canonical.split_once(";;;").ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "expected SDDL trustee is missing",
+                )
+            })?;
+            let (trustee, _) = trustee_and_suffix.split_once(')').ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "expected SDDL ACE is malformed")
+            })?;
+            Ok(trustee.to_owned())
+        }
+
         fn assert_restricted(path: &Path, directory: bool) {
             let handle = open_object(path).expect("open secured object");
             validate_object(*handle, directory).expect("validate secured object");
@@ -499,17 +542,17 @@ mod windows_acl {
             assert!(sddl.contains("D:P"), "{sddl}");
             assert_eq!(sddl.matches("(A;").count(), 3, "{sddl}");
             let flags = if directory { "OICI" } else { "" };
-            assert!(sddl.contains(&format!("(A;{flags};FA;;;{sid})")), "{sddl}");
-            assert!(
-                sddl.contains(&format!("(A;{flags};FA;;;SY)"))
-                    || sddl.contains(&format!("(A;{flags};FA;;;S-1-5-18)")),
-                "{sddl}"
-            );
-            assert!(
-                sddl.contains(&format!("(A;{flags};FA;;;BA)"))
-                    || sddl.contains(&format!("(A;{flags};FA;;;S-1-5-32-544)")),
-                "{sddl}"
-            );
+            let user_trustee = canonical_sddl_trustee(&sid).expect("canonical user trustee");
+            let system_trustee =
+                canonical_sddl_trustee("S-1-5-18").expect("canonical SYSTEM trustee");
+            let administrators_trustee = canonical_sddl_trustee(BUILTIN_ADMINISTRATORS_SID)
+                .expect("canonical Administrators trustee");
+            for trustee in [user_trustee, system_trustee, administrators_trustee] {
+                assert!(
+                    sddl.contains(&format!("(A;{flags};FA;;;{trustee})")),
+                    "{sddl}"
+                );
+            }
         }
 
         #[test]
