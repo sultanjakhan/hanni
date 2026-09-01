@@ -2,8 +2,9 @@
 //
 // When the phone and the Mac are on the same Wi-Fi they exchange SYNC_TABLES
 // rows straight over HTTP — no cloud, no Firestore, no quota. A dedicated
-// server bound to 0.0.0.0:8244 exposes ONLY the sync endpoint; /auto/eval
-// (arbitrary JS = RCE) stays on the loopback-only server and is never exposed.
+// server bound to 0.0.0.0:8244 exposes ONLY the sync endpoint. The fixed
+// debug reload action stays on the loopback-only dev server and arbitrary
+// JavaScript execution is not exposed by any Hanni HTTP route.
 //
 // One POST /lan/sync is a full bidirectional exchange: the caller sends its
 // rows changed since its per-table cursors, the callee applies them and

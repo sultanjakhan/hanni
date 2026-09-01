@@ -1,22 +1,24 @@
 #!/usr/bin/env node
 // Watches desktop/src/**/*.{js,css,html,mjs} and triggers WebView reload
-// in the running Hanni dev (or prod) instance via /auto/eval.
-// Port: HANNI_DEV_PORT env (default 8236).
+// through the fixed, debug-only /auto/reload action on port 8236.
 
 import { watch } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const PORT = process.env.HANNI_DEV_PORT || '8236';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src');
-const TOKEN_PATH = join(homedir(), 'Library', 'Application Support', 'Hanni', 'api_token.txt');
-const URL = `http://127.0.0.1:${PORT}/auto/eval`;
+const URL = 'http://127.0.0.1:8236/auto/reload';
+const token = process.env.HANNI_DEV_RELOAD_TOKEN?.trim();
 
-const token = (await readFile(TOKEN_PATH, 'utf8')).trim();
-if (!token) { console.error('No API token at ' + TOKEN_PATH); process.exit(1); }
+if (!token) {
+  console.error('HANNI_DEV_RELOAD_TOKEN is required for debug auto-reload.');
+  process.exit(1);
+}
+if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(token)) {
+  console.error('HANNI_DEV_RELOAD_TOKEN must be a canonical lowercase UUID.');
+  process.exit(1);
+}
 
 const isWatchable = (name) =>
   /\.(js|mjs|css|html)$/i.test(name) &&
@@ -32,16 +34,18 @@ async function reload() {
   try {
     const res = await fetch(URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({ script: 'location.reload(); return "ok";' }),
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: 'error',
+      signal: AbortSignal.timeout(2000),
     });
-    const data = await res.json().catch(() => ({}));
+    if (res.status !== 204) {
+      throw new Error(`reload endpoint returned HTTP ${res.status}`);
+    }
     const ts = new Date().toLocaleTimeString();
     const sample = files.slice(0, 3).join(', ') + (files.length > 3 ? `, +${files.length - 3}` : '');
     console.log(`[${ts}] reload (${files.length}): ${sample}`);
-    if (data && data.error) console.error('  api error:', data.error);
   } catch (e) {
-    console.error(`[reload] ${e.message} (is dev running on :${PORT}?)`);
+    console.error(`[reload] ${e.message} (is debug Hanni running on :8236 with the same reload token?)`);
   }
 }
 

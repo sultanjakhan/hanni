@@ -101,3 +101,51 @@ test('secret provisioning paths stay encrypted and redacted at UI boundaries', a
   assert.match(getConfig, /"key_set"/);
   assert.doesNotMatch(getConfig, /"key"\s*:/);
 });
+
+test('automation surface is fixed-action debug-only and logs metadata only', async () => {
+  const [meta, lib, securityUi, reloadTool, reloadShell] = await Promise.all([
+    readFile(new URL('../src-tauri/src/commands_meta.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/js/settings-security.js', import.meta.url), 'utf8'),
+    readFile(new URL('../tools/auto-reload.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../tools/auto-reload.sh', import.meta.url), 'utf8'),
+  ]);
+
+  assert.doesNotMatch(meta, /route\(\s*["']\/auto\/eval/);
+  assert.doesNotMatch(meta, /AutoEvalCallbacks|auto_eval_callback|EvalReq/);
+  assert.doesNotMatch(lib, /AutoEvalCallbacks|auto_eval_callback/);
+
+  const reloadHandler = meta.slice(
+    meta.indexOf('async fn auto_reload'),
+    meta.indexOf('async fn google_oauth_callback')
+  );
+  assert.match(meta, /#\[cfg\(debug_assertions\)\][\s\S]*?async fn auto_reload/);
+  assert.match(meta, /HANNI_DEV_RELOAD_TOKEN/);
+  assert.match(meta, /must differ from the API and Jobs credentials/);
+  assert.match(reloadHandler, /window\.reload\(\)/);
+  assert.doesNotMatch(reloadHandler, /Json\s*<|script|\.eval\(/);
+  assert.match(meta, /route\("\/auto\/reload", post\(auto_reload\)\)/);
+
+  const logRow = meta.slice(
+    meta.indexOf('pub struct AutomationLogRow'),
+    meta.indexOf('fn get_or_create_token')
+  );
+  assert.doesNotMatch(logRow, /script_preview|pub script\s*:/);
+  assert.doesNotMatch(securityUi, /script_preview|\/auto\/eval/);
+  assert.match(securityUi, /тела запросов и скрипты не сохраняются/);
+
+  assert.match(reloadTool, /http:\/\/127\.0\.0\.1:8236\/auto\/reload/);
+  assert.match(reloadTool, /process\.env\.HANNI_DEV_RELOAD_TOKEN/);
+  assert.match(reloadTool, /Authorization: `Bearer \$\{token\}`/);
+  assert.doesNotMatch(reloadTool, /readFile|homedir|api_token\.txt|HANNI_DEV_PORT|process\.argv|8235/);
+  const reloadOutputCalls = [...reloadTool.matchAll(/console\.(?:log|error)\([^;]*\);/g)]
+    .map(match => match[0])
+    .join('\n');
+  assert.doesNotMatch(reloadOutputCalls, /\$\{token\}|\+\s*token/);
+  assert.doesNotMatch(reloadShell, /\/auto\/eval|HANNI_DEV_PORT|8235|\$\{1|\$1/);
+
+  const scrub = lib.indexOf('db::migrate_automation_log(&conn)');
+  const oldBackups = lib.indexOf('secret_store::migrate_backup_databases(&data_dir)');
+  const newBackup = lib.indexOf('backup_db()');
+  assert.ok(scrub > 0 && scrub < oldBackups && oldBackups < newBackup);
+});

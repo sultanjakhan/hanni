@@ -147,7 +147,7 @@ Firebase/Firestore исторически выполняет в Hanni три р�
     *Gate:* `node --check`; `:261` не обещает Firebase read.
 17. **projects.yaml** — убрать `share_assets/guest_firestore.js` (`:386`); обновить `share.description` (`:356`), убрав «Firebase Hosting fallback». Subprojects `guest_cloud` (393-411) и `firestore` (412-419) описывают **отдельный** Hosting-деплой (`apps/guest-cloud`, `firebase/`) — НЕ часть axum Tier-2; флагнуть юзеру (§9), не удалять в этом проходе.
     *Gate:* `rg 'guest_firestore' projects.yaml` пусто под share_assets; `/audit-projects` без phantom/orphan.
-18. **verify** — `UPDATER_GITHUB_TOKEN=dummy cargo check` из `desktop/src-tauri` (baseline: 17 pre-existing warnings). `node --check` на каждый правленый JS. Smoke-test живого share-link (auto-reload + screenshot.sh + /auto/eval): `/s/{token}`, проверить рендер recipes/products/meal_plan/memory/fridge, reads/writes через axum, без console-ошибок про `HanniGuest.firestore`.
+18. **verify** — `UPDATER_GITHUB_TOKEN=dummy cargo check` из `desktop/src-tauri` (baseline: 17 pre-existing warnings). `node --check` на каждый правленый JS. Smoke-test живого share-link поддерживаемым браузерным/оконным инструментом: `/s/{token}`, проверить рендер recipes/products/meal_plan/memory/fridge, reads/writes через axum, без console-ошибок про `HanniGuest.firestore`. Старый arbitrary-eval/screenshot workflow удалён и не должен возвращаться.
 
 ---
 
@@ -223,7 +223,7 @@ Tier 3 — это **рабочий механизм sync**, его нельзя 
 - `cargo check` exit 0, без новых ошибок.
 - `node --check` на каждый правленый JS (`guest*.js`, `share-modal.js`).
 - `rg 'firestore|HanniGuest.firestore|web\.app|firebaseapp'` по `share_assets/` — пусто.
-- Live smoke через auto-reload + screenshot.sh + /auto/eval: `/s/{token}` рендерит recipes/products/meal_plan/memory/fridge; read + write (напр. добавить комментарий) через axum проходит; console без ошибок про `HanniGuest.firestore`.
+- Live smoke поддерживаемым браузерным/оконным инструментом: `/s/{token}` рендерит recipes/products/meal_plan/memory/fridge; read + write (напр. добавить комментарий) через axum проходит; console без ошибок про `HanniGuest.firestore`. Не использовать удалённый arbitrary-eval/screenshot workflow.
 
 **После Tier 3 (выбранная опция):**
 - `UPDATER_GITHUB_TOKEN=dummy cargo check` — особое внимание на dangling `sync_owner::` ссылки в `lib.rs` и `lan_sync.rs` после relocation (Option A).

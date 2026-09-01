@@ -1,7 +1,6 @@
 // settings-security.js — Settings → Безопасность.
-// Surfaces the local automation API token (preview + rotate) and the
-// audit log of /auto/eval invocations so the user can see what
-// remote-controlled the app.
+// Surfaces local API token controls and metadata-only diagnostics for fixed
+// automation actions. Request bodies and executable scripts are never logged.
 
 import { invoke } from './state.js';
 import { escapeHtml, confirmModal } from './utils.js';
@@ -15,20 +14,18 @@ function formatTs(epochSecs) {
 
 function renderLogRows(rows) {
   if (!rows.length) {
-    return `<div class="settings-empty-hint">Лог пуст — вызовов /auto/eval ещё не было</div>`;
+    return `<div class="settings-empty-hint">Журнал пуст — служебных действий ещё не было</div>`;
   }
   const head = `<thead><tr>
-    <th>Время</th><th>Хэш</th><th>Превью</th><th>Статус</th><th>ms</th>
+    <th>Время</th><th>Хэш действия</th><th>Статус</th><th>ms</th>
   </tr></thead>`;
   const body = rows.map(r => {
     const hash = (r.script_hash || '').slice(0, 8);
-    const preview = escapeHtml((r.script_preview || '').replace(/\s+/g, ' ').slice(0, 80));
     const statusCls = r.success ? 'security-log-ok' : 'security-log-err';
     const statusTxt = r.success ? 'ok' : 'err';
     return `<tr>
       <td>${formatTs(r.ts)}</td>
       <td class="security-log-hash">${hash}</td>
-      <td class="security-log-preview">${preview}</td>
       <td class="${statusCls}">${statusTxt}</td>
       <td>${r.duration_ms}</td>
     </tr>`;
@@ -75,9 +72,9 @@ export async function renderSecuritySection() {
     </div>
 
     <div class="settings-section">
-      <div class="settings-section-title">Журнал /auto/eval</div>
+      <div class="settings-section-title">Журнал автоматизации</div>
       <div class="settings-row">
-        <span class="settings-hint">Последние ${logRows.length} вызовов. Хранится 7 дней. Превью обрезан до 200 символов; полный скрипт идентифицируется по SHA-256.</span>
+        <span class="settings-hint">Последние ${logRows.length} служебных действий. Хранится 7 дней. Записываются только время, SHA-256 идентификатора действия, результат и длительность; тела запросов и скрипты не сохраняются.</span>
       </div>
       <div id="security-log-wrap">${renderLogRows(logRows)}</div>
       <div class="settings-row" style="justify-content:flex-end;">

@@ -9,7 +9,7 @@
 - **Никогда** `kill`/`pkill`/`killall` — может ребутнуть macOS. Стоп Hanni: `osascript -e 'tell application "Hanni" to quit'`. Стоп `cargo tauri dev` — попросить юзера Ctrl+C.
 - **Не трогать prod Hanni.** Тестировать только в `cargo tauri dev`.
 - **Не активировать окно** (`open -a Hanni`, `osascript activate`) — прерывает работу юзера. Нужен фокус для скрина → попроси сделать вручную.
-- **Порты: 8236 dev / 8235 prod.** Максимум 1 dev + 1 prod. Dev уже отвечает на `:8236` — **не рестартить**: JS/CSS подхватит `auto-reload`, для Rust спроси «нужен рестарт?». Детали: `memory/feedback_dev_no_restart.md`.
+- **Порты: 8236 dev / 8235 prod.** Максимум 1 dev + 1 prod. Dev уже отвечает на `:8236` — **не рестартить**: JS/CSS может подхватить debug-only `auto-reload`, если dev и watcher запущены с одним отдельным `HANNI_DEV_RELOAD_TOKEN`; для Rust спроси «нужен рестарт?». Детали: `memory/feedback_dev_no_restart.md`.
 
 ## Clarify (дельта к global-чеклисту)
 - **ГДЕ** = какой таб → sub-view → элемент. **Данные** = SQLite-таблица / localStorage / объект `S`. Нужна ли миграция?
@@ -34,8 +34,9 @@ SSOT структуры проекта: 17 табов + cross-cutting `share`/`s
 **Скиллы:** полная карта (тип задачи → built-in agent / субагент / скилл + decision-tree) — **`docs/AGENT_ROUTING.md`**. Связки: новый таб → `add-tab`+`design`; «тормозит» → `perf` (профиль) → `architect`/`refactor` если причина структурная; крупный сплит файла → `architect` (план) → `refactor` (правки). `improve` = ревью-совет (read-only); role-скиллы (`architect`/`security`/`perf`) — правят. Не уверен какой — спроси.
 
 ## Hanni app interaction
-- **Скриншот**: `desktop/tools/screenshot.sh /tmp/out.png [port]` → Read. Silent (`-x`), работает свёрнутым (html2canvas).
-- **DOM/eval**: `POST 127.0.0.1:<port>/auto/eval` c `{"script":"…"}` (порты см. Safety). Клик/тайп/навигация — через eval (`element.click()`, `MouseEvent`, `KeyboardEvent`). Сложные скрипты с кавычками — `python3 urllib`. Токен: на macOS `cat ~/Library/Application\ Support/Hanni/api_token.txt`; на Windows — Hanni → Настройки → Безопасность → «Перевыпустить и скопировать» (файл защищён DPAPI и напрямую не читается).
+- Произвольное выполнение JavaScript и фоновый screenshot endpoint удалены. Не воссоздавай их через локальный API или Tauri-команды.
+- Для debug hot-reload задай отдельный canonical UUID в `HANNI_DEV_RELOAD_TOKEN` одновременно для `cargo tauri dev` и `desktop/tools/auto-reload.sh`. Маршрут фиксированный, доступен только debug-сборке на `127.0.0.1:8236` и не принимает тело/скрипт.
+- Скриншоты и UI-взаимодействие выполняй поддерживаемым оконным инструментом или вручную с явным участием пользователя; не инжектируй DOM-код.
 - **Никогда** MCP screenshot / tauri-automation (виснут на macOS).
 - После UI-правок — скриншот юзеру на сверку.
 
@@ -43,7 +44,7 @@ SSOT структуры проекта: 17 табов + cross-cutting `share`/`s
 - **Rust**: `UPDATER_GITHUB_TOKEN=dummy cargo check` — компиляция + регистрация команд (PostToolUse-хук гоняет авто после правки `.rs`).
 - **JS**: `node --check` — синтаксис ОДНОГО файла. НЕ резолвит ES-импорты → при переносе/переключении импортов проверь Grep/Glob, что все `import from` существуют (битый импорт = белый экран, `memory/feedback_split_files.md`).
 - **Python (hanni-mcp)**: синтаксис проверяет PostToolUse-хук.
-- **Поведение**: smoke через `/auto/eval` :8236 (dev) — выполни команду / проверь стейт. UI — `screenshot.sh` + показать юзеру.
+- **Поведение**: API проверяй маршрутными/интеграционными тестами, UI — поддерживаемым оконным инструментом или ручным smoke с пользователем. Исходники и статический рендер не считаются live-доказательством.
 - **Свежая БД** (после правок миграций в `db.rs`): `cargo check` НЕ проверяет порядок миграций — запусти dev и убедись, что прошли.
 
 ## Архитектура (кратко; полное — `docs/architecture/quick-reference.md`)

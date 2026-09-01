@@ -9,17 +9,6 @@ use tauri_plugin_updater::UpdaterExt;
 use std::sync::atomic::Ordering;
 use std::process::{Command, Child};
 use std::path::PathBuf;
-use std::collections::HashMap;
-
-/// Global callback map for auto_eval HTTP → JS → Rust roundtrip
-pub struct AutoEvalCallbacks(pub std::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<String>>>);
-
-#[tauri::command]
-pub fn auto_eval_callback(cb_id: String, result: String, state: tauri::State<'_, AutoEvalCallbacks>) {
-    if let Some(tx) = state.0.lock().unwrap().remove(&cb_id) {
-        let _ = tx.send(result);
-    }
-}
 
 // ── Focus Commands ──
 
@@ -1044,7 +1033,6 @@ pub struct AutomationLogRow {
     pub id: i64,
     pub ts: i64,
     pub script_hash: String,
-    pub script_preview: String,
     pub success: bool,
     pub duration_ms: i64,
 }
@@ -1054,7 +1042,7 @@ pub fn list_automation_log(limit: Option<i64>, db: tauri::State<'_, HanniDb>) ->
     let conn = db.conn();
     let lim = limit.unwrap_or(100).clamp(1, 1000);
     let mut stmt = conn.prepare(
-        "SELECT id, ts, script_hash, script_preview, success, duration_ms
+        "SELECT id, ts, script_hash, success, duration_ms
          FROM automation_log ORDER BY ts DESC LIMIT ?1"
     ).map_err(|e| format!("prepare: {}", e))?;
     let rows = stmt.query_map(rusqlite::params![lim], |r| {
@@ -1062,9 +1050,8 @@ pub fn list_automation_log(limit: Option<i64>, db: tauri::State<'_, HanniDb>) ->
             id: r.get(0)?,
             ts: r.get(1)?,
             script_hash: r.get(2)?,
-            script_preview: r.get(3)?,
-            success: r.get::<_, i64>(4)? != 0,
-            duration_ms: r.get(5)?,
+            success: r.get::<_, i64>(3)? != 0,
+            duration_ms: r.get(4)?,
         })
     }).map_err(|e| format!("query: {}", e))?;
     let out: Vec<_> = rows.flatten().collect();
@@ -1112,6 +1099,42 @@ pub fn get_or_create_jobs_api_token() -> Result<String, String> {
     get_or_create_token(jobs_api_token_path())
 }
 
+#[cfg(debug_assertions)]
+fn dev_reload_token_from_env() -> Result<Option<String>, String> {
+    let raw = match std::env::var("HANNI_DEV_RELOAD_TOKEN") {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("HANNI_DEV_RELOAD_TOKEN is not valid Unicode".into());
+        }
+    };
+    let token = raw.trim();
+    let parsed = uuid::Uuid::parse_str(token)
+        .map_err(|_| "HANNI_DEV_RELOAD_TOKEN must be a canonical UUID".to_string())?;
+    let canonical = parsed.hyphenated().to_string();
+    if token != canonical {
+        return Err("HANNI_DEV_RELOAD_TOKEN must be a canonical UUID".into());
+    }
+    Ok(Some(canonical))
+}
+
+#[cfg(debug_assertions)]
+fn validate_dev_reload_token(
+    token: Option<String>,
+    api_token: &str,
+    jobs_token: &str,
+) -> Result<Option<String>, String> {
+    if token
+        .as_deref()
+        .is_some_and(|value| value == api_token || value == jobs_token)
+    {
+        return Err(
+            "HANNI_DEV_RELOAD_TOKEN must differ from the API and Jobs credentials".into(),
+        );
+    }
+    Ok(token)
+}
+
 /// Shared state of the local HTTP API (:8236 dev / :8235 prod).
 /// Module-level so route handlers can live in other modules (api_jobs.rs).
 #[derive(Clone)]
@@ -1119,10 +1142,12 @@ pub struct ApiState {
     pub app: AppHandle,
     pub token: String,
     /// Least-privilege credential accepted only by the Jobs vacancy routes.
-    /// It must never authenticate `/auto/eval` or the general local API.
+    /// It must never authenticate the general local API.
     pub jobs_token: String,
-    // (count, window_start_epoch_secs) keyed by source IP.
-    pub rate_limit: std::sync::Arc<std::sync::Mutex<HashMap<String, (u32, i64)>>>,
+    /// Debug-only reload credential. It is never persisted or accepted by a
+    /// release build and is separate from both production API tokens.
+    #[cfg(debug_assertions)]
+    dev_reload_token: Option<String>,
 }
 
 pub fn check_auth(headers: &axum::http::HeaderMap, token: &str) -> Result<(), (axum::http::StatusCode, String)> {
@@ -1146,20 +1171,17 @@ pub fn check_auth(headers: &axum::http::HeaderMap, token: &str) -> Result<(), (a
 
 pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
     use axum::{Router, routing::{get, post}, extract::{State as AxumState, Query, DefaultBodyLimit}, Json, http::{StatusCode, HeaderMap}};
-    use std::sync::{Arc, Mutex};
 
     let api_token = get_or_create_api_token()?;
     let jobs_api_token = get_or_create_jobs_api_token()?;
+    #[cfg(debug_assertions)]
+    let dev_reload_token = validate_dev_reload_token(
+        dev_reload_token_from_env()?,
+        &api_token,
+        &jobs_api_token,
+    )?;
 
-    // /auto/eval body cap: a single eval script over this size is almost
-    // certainly malicious or a runaway log dump. 256 KiB matches the
-    // share-server body limit (share_auth::BODY_LIMIT_BYTES).
-    const AUTO_EVAL_BODY_LIMIT: usize = 256 * 1024;
     const JOBS_API_BODY_LIMIT: usize = 16 * 1024;
-    // Rate-limit per IP: same posture as share_auth::RATE_LIMIT_PER_MINUTE.
-    // Server is loopback-only so the IP is effectively always 127.0.0.1,
-    // but keying by IP keeps the door open for future tunneling.
-    const AUTO_EVAL_RATE_PER_MINUTE: u32 = 100;
     // Retention: automation_log rows older than this are pruned lazily.
     const AUTO_LOG_RETENTION_SECS: i64 = 7 * 24 * 60 * 60;
 
@@ -1167,7 +1189,8 @@ pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
         app: app_handle.clone(),
         token: api_token,
         jobs_token: jobs_api_token,
-        rate_limit: Arc::new(Mutex::new(HashMap::new())),
+        #[cfg(debug_assertions)]
+        dev_reload_token,
     };
 
     // Background retention: prune automation_log once an hour. Kept lazy
@@ -1188,34 +1211,18 @@ pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
         });
     }
 
-    fn rate_limit_check(state: &ApiState, key: &str) -> Result<(), (StatusCode, String)> {
-        let now = chrono::Utc::now().timestamp();
-        let mut map = state.rate_limit.lock().unwrap();
-        // Bound map growth so spammed distinct keys can't exhaust memory
-        // (matches share_auth::rate_limit_check cap).
-        if map.len() > 10_000 {
-            map.retain(|_, (_, started)| now - *started < 60);
-        }
-        let entry = map.entry(key.to_string()).or_insert((0, now));
-        if now - entry.1 >= 60 { *entry = (0, now); }
-        entry.0 += 1;
-        if entry.0 > AUTO_EVAL_RATE_PER_MINUTE {
-            Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".into()))
-        } else { Ok(()) }
-    }
-
-    fn log_automation(app: &AppHandle, script: &str, success: bool, duration_ms: i64) {
+    #[cfg(debug_assertions)]
+    fn log_automation(app: &AppHandle, action: &str, success: bool, duration_ms: i64) {
         use sha2::{Sha256, Digest};
         let mut hasher = Sha256::new();
-        hasher.update(script.as_bytes());
+        hasher.update(action.as_bytes());
         let hash = hex::encode(hasher.finalize());
-        let preview: String = script.chars().take(200).collect();
         let ts = chrono::Utc::now().timestamp();
         let db = app.state::<HanniDb>();
         let _ = db.conn().execute(
-            "INSERT INTO automation_log (ts, script_hash, script_preview, success, duration_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![ts, hash, preview, success as i64, duration_ms],
+            "INSERT INTO automation_log (ts, script_hash, success, duration_ms)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![ts, hash, success as i64, duration_ms],
         );
     }
 
@@ -1353,76 +1360,44 @@ pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
         Ok(Json(serde_json::json!({ "status": "ok" })))
     }
 
-    // ── Automation endpoints (eval JS in WebView, works even minimized) ──
-
-    #[derive(Deserialize)]
-    struct EvalReq {
-        script: String,
-    }
-
-    pub async fn auto_eval(
+    /// Fixed, debug-only reload action. No request data reaches the WebView,
+    /// and the credential is separate from every production API token.
+    #[cfg(debug_assertions)]
+    async fn auto_reload(
         headers: HeaderMap,
         AxumState(state): AxumState<ApiState>,
-        Json(req): Json<EvalReq>,
-    ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-        check_auth(&headers, &state.token)?;
-        // Loopback-only server: a single rate-limit bucket is enough.
-        // If we ever expose this beyond 127.0.0.1, switch to per-IP keying.
-        rate_limit_check(&state, "loopback")?;
-
+    ) -> Result<StatusCode, (StatusCode, String)> {
+        let token = state.dev_reload_token.as_deref().ok_or((
+            StatusCode::NOT_FOUND,
+            "Debug reload endpoint is disabled".into(),
+        ))?;
+        check_auth(&headers, token)?;
         let started = std::time::Instant::now();
-        let script = req.script.clone();
-
-        let cb_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-
-        // Register callback in global map
-        state.app.state::<AutoEvalCallbacks>()
-            .0.lock().unwrap()
-            .insert(cb_id.clone(), tx);
-
-        // Wrap script to invoke Tauri command with result
-        let wrapped = format!(
-            r#"(async () => {{
-                try {{
-                    const __r = await (async () => {{ {script} }})();
-                    await window.__TAURI__.core.invoke('auto_eval_callback', {{ cbId: '{cb_id}', result: JSON.stringify(__r ?? null) }});
-                }} catch(e) {{
-                    await window.__TAURI__.core.invoke('auto_eval_callback', {{ cbId: '{cb_id}', result: JSON.stringify({{ __error: e.message }}) }});
-                }}
-            }})()"#,
-            script = req.script, cb_id = cb_id
-        );
-
-        if let Some(win) = state.app.get_webview_window("main") {
-            if let Err(e) = win.eval(&wrapped) {
-                let dur = started.elapsed().as_millis() as i64;
-                log_automation(&state.app, &script, false, dur);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("eval error: {}", e)));
+        let window = state.app.get_webview_window("main").ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "No main webview found".into(),
+        ))?;
+        match window.reload() {
+            Ok(()) => {
+                log_automation(
+                    &state.app,
+                    "debug_webview_reload",
+                    true,
+                    started.elapsed().as_millis() as i64,
+                );
+                Ok(StatusCode::NO_CONTENT)
             }
-        } else {
-            let dur = started.elapsed().as_millis() as i64;
-            log_automation(&state.app, &script, false, dur);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, "No main webview found".into()));
-        }
-
-        let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await;
-        let dur = started.elapsed().as_millis() as i64;
-        match outcome {
-            Ok(Ok(result)) => {
-                let inner: serde_json::Value = serde_json::from_str(&result)
-                    .unwrap_or(serde_json::Value::String(result));
-                let script_failed = inner.get("__error").is_some();
-                log_automation(&state.app, &script, !script_failed, dur);
-                Ok(Json(serde_json::json!({ "result": inner })))
-            }
-            Ok(Err(_)) => {
-                log_automation(&state.app, &script, false, dur);
-                Err((StatusCode::INTERNAL_SERVER_ERROR, "Channel closed".into()))
-            }
-            Err(_) => {
-                log_automation(&state.app, &script, false, dur);
-                Err((StatusCode::REQUEST_TIMEOUT, "Script timed out after 10s".into()))
+            Err(error) => {
+                log_automation(
+                    &state.app,
+                    "debug_webview_reload",
+                    false,
+                    started.elapsed().as_millis() as i64,
+                );
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("reload error: {error}"),
+                ))
             }
         }
     }
@@ -1442,8 +1417,7 @@ pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
         // We rely on the random `state` param (CSRF-protection) inside the handler.
         let html_ok = "<html><body style='font-family:-apple-system,sans-serif;padding:40px;text-align:center'>\
             <h2>✓ Signed in to Hanni</h2>\
-            <p>You can close this tab and return to the app.</p>\
-            <script>setTimeout(()=>window.close(),1500)</script></body></html>";
+            <p>You can close this tab and return to the app.</p></body></html>";
         let ct = (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
 
         // Escape reflected values — `error` comes straight from the redirect
@@ -1472,12 +1446,14 @@ pub async fn spawn_api_server(app_handle: AppHandle) -> Result<(), String> {
         .route("/api/memory/search", get(api_memory_search))
         .route("/api/memory", post(api_memory_add))
         .route("/api/vacancy", get(crate::api_jobs::api_vacancy_lookup).post(crate::api_jobs::api_vacancy_save).layer(DefaultBodyLimit::max(JOBS_API_BODY_LIMIT)))
-        .route(
-            "/auto/eval",
-            post(auto_eval).layer(DefaultBodyLimit::max(AUTO_EVAL_BODY_LIMIT)),
-        )
-        .route("/oauth/google/callback", get(google_oauth_callback))
-        .with_state(state);
+        .route("/oauth/google/callback", get(google_oauth_callback));
+    #[cfg(debug_assertions)]
+    let app = if state.dev_reload_token.is_some() {
+        app.route("/auto/reload", post(auto_reload))
+    } else {
+        app
+    };
+    let app = app.with_state(state);
 
     let port = if cfg!(debug_assertions) { 8236 } else { 8235 };
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.map_err(|e| format!("API server bind: {e}") )?;
@@ -1747,5 +1723,65 @@ pub async fn auto_check_on_startup(app: AppHandle) {
         }
         Ok(None) => updater_log("auto: up to date"),
         Err(e) => updater_log(&format!("auto: check error: {}", e)),
+    }
+}
+
+#[cfg(all(test, debug_assertions))]
+mod dev_reload_security_tests {
+    use super::{validate_dev_reload_token, AutomationLogRow};
+
+    const API_TOKEN: &str = "11111111-1111-4111-8111-111111111111";
+    const JOBS_TOKEN: &str = "22222222-2222-4222-8222-222222222222";
+    const RELOAD_TOKEN: &str = "33333333-3333-4333-8333-333333333333";
+
+    #[test]
+    fn reload_token_must_not_reuse_production_credentials() {
+        for reused in [API_TOKEN, JOBS_TOKEN] {
+            let error = validate_dev_reload_token(
+                Some(reused.to_string()),
+                API_TOKEN,
+                JOBS_TOKEN,
+            )
+            .expect_err("credential reuse must fail");
+            assert!(error.contains("must differ"));
+            assert!(!error.contains(reused));
+        }
+    }
+
+    #[test]
+    fn distinct_reload_token_and_disabled_route_are_valid() {
+        assert_eq!(
+            validate_dev_reload_token(
+                Some(RELOAD_TOKEN.to_string()),
+                API_TOKEN,
+                JOBS_TOKEN,
+            )
+            .expect("distinct reload token"),
+            Some(RELOAD_TOKEN.to_string())
+        );
+        assert_eq!(
+            validate_dev_reload_token(None, API_TOKEN, JOBS_TOKEN)
+                .expect("missing token disables route"),
+            None
+        );
+    }
+
+    #[test]
+    fn automation_log_json_contains_metadata_only() {
+        let value = serde_json::to_value(AutomationLogRow {
+            id: 1,
+            ts: 2,
+            script_hash: "fixed-action-hash".into(),
+            success: true,
+            duration_ms: 3,
+        })
+        .expect("serialize automation metadata");
+        let object = value.as_object().expect("automation row object");
+        assert_eq!(object.len(), 5);
+        for key in ["id", "ts", "script_hash", "success", "duration_ms"] {
+            assert!(object.contains_key(key), "missing metadata field {key}");
+        }
+        assert!(!object.contains_key("script_preview"));
+        assert!(!object.contains_key("script"));
     }
 }

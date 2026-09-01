@@ -24,8 +24,9 @@
 
 ## HTTP API (automation)
 - `127.0.0.1:8235` (prod), `127.0.0.1:8236` (dev, `cfg!(debug_assertions)`).
-- Endpoint `POST /auto/eval` — DOM-eval, используется `screenshot.sh` и Claude.
-- Токен: macOS — `~/Library/Application Support/Hanni/api_token.txt`; Windows — явное «Перевыпустить и скопировать» в Hanni → Настройки → Безопасность (файл защищён DPAPI).
+- Произвольное выполнение JavaScript через HTTP отсутствует; production API не содержит automation code-execution маршрутов.
+- Debug hot-reload — фиксированный `POST /auto/reload` только на `127.0.0.1:8236`. Маршрут компилируется только в debug и регистрируется только при наличии отдельного canonical UUID в `HANNI_DEV_RELOAD_TOKEN`; API/Jobs-токены не принимаются.
+- Reload не принимает request body. `desktop/tools/auto-reload.mjs` получает credential только из окружения и никогда не читает token-файлы.
 
 ## MCP / сервисы
 - **MCP hanni**: Python-сервер `desktop/hanni-mcp/server.py` — CRUD по той же SQLite (facts, events, SQL).
@@ -33,7 +34,7 @@
 
 ## Build / dev
 - Dev-проверка: `UPDATER_GITHUB_TOKEN=dummy cargo check`.
-- Dev-инстанс: `cargo tauri dev` (порт 8236). JS/CSS hot-reload — `desktop/tools/auto-reload.mjs` (watcher → reload через `/auto/eval`).
+- Dev-инстанс: `cargo tauri dev` (порт 8236). Для JS/CSS hot-reload запусти dev и `desktop/tools/auto-reload.sh` с одинаковым отдельным `HANNI_DEV_RELOAD_TOKEN`.
 - Graceful quit: `osascript -e 'tell application "Hanni" to quit'`. Re-open — попросить пользователя (никогда `open -a Hanni` / activate). Never kill/pkill/killall.
 
 См. также: `docs/architecture/WIKI.md`, `docs/MODULE_MAP.md`, и per-module папки (`calendar/`, `chat/`, `core/`, `voice/` …).

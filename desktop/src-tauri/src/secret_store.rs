@@ -131,8 +131,10 @@ pub fn migrate_sensitive_settings(conn: &rusqlite::Connection) -> Result<(), Str
     Ok(())
 }
 
-#[cfg(windows)]
-fn checkpoint_truncate(conn: &rusqlite::Connection, context: &str) -> Result<(), String> {
+pub(crate) fn checkpoint_truncate(
+    conn: &rusqlite::Connection,
+    context: &str,
+) -> Result<(), String> {
     let (busy, _log_frames, _checkpointed_frames): (i64, i64, i64) = conn
         .query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -189,38 +191,54 @@ pub fn migrate_token_files(data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Migrate only Hanni's bounded rolling SQLite backups. This prevents the
-/// first protected startup from leaving yesterday's credential rows in
-/// plaintext while avoiding unrelated files in the backup directory.
+/// Sanitize only Hanni's bounded rolling SQLite backups. Automation log
+/// previews are removed on every platform; Windows additionally migrates
+/// protected credential rows. Managed WAL/SHM sidecars without their database
+/// fail closed because they may still contain sensitive historical pages.
 pub fn migrate_backup_databases(data_dir: &Path) -> Result<(), String> {
-    #[cfg(not(windows))]
-    {
-        let _ = data_dir;
-        return Ok(());
+    let backup_dir = data_dir.join("backups");
+    let entries = match std::fs::read_dir(&backup_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("scan Hanni backups: {error}")),
+    };
+    let mut databases = std::collections::BTreeSet::new();
+    let mut sidecar_bases = std::collections::BTreeSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read Hanni backup entry: {error}"))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if is_managed_backup_database_name(name) {
+            databases.insert(name.to_string());
+        } else if let Some(base) = managed_backup_sidecar_base(name) {
+            sidecar_bases.insert(base);
+        }
     }
 
-    #[cfg(windows)]
-    {
-        let backup_dir = data_dir.join("backups");
-        let entries = match std::fs::read_dir(&backup_dir) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(format!("scan Hanni backups: {error}")),
-        };
-        for entry in entries {
-            let entry = entry.map_err(|error| format!("read Hanni backup entry: {error}"))?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            if !is_managed_backup_database_name(name) {
-                continue;
-            }
-            let path = entry.path();
-            crate::secure_fs::restrict_file_if_present(&path)
-                .map_err(|error| format!("secure backup {name}: {error}"))?;
-            let conn = rusqlite::Connection::open(&path)
-                .map_err(|error| format!("open backup {name}: {error}"))?;
+    for base in &sidecar_bases {
+        if !databases.contains(base) {
+            return Err(format!("orphan managed backup sidecar for {base}"));
+        }
+    }
+
+    for name in databases {
+        let path = backup_dir.join(&name);
+        let wal_path = path.with_extension("db-wal");
+        let shm_path = path.with_extension("db-shm");
+        for candidate in [&path, &wal_path, &shm_path] {
+            crate::secure_fs::restrict_file_if_present(candidate)
+                .map_err(|error| format!("secure backup {}: {error}", candidate.display()))?;
+        }
+
+        let conn = rusqlite::Connection::open(&path)
+            .map_err(|error| format!("open backup {name}: {error}"))?;
+        crate::db::migrate_automation_log(&conn)
+            .map_err(|error| format!("sanitize backup {name}: {error}"))?;
+
+        #[cfg(windows)]
+        {
             let has_settings: bool = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_settings')",
@@ -233,8 +251,14 @@ pub fn migrate_backup_databases(data_dir: &Path) -> Result<(), String> {
                     .map_err(|error| format!("migrate backup {name}: {error}"))?;
             }
         }
-        Ok(())
+        drop(conn);
+
+        for candidate in [&path, &wal_path, &shm_path] {
+            crate::secure_fs::restrict_file_if_present(candidate)
+                .map_err(|error| format!("re-secure backup {}: {error}", candidate.display()))?;
+        }
     }
+    Ok(())
 }
 
 fn is_managed_backup_database_name(name: &str) -> bool {
@@ -248,6 +272,17 @@ fn is_managed_backup_database_name(name: &str) -> bool {
         && stem
             .bytes()
             .all(|byte| byte.is_ascii_digit() || byte == b'_')
+}
+
+fn managed_backup_sidecar_base(name: &str) -> Option<String> {
+    ["-wal", "-shm"].iter().find_map(|suffix| {
+        let base = name.strip_suffix(suffix)?;
+        if is_managed_backup_database_name(base) {
+            Some(base.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 fn decode_or_migrate_setting(
@@ -549,6 +584,45 @@ mod tests {
         conn
     }
 
+    fn file_contains(path: &Path, needle: &[u8]) -> bool {
+        std::fs::read(path)
+            .map(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
+            .unwrap_or(false)
+    }
+
+    fn assert_sqlite_artifacts_do_not_contain(path: &Path, needle: &[u8]) {
+        for candidate in [
+            path.to_path_buf(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ] {
+            if !candidate.exists() {
+                continue;
+            }
+            assert!(
+                !file_contains(&candidate, needle),
+                "sensitive preview remained in {}",
+                candidate.display()
+            );
+        }
+    }
+
+    fn create_legacy_automation_log(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "PRAGMA user_version=10;
+             CREATE TABLE automation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                script_hash TEXT NOT NULL,
+                script_preview TEXT NOT NULL DEFAULT '',
+                success INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX idx_automation_log_ts ON automation_log(ts);",
+        )
+        .expect("create legacy automation log");
+    }
+
     #[test]
     fn sensitive_key_allowlist_is_exact() {
         assert!(is_sensitive_setting("cloud_owner_gh_pat"));
@@ -585,6 +659,14 @@ mod tests {
     #[test]
     fn backup_database_allowlist_is_bounded() {
         assert!(is_managed_backup_database_name("hanni_20260901_010203.db"));
+        assert_eq!(
+            managed_backup_sidecar_base("hanni_20260901_010203.db-wal").as_deref(),
+            Some("hanni_20260901_010203.db")
+        );
+        assert_eq!(
+            managed_backup_sidecar_base("hanni_20260901_010203.db-shm").as_deref(),
+            Some("hanni_20260901_010203.db")
+        );
         for name in [
             "hanni_.db",
             "hanni_secret.db",
@@ -594,6 +676,137 @@ mod tests {
         ] {
             assert!(!is_managed_backup_database_name(name), "{name}");
         }
+        assert!(managed_backup_sidecar_base("hanni_secret.db-wal").is_none());
+        assert!(managed_backup_sidecar_base("other_20260901.db-shm").is_none());
+    }
+
+    #[test]
+    fn managed_backup_legacy_wal_is_scrubbed_and_metadata_survives() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let backup_dir = temp.path().join("backups");
+        std::fs::create_dir(&backup_dir).expect("create backup dir");
+        let path = backup_dir.join("hanni_20260901_010203.db");
+        let canary = b"hanni-backup-wal-preview-canary-5579";
+
+        let fixture = rusqlite::Connection::open(&path).expect("open backup fixture");
+        fixture
+            .pragma_update(None, "journal_mode", "WAL")
+            .expect("enable backup WAL");
+        fixture
+            .pragma_update(None, "secure_delete", "OFF")
+            .expect("disable legacy secure delete");
+        create_legacy_automation_log(&fixture);
+        fixture
+            .execute(
+                "INSERT INTO automation_log(ts, script_hash, script_preview, success, duration_ms)
+                 VALUES (456, 'backup-action-hash', ?1, 1, 29)",
+                [String::from_utf8_lossy(canary).as_ref()],
+            )
+            .expect("seed backup preview");
+        assert!(
+            file_contains(&path.with_extension("db-wal"), canary),
+            "fixture must place backup preview specifically in WAL"
+        );
+
+        migrate_backup_databases(temp.path()).expect("sanitize managed backup");
+        assert_sqlite_artifacts_do_not_contain(&path, canary);
+        drop(fixture);
+
+        let conn = rusqlite::Connection::open(&path).expect("reopen sanitized backup");
+        let row: (i64, String, i64, i64) = conn
+            .query_row(
+                "SELECT ts, script_hash, success, duration_ms FROM automation_log",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read preserved backup metadata");
+        assert_eq!(row, (456, "backup-action-hash".into(), 1, 29));
+        let marker: String = conn
+            .query_row(
+                "SELECT state FROM _hanni_security_migrations
+                 WHERE name='automation_log_metadata_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read backup scrub marker");
+        assert_eq!(marker, "complete");
+    }
+
+    #[test]
+    fn orphan_managed_backup_sidecar_fails_closed() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let backup_dir = temp.path().join("backups");
+        std::fs::create_dir(&backup_dir).expect("create backup dir");
+        let sidecar = backup_dir.join("hanni_20260901_010203.db-wal");
+        let canary = b"orphan-managed-wal-canary";
+        std::fs::write(&sidecar, canary).expect("seed orphan WAL");
+
+        let error = migrate_backup_databases(temp.path())
+            .expect_err("orphan managed sidecar must block startup");
+        assert!(error.contains("orphan managed backup sidecar"));
+        assert_eq!(std::fs::read(&sidecar).expect("read preserved sidecar"), canary);
+    }
+
+    #[test]
+    fn unknown_backup_schema_fails_without_mutation_and_can_retry_after_repair() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let backup_dir = temp.path().join("backups");
+        std::fs::create_dir(&backup_dir).expect("create backup dir");
+        let path = backup_dir.join("hanni_20260901_010203.db");
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open backup");
+            conn.execute_batch(
+                "CREATE TABLE automation_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    script_hash BLOB NOT NULL,
+                    success INTEGER NOT NULL,
+                    duration_ms INTEGER NOT NULL DEFAULT 0
+                 );",
+            )
+            .expect("create unknown backup schema");
+        }
+
+        let error = migrate_backup_databases(temp.path())
+            .expect_err("unknown backup schema must fail closed");
+        assert!(error.contains("unexpected automation_log schema"));
+        {
+            let conn = rusqlite::Connection::open(&path).expect("reopen failed backup");
+            let declared_type: String = conn
+                .query_row(
+                    "SELECT type FROM pragma_table_xinfo('automation_log')
+                     WHERE name='script_hash'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read unchanged backup schema");
+            assert_eq!(declared_type, "BLOB");
+            let has_complete_marker: bool = conn
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM sqlite_master
+                       WHERE type='table' AND name='_hanni_security_migrations'
+                     )",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("inspect failed marker transaction");
+            assert!(!has_complete_marker);
+            conn.execute_batch("DROP TABLE automation_log;")
+                .expect("repair unknown backup schema");
+        }
+
+        migrate_backup_databases(temp.path()).expect("retry repaired backup");
+        let conn = rusqlite::Connection::open(&path).expect("reopen repaired backup");
+        let marker: String = conn
+            .query_row(
+                "SELECT state FROM _hanni_security_migrations
+                 WHERE name='automation_log_metadata_v1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read completed retry marker");
+        assert_eq!(marker, "complete");
     }
 
     #[cfg(windows)]

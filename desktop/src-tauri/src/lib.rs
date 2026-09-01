@@ -202,12 +202,17 @@ fn init_database() -> HanniDb {
     // EXISTS (idempotent, fast) and the seeds are insert-if-empty; both must
     // run so the recurring data-ops below always have their tables.
     init_db(&conn).expect("Cannot initialize database");
+    // Security migrations are unconditional: databases already at the latest
+    // user_version can still contain legacy automation previews. Complete the
+    // physical scrub before touching historical backups or creating a new one.
+    db::migrate_automation_log(&conn)
+        .expect("Cannot migrate automation diagnostics to metadata-only storage");
     secret_store::migrate_sensitive_settings(&conn)
         .expect("Cannot migrate Hanni secrets to protected storage");
     secret_store::migrate_token_files(&data_dir)
         .expect("Cannot migrate Hanni API tokens to protected storage");
     secret_store::migrate_backup_databases(&data_dir)
-        .expect("Cannot migrate Hanni backup credentials to protected storage");
+        .expect("Cannot sanitize Hanni backup databases");
     seed_ingredient_catalog(&conn);
     seed_default_cuisines(&conn);
 
@@ -260,7 +265,6 @@ fn init_database() -> HanniDb {
         db::migrate_food_blacklist_love(&conn);
         db::migrate_food_blacklist_recipe(&conn);
         db::migrate_share_links(&conn);
-        db::migrate_automation_log(&conn);
         db::migrate_priority(&conn);
         db::migrate_schedule_priority(&conn);
         db::migrate_event_linked_tab(&conn);
@@ -443,7 +447,6 @@ pub fn run() {
         .manage(focus_manager)
         .manage(call_mode)
         .manage(mcp::McpState::empty())
-        .manage(commands_meta::AutoEvalCallbacks(std::sync::Mutex::new(std::collections::HashMap::new())))
         .manage(share_tunnel::ShareTunnel::default())
         .manage(web_assets::BootGuard::default())
         .plugin(tauri_plugin_opener::init())
@@ -908,7 +911,6 @@ pub fn run() {
             vacancy::vacancy_search_now,
             vacancy::vacancy_search_source,
             // Automation API
-            commands_meta::auto_eval_callback,
             commands_meta::rotate_api_token,
             commands_meta::rotate_jobs_api_token,
             commands_meta::get_api_token_preview,

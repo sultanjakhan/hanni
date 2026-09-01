@@ -615,9 +615,8 @@ _shared:
       - desktop/src/assets/draco/draco_wasm_wrapper.js
 
   automation:
-    description: "HTTP automation API :8236 dev / :8235 prod + dev tooling, background sync loops"
+    description: "Local HTTP API, debug-only fixed reload tooling, background sync loops"
     files:
-      - desktop/tools/screenshot.sh
       - desktop/tools/auto-reload.sh
       - desktop/tools/auto-reload.mjs
       - desktop/tools/dev.sh

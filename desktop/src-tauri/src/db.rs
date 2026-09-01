@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use crate::types::hanni_data_dir;
 use crate::secure_fs;
 use chrono;
+use rusqlite::OptionalExtension;
 
 /// Migrate data from old ~/Documents/Hanni/ to ~/Library/Application Support/Hanni/
 #[cfg(not(target_os = "android"))]
@@ -2799,21 +2800,245 @@ pub fn migrate_share_links(conn: &rusqlite::Connection) {
     ).ok();
 }
 
-pub fn migrate_automation_log(conn: &rusqlite::Connection) {
-    // v0.90.0: audit trail for /auto/eval. Lets the user see what
-    // remote-controlled the app and when. Retention is enforced by a
-    // periodic DELETE in the API server (see commands_meta.rs).
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS automation_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts INTEGER NOT NULL,
-            script_hash TEXT NOT NULL,
-            script_preview TEXT NOT NULL DEFAULT '',
-            success INTEGER NOT NULL,
-            duration_ms INTEGER NOT NULL DEFAULT 0
+const AUTOMATION_LOG_SCRUB_KEY: &str = "automation_log_metadata_v1";
+const AUTOMATION_LOG_SCRUB_PENDING: &str = "pending";
+const AUTOMATION_LOG_SCRUB_COMPLETE: &str = "complete";
+
+#[derive(Debug, PartialEq, Eq)]
+struct SqliteColumnSpec {
+    name: String,
+    declared_type: String,
+    not_null: bool,
+    default_value: Option<String>,
+    primary_key: i64,
+    hidden: i64,
+}
+
+fn column_spec(
+    name: &str,
+    declared_type: &str,
+    not_null: bool,
+    default_value: Option<&str>,
+    primary_key: i64,
+) -> SqliteColumnSpec {
+    SqliteColumnSpec {
+        name: name.to_string(),
+        declared_type: declared_type.to_string(),
+        not_null,
+        default_value: default_value.map(str::to_string),
+        primary_key,
+        hidden: 0,
+    }
+}
+
+fn automation_log_metadata_schema() -> Vec<SqliteColumnSpec> {
+    vec![
+        column_spec("id", "INTEGER", false, None, 1),
+        column_spec("ts", "INTEGER", true, None, 0),
+        column_spec("script_hash", "TEXT", true, None, 0),
+        column_spec("success", "INTEGER", true, None, 0),
+        column_spec("duration_ms", "INTEGER", true, Some("0"), 0),
+    ]
+}
+
+fn automation_log_legacy_schema() -> Vec<SqliteColumnSpec> {
+    vec![
+        column_spec("id", "INTEGER", false, None, 1),
+        column_spec("ts", "INTEGER", true, None, 0),
+        column_spec("script_hash", "TEXT", true, None, 0),
+        column_spec("script_preview", "TEXT", true, Some("''"), 0),
+        column_spec("success", "INTEGER", true, None, 0),
+        column_spec("duration_ms", "INTEGER", true, Some("0"), 0),
+    ]
+}
+
+fn table_xinfo_in(
+    conn: &rusqlite::Connection,
+    table: &str,
+) -> Result<Vec<SqliteColumnSpec>, String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_xinfo({table})"))
+        .map_err(|error| format!("table_xinfo {table}: {error}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SqliteColumnSpec {
+                name: row.get(1)?,
+                declared_type: row.get::<_, String>(2)?.to_ascii_uppercase(),
+                not_null: row.get::<_, i64>(3)? != 0,
+                default_value: row.get(4)?,
+                primary_key: row.get(5)?,
+                hidden: row.get(6)?,
+            })
+        })
+        .map_err(|error| format!("query table_xinfo {table}: {error}"))?;
+    let mut schema = Vec::new();
+    for row in rows {
+        schema.push(row.map_err(|error| format!("decode table_xinfo {table}: {error}"))?);
+    }
+    Ok(schema)
+}
+
+fn table_exists_in(conn: &rusqlite::Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [table],
+        |row| row.get(0),
+    )
+    .map_err(|error| format!("inspect table {table}: {error}"))
+}
+
+fn set_automation_log_scrub_state(
+    conn: &rusqlite::Connection,
+    state: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO _hanni_security_migrations(name, state) VALUES (?1, ?2)
+         ON CONFLICT(name) DO UPDATE SET state=excluded.state",
+        rusqlite::params![AUTOMATION_LOG_SCRUB_KEY, state],
+    )
+    .map_err(|error| format!("record automation log scrub state: {error}"))?;
+    Ok(())
+}
+
+fn complete_automation_log_scrub(conn: &rusqlite::Connection) -> Result<(), String> {
+    crate::secret_store::checkpoint_truncate(conn, "before automation log scrub")?;
+    conn.execute_batch("VACUUM;")
+        .map_err(|error| format!("scrub historical automation log pages: {error}"))?;
+    set_automation_log_scrub_state(conn, AUTOMATION_LOG_SCRUB_COMPLETE)?;
+    crate::secret_store::checkpoint_truncate(conn, "after automation log scrub")?;
+    Ok(())
+}
+
+/// Replace the legacy automation audit log with a metadata-only schema and
+/// physically scrub old script previews from SQLite pages and WAL sidecars.
+///
+/// This migration is deliberately independent of `PRAGMA user_version`: an
+/// already-v10 database can still contain the legacy preview column. The
+/// durable pending marker also makes a crash after the table rebuild but
+/// before VACUUM resume the physical scrub on the next startup.
+pub fn migrate_automation_log(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.pragma_update(None, "secure_delete", "ON")
+        .map_err(|error| format!("enable automation log secure delete: {error}"))?;
+
+    let tx = rusqlite::Transaction::new_unchecked(
+        conn,
+        rusqlite::TransactionBehavior::Immediate,
+    )
+    .map_err(|error| format!("begin automation log migration: {error}"))?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _hanni_security_migrations (
+            name TEXT PRIMARY KEY,
+            state TEXT NOT NULL CHECK(state IN ('pending', 'complete'))
+         );",
+    )
+    .map_err(|error| format!("create security migration state: {error}"))?;
+
+    if table_exists_in(&tx, "_automation_log_metadata_v1")? {
+        return Err("automation log staging table already exists".into());
+    }
+
+    if !table_exists_in(&tx, "automation_log")? {
+        tx.execute_batch(
+            "CREATE TABLE automation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                script_hash TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX idx_automation_log_ts ON automation_log(ts);",
+        )
+        .map_err(|error| format!("create metadata-only automation log: {error}"))?;
+        // Absence does not prove that an older table never existed: dropped
+        // pages may remain in the database or WAL. Persist pending and perform
+        // the same physical scrub as a legacy-table rebuild.
+        set_automation_log_scrub_state(&tx, AUTOMATION_LOG_SCRUB_PENDING)?;
+        tx.commit()
+            .map_err(|error| format!("commit fresh automation log schema: {error}"))?;
+        return complete_automation_log_scrub(conn);
+    }
+
+    let schema = table_xinfo_in(&tx, "automation_log")?;
+    let metadata_schema = automation_log_metadata_schema();
+    let legacy_schema = automation_log_legacy_schema();
+    let marker: Option<String> = tx
+        .query_row(
+            "SELECT state FROM _hanni_security_migrations WHERE name=?1",
+            [AUTOMATION_LOG_SCRUB_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("read automation log scrub state: {error}"))?;
+
+    let scrub_required = if schema == legacy_schema {
+        set_automation_log_scrub_state(&tx, AUTOMATION_LOG_SCRUB_PENDING)?;
+        let source_count: i64 = tx
+            .query_row("SELECT COUNT(*) FROM automation_log", [], |row| row.get(0))
+            .map_err(|error| format!("count legacy automation rows: {error}"))?;
+        tx.execute_batch(
+            "CREATE TABLE _automation_log_metadata_v1 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                script_hash TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+             );
+             INSERT INTO _automation_log_metadata_v1
+                (id, ts, script_hash, success, duration_ms)
+             SELECT id, ts, script_hash, success, duration_ms
+             FROM automation_log;",
+        )
+        .map_err(|error| format!("copy automation metadata: {error}"))?;
+        let copied_count: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM _automation_log_metadata_v1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("verify copied automation rows: {error}"))?;
+        if copied_count != source_count {
+            return Err(format!(
+                "automation metadata row count mismatch: expected {source_count}, copied {copied_count}"
+            ));
+        }
+        tx.execute_batch(
+            "DROP TABLE automation_log;
+             ALTER TABLE _automation_log_metadata_v1 RENAME TO automation_log;
+             CREATE INDEX idx_automation_log_ts ON automation_log(ts);",
+        )
+        .map_err(|error| format!("publish metadata-only automation log: {error}"))?;
+        true
+    } else if schema == metadata_schema {
+        tx.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_automation_log_ts ON automation_log(ts);",
+        )
+        .map_err(|error| format!("repair automation log index: {error}"))?;
+        if marker.as_deref() == Some(AUTOMATION_LOG_SCRUB_COMPLETE) {
+            false
+        } else {
+            set_automation_log_scrub_state(&tx, AUTOMATION_LOG_SCRUB_PENDING)?;
+            true
+        }
+    } else {
+        return Err(
+            "unexpected automation_log schema; expected exact legacy or metadata-only shape"
+                .into(),
         );
-        CREATE INDEX IF NOT EXISTS idx_automation_log_ts ON automation_log(ts);"
-    ).ok();
+    };
+
+    tx.commit()
+        .map_err(|error| format!("commit automation log migration: {error}"))?;
+    if !scrub_required {
+        // A previous run can crash after writing `complete` but before its
+        // final checkpoint. Re-verify/truncate on the completed path so that
+        // the durable marker never turns a prior busy checkpoint into a skip.
+        return crate::secret_store::checkpoint_truncate(
+            conn,
+            "verify completed automation log scrub",
+        );
+    }
+
+    complete_automation_log_scrub(conn)
 }
 
 /// Returns the column names of `table` from `PRAGMA table_info`. Returns
@@ -5186,6 +5411,287 @@ pub fn migrate_shopping_list(conn: &rusqlite::Connection) {
             CREATE INDEX IF NOT EXISTS idx_shopping_list_open
                 ON shopping_list(bought_at) WHERE bought_at IS NULL;"
         ).ok();
+    }
+}
+
+#[cfg(test)]
+mod automation_log_security_tests {
+    use super::*;
+    use std::path::Path;
+
+    fn create_legacy_schema(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "PRAGMA user_version=10;
+             CREATE TABLE automation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                script_hash TEXT NOT NULL,
+                script_preview TEXT NOT NULL DEFAULT '',
+                success INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE INDEX idx_automation_log_ts ON automation_log(ts);",
+        )
+        .expect("create legacy automation log");
+    }
+
+    fn create_metadata_schema(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "CREATE TABLE automation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                script_hash TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .expect("create metadata-only automation log");
+    }
+
+    fn create_scrub_marker(conn: &rusqlite::Connection, state: &str) {
+        conn.execute_batch(
+            "CREATE TABLE _hanni_security_migrations (
+                name TEXT PRIMARY KEY,
+                state TEXT NOT NULL CHECK(state IN ('pending', 'complete'))
+             );",
+        )
+        .expect("create security marker table");
+        conn.execute(
+            "INSERT INTO _hanni_security_migrations(name, state) VALUES (?1, ?2)",
+            rusqlite::params![AUTOMATION_LOG_SCRUB_KEY, state],
+        )
+        .expect("seed scrub marker");
+    }
+
+    fn scrub_marker(conn: &rusqlite::Connection) -> String {
+        conn.query_row(
+            "SELECT state FROM _hanni_security_migrations WHERE name=?1",
+            [AUTOMATION_LOG_SCRUB_KEY],
+            |row| row.get(0),
+        )
+        .expect("read scrub marker")
+    }
+
+    fn sqlite_artifacts(path: &Path) -> [std::path::PathBuf; 3] {
+        [
+            path.to_path_buf(),
+            path.with_extension("db-wal"),
+            path.with_extension("db-shm"),
+        ]
+    }
+
+    fn artifact_contains(path: &Path, needle: &[u8]) -> bool {
+        sqlite_artifacts(path)
+            .iter()
+            .any(|candidate| file_contains(candidate, needle))
+    }
+
+    fn file_contains(path: &Path, needle: &[u8]) -> bool {
+        std::fs::read(path)
+            .map(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
+            .unwrap_or(false)
+    }
+
+    fn assert_artifacts_do_not_contain(path: &Path, needle: &[u8]) {
+        for candidate in sqlite_artifacts(path) {
+            if !candidate.exists() {
+                continue;
+            }
+            let bytes = std::fs::read(&candidate).expect("read SQLite artifact");
+            assert!(
+                !bytes.windows(needle.len()).any(|window| window == needle),
+                "sensitive preview remained in {}",
+                candidate.display()
+            );
+        }
+    }
+
+    #[test]
+    fn missing_table_gets_metadata_schema_and_one_time_physical_scrub() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("missing-table.db");
+        let prefix = b"hanni-absent-table-preview-canary-1432";
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open database");
+            conn.pragma_update(None, "secure_delete", "OFF")
+                .expect("disable legacy secure delete");
+            conn.execute_batch("CREATE TABLE discarded_preview(value TEXT NOT NULL);")
+                .expect("create discarded table");
+            let payload = format!("{}{}", String::from_utf8_lossy(prefix), "x".repeat(65_536));
+            conn.execute("INSERT INTO discarded_preview(value) VALUES (?1)", [&payload])
+                .expect("seed discarded preview");
+            conn.execute_batch("DROP TABLE discarded_preview;")
+                .expect("drop discarded table");
+        }
+        assert!(
+            artifact_contains(&path, prefix),
+            "fixture must contain dropped-table residue"
+        );
+
+        {
+            let conn = rusqlite::Connection::open(&path).expect("reopen database");
+            migrate_automation_log(&conn).expect("create and scrub automation log");
+            assert_eq!(
+                table_xinfo_in(&conn, "automation_log").expect("read metadata schema"),
+                automation_log_metadata_schema()
+            );
+            assert_eq!(scrub_marker(&conn), AUTOMATION_LOG_SCRUB_COMPLETE);
+            migrate_automation_log(&conn).expect("migration is idempotent");
+        }
+        assert_artifacts_do_not_contain(&path, prefix);
+    }
+
+    #[test]
+    fn legacy_v10_rebuild_preserves_metadata_and_scrubs_db_wal_and_shm() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("legacy-wal.db");
+        let canary = b"hanni-legacy-script-preview-canary-8825";
+        let conn = rusqlite::Connection::open(&path).expect("open database");
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .expect("enable WAL");
+        conn.pragma_update(None, "secure_delete", "OFF")
+            .expect("disable legacy secure delete");
+        create_legacy_schema(&conn);
+        let user_version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read legacy user_version");
+        assert_eq!(user_version, 10, "fixture must represent an already-v10 install");
+        conn.execute(
+            "INSERT INTO automation_log(ts, script_hash, script_preview, success, duration_ms)
+             VALUES (123, 'known-action-hash', ?1, 1, 17)",
+            [String::from_utf8_lossy(canary).as_ref()],
+        )
+        .expect("seed legacy automation row");
+        assert!(
+            file_contains(&path.with_extension("db-wal"), canary),
+            "fixture must place the preview specifically in the WAL"
+        );
+
+        migrate_automation_log(&conn).expect("migrate legacy automation log");
+        assert_eq!(
+            table_xinfo_in(&conn, "automation_log").expect("read metadata schema"),
+            automation_log_metadata_schema()
+        );
+        let row: (i64, String, i64, i64) = conn
+            .query_row(
+                "SELECT ts, script_hash, success, duration_ms FROM automation_log",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read preserved metadata");
+        assert_eq!(row, (123, "known-action-hash".into(), 1, 17));
+        assert_eq!(scrub_marker(&conn), AUTOMATION_LOG_SCRUB_COMPLETE);
+        assert_artifacts_do_not_contain(&path, canary);
+    }
+
+    #[test]
+    fn migration_scrubs_historical_preview_from_freelist() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("historical-preview.db");
+        let prefix = b"hanni-freelist-script-preview-canary-3364";
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open database");
+            conn.pragma_update(None, "secure_delete", "OFF")
+                .expect("disable legacy secure delete");
+            create_legacy_schema(&conn);
+            let historical = format!(
+                "{}{}",
+                String::from_utf8_lossy(prefix),
+                "y".repeat(65_536)
+            );
+            conn.execute(
+                "INSERT INTO automation_log(ts, script_hash, script_preview, success, duration_ms)
+                 VALUES (1, 'old-hash', ?1, 0, 5)",
+                [&historical],
+            )
+            .expect("seed historical preview");
+            conn.execute(
+                "UPDATE automation_log SET script_preview='replaced' WHERE id=1",
+                [],
+            )
+            .expect("replace historical preview");
+        }
+        assert!(
+            artifact_contains(&path, prefix),
+            "fixture must retain historical preview bytes"
+        );
+
+        {
+            let conn = rusqlite::Connection::open(&path).expect("reopen database");
+            migrate_automation_log(&conn).expect("scrub historical preview");
+            assert_eq!(scrub_marker(&conn), AUTOMATION_LOG_SCRUB_COMPLETE);
+        }
+        assert_artifacts_do_not_contain(&path, prefix);
+    }
+
+    #[test]
+    fn pending_marker_resumes_scrub_after_rebuild_before_vacuum() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("pending-scrub.db");
+        let prefix = b"hanni-pending-scrub-canary-9107";
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open database");
+            conn.pragma_update(None, "secure_delete", "OFF")
+                .expect("disable legacy secure delete");
+            create_metadata_schema(&conn);
+            create_scrub_marker(&conn, AUTOMATION_LOG_SCRUB_PENDING);
+            conn.execute_batch("CREATE TABLE discarded_preview(value TEXT NOT NULL);")
+                .expect("create discarded preview table");
+            let payload = format!("{}{}", String::from_utf8_lossy(prefix), "z".repeat(65_536));
+            conn.execute("INSERT INTO discarded_preview(value) VALUES (?1)", [&payload])
+                .expect("seed discarded preview");
+            conn.execute_batch("DROP TABLE discarded_preview;")
+                .expect("drop discarded preview table");
+        }
+        assert!(artifact_contains(&path, prefix), "fixture must contain residue");
+
+        {
+            let conn = rusqlite::Connection::open(&path).expect("reopen database");
+            migrate_automation_log(&conn).expect("resume pending scrub");
+            assert_eq!(scrub_marker(&conn), AUTOMATION_LOG_SCRUB_COMPLETE);
+        }
+        assert_artifacts_do_not_contain(&path, prefix);
+    }
+
+    #[test]
+    fn pending_marker_after_vacuum_completes_and_is_idempotent() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open database");
+        create_metadata_schema(&conn);
+        create_scrub_marker(&conn, AUTOMATION_LOG_SCRUB_PENDING);
+        conn.execute_batch("VACUUM;").expect("simulate completed vacuum");
+
+        migrate_automation_log(&conn).expect("finish pending marker");
+        assert_eq!(scrub_marker(&conn), AUTOMATION_LOG_SCRUB_COMPLETE);
+        migrate_automation_log(&conn).expect("completed migration is idempotent");
+    }
+
+    #[test]
+    fn unknown_schema_fails_closed_without_completion_marker() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open database");
+        conn.execute_batch(
+            "CREATE TABLE automation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts INTEGER NOT NULL,
+                script_hash BLOB NOT NULL,
+                success INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .expect("create corrupt schema");
+
+        let error = migrate_automation_log(&conn).expect_err("unknown schema must fail");
+        assert!(error.contains("unexpected automation_log schema"));
+        assert!(!table_exists_in(&conn, "_hanni_security_migrations")
+            .expect("inspect rolled-back marker table"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT type FROM pragma_table_xinfo('automation_log') WHERE name='script_hash'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("read preserved corrupt schema"),
+            "BLOB"
+        );
     }
 }
 
