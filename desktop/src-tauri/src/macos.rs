@@ -511,13 +511,21 @@ mod safe_command_tests {
     fn external_urls_allow_only_http_and_https() {
         assert!(validate_external_url("http://127.0.0.1:18789/").is_ok());
         assert!(validate_external_url("https://example.com/path?q=1").is_ok());
+        assert!(validate_external_url("HtTpS://EXAMPLE.COM/path").is_ok());
         for rejected in [
             "javascript:alert(1)",
             "file:///tmp/private",
             "data:text/html,hello",
             "ftp://example.com/file",
             "https-not-really://example.com",
+            "http://",
+            "https://",
             "http:///missing-host",
+            "http://\\evil.example",
+            "http://trusted.example\\@evil.example",
+            "https://trusted.example@evil.example",
+            "https://user:secret@example.com",
+            "https://example.com/path\r\nheader: injected",
             "not a url",
         ] {
             assert!(
@@ -529,8 +537,28 @@ mod safe_command_tests {
 }
 
 fn validate_external_url(url: &str) -> Result<(), String> {
+    if url.contains('\\')
+        || url
+            .chars()
+            .any(|value| value.is_whitespace() || value.is_control())
+    {
+        return Err("Invalid URL".into());
+    }
+    let (scheme, authority) = url
+        .split_once("://")
+        .ok_or_else(|| "Only http:// and https:// URLs allowed".to_string())?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return Err("Only http:// and https:// URLs allowed".into());
+    }
+    if authority.is_empty() || authority.starts_with('/') {
+        return Err("Invalid URL".into());
+    }
     let parsed = tauri::Url::parse(url).map_err(|_| "Invalid URL".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
         return Err("Only http:// and https:// URLs allowed".into());
     }
     Ok(())
