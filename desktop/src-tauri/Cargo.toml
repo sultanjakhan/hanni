@@ -66,6 +66,9 @@ windows = { version = "=0.61.3", features = [
     "Win32_System_Threading",
 ] }
 
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
 # Release size: the default profile ships an unstripped ~110-127MB binary (mostly
 # debug symbols) → bloated .app/APK and expensive native updates. strip drops the
 # symbols (~3-4× smaller); fat LTO + codegen-units=1 trim a few more MB at the

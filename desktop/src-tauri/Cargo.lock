@@ -1948,6 +1948,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "tokio",
+ "tower",
  "tower-http",
  "uuid",
  "voice_activity_detector",

@@ -78,6 +78,23 @@ fn is_allowed_share_origin(origin: &HeaderValue) -> bool {
     }
 }
 
+/// Single production CORS contract for the guest share server. Keep tests on
+/// this layer itself so route-level refactors cannot silently broaden origins,
+/// methods, headers, or credential behavior.
+fn share_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            is_allowed_share_origin(origin)
+        }))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+        ])
+        .allow_headers([header::CONTENT_TYPE])
+}
+
 pub async fn spawn_share_server(app_handle: AppHandle) {
     let state = ShareServerState {
         app: app_handle,
@@ -123,14 +140,7 @@ pub async fn spawn_share_server(app_handle: AppHandle) {
         // Allow same-host guest origins only: localhost/loopback for dev
         // tooling, and any Tailscale CGNAT origin (100.64.0.0/10) — guests in
         // the same tailnet hit the server directly at http://100.x.x.x:8240/...
-        .layer(
-            CorsLayer::new()
-                .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
-                    is_allowed_share_origin(origin)
-                }))
-                .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
-                .allow_headers([header::CONTENT_TYPE])
-        );
+        .layer(share_cors_layer());
 
     let port = share_port();
     // Bind on 0.0.0.0 (was 127.0.0.1) so guests on the same Tailnet can
@@ -165,11 +175,80 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_share_origin;
-    use axum::http::HeaderValue;
+    use super::{is_allowed_share_origin, share_cors_layer};
+    use axum::{
+        body::Body,
+        http::{header, HeaderValue, Method, Request, StatusCode},
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
 
     fn allowed(origin: &'static str) -> bool {
         is_allowed_share_origin(&HeaderValue::from_static(origin))
+    }
+
+    fn cors_test_router() -> Router {
+        Router::new()
+            .route("/probe", get(|| async { StatusCode::NO_CONTENT }))
+            .layer(share_cors_layer())
+    }
+
+    async fn preflight(
+        origin: &'static str,
+        requested_method: Method,
+        requested_headers: &'static str,
+    ) -> axum::response::Response {
+        cors_test_router()
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/probe")
+                    .header(header::ORIGIN, origin)
+                    .header(
+                        header::ACCESS_CONTROL_REQUEST_METHOD,
+                        requested_method.as_str(),
+                    )
+                    .header(header::ACCESS_CONTROL_REQUEST_HEADERS, requested_headers)
+                    .body(Body::empty())
+                    .expect("build preflight request"),
+            )
+            .await
+            .expect("preflight response")
+    }
+
+    async fn actual(origin: Option<&'static str>) -> axum::response::Response {
+        let mut request = Request::builder().method(Method::GET).uri("/probe");
+        if let Some(origin) = origin {
+            request = request.header(header::ORIGIN, origin);
+        }
+        cors_test_router()
+            .oneshot(
+                request
+                    .body(Body::empty())
+                    .expect("build actual request"),
+            )
+            .await
+            .expect("actual response")
+    }
+
+    fn assert_default_cors_vary(response: &axum::response::Response) {
+        let vary = response
+            .headers()
+            .get(header::VARY)
+            .expect("CORS Vary header")
+            .to_str()
+            .expect("Vary text");
+        for expected in [
+            "origin",
+            "access-control-request-method",
+            "access-control-request-headers",
+        ] {
+            assert!(
+                vary.split(',').any(|value| value.trim() == expected),
+                "missing {expected} in Vary: {vary}"
+            );
+        }
     }
 
     #[test]
@@ -194,6 +273,196 @@ mod tests {
         assert!(!allowed("http://localhost:8239/path"));
         assert!(!allowed("http://localhost:8239/?q=1"));
         assert!(!allowed("null"));
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_advertises_only_the_production_contract() {
+        let origin = "http://100.64.0.1:8240";
+        let response = preflight(origin, Method::PATCH, "content-type").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&HeaderValue::from_static(origin))
+        );
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_METHODS),
+            Some(&HeaderValue::from_static("GET,POST,PATCH,DELETE"))
+        );
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS),
+            Some(&HeaderValue::from_static("content-type"))
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .is_none()
+        );
+        assert_default_cors_vary(&response);
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_rejects_hostile_origins_in_the_actual_middleware() {
+        for origin in [
+            "http://localhost.evil.example:8240",
+            "http://user@localhost:8240",
+            "http://100.63.255.255:8240",
+            "http://100.128.0.1:8240",
+            "https://localhost:8240",
+        ] {
+            let response = preflight(origin, Method::PATCH, "content-type").await;
+
+            assert_eq!(response.status(), StatusCode::OK, "origin {origin}");
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .is_none(),
+                "origin {origin}"
+            );
+            assert_eq!(
+                response.headers().get(header::ACCESS_CONTROL_ALLOW_METHODS),
+                Some(&HeaderValue::from_static("GET,POST,PATCH,DELETE"))
+            );
+            assert_eq!(
+                response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS),
+                Some(&HeaderValue::from_static("content-type"))
+            );
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                    .is_none()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_does_not_advertise_put() {
+        let origin = "http://127.0.0.1:8240";
+        let response = preflight(origin, Method::PUT, "content-type").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&HeaderValue::from_static(origin))
+        );
+        let methods = response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+            .expect("fixed allow-methods")
+            .to_str()
+            .expect("allow-methods text");
+        assert!(!methods.split(',').any(|method| method.trim() == "PUT"));
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_HEADERS),
+            Some(&HeaderValue::from_static("content-type"))
+        );
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_does_not_advertise_authorization() {
+        let origin = "http://127.0.0.1:8240";
+        let response = preflight(origin, Method::POST, "authorization").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&HeaderValue::from_static(origin))
+        );
+        assert_eq!(
+            response.headers().get(header::ACCESS_CONTROL_ALLOW_METHODS),
+            Some(&HeaderValue::from_static("GET,POST,PATCH,DELETE"))
+        );
+        let headers = response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+            .expect("fixed allow-headers")
+            .to_str()
+            .expect("allow-headers text");
+        assert!(!headers
+            .split(',')
+            .any(|name| name.trim() == "authorization"));
+    }
+
+    #[tokio::test]
+    async fn cors_actual_response_echoes_only_an_allowed_origin() {
+        for (origin, expected_allow_origin) in [
+            ("http://127.0.0.1:8240", true),
+            ("https://localhost:8240", false),
+            ("http://100.128.0.1:8240", false),
+        ] {
+            let response = actual(Some(origin)).await;
+
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            if expected_allow_origin {
+                assert_eq!(
+                    response.headers().get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+                    Some(&HeaderValue::from_static(origin)),
+                    "origin {origin}"
+                );
+            } else {
+                assert!(
+                    response
+                        .headers()
+                        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                        .is_none(),
+                    "origin {origin}"
+                );
+            }
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                    .is_none()
+            );
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+                    .is_none()
+            );
+            assert!(
+                response
+                    .headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                    .is_none()
+            );
+            assert_default_cors_vary(&response);
+        }
+    }
+
+    #[tokio::test]
+    async fn cors_actual_response_without_origin_is_an_ordinary_response() {
+        let response = actual(None).await;
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none()
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .is_none()
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+                .is_none()
+        );
+        assert!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                .is_none()
+        );
+        assert_default_cors_vary(&response);
     }
 }
 
