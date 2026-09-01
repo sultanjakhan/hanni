@@ -593,7 +593,7 @@ function showAddGoalModal() {
       <input class="form-input" id="goal-deadline" type="date" style="max-width:150px;">
     </div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-secondary" data-dismiss-modal>Cancel</button>
       <button class="btn-primary" id="goal-save">Save</button>
     </div>
   </div>`;

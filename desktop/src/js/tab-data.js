@@ -126,7 +126,7 @@ async function loadSupplies(el) {
             <option value="storage">Storage</option><option value="other">Other</option>
           </select></div>
         <div class="modal-actions">
-          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn-secondary" data-dismiss-modal>Cancel</button>
           <button class="btn-primary" id="hi-save">Save</button>
         </div>
       </div>`;
@@ -310,7 +310,7 @@ function showAddFoodModal(el) {
     <div class="form-group"><label class="form-label">Carbs (g)</label><input class="form-input" id="food-carbs" type="number"></div>
     <div class="form-group"><label class="form-label">Fat (g)</label><input class="form-input" id="food-fat" type="number"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-secondary" data-dismiss-modal>Cancel</button>
       <button class="btn-primary" id="food-save">Save</button>
     </div>
   </div>`;
@@ -438,7 +438,7 @@ function showAddTransactionModal(parentEl) {
         <option value="KZT">KZT</option><option value="USD">USD</option><option value="RUB">RUB</option>
       </select></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-secondary" data-dismiss-modal>Cancel</button>
       <button class="btn-primary" id="tx-save">Save</button>
     </div>
   </div>`;
@@ -490,8 +490,8 @@ async function loadPeople(subTab) {
             { key: 'email', label: 'Email', editable: true, editType: 'text', render: r => `<span style="font-size:12px;color:var(--text-secondary);">${r.email || '—'}</span>` },
             { key: 'status', label: 'Статус', render: r => r.blocked ? '<span class="badge badge-red">Blocked</span>' : '<span class="badge badge-green">OK</span>' },
             { key: 'actions', label: '', render: r => `
-              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="toggleContactFav(${r.id})">${r.favorite ? '★' : '☆'}</button>
-              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="toggleContactBlock(${r.id})">${r.blocked ? '🔓' : '🚫'}</button>
+              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" data-contact-favorite-id="${r.id}">${r.favorite ? '★' : '☆'}</button>
+              <button class="btn-secondary" style="padding:4px 8px;font-size:11px;" data-contact-block-id="${r.id}">${r.blocked ? '🔓' : '🚫'}</button>
             ` },
           ],
           idField: 'id',
@@ -520,7 +520,17 @@ async function loadPeople(subTab) {
   });
 }
 
-// Window handlers for People (called from inline onclick)
+// Delegated handlers survive DatabaseView re-renders without executable HTML attributes.
+document.addEventListener('click', (event) => {
+  const favorite = event.target.closest('[data-contact-favorite-id]');
+  if (favorite) {
+    window.toggleContactFav(parseInt(favorite.dataset.contactFavoriteId));
+    return;
+  }
+  const blocked = event.target.closest('[data-contact-block-id]');
+  if (blocked) window.toggleContactBlock(parseInt(blocked.dataset.contactBlockId));
+});
+
 window.toggleContactFav = async (id) => {
   await invoke('toggle_contact_favorite', { id });
   loadPeople(S.activeSubTab.people || 'All');
@@ -1147,7 +1157,7 @@ function showAddProjectModal(reloadFn) {
     <div class="form-group"><label class="form-label">Иконка</label>
       <input class="form-input" id="dev-proj-icon" value="📁" style="width:60px;"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="dev-proj-save">Создать</button>
     </div>
   </div>`;
@@ -1253,7 +1263,7 @@ function showAddLearningModal() {
     <div class="form-group"><label class="form-label">Описание</label><textarea class="form-textarea" id="learn-desc"></textarea></div>
     <div class="form-group"><label class="form-label">URL</label><input class="form-input" id="learn-url"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="learn-save">Сохранить</button>
     </div>
   </div>`;
@@ -1443,7 +1453,7 @@ function showAddMediaModal(mediaType) {
     </div>` : ''}
     <textarea class="form-textarea" id="media-notes" placeholder="Notes" rows="2"></textarea>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-secondary" data-dismiss-modal>Cancel</button>
       <button class="btn-primary" id="media-save">Save</button>
     </div>
   </div>`;
@@ -1485,7 +1495,7 @@ function showMediaDetail(item, mediaType) {
     <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="md-notes">${escapeHtml(item.notes||'')}</textarea></div>
     <div class="modal-actions">
       <button class="btn-danger" id="md-delete">Delete</button>
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn-secondary" data-dismiss-modal>Cancel</button>
       <button class="btn-primary" id="md-save">Save</button>
     </div>
   </div>`;
@@ -1616,7 +1626,7 @@ function showAddWorkoutModal() {
     </div>
     <textarea class="form-textarea" id="workout-notes" placeholder="Заметки (необязательно)" rows="2"></textarea>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-secondary" id="workout-from-tmpl">Из шаблона</button>
       <button class="btn-primary" id="workout-save">Сохранить</button>
     </div>
@@ -2382,7 +2392,7 @@ function showScheduleModal() {
     <div class="form-group"><label class="form-label">Показывать с (HH:MM, чтобы не мусорить таскер)</label>
       <input class="form-input" id="sch-visfrom" type="time"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="sch-save">Сохранить</button>
     </div>
   </div>`;

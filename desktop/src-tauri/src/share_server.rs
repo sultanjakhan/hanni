@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-use crate::share_auth::{html_escape, load_link, rate_limit_check, BODY_LIMIT_BYTES};
+use crate::share_auth::{html_escape, load_link, rate_limit_check, LinkCtx, BODY_LIMIT_BYTES};
 use crate::share_routes_comments::{create_comment, list_comments};
 use crate::share_routes_food_meta::{create_blacklist_item, create_catalog_item, create_cuisine, delete_blacklist_item, list_blacklist, list_cuisines, list_fridge};
 use crate::share_routes_meal_plan::{create_meal_plan, delete_meal_plan, list_meal_plan};
@@ -30,6 +30,8 @@ use crate::share_static::{
     asset_js_recipes,
 };
 use crate::types::HanniDb;
+
+const SHARE_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
 #[derive(Clone)]
 pub struct ShareServerState {
@@ -170,15 +172,23 @@ async fn add_security_headers(req: Request, next: Next) -> Response {
         "referrer-policy",
         HeaderValue::from_static("no-referrer"),
     );
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(SHARE_CSP),
+    );
     response
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_allowed_share_origin, share_cors_layer};
+    use super::{
+        add_security_headers, is_allowed_share_origin, render_landing_html, share_cors_layer,
+        LinkCtx, SHARE_CSP,
+    };
     use axum::{
         body::Body,
         http::{header, HeaderValue, Method, Request, StatusCode},
+        middleware,
         routing::get,
         Router,
     };
@@ -192,6 +202,12 @@ mod tests {
         Router::new()
             .route("/probe", get(|| async { StatusCode::NO_CONTENT }))
             .layer(share_cors_layer())
+    }
+
+    fn security_headers_test_router() -> Router {
+        Router::new()
+            .route("/probe", get(|| async { StatusCode::NO_CONTENT }))
+            .layer(middleware::from_fn(add_security_headers))
     }
 
     async fn preflight(
@@ -249,6 +265,46 @@ mod tests {
                 "missing {expected} in Vary: {vary}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn share_responses_enforce_external_scripts() {
+        let response = security_headers_test_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/probe")
+                    .body(Body::empty())
+                    .expect("build security header request"),
+            )
+            .await
+            .expect("security header response");
+        assert_eq!(
+            response.headers().get(header::CONTENT_SECURITY_POLICY),
+            Some(&HeaderValue::from_static(SHARE_CSP))
+        );
+        let script_src = SHARE_CSP
+            .split(';')
+            .find(|directive| directive.trim_start().starts_with("script-src"));
+        assert_eq!(script_src.map(str::trim), Some("script-src 'self'"));
+    }
+
+    #[test]
+    fn landing_context_is_escaped_once_without_placeholder_reprocessing() {
+        let context = LinkCtx {
+            id: 1,
+            tab: "food\" onload=\"window.pwned=1".into(),
+            scope: "recipes\"><img src=x onerror=window.pwned>".into(),
+            permissions: vec!["read\"><script>window.pwned=1</script>".into()],
+            label: "\"><script>window.pwned=1</script> literal {{TOKEN}}".into(),
+        };
+        let html = render_landing_html(&context, "safe-token");
+
+        assert!(!html.contains("<script>window.pwned=1</script>"));
+        assert!(!html.contains(" onload=\"window.pwned=1"));
+        assert!(!html.contains("<img src=x onerror=window.pwned>"));
+        assert!(html.contains("&quot;&gt;&lt;script&gt;window.pwned=1&lt;/script&gt;"));
+        assert!(html.contains("literal {{TOKEN}}"));
+        assert!(html.contains("data-share-token=\"safe-token\""));
     }
 
     #[test]
@@ -476,11 +532,45 @@ async fn landing(
         let conn = db.conn();
         load_link(&conn, &token)?
     };
-    let html = include_str!("share_assets/guest.html")
-        .replace("{{LABEL}}", &html_escape(&ctx.label))
-        .replace("{{TAB}}", &html_escape(&ctx.tab))
-        .replace("{{SCOPE}}", &html_escape(&ctx.scope))
-        .replace("{{TOKEN}}", &html_escape(&token))
-        .replace("{{PERMS}}", &serde_json::to_string(&ctx.permissions).unwrap_or("[]".into()));
-    Ok(Html(html))
+    Ok(Html(render_landing_html(&ctx, &token)))
+}
+
+fn render_landing_html(ctx: &LinkCtx, token: &str) -> String {
+    let token = html_escape(token);
+    let tab = html_escape(&ctx.tab);
+    let scope = html_escape(&ctx.scope);
+    let label = html_escape(&ctx.label);
+    let permissions =
+        html_escape(&serde_json::to_string(&ctx.permissions).unwrap_or_else(|_| "[]".into()));
+    let template = include_str!("share_assets/guest.html");
+    let mut rendered = String::with_capacity(template.len() + label.len());
+    let mut remaining = template;
+
+    while let Some(start) = remaining.find("{{") {
+        rendered.push_str(&remaining[..start]);
+        let marker = &remaining[start + 2..];
+        let Some(end) = marker.find("}}") else {
+            rendered.push_str(&remaining[start..]);
+            return rendered;
+        };
+        let key = &marker[..end];
+        let value = match key {
+            "TOKEN" => Some(token.as_str()),
+            "TAB" => Some(tab.as_str()),
+            "SCOPE" => Some(scope.as_str()),
+            "PERMS" => Some(permissions.as_str()),
+            "LABEL" => Some(label.as_str()),
+            _ => None,
+        };
+        if let Some(value) = value {
+            rendered.push_str(value);
+        } else {
+            rendered.push_str("{{");
+            rendered.push_str(key);
+            rendered.push_str("}}");
+        }
+        remaining = &marker[end + 2..];
+    }
+    rendered.push_str(remaining);
+    rendered
 }

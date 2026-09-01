@@ -109,6 +109,7 @@ focus:
   files:
     - desktop/src/js/tab-focus.js
     - desktop/src/focus-overlay.html
+    - desktop/src/focus-overlay.js
   rust: []  # logic в commands_meta.rs
   tables: [activities]
   memory: []
@@ -550,6 +551,7 @@ _shared:
     description: "Общие CSS: base, layout, themes, mobile, settings, emoji"
     files:
       - desktop/src/index.html
+      - desktop/src/js/theme-boot.js
       - desktop/src/css/base.css
       - desktop/src/css/layout.css
       - desktop/src/css/tabs-main.css

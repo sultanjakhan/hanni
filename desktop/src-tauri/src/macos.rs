@@ -4,6 +4,7 @@ use crate::types::*;
 use std::io::Write;
 use std::sync::atomic::Ordering;
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 
 // ── Idle / screen lock detection (for auto-quiet) ──
 
@@ -454,7 +455,7 @@ pub async fn run_shell(command: String) -> Result<String, String> {
 
 #[cfg(test)]
 mod safe_command_tests {
-    use super::{parse_safe_command, SafeCommand};
+    use super::{parse_safe_command, validate_external_url, SafeCommand};
 
     #[test]
     fn accepts_exact_read_only_commands_without_a_shell() {
@@ -505,18 +506,42 @@ mod safe_command_tests {
             assert!(parse_safe_command(input).is_err(), "accepted {input:?}");
         }
     }
+
+    #[test]
+    fn external_urls_allow_only_http_and_https() {
+        assert!(validate_external_url("http://127.0.0.1:18789/").is_ok());
+        assert!(validate_external_url("https://example.com/path?q=1").is_ok());
+        for rejected in [
+            "javascript:alert(1)",
+            "file:///tmp/private",
+            "data:text/html,hello",
+            "ftp://example.com/file",
+            "https-not-really://example.com",
+            "http:///missing-host",
+            "not a url",
+        ] {
+            assert!(
+                validate_external_url(rejected).is_err(),
+                "accepted {rejected:?}"
+            );
+        }
+    }
+}
+
+fn validate_external_url(url: &str) -> Result<(), String> {
+    let parsed = tauri::Url::parse(url).map_err(|_| "Invalid URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("Only http:// and https:// URLs allowed".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn open_url(url: String) -> Result<String, String> {
-    // Only allow http:// and https:// to prevent file://, javascript:, etc.
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Only http:// and https:// URLs allowed".into());
-    }
-    std::process::Command::new("open")
-        .arg(&url)
-        .spawn()
-        .map_err(|e| format!("Open error: {}", e))?;
+pub async fn open_url(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    validate_external_url(&url)?;
+    app.opener()
+        .open_url(url.clone(), None::<&str>)
+        .map_err(|e| format!("Open error: {e}"))?;
     Ok(format!("Opened {}", url))
 }
 

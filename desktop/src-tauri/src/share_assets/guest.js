@@ -1,6 +1,19 @@
 // guest.js — skeleton: shared utils + tab routing for share-link guest UI.
 (function () {
-  const ctx = window.__SHARE__ || {};
+  let permissions = [];
+  try {
+    const parsed = JSON.parse(document.body.dataset.sharePermissions || '[]');
+    if (Array.isArray(parsed) && parsed.every(value => typeof value === 'string')) {
+      permissions = parsed;
+    }
+  } catch {}
+  const ctx = {
+    token: document.body.dataset.shareToken || '',
+    tab: document.body.dataset.shareTab || '',
+    scope: document.body.dataset.shareScope || '',
+    permissions,
+    label: document.body.dataset.shareLabel || '',
+  };
   const base = `/s/${encodeURIComponent(ctx.token)}`;
   const app = document.getElementById('app');
   const perms = ctx.permissions || [];
@@ -102,12 +115,10 @@
 
   window.HanniGuest = window.HanniGuest || {};
   window.HanniGuest.utils = { ctx, base, api, esc, can, rememberAuthor, recallAuthor };
-  // Exposed so the landing page can trigger the initial render once all
-  // view-modules have registered (guest.html calls it at the very end).
+  // Keep this public for guest modules and tests that refresh the shell.
   window.HanniGuest.renderShell = renderShell;
 
-  // Don't auto-render here: view-modules (recipes/products/etc) load via
-  // <script> tags AFTER guest.js and register on window.HanniGuest; guest.html
-  // calls window.HanniGuest.renderShell() once they're all in. Rendering now
-  // would flash "модуль не загружен" before they register.
+  // DOMContentLoaded fires after the following classic scripts have loaded and
+  // registered their modules, without requiring an inline bootstrap script.
+  document.addEventListener('DOMContentLoaded', renderShell, { once: true });
 })();

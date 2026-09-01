@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import createDOMPurify from 'dompurify';
@@ -9,6 +9,24 @@ import { parseRecipeSteps } from '../src/js/recipe-step-security.js';
 function sanitizer() {
   const dom = new JSDOM('<!doctype html><body></body>');
   return { dom, purify: createDOMPurify(dom.window) };
+}
+
+function cspDirectives(policy) {
+  return new Map(policy.split(';').map(part => {
+    const [name, ...values] = part.trim().split(/\s+/);
+    return [name, values];
+  }).filter(([name]) => name));
+}
+
+async function firstPartyJavaScript(root) {
+  const files = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.name === 'vendor' || entry.name === 'assets') continue;
+    const url = new URL(entry.name + (entry.isDirectory() ? '/' : ''), root);
+    if (entry.isDirectory()) files.push(...await firstPartyJavaScript(url));
+    else if (entry.name.endsWith('.js') && !entry.name.endsWith('.min.js')) files.push(url);
+  }
+  return files;
 }
 
 test('markdown sanitizer removes executable and foreign content', () => {
@@ -148,4 +166,146 @@ test('automation surface is fixed-action debug-only and logs metadata only', asy
   const oldBackups = lib.indexOf('secret_store::migrate_backup_databases(&data_dir)');
   const newBackup = lib.indexOf('backup_db()');
   assert.ok(scrub > 0 && scrub < oldBackups && oldBackups < newBackup);
+});
+
+test('native entrypoints enforce external scripts under the same CSP exception', async () => {
+  const [indexHtml, focusHtml, tauriConfigText, themeBoot, focusJavaScript] = await Promise.all([
+    readFile(new URL('../src/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/focus-overlay.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    readFile(new URL('../src/js/theme-boot.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/focus-overlay.js', import.meta.url), 'utf8'),
+  ]);
+  const indexDom = new JSDOM(indexHtml);
+  const focusDom = new JSDOM(focusHtml);
+  const indexPolicy = indexDom.window.document
+    .querySelector('meta[http-equiv="Content-Security-Policy"]')
+    ?.getAttribute('content');
+  const configPolicy = JSON.parse(tauriConfigText).app.security.csp;
+
+  for (const [source, policy] of [['index meta', indexPolicy], ['Tauri config', configPolicy]]) {
+    assert.ok(policy, `${source} CSP is present`);
+    const scriptSources = cspDirectives(policy).get('script-src');
+    assert.deepEqual(scriptSources, ["'self'", "'wasm-unsafe-eval'"], `${source} script-src`);
+    assert.equal(scriptSources.includes("'unsafe-inline'"), false, source);
+    assert.equal(scriptSources.includes("'unsafe-eval'"), false, source);
+  }
+
+  for (const [name, dom] of [['index.html', indexDom], ['focus-overlay.html', focusDom]]) {
+    for (const script of dom.window.document.querySelectorAll('script')) {
+      assert.ok(script.hasAttribute('src'), `${name} has an inline executable script`);
+    }
+    for (const element of dom.window.document.querySelectorAll('*')) {
+      for (const attribute of element.getAttributeNames()) {
+        assert.equal(/^on/i.test(attribute), false, `${name} has ${attribute}`);
+      }
+      for (const attribute of ['href', 'src', 'action', 'formaction', 'xlink:href']) {
+        assert.equal(
+          element.getAttribute(attribute)?.trim().toLowerCase().startsWith('javascript:') ?? false,
+          false,
+          `${name} has a javascript: ${attribute}`
+        );
+      }
+    }
+  }
+
+  assert.match(indexHtml, /<script src="js\/theme-boot\.js"><\/script>/);
+  assert.ok(indexHtml.indexOf('js/theme-boot.js') < indexHtml.indexOf('styles.css'));
+  assert.match(focusHtml, /<script src="focus-overlay\.js"><\/script>/);
+  assert.match(themeBoot, /localStorage\.getItem\('hanni_theme'\)/);
+  assert.match(themeBoot, /setAttribute\(\s*'data-theme'/);
+  assert.match(focusJavaScript, /listen\('focus-state'/);
+  assert.match(focusJavaScript, /invoke\('stop_activity'\)/);
+  assert.match(focusJavaScript, /invoke\('get_current_activity'\)/);
+});
+
+test('first-party generated markup contains no CSP-blocked event attributes', async () => {
+  const sources = [
+    ...await firstPartyJavaScript(new URL('../src/', import.meta.url)),
+    ...await firstPartyJavaScript(new URL('../src-tauri/src/share_assets/', import.meta.url)),
+  ];
+  const htmlEventAttribute = /<[a-z][a-z0-9:-]*\b[^>]*\son[a-z][a-z0-9-]*\s*=/i;
+  const setEventAttribute = /setAttribute\(\s*['"]on[a-z][a-z0-9-]*['"]/i;
+  const javascriptUrl = /<[a-z][a-z0-9:-]*\b[^>]*\s(?:href|src|action|formaction|xlink:href)\s*=\s*['"]?\s*javascript:/i;
+  const inlineExecutableScript = /<script(?:\s[^>]*)?>[\s\S]*?<\/script>/i;
+
+  for (const url of sources) {
+    const source = await readFile(url, 'utf8');
+    assert.doesNotMatch(source, htmlEventAttribute, url.pathname);
+    assert.doesNotMatch(source, setEventAttribute, url.pathname);
+    assert.doesNotMatch(source, javascriptUrl, url.pathname);
+    assert.doesNotMatch(source, inlineExecutableScript, url.pathname);
+  }
+});
+
+test('guest share page externalizes context and bootstrap under response CSP', async () => {
+  const [guestHtml, guestJavaScript, shareServer, utilities, chat, capability, macos] = await Promise.all([
+    readFile(new URL('../src-tauri/src/share_assets/guest.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/share_assets/guest.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/share_server.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/js/chat.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/capabilities/default.json', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/macos.rs', import.meta.url), 'utf8'),
+  ]);
+  const dom = new JSDOM(guestHtml);
+  const body = dom.window.document.body;
+
+  for (const script of dom.window.document.querySelectorAll('script')) {
+    assert.ok(script.hasAttribute('src'), 'guest.html has an inline executable script');
+  }
+  for (const element of dom.window.document.querySelectorAll('*')) {
+    for (const attribute of element.getAttributeNames()) {
+      assert.equal(/^on/i.test(attribute), false, `guest.html has ${attribute}`);
+    }
+    for (const attribute of ['href', 'src', 'action', 'formaction', 'xlink:href']) {
+      assert.equal(
+        element.getAttribute(attribute)?.trim().toLowerCase().startsWith('javascript:') ?? false,
+        false,
+        `guest.html has a javascript: ${attribute}`
+      );
+    }
+  }
+  for (const attribute of [
+    'data-share-token',
+    'data-share-tab',
+    'data-share-scope',
+    'data-share-permissions',
+    'data-share-label',
+  ]) assert.equal(body.hasAttribute(attribute), true, attribute);
+  assert.doesNotMatch(guestHtml, /window\.__SHARE__|renderShell\?\./);
+  assert.match(guestJavaScript, /document\.body\.dataset/);
+  assert.match(guestJavaScript, /DOMContentLoaded/);
+  assert.match(shareServer, /header::CONTENT_SECURITY_POLICY/);
+  assert.match(shareServer, /script-src 'self'/);
+  assert.doesNotMatch(
+    shareServer.match(/const SHARE_CSP: &str = "([^"]+)"/)?.[1] || '',
+    /script-src[^;]*unsafe-inline/
+  );
+
+  assert.match(chat, /data-open-url="http:\/\/127\.0\.0\.1:18789\/"/);
+  assert.match(utilities, /invoke\('open_url', \{ url \}\)/);
+  assert.equal(JSON.parse(capability).permissions.includes('opener:default'), true);
+  assert.match(macos, /use tauri_plugin_opener::OpenerExt/);
+  assert.match(macos, /validate_external_url\(&url\)\?/);
+  assert.match(macos, /app\.opener\(\)[\s\S]*?\.open_url\(url\.clone\(\), None::<&str>\)/);
+});
+
+test('wasm CSP exception is justified by the bundled Draco decoder', async () => {
+  const [bodyViewer, bodyModel, wrapper, wasm, architecture] = await Promise.all([
+    readFile(new URL('../src/js/body-viewer.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/assets/body.glb', import.meta.url)),
+    readFile(new URL('../src/assets/draco/draco_wasm_wrapper.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/assets/draco/draco_decoder.wasm', import.meta.url)),
+    readFile(new URL('../../docs/architecture/quick-reference.md', import.meta.url), 'utf8'),
+  ]);
+  const wasmInfo = await stat(new URL('../src/assets/draco/draco_decoder.wasm', import.meta.url));
+
+  assert.match(bodyViewer, /new window\.THREE_DRACOLoader\(\)/);
+  assert.match(bodyViewer, /setDecoderPath\('\.\/assets\/draco\/'\)/);
+  assert.equal(bodyModel.includes(Buffer.from('KHR_draco_mesh_compression')), true);
+  assert.match(wrapper, /WebAssembly\.instantiate(?:Streaming)?/);
+  assert.equal(wasm.subarray(0, 4).toString('hex'), '0061736d');
+  assert.ok(wasmInfo.size > 0);
+  assert.match(architecture, /wasm-unsafe-eval[\s\S]*Draco/i);
 });

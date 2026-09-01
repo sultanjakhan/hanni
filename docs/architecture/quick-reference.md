@@ -37,4 +37,8 @@
 - Dev-инстанс: `cargo tauri dev` (порт 8236). Для JS/CSS hot-reload запусти dev и `desktop/tools/auto-reload.sh` с одинаковым отдельным `HANNI_DEV_RELOAD_TOKEN`.
 - Graceful quit: `osascript -e 'tell application "Hanni" to quit'`. Re-open — попросить пользователя (никогда `open -a Hanni` / activate). Never kill/pkill/killall.
 
+## WebView security
+- `script-src` не разрешает inline JavaScript: boot-логика, overlay-логика и UI-обработчики вынесены в same-origin файлы и `addEventListener`/`data-*` actions.
+- Исключение `'wasm-unsafe-eval'` сохранено из-за локально бандленного Draco WebAssembly decoder, который декодирует `body.glb`; внешний code fetch для этого не нужен.
+
 См. также: `docs/architecture/WIKI.md`, `docs/MODULE_MAP.md`, и per-module папки (`calendar/`, `chat/`, `core/`, `voice/` …).

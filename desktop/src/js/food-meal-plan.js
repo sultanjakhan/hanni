@@ -49,7 +49,7 @@ export function showMealPlanModal(date, reloadFn) {
       <div id="mp-list" class="mp-recipe-list" style="max-height:200px;overflow-y:auto;margin-top:6px;"></div>
     </div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
     </div>
   </div>`;
 

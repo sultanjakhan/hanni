@@ -402,6 +402,11 @@ export function migrateTextToBlocks(text) {
 
 // Delegated click handler for markdown links (safe — no inline onclick)
 document.addEventListener('click', (e) => {
+  const modalDismiss = e.target.closest('[data-dismiss-modal]');
+  if (modalDismiss) {
+    modalDismiss.closest('.modal-overlay')?.remove();
+    return;
+  }
   const copy = e.target.closest('.code-copy-btn');
   if (copy) {
     const code = copy.closest('.code-block')?.querySelector('code')?.textContent || '';

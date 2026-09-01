@@ -310,7 +310,7 @@ function showAddGoalModal(parentEl, tabId, config) {
     <div class="form-group"><label class="form-label">Единица измерения</label><input class="form-input" id="goal-unit" placeholder="км, книг, часов..."></div>
     <div class="form-group"><label class="form-label">Дедлайн</label><input class="form-input" id="goal-deadline" type="date"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="goal-save">Создать</button>
     </div>
   </div>`;
@@ -411,7 +411,7 @@ function showAddNoteModal(parentEl, tabId, config) {
     <div class="form-group"><label class="form-label">Содержимое</label><textarea class="form-textarea" id="note-content" rows="5"></textarea></div>
     <div class="form-group"><label class="form-label">Теги</label><input class="form-input" id="note-tags" value="${tabId}" placeholder="через запятую"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="note-save">Создать</button>
     </div>
   </div>`;
@@ -443,7 +443,7 @@ function showEditNoteModal(parentEl, tabId, config, note) {
     <div class="form-group"><label class="form-label">Содержимое</label><textarea class="form-textarea" id="note-content" rows="5">${escapeHtml(note.content || '')}</textarea></div>
     <div class="form-group"><label class="form-label">Теги</label><input class="form-input" id="note-tags" value="${escapeHtml(note.tags || '')}"></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="note-save">Сохранить</button>
     </div>
   </div>`;
@@ -601,7 +601,7 @@ function showAddStoreModal(parentEl, tabId, config) {
     <div class="form-group"><label class="form-label">Ключ</label><input class="form-input" id="store-key" placeholder="${hints.examples[0] || 'Название'}"></div>
     <div class="form-group"><label class="form-label">Значение</label><textarea class="form-textarea" id="store-val" rows="4" placeholder="Содержимое..."></textarea></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="store-save">Сохранить</button>
     </div>
   </div>`;
@@ -630,7 +630,7 @@ function showEditStoreModal(parentEl, tabId, config, entry) {
     <div class="form-group"><label class="form-label">Ключ</label><input class="form-input" id="store-key" value="${escapeHtml(entry.key)}" readonly style="opacity:0.6"></div>
     <div class="form-group"><label class="form-label">Значение</label><textarea class="form-textarea" id="store-val" rows="4">${escapeHtml(entry.value || '')}</textarea></div>
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+      <button class="btn-secondary" data-dismiss-modal>Отмена</button>
       <button class="btn-primary" id="store-save">Сохранить</button>
     </div>
   </div>`;

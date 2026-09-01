@@ -347,7 +347,7 @@ async function loadChatSettings() {
             <span class="settings-label" style="font-size:12px">Агент, 24 инструмента, Talk Mode, Telegram</span>
           </div>
           <div class="settings-row" style="opacity:0.7">
-            <span class="settings-label" style="font-size:12px">Дашборд: <a href="#" onclick="window.__TAURI__.shell.open('http://127.0.0.1:18789/');return false" style="color:var(--blue)">localhost:18789</a></span>
+            <span class="settings-label" style="font-size:12px">Дашборд: <a href="#" data-open-url="http://127.0.0.1:18789/" style="color:var(--blue)">localhost:18789</a></span>
           </div>
         </div>
         <div class="settings-section">
