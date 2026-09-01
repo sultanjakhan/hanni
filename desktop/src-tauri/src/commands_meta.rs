@@ -1600,7 +1600,13 @@ fn updater_log(msg: &str) {
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let line = format!("[{}] {}\n", ts, msg);
     let path = hanni_data_dir().join("updater.log");
-    if let Err(error) = prepare_secret_path(&path) {
+    let Some(parent) = path.parent() else {
+        eprintln!("[updater] log path has no parent");
+        return;
+    };
+    if let Err(error) = crate::secure_fs::ensure_private_dir(parent)
+        .and_then(|_| crate::secure_fs::restrict_file_if_present(&path))
+    {
         eprintln!("[updater] secure log path failed: {error}");
         return;
     }
