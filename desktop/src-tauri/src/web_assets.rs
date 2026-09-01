@@ -718,27 +718,90 @@ fn select_embedded_origin<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// Resolve to (bytes, mime, csp) from the single origin selected before
-/// navigation. Rejects `..` traversal out of the bundle dir.
+#[derive(Debug)]
+enum ProtocolBody {
+    Embedded(Vec<u8>),
+    OtaFile(std::fs::File),
+    Empty,
+}
+
+#[derive(Debug)]
+struct AssetSnapshot {
+    etag: String,
+    mime: String,
+    csp: Option<String>,
+    body: ProtocolBody,
+}
+
+#[derive(Debug)]
+enum ResolveOutcome {
+    Found(AssetSnapshot),
+    Missing,
+    Invalid,
+}
+
+/// Resolve one immutable origin snapshot before evaluating cache validators.
+/// OTA bytes remain lazy so a valid 304 keeps the cheap no-body-read path.
 #[cfg(any(target_os = "android", target_os = "macos"))]
 fn resolve<R: Runtime>(
     app: &tauri::AppHandle<R>,
     rel: &str,
-) -> Option<(Vec<u8>, String, Option<String>)> {
+) -> ResolveOutcome {
     let traversal = rel.split('/').any(|c| c == "..");
     if traversal {
-        return None;
+        return ResolveOutcome::Missing;
     }
+    let epoch = read_cache_epoch(app).unwrap_or_else(|_| {
+        VOLATILE_CACHE_EPOCH
+            .get_or_init(|| uuid::Uuid::new_v4().hyphenated().to_string())
+            .clone()
+    });
     if let Some(expected) = selected_ota_version(app) {
-        if version_cmp(&current_bundle_version(app), &expected) != Some(std::cmp::Ordering::Equal) {
-            return None;
+        let current = current_bundle_version(app);
+        if version_cmp(&current, &expected) != Some(std::cmp::Ordering::Equal) {
+            return ResolveOutcome::Invalid;
         }
-        let bytes = std::fs::read(current_dir(app).join(rel)).ok()?;
-        return Some((bytes, mime_for(rel).to_string(), embedded_csp(app)));
+        let path = current_dir(app).join(rel);
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return ResolveOutcome::Missing;
+            }
+            Err(_) => return ResolveOutcome::Invalid,
+        };
+        if !metadata.file_type().is_file() {
+            return ResolveOutcome::Invalid;
+        }
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return ResolveOutcome::Missing;
+            }
+            Err(_) => return ResolveOutcome::Invalid,
+        };
+        if !file
+            .metadata()
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false)
+        {
+            return ResolveOutcome::Invalid;
+        }
+        return ResolveOutcome::Found(AssetSnapshot {
+            etag: format!("\"hanni-v2:{epoch}:ota:{expected}\""),
+            mime: mime_for(rel).to_string(),
+            csp: embedded_csp(app),
+            body: ProtocolBody::OtaFile(file),
+        });
     }
-    app.asset_resolver()
-        .get(rel.to_string())
-        .map(|a| (a.bytes, a.mime_type, a.csp_header))
+    match app.asset_resolver().get(rel.to_string()) {
+        Some(asset) => ResolveOutcome::Found(AssetSnapshot {
+            etag: format!("\"hanni-v2:{epoch}:native:{}\"", app.package_info().version),
+            mime: asset.mime_type,
+            csp: asset.csp_header,
+            body: ProtocolBody::Embedded(asset.bytes),
+        }),
+        None => ResolveOutcome::Missing,
+    }
 }
 
 /// CSP from the embedded index.html so OTA-served HTML carries the same policy.
@@ -757,29 +820,148 @@ fn not_found() -> tauri::http::Response<Vec<u8>> {
         .unwrap()
 }
 
-/// The version currently being served — the applied OTA bundle's version if one
-/// is live, else the native (embedded) version. Drives the protocol ETag so the
-/// WebView's cache invalidates exactly when the served content changes.
-#[cfg(any(target_os = "android", target_os = "macos"))]
-fn serve_version<R: Runtime>(app: &tauri::AppHandle<R>) -> String {
-    let epoch = read_cache_epoch(app).unwrap_or_else(|_| {
-        VOLATILE_CACHE_EPOCH
-            .get_or_init(|| uuid::Uuid::new_v4().hyphenated().to_string())
-            .clone()
-    });
-    if let Some(expected) = selected_ota_version(app) {
-        if version_cmp(&current_bundle_version(app), &expected) == Some(std::cmp::Ordering::Equal) {
-            return format!("hanni-v2:{epoch}:ota:{expected}");
-        }
-        return format!("hanni-v2:{epoch}:ota-invalid:{expected}");
+fn empty_contract(status: u16) -> tauri::http::Response<ProtocolBody> {
+    tauri::http::Response::builder()
+        .status(status)
+        .body(ProtocolBody::Empty)
+        .expect("static protocol error response")
+}
+
+fn html_mime(mime: &str) -> bool {
+    mime.split(';')
+        .next()
+        .map(|essence| essence.trim().eq_ignore_ascii_case("text/html"))
+        .unwrap_or(false)
+}
+
+fn has_safe_explicit_script_policy(csp: &str) -> bool {
+    // Hanni emits one canonical policy. Reject comma-combined policies so a
+    // forbidden source token cannot hide behind the policy-list delimiter.
+    if csp.contains(',') {
+        return false;
     }
-    format!("hanni-v2:{epoch}:native:{}", app.package_info().version)
+    let mut found = false;
+    for directive in csp.split(';') {
+        let mut tokens = directive.split_ascii_whitespace();
+        let Some(name) = tokens.next() else {
+            continue;
+        };
+        let is_script_src = name.eq_ignore_ascii_case("script-src");
+        let is_script_variant = is_script_src
+            || name.eq_ignore_ascii_case("script-src-elem")
+            || name.eq_ignore_ascii_case("script-src-attr");
+        if !is_script_variant {
+            continue;
+        }
+        let sources: Vec<_> = tokens.collect();
+        if sources.iter().any(|source| {
+            source.eq_ignore_ascii_case("'unsafe-inline'")
+                || source.eq_ignore_ascii_case("'unsafe-eval'")
+        }) {
+            return false;
+        }
+        if is_script_src {
+            // Duplicate directives have browser-dependent-looking source text
+            // even though only the first is enforced. Accept only Hanni's
+            // canonical single, non-empty script policy.
+            if found || sources.is_empty() {
+                return false;
+            }
+            found = true;
+        }
+    }
+    found
+}
+
+fn document_csp(snapshot: &AssetSnapshot) -> Result<Option<tauri::http::HeaderValue>, ()> {
+    if !html_mime(&snapshot.mime) {
+        return Ok(None);
+    }
+    let csp = snapshot
+        .csp
+        .as_deref()
+        .ok_or(())?;
+    if csp.trim().is_empty() || !has_safe_explicit_script_policy(csp) {
+        return Err(());
+    }
+    tauri::http::HeaderValue::from_bytes(csp.as_bytes())
+        .map(Some)
+        .map_err(|_| ())
+}
+
+fn if_none_match_matches(value: Option<&str>, etag: &str) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let target = etag.strip_prefix("W/").unwrap_or(etag);
+    value.split(',').any(|candidate| {
+        let candidate = candidate.trim();
+        candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == target
+    })
+}
+
+fn response_contract(
+    outcome: ResolveOutcome,
+    if_none_match: Option<&str>,
+) -> tauri::http::Response<ProtocolBody> {
+    let snapshot = match outcome {
+        ResolveOutcome::Found(snapshot) => snapshot,
+        ResolveOutcome::Missing => {
+            return tauri::http::Response::builder()
+                .status(404)
+                .body(ProtocolBody::Embedded(b"not found".to_vec()))
+                .expect("static not-found response");
+        }
+        ResolveOutcome::Invalid => return empty_contract(500),
+    };
+    // A cached document must never bypass policy validation: validate CSP and
+    // every shared response header before deciding whether 304 is permissible.
+    let csp = match document_csp(&snapshot) {
+        Ok(csp) => csp,
+        Err(()) => return empty_contract(500),
+    };
+    let not_modified = if_none_match_matches(if_none_match, &snapshot.etag);
+    let AssetSnapshot { etag, mime, body, .. } = snapshot;
+    let mut builder = tauri::http::Response::builder()
+        .status(if not_modified { 304 } else { 200 })
+        .header("Content-Type", mime)
+        .header("Cross-Origin-Resource-Policy", "same-origin")
+        .header("X-Content-Type-Options", "nosniff")
+        .header("Cache-Control", "no-cache")
+        .header("ETag", etag);
+    if let Some(csp) = csp {
+        builder = builder.header("Content-Security-Policy", csp);
+    }
+    builder
+        .body(if not_modified { ProtocolBody::Empty } else { body })
+        .unwrap_or_else(|_| empty_contract(500))
+}
+
+fn materialize_response(
+    response: tauri::http::Response<ProtocolBody>,
+) -> tauri::http::Response<Vec<u8>> {
+    let (parts, body) = response.into_parts();
+    let bytes = match body {
+        ProtocolBody::Embedded(bytes) => bytes,
+        ProtocolBody::Empty => Vec::new(),
+        ProtocolBody::OtaFile(mut file) => {
+            let mut bytes = Vec::new();
+            if std::io::Read::read_to_end(&mut file, &mut bytes).is_err() {
+                return tauri::http::Response::builder()
+                    .status(500)
+                    .body(Vec::new())
+                    .expect("static protocol integrity response");
+            }
+            bytes
+        }
+    };
+    tauri::http::Response::from_parts(parts, bytes)
 }
 
 /// Registers the OTA web-asset protocol on the builder (Android + macOS).
 #[cfg(any(target_os = "android", target_os = "macos"))]
 pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    use tauri::http::{Request, Response};
+    use tauri::http::Request;
     use tauri::UriSchemeContext;
     builder.register_uri_scheme_protocol(
         SCHEME,
@@ -791,6 +973,9 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             // Keep the eligibility decision, ETag response, and bytes read in
             // one state snapshot so rollback cannot yield a stale 304.
             let _state_guard = lock_ota_state();
+            // Resolve origin metadata and policy before cache validation. The
+            // body remains lazy, so a valid 304 still avoids reading asset bytes.
+            let outcome = resolve(app, &rel);
             // Cache + revalidate via an ETag tied to the served version (not no-store).
             // no-store forced the WebView to re-fetch + re-parse all ~120 JS modules
             // on every cold start (multi-second freeze after Android evicts the app
@@ -798,36 +983,11 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             // and revalidates cheaply: matching If-None-Match → 304 → reuse cache (no
             // re-read/re-parse). An applied OTA bundle bumps version.txt → the ETag
             // changes → the cache busts and the new bundle is fetched once.
-            let etag = format!("\"{}\"", serve_version(app));
-            if request
+            let if_none_match = request
                 .headers()
                 .get("If-None-Match")
-                .and_then(|v| v.to_str().ok())
-                == Some(etag.as_str())
-            {
-                return Response::builder()
-                    .status(304)
-                    .header("ETag", etag)
-                    .header("Cache-Control", "no-cache")
-                    .body(Vec::new())
-                    .unwrap_or_else(|_| not_found());
-            }
-            match resolve(app, &rel) {
-                Some((bytes, mime, csp)) => {
-                    let mut b = Response::builder()
-                        .status(200)
-                        .header("Content-Type", mime)
-                        .header("Cross-Origin-Resource-Policy", "same-origin")
-                        .header("X-Content-Type-Options", "nosniff")
-                        .header("Cache-Control", "no-cache")
-                        .header("ETag", etag);
-                    if let Some(csp) = csp {
-                        b = b.header("Content-Security-Policy", csp);
-                    }
-                    b.body(bytes).unwrap_or_else(|_| not_found())
-                }
-                None => not_found(),
-            }
+                .and_then(|value| value.to_str().ok());
+            materialize_response(response_contract(outcome, if_none_match))
         },
     )
 }
@@ -1832,6 +1992,210 @@ pub async fn web_reset_bundle<R: Runtime>(app: tauri::AppHandle<R>) -> Result<()
 #[cfg(test)]
 mod web_asset_security_tests {
     use super::*;
+
+    const TEST_ETAG: &str = "\"hanni-test-etag\"";
+    const TEST_CSP: &str = "default-src 'self'; script-src 'self'; object-src 'none'";
+
+    fn test_snapshot(mime: &str, csp: Option<&str>, body: ProtocolBody) -> ResolveOutcome {
+        ResolveOutcome::Found(AssetSnapshot {
+            etag: TEST_ETAG.to_string(),
+            mime: mime.to_string(),
+            csp: csp.map(str::to_string),
+            body,
+        })
+    }
+
+    fn header<'a>(
+        response: &'a tauri::http::Response<ProtocolBody>,
+        name: &'static str,
+    ) -> &'a str {
+        response
+            .headers()
+            .get(name)
+            .expect("required response header")
+            .to_str()
+            .expect("ASCII response header")
+    }
+
+    #[test]
+    fn html_200_and_all_matching_304_forms_share_security_headers() {
+        let ok = response_contract(
+            test_snapshot(
+                "text/html; charset=utf-8",
+                Some(TEST_CSP),
+                ProtocolBody::Embedded(b"<!doctype html>".to_vec()),
+            ),
+            None,
+        );
+        assert_eq!(ok.status(), tauri::http::StatusCode::OK);
+        assert_eq!(ok.headers().len(), 6);
+        assert_eq!(header(&ok, "Content-Type"), "text/html; charset=utf-8");
+        assert_eq!(header(&ok, "Content-Security-Policy"), TEST_CSP);
+        assert_eq!(header(&ok, "ETag"), TEST_ETAG);
+        assert_eq!(header(&ok, "Cache-Control"), "no-cache");
+        assert_eq!(header(&ok, "Cross-Origin-Resource-Policy"), "same-origin");
+        assert_eq!(header(&ok, "X-Content-Type-Options"), "nosniff");
+        assert!(matches!(
+            ok.body(),
+            ProtocolBody::Embedded(bytes) if bytes.as_slice() == b"<!doctype html>"
+        ));
+
+        for candidate in [
+            TEST_ETAG.to_string(),
+            format!("\"other\", {TEST_ETAG}"),
+            format!("W/{TEST_ETAG}"),
+            "*".to_string(),
+        ] {
+            let cached = response_contract(
+                test_snapshot(
+                    "text/html; charset=utf-8",
+                    Some(TEST_CSP),
+                    ProtocolBody::Embedded(b"must not be returned".to_vec()),
+                ),
+                Some(&candidate),
+            );
+            assert_eq!(
+                cached.status(),
+                tauri::http::StatusCode::NOT_MODIFIED,
+                "{candidate}"
+            );
+            assert_eq!(cached.headers(), ok.headers(), "{candidate}");
+            assert!(matches!(cached.body(), ProtocolBody::Empty));
+        }
+
+        for candidate in ["not-an-etag", "\"other\""] {
+            let response = response_contract(
+                test_snapshot(
+                    "text/html",
+                    Some(TEST_CSP),
+                    ProtocolBody::Embedded(Vec::new()),
+                ),
+                Some(candidate),
+            );
+            assert_eq!(response.status(), tauri::http::StatusCode::OK, "{candidate}");
+        }
+    }
+
+    #[test]
+    fn html_policy_failure_preempts_matching_cache_validator() {
+        for csp in [
+            None,
+            Some(""),
+            Some(" \t "),
+            Some("; ;"),
+            Some("not-a-csp-directive"),
+            Some("default-src 'self'"),
+            Some("foo script-src 'self'"),
+            Some("script-src"),
+            Some("script-src 'self'; SCRIPT-SRC 'self'"),
+            Some("script-src 'self' 'unsafe-inline'"),
+            Some("script-src 'self' 'UNSAFE-EVAL'"),
+            Some("script-src 'self' 'unsafe-inline', object-src 'none'"),
+            Some("script-src 'self' 'unsafe-eval', object-src 'none'"),
+            Some("script-src 'self'; script-src-elem 'unsafe-inline'"),
+            Some("script-src 'self'; script-src-attr 'unsafe-eval'"),
+            Some("script-src 'self'\r\nX-Injected: yes"),
+        ] {
+            let response = response_contract(
+                test_snapshot(
+                    "text/html",
+                    csp,
+                    ProtocolBody::Embedded(b"must not leak".to_vec()),
+                ),
+                Some(TEST_ETAG),
+            );
+            assert_eq!(
+                response.status(),
+                tauri::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "{csp:?}"
+            );
+            assert!(response.headers().is_empty(), "{csp:?}");
+            assert!(matches!(response.body(), ProtocolBody::Empty), "{csp:?}");
+            let materialized = materialize_response(response);
+            assert!(materialized.body().is_empty(), "{csp:?}");
+        }
+    }
+
+    #[test]
+    fn html_policy_recognizes_case_insensitive_tokenized_script_directive() {
+        let csp =
+            "default-src 'self'; SCRIPT-SRC 'self' 'wasm-unsafe-eval'; object-src 'none'";
+        let response = response_contract(
+            test_snapshot(
+                "TEXT/HTML; charset=utf-8",
+                Some(csp),
+                ProtocolBody::Embedded(Vec::new()),
+            ),
+            Some(TEST_ETAG),
+        );
+        assert_eq!(response.status(), tauri::http::StatusCode::NOT_MODIFIED);
+        assert_eq!(header(&response, "Content-Security-Policy"), csp);
+    }
+
+    #[test]
+    fn non_html_assets_do_not_require_or_emit_document_csp() {
+        let ok = response_contract(
+            test_snapshot(
+                "text/javascript",
+                None,
+                ProtocolBody::Embedded(b"export {};".to_vec()),
+            ),
+            None,
+        );
+        let cached = response_contract(
+            test_snapshot(
+                "text/javascript",
+                Some("invalid\r\nheader"),
+                ProtocolBody::Embedded(b"must not be returned".to_vec()),
+            ),
+            Some(&format!("\"other\", W/{TEST_ETAG}")),
+        );
+        assert_eq!(ok.status(), tauri::http::StatusCode::OK);
+        assert_eq!(cached.status(), tauri::http::StatusCode::NOT_MODIFIED);
+        assert_eq!(ok.headers(), cached.headers());
+        assert!(ok.headers().get("Content-Security-Policy").is_none());
+        assert!(matches!(cached.body(), ProtocolBody::Empty));
+    }
+
+    #[test]
+    fn missing_and_invalid_assets_cannot_return_stale_304() {
+        let missing = response_contract(ResolveOutcome::Missing, Some("*"));
+        assert_eq!(missing.status(), tauri::http::StatusCode::NOT_FOUND);
+        assert!(missing.headers().get("ETag").is_none());
+        assert!(matches!(
+            missing.body(),
+            ProtocolBody::Embedded(bytes) if bytes.as_slice() == b"not found"
+        ));
+
+        let invalid = response_contract(ResolveOutcome::Invalid, Some(TEST_ETAG));
+        assert_eq!(
+            invalid.status(),
+            tauri::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert!(invalid.headers().is_empty());
+        assert!(matches!(invalid.body(), ProtocolBody::Empty));
+        assert!(materialize_response(invalid).body().is_empty());
+    }
+
+    #[test]
+    fn matching_ota_304_does_not_read_the_open_file() {
+        use std::io::{Seek, SeekFrom};
+
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file!());
+        let mut file = std::fs::File::open(source).expect("open test source");
+        file.seek(SeekFrom::Start(7)).expect("seek test source");
+        let mut observer = file.try_clone().expect("clone test source handle");
+        let response = response_contract(
+            test_snapshot("text/html", Some(TEST_CSP), ProtocolBody::OtaFile(file)),
+            Some(TEST_ETAG),
+        );
+        assert_eq!(response.status(), tauri::http::StatusCode::NOT_MODIFIED);
+        assert!(matches!(response.body(), ProtocolBody::Empty));
+        let response = materialize_response(response);
+        assert_eq!(response.status(), tauri::http::StatusCode::NOT_MODIFIED);
+        assert!(response.body().is_empty());
+        assert_eq!(observer.stream_position().expect("read shared offset"), 7);
+    }
 
     #[test]
     fn ota_uri_paths_stay_relative() {
