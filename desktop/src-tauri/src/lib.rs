@@ -447,7 +447,6 @@ pub fn run() {
         .manage(share_tunnel::ShareTunnel::default())
         .manage(web_assets::BootGuard::default())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(health_connect_plugin::init())
         .plugin(android_update::install_apk_plugin())
@@ -496,8 +495,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Chat
             chat::chat,
-            chat::read_file,
-            chat::list_dir,
             // Tracker
             commands_data::tracker_add_purchase,
             commands_data::tracker_add_time,

@@ -158,7 +158,7 @@ async function loadChatSettings() {
       invoke('get_app_setting', { key: 'voice_clone_enabled' }).catch(() => null),
       invoke('get_app_setting', { key: 'voice_clone_sample' }).catch(() => null),
       invoke('list_voice_samples').catch(() => []),
-      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0 })),
+      invoke('get_training_stats').catch(() => ({ conversations: 0, total_messages: 0, thumbs_up_pairs: 0 })),
       invoke('get_flywheel_status').catch(() => ({ thumbs_up_total: 0, new_pairs: 0, total_cycles: 0, ready_to_train: false })),
       invoke('get_flywheel_history').catch(() => []),
       invoke('get_app_setting', { key: 'use_openclaw' }).catch(() => null),
@@ -381,7 +381,7 @@ async function loadChatSettings() {
           <div class="settings-section-title">Данные для обучения</div>
           <div class="settings-row"><span class="settings-label">Диалогов (4+ сообщений)</span><span class="settings-value">${trainStats.conversations}</span></div>
           <div class="settings-row"><span class="settings-label">Всего сообщений</span><span class="settings-value">${trainStats.total_messages}</span></div>
-          <div class="settings-row"><span class="settings-label">Thumbs-up пар</span><span class="settings-value" id="train-pairs-count">...</span></div>
+          <div class="settings-row"><span class="settings-label">Thumbs-up пар</span><span class="settings-value">${trainStats.thumbs_up_pairs}</span></div>
           <div class="settings-row"><span class="settings-label">Период</span><span class="settings-value">${trainStats.earliest ? trainStats.earliest.substring(0,10) + ' — ' + trainStats.latest.substring(0,10) : '—'}</span></div>
         </div>
         <div class="settings-section">
@@ -633,16 +633,6 @@ async function loadChatSettings() {
     });
 
     // ── Training panel handlers ──
-    try {
-      const pairsPath = '~/Library/Application Support/Hanni/training_pairs.jsonl';
-      const content = await invoke('read_file', { path: pairsPath }).catch(() => '');
-      const count = content ? content.trim().split('\\n').filter(l => l.trim()).length : 0;
-      const pairsEl = document.getElementById('train-pairs-count');
-      if (pairsEl) pairsEl.textContent = String(count);
-    } catch (_) {
-      const pairsEl = document.getElementById('train-pairs-count');
-      if (pairsEl) pairsEl.textContent = '0';
-    }
     document.getElementById('train-export-btn')?.addEventListener('click', async (e) => {
       const btn = e.target; btn.textContent = 'Экспорт...'; btn.disabled = true;
       try { const r = await invoke('export_training_data'); btn.textContent = r.train_count + ' train + ' + r.valid_count + ' valid'; }

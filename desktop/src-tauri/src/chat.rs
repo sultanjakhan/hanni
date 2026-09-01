@@ -980,36 +980,3 @@ pub async fn quality_check_response(
         Ok(Some(text))
     }
 }
-
-// ── File commands ──
-
-#[tauri::command]
-pub async fn read_file(path: String) -> Result<String, String> {
-    let metadata = tokio::fs::metadata(&path)
-        .await
-        .map_err(|e| format!("Cannot access {}: {}", path, e))?;
-
-    // Limit to 500KB for text files
-    if metadata.len() > 512_000 {
-        return Err(format!("File too large: {} bytes (max 500KB)", metadata.len()));
-    }
-
-    tokio::fs::read_to_string(&path)
-        .await
-        .map_err(|e| format!("Cannot read {}: {}", path, e))
-}
-
-#[tauri::command]
-pub async fn list_dir(path: String) -> Result<Vec<String>, String> {
-    let mut entries = Vec::new();
-    let mut dir = tokio::fs::read_dir(&path)
-        .await
-        .map_err(|e| format!("Cannot read dir {}: {}", path, e))?;
-
-    while let Some(entry) = dir.next_entry().await.map_err(|e| e.to_string())? {
-        if let Some(name) = entry.file_name().to_str() {
-            entries.push(name.to_string());
-        }
-    }
-    Ok(entries)
-}

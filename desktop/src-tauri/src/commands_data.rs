@@ -3577,31 +3577,89 @@ pub async fn run_flywheel_cycle(db: tauri::State<'_, HanniDb>) -> Result<serde_j
 #[tauri::command]
 pub fn get_training_stats(db: tauri::State<'_, HanniDb>) -> Result<serde_json::Value, String> {
     let conn = db.conn();
+    training_stats_for_conn(&conn)
+}
 
-    let conv_count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM conversations WHERE message_count >= 4",
-        [],
-        |row| row.get(0),
-    ).unwrap_or(0);
+fn training_stats_for_conn(conn: &rusqlite::Connection) -> Result<serde_json::Value, String> {
+    let conv_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM conversations WHERE message_count >= 4",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("training conversation count: {e}"))?;
 
-    let total_messages: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(message_count), 0) FROM conversations WHERE message_count >= 4",
-        [],
-        |row| row.get(0),
-    ).unwrap_or(0);
+    let total_messages: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(message_count), 0) FROM conversations WHERE message_count >= 4",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("training message count: {e}"))?;
 
-    let date_range: (String, String) = conn.query_row(
-        "SELECT COALESCE(MIN(started_at), ''), COALESCE(MAX(started_at), '') FROM conversations WHERE message_count >= 4",
-        [],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ).unwrap_or(("".into(), "".into()));
+    let date_range: (String, String) = conn
+        .query_row(
+            "SELECT COALESCE(MIN(started_at), ''), COALESCE(MAX(started_at), '') FROM conversations WHERE message_count >= 4",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|e| format!("training date range: {e}"))?;
+
+    let thumbs_up_pairs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM message_feedback WHERE rating = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("training thumbs-up count: {e}"))?;
 
     Ok(serde_json::json!({
         "conversations": conv_count,
         "total_messages": total_messages,
+        "thumbs_up_pairs": thumbs_up_pairs,
         "earliest": date_range.0,
         "latest": date_range.1,
     }))
+}
+
+#[cfg(test)]
+mod training_stats_tests {
+    use super::training_stats_for_conn;
+
+    #[test]
+    fn training_stats_count_semantic_thumbs_up_rows() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open fixture");
+        conn.execute_batch(
+            "CREATE TABLE conversations (
+                id INTEGER PRIMARY KEY,
+                message_count INTEGER NOT NULL,
+                started_at TEXT NOT NULL
+             );
+             CREATE TABLE message_feedback (
+                id INTEGER PRIMARY KEY,
+                rating INTEGER NOT NULL
+             );
+             INSERT INTO conversations VALUES
+                (1, 3, '2026-08-01T00:00:00Z'),
+                (2, 4, '2026-08-02T00:00:00Z'),
+                (3, 7, '2026-08-03T00:00:00Z');
+             INSERT INTO message_feedback VALUES
+                (1, 1),
+                (2, -1),
+                (3, 1);",
+        )
+        .expect("seed fixture");
+
+        let stats = training_stats_for_conn(&conn).expect("read training stats");
+        assert_eq!(stats["conversations"].as_i64(), Some(2));
+        assert_eq!(stats["total_messages"].as_i64(), Some(11));
+        assert_eq!(stats["thumbs_up_pairs"].as_i64(), Some(2));
+        assert_eq!(
+            stats["earliest"].as_str(),
+            Some("2026-08-02T00:00:00Z")
+        );
+        assert_eq!(stats["latest"].as_str(), Some("2026-08-03T00:00:00Z"));
+    }
 }
 
 #[tauri::command]
