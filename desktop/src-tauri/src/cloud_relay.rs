@@ -935,7 +935,7 @@ fn sync_once(conn: &mut Connection, cfg: &RelayConfig) -> Result<Value, String> 
     )
 }
 
-pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
+pub(crate) fn open_existing(path: &str) -> Result<crate::worker_connection::WorkerConnection, String> {
     static EXTENSIONS: std::sync::Once = std::sync::Once::new();
     EXTENSIONS.call_once(|| unsafe {
         rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
@@ -946,6 +946,8 @@ pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
     )).map_err(|code| { eprintln!("[hanni-worker] relay_bootstrap=open_failed"); code })?;
+    // Own cleanup before any schema check or extension initialization can fail.
+    let mut conn = crate::worker_connection::WorkerConnection::new(conn);
     sql(conn.busy_timeout(Duration::from_secs(5)))?;
     let mode: String = sql(conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)))?;
     if mode != "wal" {
@@ -1037,6 +1039,8 @@ pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
                 .map_err(|code| { eprintln!("[hanni-worker] relay_bootstrap=crsqlite_load_failed"); code })?;
             drop(guard);
         }
+        // Only a successful load keeps the extension library mapped.
+        conn.mark_crsqlite_loaded();
     }
     Ok(conn)
 }

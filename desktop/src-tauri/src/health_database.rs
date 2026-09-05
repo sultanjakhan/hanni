@@ -1,7 +1,8 @@
 //! Internal Android SQL facade: every connection uses the application's rusqlite engine.
 //! No Tauri command exposes this interface. Replies never contain raw SQLite errors.
 use base64::{engine::general_purpose::STANDARD, Engine};
-use rusqlite::{params_from_iter, types::{Value as SqlValue, ValueRef}, Connection};
+use rusqlite::{params_from_iter, types::{Value as SqlValue, ValueRef}};
+use crate::worker_connection::WorkerConnection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -10,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 const MESSAGE_LIMIT: usize = 16 * 1024 * 1024;
 const HANDLE_LIMIT: usize = 16;
 type Failure = &'static str;
-type OpenExisting = fn(&str) -> Result<Connection, String>;
+type OpenExisting = fn(&str) -> Result<WorkerConnection, String>;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "t", content = "v", deny_unknown_fields)]
@@ -65,12 +66,12 @@ enum Request {
     #[serde(rename = "in_transaction")] InTransaction { handle: String },
 }
 
-struct Session { connection: Option<Connection>, successful: bool }
+struct Session { connection: Option<WorkerConnection>, successful: bool }
 #[derive(Default)]
 struct Registry { next: u64, handles: HashMap<u64, Arc<Mutex<Session>>> }
 
 impl Registry {
-    fn insert(&mut self, connection: Connection) -> Result<u64, (Failure, Connection)> {
+    fn insert(&mut self, connection: WorkerConnection) -> Result<u64, (Failure, WorkerConnection)> {
         // Return rejected ownership; dropping SQLite may perform IO and must happen
         // after the caller releases the registry mutex, including capacity failures.
         if self.handles.len() >= HANDLE_LIMIT { return Err(("native_db_limit", connection)); }
@@ -112,9 +113,7 @@ fn dispatch(registry: &Mutex<Registry>, request: Request, open: OpenExisting) ->
             // Recover a poisoned session only to release it, never to continue using its data.
             let mut session = session.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(connection) = session.connection.take() {
-                let rollback = if connection.is_autocommit() { Ok(()) } else { sql(connection.execute_batch("ROLLBACK")) };
-                drop(connection);
-                rollback?;
+                connection.close()?;
             }
             return Ok(Value::Null);
         }
@@ -196,7 +195,7 @@ pub(crate) fn reply(request: &str, open: OpenExisting) -> String {
 /// If JNI cannot allocate the open response, the caller never receives its handle.
 /// Release that connection rather than leaving it registered for the process lifetime.
 pub(crate) fn discard_undelivered_reply(response: &str) {
-    fn no_open(_: &str) -> Result<Connection, String> { Err("native_db_arguments".into()) }
+    fn no_open(_: &str) -> Result<WorkerConnection, String> { Err("native_db_arguments".into()) }
     if let Ok(value) = serde_json::from_str::<Value>(response) {
         if let Some(handle) = value.get("result").and_then(|v| v.get("handle")).and_then(Value::as_str) {
             let _ = reply(&json!({"op":"close", "handle":handle}).to_string(), no_open);

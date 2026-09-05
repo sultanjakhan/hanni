@@ -202,10 +202,7 @@ pub(crate) fn run_sync_only() -> tauri::Result<()> {
             reader
                 .pragma_update(None, "query_only", "ON")
                 .map_err(std::io::Error::other)?;
-            app.manage(crate::types::HanniDb {
-                writer: Mutex::new(writer),
-                reader: Mutex::new(reader),
-            });
+            app.manage(writer.into_hanni_db(reader));
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 

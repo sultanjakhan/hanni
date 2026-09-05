@@ -80,6 +80,7 @@ mod sync_github_replay;
 mod sync_github_cmds;
 mod lan_sync;
 mod cloud_relay;
+mod worker_connection;
 #[cfg(not(target_os = "android"))]
 mod cloud_relay_runtime;
 #[cfg(any(target_os = "windows", target_os = "macos"))]

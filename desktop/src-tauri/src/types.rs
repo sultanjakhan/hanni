@@ -212,10 +212,11 @@ impl HanniDb {
 
 impl Drop for HanniDb {
     fn drop(&mut self) {
-        for m in [&self.writer, &self.reader] {
-            if let Ok(conn) = m.lock() {
-                let _ = conn.execute_batch("SELECT crsql_finalize();");
-            }
+        for m in [&mut self.writer, &mut self.reader] {
+            let conn = m.get_mut().unwrap_or_else(|error| error.into_inner());
+            if !conn.is_autocommit() { let _ = conn.execute_batch("ROLLBACK"); }
+            conn.flush_prepared_statement_cache();
+            let _ = conn.execute_batch("SELECT crsql_finalize();");
         }
     }
 }

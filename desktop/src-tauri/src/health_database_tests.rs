@@ -1,16 +1,16 @@
 use super::*;
-use rusqlite::OpenFlags;
+use rusqlite::{Connection, OpenFlags};
 use std::{sync::mpsc, time::Duration};
 
-fn open_fixture(path: &str) -> Result<Connection, String> {
-    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE).map_err(|_| "fixture_open_failed".into())
+fn open_fixture(path: &str) -> Result<WorkerConnection, String> {
+    Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE).map(WorkerConnection::new).map_err(|_| "fixture_open_failed".into())
 }
 fn request(registry: &Mutex<Registry>, value: Value) -> Result<Value, Failure> {
     dispatch(registry, serde_json::from_value(value).unwrap(), open_fixture)
 }
 fn memory() -> (Mutex<Registry>, String) {
     let mut registry = Registry::default();
-    let handle = registry.insert(Connection::open_in_memory().unwrap()).unwrap().to_string();
+    let handle = registry.insert(WorkerConnection::new(Connection::open_in_memory().unwrap())).unwrap().to_string();
     (Mutex::new(registry), handle)
 }
 fn execute(registry: &Mutex<Registry>, handle: &str, sql: &str) -> Result<Value, Failure> {
@@ -54,7 +54,7 @@ fn bootstrap_can_inspect_wal_mode_but_query_cannot_change_it() {
 
 #[test]
 fn failed_jni_delivery_releases_the_unreceived_handle() {
-    fn open_memory(_: &str) -> Result<Connection, String> { Connection::open_in_memory().map_err(|_| "fixture_failed".into()) }
+    fn open_memory(_: &str) -> Result<WorkerConnection, String> { Connection::open_in_memory().map(WorkerConnection::new).map_err(|_| "fixture_failed".into()) }
     let directory = tempfile::tempdir().unwrap();
     let response = reply(&json!({"op":"open", "path":directory.path().join("fixture.db")}).to_string(), open_memory);
     let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -68,11 +68,11 @@ fn failed_jni_delivery_releases_the_unreceived_handle() {
 fn full_registry_returns_connection_ownership_for_close_outside_its_mutex() {
     let registry = Mutex::new(Registry::default());
     for _ in 0..HANDLE_LIMIT {
-        registry.lock().unwrap().insert(Connection::open_in_memory().unwrap()).unwrap();
+        registry.lock().unwrap().insert(WorkerConnection::new(Connection::open_in_memory().unwrap())).unwrap();
     }
     let connection = Connection::open_in_memory().unwrap();
     connection.execute_batch("BEGIN; CREATE TABLE fixture(id)").unwrap();
-    let rejected = { registry.lock().unwrap().insert(connection) };
+    let rejected = { registry.lock().unwrap().insert(WorkerConnection::new(connection)) };
     let (code, connection) = rejected.unwrap_err();
     assert_eq!(code, "native_db_limit");
     assert!(!connection.is_autocommit());
@@ -147,8 +147,8 @@ fn waiting_writer_does_not_hold_registry_mutex_needed_by_committing_writer() {
     let second = Connection::open(&path).unwrap();
     second.busy_timeout(Duration::from_secs(2)).unwrap();
     let mut registry = Registry::default();
-    let first = registry.insert(first).unwrap().to_string();
-    let second = registry.insert(second).unwrap().to_string();
+    let first = registry.insert(WorkerConnection::new(first)).unwrap().to_string();
+    let second = registry.insert(WorkerConnection::new(second)).unwrap().to_string();
     let registry = Arc::new(Mutex::new(registry));
     request(&registry, json!({"op":"begin","handle":first})).unwrap();
     execute(&registry, &first, "INSERT INTO fixture VALUES(1)").unwrap();

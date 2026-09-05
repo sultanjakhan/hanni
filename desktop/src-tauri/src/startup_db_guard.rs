@@ -46,25 +46,29 @@ fn has_managed_backup(data_dir: &Path) -> Result<bool, &'static str> {
 
 pub(crate) fn inspect_android(data_dir: &Path) -> Result<OpenPolicy, &'static str> {
     directory_if_present(data_dir)?;
+    // A recreated main file does not resolve preserved corruption evidence.
+    // Check only the two local corrupt families before accepting Existing.
+    let app_root = if data_dir.file_name().is_some_and(|name| name == "files") {
+        data_dir.parent().ok_or(CHECK_FAILED)?
+    } else { data_dir };
+    let alternate = if data_dir == app_root { app_root.join("files") } else { app_root.to_path_buf() };
+    for family in [data_dir, alternate.as_path()] {
+        for name in ["hanni.db.corrupt", "hanni.db.corrupt-wal", "hanni.db.corrupt-shm", "hanni.db.corrupt-journal"] {
+            if metadata(&family.join(name))?.is_some() { return Err(RECOVERY_REQUIRED); }
+        }
+    }
     if let Some(value) = metadata(&data_dir.join("hanni.db"))? {
         return if value.is_file() && !value.file_type().is_symlink() {
             Ok(OpenPolicy::Existing)
         } else { Err(CHECK_FAILED) };
     }
-    for name in ["hanni.db-wal", "hanni.db-shm", "hanni.db-journal",
-        "hanni.db.corrupt", "hanni.db.corrupt-wal", "hanni.db.corrupt-shm", "hanni.db.corrupt-journal"] {
+    for name in ["hanni.db-wal", "hanni.db-shm", "hanni.db-journal"] {
         if metadata(&data_dir.join(name))?.is_some() { return Err(RECOVERY_REQUIRED); }
     }
-    // Tauri uses the application root; lib.rs has an explicit private-files fallback.
     // Alternate paths are evidence only: never open, select or migrate their databases.
-    let app_root = if data_dir.file_name().is_some_and(|name| name == "files") {
-        data_dir.parent().ok_or(CHECK_FAILED)?
-    } else { data_dir };
     directory_if_present(app_root)?;
-    let alternate = if data_dir == app_root { app_root.join("files") } else { app_root.to_path_buf() };
     if directory_if_present(&alternate)? {
-        for name in ["hanni.db", "hanni.db-wal", "hanni.db-shm", "hanni.db-journal",
-            "hanni.db.corrupt", "hanni.db.corrupt-wal", "hanni.db.corrupt-shm", "hanni.db.corrupt-journal"] {
+        for name in ["hanni.db", "hanni.db-wal", "hanni.db-shm", "hanni.db-journal"] {
             if metadata(&alternate.join(name))?.is_some() { return Err(RECOVERY_REQUIRED); }
         }
         if has_managed_backup(&alternate)? { return Err(RECOVERY_REQUIRED); }
@@ -253,4 +257,53 @@ mod tests {
         assert_eq!(read_error, Some(ErrorKind::PermissionDenied));
         assert_eq!(decision, Err(CHECK_FAILED)); assert!(!root.join("hanni.db").exists());
     }
+    #[test]
+    fn existing_main_never_overrides_either_local_corrupt_family() {
+        for selected_files in [false, true] {
+            for corrupt_files in [false, true] {
+                for name in ["hanni.db.corrupt", "hanni.db.corrupt-wal", "hanni.db.corrupt-shm", "hanni.db.corrupt-journal"] {
+                    let temp = tempfile::tempdir().unwrap(); let root = temp.path();
+                    fs::create_dir(root.join("files")).unwrap();
+                    let selected = if selected_files { root.join("files") } else { root.to_path_buf() };
+                    let corrupt = if corrupt_files { root.join("files") } else { root.to_path_buf() };
+                    let main_path = selected.join("hanni.db");
+                    let conn = Connection::open(&main_path).unwrap();
+                    conn.execute_batch("CREATE TABLE preserved(value); INSERT INTO preserved VALUES(7);").unwrap();
+                    drop(conn);
+                    let evidence = corrupt.join(name);
+                    fs::write(&evidence, b"public preserved corruption evidence").unwrap();
+                    let main_before = fs::read(&main_path).unwrap();
+                    let evidence_before = fs::read(&evidence).unwrap();
+                    let root_entries = fs::read_dir(root).unwrap().count();
+                    let files_entries = fs::read_dir(root.join("files")).unwrap().count();
+                    assert_eq!(inspect_android(&selected), Err(RECOVERY_REQUIRED));
+                    assert_eq!(fs::read(&main_path).unwrap(), main_before);
+                    assert_eq!(fs::read(&evidence).unwrap(), evidence_before);
+                    assert_eq!(fs::read_dir(root).unwrap().count(), root_entries);
+                    assert_eq!(fs::read_dir(root.join("files")).unwrap().count(), files_entries);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn healthy_existing_main_in_both_locations_remains_allowed() {
+        for selected_files in [false, true] {
+            let temp = tempfile::tempdir().unwrap(); let root = temp.path();
+            fs::create_dir(root.join("files")).unwrap();
+            let selected = if selected_files { root.join("files") } else { root.to_path_buf() };
+            let main_path = selected.join("hanni.db");
+            let alternate = if selected_files { root.to_path_buf() } else { root.join("files") };
+            let alternate_path = alternate.join("hanni.db");
+            fs::write(&alternate_path, b"ordinary alternate DB is not selected").unwrap();
+            let conn = Connection::open(&main_path).unwrap();
+            conn.execute_batch("CREATE TABLE preserved(value); INSERT INTO preserved VALUES(7);").unwrap();
+            drop(conn);
+            let before = fs::read(&main_path).unwrap();
+            assert_eq!(inspect_android(&selected), Ok(OpenPolicy::Existing));
+            assert_eq!(fs::read(&main_path).unwrap(), before);
+            assert_eq!(fs::read(&alternate_path).unwrap(), b"ordinary alternate DB is not selected");
+        }
+    }
+
 }
