@@ -1,7 +1,6 @@
 package com.sultanjakhan.hanni
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import androidx.health.connect.client.HealthConnectClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -28,8 +27,7 @@ internal object RawHealthSync {
                 android.util.Log.w("HanniWorkerDiag", "raw_bootstrap_file_missing")
                 throw RawHealthImportException("hc_database_not_ready")
             }
-            val result = SQLiteDatabase.openDatabase(file.absolutePath, null,
-                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING).use { db ->
+            val result = NativeHealthDatabase.openExisting(file.absolutePath).use { db ->
                 db.rawQuery("PRAGMA journal_mode", null).use { cursor ->
                     if (!cursor.moveToFirst() || cursor.getString(0) != "wal") {
                         android.util.Log.w("HanniWorkerDiag", "raw_bootstrap_wal_required")

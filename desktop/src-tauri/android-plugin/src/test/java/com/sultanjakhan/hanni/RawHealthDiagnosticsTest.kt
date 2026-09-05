@@ -1,6 +1,5 @@
 package com.sultanjakhan.hanni
 
-import android.database.sqlite.SQLiteDatabase
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -70,7 +69,7 @@ class RawHealthDiagnosticsTest {
     }
 
     @Test fun failedPageCommitReportsCommitWithoutAdvancingCheckpointOrWritingRows() = runBlocking {
-        SQLiteDatabase.create(null).use { db ->
+        PlatformTestHealthDatabase.create(null).use { db ->
             RawHealthTestSupport.initialize(db)
             db.execSQL("CREATE TRIGGER synthetic_failure BEFORE INSERT ON health_records BEGIN SELECT RAISE(ABORT,'synthetic-private-value'); END")
             val store = RawHealthRecordStore(db, RawHealthTestSupport.storeId)
@@ -89,7 +88,7 @@ class RawHealthDiagnosticsTest {
     }
 
     @Test fun repeatedPageTokenReportsCursorAndPreservesExistingRetryState() = runBlocking {
-        SQLiteDatabase.create(null).use { db ->
+        PlatformTestHealthDatabase.create(null).use { db ->
             RawHealthTestSupport.initialize(db)
             val store = RawHealthRecordStore(db, RawHealthTestSupport.storeId)
             val initial = store.checkpoint(steps.name)

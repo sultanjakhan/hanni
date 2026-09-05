@@ -1,6 +1,5 @@
 package com.sultanjakhan.hanni
 
-import android.database.sqlite.SQLiteDatabase
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -17,11 +16,11 @@ import org.robolectric.annotation.SQLiteMode
 @Config(sdk = [33], manifest = Config.NONE)
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class HealthImportIdempotencyTest {
-    private lateinit var db: SQLiteDatabase
+    private lateinit var db: PlatformTestHealthDatabase
     private lateinit var worker: HanniHealthWorker
 
     @Before fun setup() {
-        db = SQLiteDatabase.create(null)
+        db = PlatformTestHealthDatabase.create(null)
         // Import methods are pure DB operations; bypass only the WorkManager constructor.
         // This fixture does not claim to test scheduling or a Health Connect provider.
         val unsafeClass = Class.forName("sun.misc.Unsafe")
@@ -71,7 +70,7 @@ class HealthImportIdempotencyTest {
 
     private fun importRecords(records: List<JSONObject>) {
         for ((index, name) in listOf("insertSleep", "insertSteps", "insertExercise", "insertHeartRate").withIndex()) {
-            HanniHealthWorker::class.java.getDeclaredMethod(name, SQLiteDatabase::class.java, JSONArray::class.java)
+            HanniHealthWorker::class.java.getDeclaredMethod(name, HealthDatabase::class.java, JSONArray::class.java)
                 .apply { isAccessible = true }.invoke(worker, db, JSONArray().put(records[index]))
         }
     }

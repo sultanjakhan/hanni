@@ -1,7 +1,6 @@
 package com.sultanjakhan.hanni
 
 import android.database.Cursor
-import android.database.sqlite.SQLiteDatabase
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -58,7 +57,7 @@ internal object LanSyncDatabase {
     private class SyncFailure(message: String) : IllegalStateException(message)
 
     // Do not expose SQLite errors or record values through worker logs.
-    private fun <T> databaseTransaction(db: SQLiteDatabase, action: () -> T): T {
+    private fun <T> databaseTransaction(db: HealthDatabase, action: () -> T): T {
         try {
             check(!db.inTransaction())
             db.beginTransaction()
@@ -75,7 +74,7 @@ internal object LanSyncDatabase {
         }
     }
 
-    fun gather(db: SQLiteDatabase, expectedPeer: String? = null): Outbound = databaseTransaction(db) {
+    fun gather(db: HealthDatabase, expectedPeer: String? = null): Outbound = databaseTransaction(db) {
         val peer = readSetting(db, "lan_sync_peer").orEmpty()
         if (expectedPeer != null && peer != expectedPeer) {
             throw SyncFailure("LAN configuration changed; retry")
@@ -132,7 +131,7 @@ internal object LanSyncDatabase {
             rowMax, tombMax, snapshot, peer)
     }
 
-    fun applyResponse(db: SQLiteDatabase, outbound: Outbound, response: JSONObject): Int =
+    fun applyResponse(db: HealthDatabase, outbound: Outbound, response: JSONObject): Int =
         databaseTransaction(db) {
             // A malformed HTTP 200 is not an empty successful pull.
             val rows = response.getJSONArray("rows")
@@ -179,7 +178,7 @@ internal object LanSyncDatabase {
             applied
         }
 
-    private fun setRemoteApply(db: SQLiteDatabase, active: Boolean) {
+    private fun setRemoteApply(db: HealthDatabase, active: Boolean) {
         val previous = if (active) 0 else 1
         val desired = if (active) 1 else 0
         val changed = db.compileStatement(
@@ -189,7 +188,7 @@ internal object LanSyncDatabase {
         check(changed == 1)
     }
 
-    private fun observeTimestamp(db: SQLiteDatabase, time: Instant) {
+    private fun observeTimestamp(db: HealthDatabase, time: Instant) {
         // Match Rust: ceil sub-millisecond remote timestamps before local HLC.
         require(time.epochSecond >= 0)
         val millis = Math.addExact(Math.multiplyExact(time.epochSecond, 1000L),
@@ -222,7 +221,7 @@ internal object LanSyncDatabase {
 
     private data class RowKey(val value: Any, val text: String)
 
-    private fun rowKey(db: SQLiteDatabase, table: String, id: Any?, tombstone: Boolean = false): RowKey {
+    private fun rowKey(db: HealthDatabase, table: String, id: Any?, tombstone: Boolean = false): RowKey {
         require(id != null && id != JSONObject.NULL)
         val type = tableSchema(db, table)["id"] ?: throw SyncFailure("Invalid LAN table schema")
         return if (type.uppercase(Locale.ROOT).contains("TEXT")) {
@@ -244,7 +243,7 @@ internal object LanSyncDatabase {
         }
     }
 
-    private fun upsertRow(db: SQLiteDatabase, table: String, fields: JSONObject, remote: Instant): Boolean {
+    private fun upsertRow(db: HealthDatabase, table: String, fields: JSONObject, remote: Instant): Boolean {
         val key = rowKey(db, table, fields.opt("id"))
         if (table == "event_categories") return upsertCategory(db, fields, remote)
         val tomb = queryString(db,
@@ -259,7 +258,7 @@ internal object LanSyncDatabase {
         return true
     }
 
-    private fun upsertCategory(db: SQLiteDatabase, fields: JSONObject, remote: Instant): Boolean {
+    private fun upsertCategory(db: HealthDatabase, fields: JSONObject, remote: Instant): Boolean {
         val name = fields.opt("name") as? String ?: throw SyncFailure("Invalid LAN category")
         require(name.isNotEmpty())
         val tomb = queryString(db,
@@ -273,7 +272,7 @@ internal object LanSyncDatabase {
         return true
     }
 
-    private fun applyTombstone(db: SQLiteDatabase, table: String, id: Any, remote: Instant): Boolean {
+    private fun applyTombstone(db: HealthDatabase, table: String, id: Any, remote: Instant): Boolean {
         val key: RowKey
         val column: String
         if (table == "event_categories") {
@@ -304,7 +303,7 @@ internal object LanSyncDatabase {
         return deleted > 0 || known != effective
     }
 
-    private fun executeUpsert(db: SQLiteDatabase, table: String, conflict: String,
+    private fun executeUpsert(db: HealthDatabase, table: String, conflict: String,
                              fields: JSONObject, includeId: Boolean) {
         val schema = tableSchema(db, table)
         val cols = schema.keys.filter { fields.has(it) && (includeId || it != "id") }
@@ -316,7 +315,7 @@ internal object LanSyncDatabase {
         db.execSQL(sql, cols.map { sqlValue(fields.opt(it)) }.toTypedArray())
     }
 
-    private fun advanceCursors(db: SQLiteDatabase, prefix: String, rows: Map<String, String>, tomb: String) {
+    private fun advanceCursors(db: HealthDatabase, prefix: String, rows: Map<String, String>, tomb: String) {
         for ((table, maximum) in rows) {
             require(table in allowed)
             if (maximum > readCursor(db, prefix, table)) writeSetting(db, "$prefix$table", maximum)
@@ -326,13 +325,13 @@ internal object LanSyncDatabase {
         }
     }
 
-    private fun readSnapshot(db: SQLiteDatabase): CursorSnapshot = CursorSnapshot(
+    private fun readSnapshot(db: HealthDatabase): CursorSnapshot = CursorSnapshot(
         TABLES.associateWith { readCursor(db, PUSH_PREFIX, it) },
         TABLES.associateWith { readCursor(db, PULL_PREFIX, it) },
         readCursor(db, PUSH_PREFIX, "tombstones"), readCursor(db, PULL_PREFIX, "tombstones"),
     )
 
-    private fun readCursor(db: SQLiteDatabase, prefix: String, table: String): String {
+    private fun readCursor(db: HealthDatabase, prefix: String, table: String): String {
         readSetting(db, "$prefix$table")?.let { return it }
         // Preserve old progress. Historical reconciliation is explicit.
         var previous = EPOCH
@@ -342,10 +341,10 @@ internal object LanSyncDatabase {
         return previous
     }
 
-    private fun projectionRegistryExists(db: SQLiteDatabase): Boolean =
+    private fun projectionRegistryExists(db: HealthDatabase): Boolean =
         queryString(db, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='hc_sleep_projection_owned' AND type='table')", emptyArray()) == "1"
 
-    private fun projectionRowFilter(db: SQLiteDatabase, table: String): String {
+    private fun projectionRowFilter(db: HealthDatabase, table: String): String {
         require(table in allowed)
         val parts = mutableListOf("1")
         if (table == "sleep_sessions") parts.add("CAST($table.id AS TEXT) NOT GLOB 'raw-sleep:*'")
@@ -357,7 +356,7 @@ internal object LanSyncDatabase {
         return parts.joinToString(" AND ")
     }
 
-    private fun projectionTombFilter(db: SQLiteDatabase): String {
+    private fun projectionTombFilter(db: HealthDatabase): String {
         val parts = mutableListOf(
             "NOT (sync_tombstones.table_name='sleep_sessions' AND sync_tombstones.row_id GLOB 'raw-sleep:*')",
             "NOT (sync_tombstones.table_name='sleep_stages' AND sync_tombstones.row_id GLOB 'raw-stage:*')")
@@ -365,7 +364,7 @@ internal object LanSyncDatabase {
         return parts.joinToString(" AND ")
     }
 
-    private fun tableSchema(db: SQLiteDatabase, table: String): Map<String, String> {
+    private fun tableSchema(db: HealthDatabase, table: String): Map<String, String> {
         require(table in allowed)
         val columns = linkedMapOf<String, String>()
         db.rawQuery("PRAGMA table_info($table)", null).use {
@@ -375,7 +374,7 @@ internal object LanSyncDatabase {
         return columns
     }
 
-    private fun queryString(db: SQLiteDatabase, sql: String, args: Array<Any?>): String? =
+    private fun queryString(db: HealthDatabase, sql: String, args: Array<Any?>): String? =
         db.rawQuery(sql, args.map { it?.toString() ?: "" }.toTypedArray()).use {
             if (it.moveToFirst()) it.getString(0) else null
         }
@@ -397,12 +396,12 @@ internal object LanSyncDatabase {
         })
     }
 
-    private fun readSetting(db: SQLiteDatabase, key: String): String? =
+    private fun readSetting(db: HealthDatabase, key: String): String? =
         db.rawQuery("SELECT value FROM app_settings WHERE key=?", arrayOf(key)).use {
             if (it.moveToFirst()) it.getString(0) else null
         }
 
-    private fun writeSetting(db: SQLiteDatabase, key: String, value: String) = db.execSQL(
+    private fun writeSetting(db: HealthDatabase, key: String, value: String) = db.execSQL(
         "INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         arrayOf(key, value),
     )

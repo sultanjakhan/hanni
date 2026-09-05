@@ -4,6 +4,8 @@ mod types;
 mod prompts;
 mod db;
 mod secure_fs;
+#[cfg(any(target_os = "android", test))]
+mod startup_db_guard;
 mod secret_store;
 mod sports_seed;
 mod chat;
@@ -48,6 +50,10 @@ mod health_raw_sleep_projection;
 mod bg_sync;
 #[cfg(target_os = "android")]
 mod cloud_relay_android;
+#[cfg(any(target_os = "android", test))]
+mod health_database;
+#[cfg(target_os = "android")]
+mod health_database_android;
 mod sleep_analysis;
 mod timeline_health;
 mod calendar_health;
@@ -165,6 +171,9 @@ fn init_database() -> HanniDb {
     // The destination must be private before legacy files or a new database
     // are created inside it. On Windows this applies a protected DACL.
     let data_dir = hanni_data_dir();
+    #[cfg(target_os = "android")]
+    let startup_policy = startup_db_guard::inspect_android(&data_dir)
+        .unwrap_or_else(|_| panic!("database_recovery_required"));
     secure_fs::ensure_private_dir(&data_dir)
         .expect("Cannot create and secure Hanni data directory");
     secure_fs::startup_repair(&data_dir)
@@ -186,9 +195,14 @@ fn init_database() -> HanniDb {
     }
 
     let db_path = hanni_db_path();
-    eprintln!("[hanni] init_database: opening {:?}", db_path);
-    let conn = rusqlite::Connection::open(&db_path)
-        .expect("Cannot open hanni.db");
+    eprintln!("[hanni] init_database: opening database");
+    #[cfg(target_os = "android")]
+    let open_flags = startup_db_guard::checked_open_flags(&data_dir, startup_policy)
+        .unwrap_or_else(|_| panic!("database_recovery_required"));
+    #[cfg(not(target_os = "android"))]
+    let open_flags = rusqlite::OpenFlags::default();
+    let conn = rusqlite::Connection::open_with_flags(&db_path, open_flags)
+        .unwrap_or_else(|_| panic!("database_open_failed"));
 
     // WAL lets the read connection (see HanniDb::read) read a consistent
     // snapshot while a long write (sync/import) holds the writer. Without it the
@@ -355,7 +369,7 @@ fn init_database() -> HanniDb {
     // copy the database.
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
         .expect("Cannot checkpoint Hanni database before backup");
-    if let Err(error) = backup_db() {
+    if let Err(error) = backup_db(&conn) {
         if error.is_security() {
             panic!("Cannot create a securely-permissioned Hanni backup: {error}");
         }
@@ -369,8 +383,9 @@ fn init_database() -> HanniDb {
     // header), so this connection opens in WAL too and reads snapshots without
     // blocking behind the writer. cr-sqlite is loaded so SELECTs over CRR views
     // work; no migrations/seed run here — the writer already initialised them.
-    let reader = rusqlite::Connection::open(&db_path)
-        .expect("Cannot open hanni.db (reader)");
+    let reader = rusqlite::Connection::open_with_flags(&db_path,
+        rusqlite::OpenFlags::default() & !rusqlite::OpenFlags::SQLITE_OPEN_CREATE)
+        .unwrap_or_else(|_| panic!("database_reader_open_failed"));
     reader.busy_timeout(std::time::Duration::from_millis(5000)).ok();
     load_crsqlite(&reader);
 
@@ -1050,7 +1065,7 @@ pub fn run() {
                         std::path::PathBuf::from("/data/data/com.sultanjakhan.hanni/files")
                     });
                 eprintln!("[hanni] android data_dir = {:?}", data_dir);
-                let _ = std::fs::create_dir_all(&data_dir);
+                // init_database performs its read-only evidence check before directory writes.
                 types::set_data_dir(data_dir);
                 let t0 = std::time::Instant::now();
                 eprintln!("[hanni] init_database START");

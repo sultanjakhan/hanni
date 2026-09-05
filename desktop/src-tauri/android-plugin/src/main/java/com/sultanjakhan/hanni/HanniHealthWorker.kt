@@ -2,7 +2,6 @@ package com.sultanjakhan.hanni
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import android.util.Log
 import java.io.File
 import androidx.health.connect.client.HealthConnectClient
@@ -80,8 +79,7 @@ class HanniHealthWorker(
             }
             val dbFile = File(ctx.filesDir.parentFile, "hanni.db")
             if (!dbFile.exists() || dbFile.length() == 0L) return@withContext Result.retry()
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null,
-                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
+            val db = NativeHealthDatabase.openExisting(dbFile.absolutePath)
             try {
                 db.beginTransaction()
                 try {
@@ -115,7 +113,7 @@ class HanniHealthWorker(
         }
     }
 
-    private fun insertSleep(db: SQLiteDatabase, arr: JSONArray) {
+    private fun insertSleep(db: HealthDatabase, arr: JSONArray) {
         val now = isoNow()
         for (i in 0 until arr.length()) {
             val s = arr.optJSONObject(i) ?: continue
@@ -142,7 +140,7 @@ class HanniHealthWorker(
                     put("source", "health_connect")
                     put("created_at", now)
                 }
-                if (db.insertWithOnConflict("sleep_sessions", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L) {
+                if (db.insertWithOnConflict("sleep_sessions", null, cv, HealthDatabase.CONFLICT_IGNORE) != -1L) {
                     sessionId = recordId
                 } else {
                     db.rawQuery(
@@ -167,7 +165,7 @@ class HanniHealthWorker(
         }
     }
 
-    private fun reconcileSleepStages(db: SQLiteDatabase, sessionId: String, stages: JSONArray) {
+    private fun reconcileSleepStages(db: HealthDatabase, sessionId: String, stages: JSONArray) {
         val desired = linkedSetOf<Triple<String, String, String>>()
         for (i in 0 until stages.length()) {
             val st = stages.optJSONObject(i) ?: continue
@@ -195,11 +193,11 @@ class HanniHealthWorker(
                 put("end_time", end)
                 put("stage", stage)
             }
-            db.insertWithOnConflict("sleep_stages", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+            db.insertWithOnConflict("sleep_stages", null, cv, HealthDatabase.CONFLICT_IGNORE)
         }
     }
 
-    private fun insertExercise(db: SQLiteDatabase, arr: JSONArray) {
+    private fun insertExercise(db: HealthDatabase, arr: JSONArray) {
         val now = isoNow()
         // Upsert per session by (date, start_time, notes). Old code did
         // delete-by-date which clobbered Mac-synced rows on every poll —
@@ -246,7 +244,7 @@ class HanniHealthWorker(
         }
     }
 
-    private fun insertSteps(db: SQLiteDatabase, arr: JSONArray) {
+    private fun insertSteps(db: HealthDatabase, arr: JSONArray) {
         val now = isoNow()
         for (i in 0 until arr.length()) {
             val d = arr.optJSONObject(i) ?: continue
@@ -282,7 +280,7 @@ class HanniHealthWorker(
         }
     }
 
-    private fun insertHeartRate(db: SQLiteDatabase, arr: JSONArray) {
+    private fun insertHeartRate(db: HealthDatabase, arr: JSONArray) {
         for (i in 0 until arr.length()) {
             val s = arr.optJSONObject(i) ?: continue
             val date = s.optString("date")
@@ -295,7 +293,7 @@ class HanniHealthWorker(
             val cv = ContentValues().apply {
                 put("id", id); put("date", date); put("time", time); put("bpm", bpm)
             }
-            db.insertWithOnConflict("heart_rate_samples", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+            db.insertWithOnConflict("heart_rate_samples", null, cv, HealthDatabase.CONFLICT_IGNORE)
             // The same HC sample can be corrected later; preserve its stable ID.
             val patch = ContentValues().apply { put("date", date); put("time", time); put("bpm", bpm) }
             db.update("heart_rate_samples", patch,

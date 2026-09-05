@@ -165,14 +165,12 @@ impl std::fmt::Display for BackupError {
 }
 
 /// Create a timestamped backup of hanni.db, keep last 5
-pub fn backup_db() -> Result<(), BackupError> {
+pub fn backup_db(conn: &rusqlite::Connection) -> Result<(), BackupError> {
     let data_dir = hanni_data_dir();
-    let db_path = data_dir.join("hanni.db");
-    if !db_path.exists() { return Ok(()); }
     let backup_dir = data_dir.join("backups");
     secure_fs::ensure_private_dir(&backup_dir)
         .map_err(|e| BackupError::Security(format!("secure backup directory: {e}")))?;
-    // Throttle to at most one backup per day. Copying the (ever-growing) DB on
+    // Throttle to at most one backup per day. Backing up the (ever-growing) DB on
     // every launch sat on the Android cold-start hot path for little value.
     let today = chrono::Local::now().format("%Y%m%d").to_string();
     let prefix = format!("hanni_{}_", today);
@@ -188,40 +186,7 @@ pub fn backup_db() -> Result<(), BackupError> {
     }
     let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let dest = backup_dir.join(format!("hanni_{}.db", ts));
-    std::fs::copy(&db_path, &dest).map_err(|error| {
-        let _ = std::fs::remove_file(&dest);
-        BackupError::Data(format!("copy database backup: {error}"))
-    })?;
-    if let Err(error) = restrict_file(&dest) {
-        let cleanup = std::fs::remove_file(&dest)
-            .err()
-            .map(|e| format!("; cleanup failed: {e}"))
-            .unwrap_or_default();
-        return Err(BackupError::Security(format!(
-            "secure database backup: {error}{cleanup}"
-        )));
-    }
-    // Also copy WAL if present
-    let wal = data_dir.join("hanni.db-wal");
-    if wal.exists() {
-        let wal_dest = backup_dir.join(format!("hanni_{}.db-wal", ts));
-        if let Err(error) = std::fs::copy(&wal, &wal_dest) {
-            let _ = std::fs::remove_file(&wal_dest);
-            let _ = std::fs::remove_file(&dest);
-            return Err(BackupError::Data(format!("copy WAL backup: {error}")));
-        }
-        if let Err(error) = restrict_file(&wal_dest) {
-            let wal_cleanup = std::fs::remove_file(&wal_dest).err();
-            let db_cleanup = std::fs::remove_file(&dest).err();
-            let cleanup = match (wal_cleanup, db_cleanup) {
-                (None, None) => String::new(),
-                (wal, db) => format!("; cleanup failed: wal={wal:?}, db={db:?}"),
-            };
-            return Err(BackupError::Security(format!(
-                "secure WAL backup: {error}{cleanup}"
-            )));
-        }
-    }
+    online_backup_to(conn, &dest)?;
     // Keep only last 5 backups
     let mut backups = Vec::new();
     for entry in std::fs::read_dir(&backup_dir)
@@ -250,6 +215,165 @@ pub fn backup_db() -> Result<(), BackupError> {
     }
     eprintln!("DB backup: {}", dest.display());
     Ok(())
+}
+
+/// Capture through the live SQLite connection; never reopen/copy the source file.
+/// Only a complete, checked standalone database is published, without overwriting.
+fn online_backup_to(conn: &rusqlite::Connection, dest: &std::path::Path) -> Result<(), BackupError> {
+    use rusqlite::backup::{Backup, StepResult};
+    use std::time::{Duration, Instant};
+
+    let parent = dest.parent().ok_or_else(|| BackupError::Data("backup_parent_missing".into()))?;
+    match std::fs::symlink_metadata(dest) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return Err(BackupError::Data("backup_destination_exists_or_unreadable".into())),
+    }
+    // tempfile uses CREATE_NEW; the containing directory has already been secured.
+    let temporary = tempfile::Builder::new().prefix(".hanni-backup-").suffix(".tmp")
+        .tempfile_in(parent).map_err(|_| BackupError::Data("backup_temp_create_failed".into()))?;
+    secure_fs::restrict_file(temporary.path())
+        .map_err(|_| BackupError::Security("backup_temp_permissions_failed".into()))?;
+    // Close this ordinary file handle before SQLite opens the destination.
+    let temporary = temporary.into_temp_path();
+    let copied = (|| -> Result<(), BackupError> {
+        let mut output = rusqlite::Connection::open_with_flags(&temporary,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|_| BackupError::Data("backup_destination_open_failed".into()))?;
+        output.busy_timeout(Duration::from_millis(100))
+            .map_err(|_| BackupError::Data("backup_timeout_setup_failed".into()))?;
+        {
+            let backup = Backup::new(conn, &mut output)
+                .map_err(|_| BackupError::Data("backup_init_failed".into()))?;
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                if Instant::now() >= deadline {
+                    return Err(BackupError::Data("backup_deadline_exceeded".into()));
+                }
+                match backup.step(128).map_err(|_| BackupError::Data("backup_step_failed".into()))? {
+                    StepResult::Done => break,
+                    StepResult::More => std::thread::yield_now(),
+                    StepResult::Busy | StepResult::Locked => std::thread::sleep(Duration::from_millis(10)),
+                    _ => return Err(BackupError::Data("backup_step_unexpected".into())),
+                }
+            }
+        }
+        // This changes only the destination, making its bytes independent of WAL.
+        let mode: String = output.query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0))
+            .map_err(|_| BackupError::Data("backup_standalone_failed".into()))?;
+        if !mode.eq_ignore_ascii_case("delete") {
+            return Err(BackupError::Data("backup_standalone_failed".into()));
+        }
+        let integrity: String = output.query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .map_err(|_| BackupError::Data("backup_integrity_failed".into()))?;
+        if integrity != "ok" { return Err(BackupError::Data("backup_integrity_failed".into())); }
+        output.close().map_err(|_| BackupError::Data("backup_destination_close_failed".into()))?;
+        Ok(())
+    })();
+    // SQLite handles have now closed. Only sidecars of our CREATE_NEW temp are eligible.
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut sidecar = temporary.as_os_str().to_os_string(); sidecar.push(suffix);
+        if let Err(error) = std::fs::remove_file(std::path::PathBuf::from(sidecar)) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(BackupError::Security("backup_temp_cleanup_failed".into()));
+            }
+        }
+    }
+    copied?;
+    // Opening/syncing this file is safe now that its SQLite connection has closed.
+    std::fs::OpenOptions::new().write(true).open(&temporary)
+        .and_then(|file| file.sync_all())
+        .map_err(|_| BackupError::Data("backup_sync_failed".into()))?;
+    // No-clobber publication also handles a destination created after the initial check.
+    temporary.persist_noclobber(dest)
+        .map_err(|_| BackupError::Data("backup_publish_failed".into()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod online_backup_tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::sync::{Arc, Barrier};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn prepare() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        secure_fs::ensure_private_dir(dir.path()).unwrap();
+        let conn = Connection::open(dir.path().join("source.db")).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE pair(id INTEGER PRIMARY KEY, a INTEGER NOT NULL, b INTEGER NOT NULL); INSERT INTO pair VALUES(1,0,0); CREATE TABLE padding(x BLOB); INSERT INTO padding VALUES(zeroblob(4194304));").unwrap();
+        (dir, conn)
+    }
+
+    #[test]
+    fn online_backup_includes_wal_without_changing_source_bytes() {
+        let (dir, conn) = prepare();
+        conn.execute("UPDATE pair SET a=7,b=7", []).unwrap();
+        let source = dir.path().join("source.db");
+        let wal = dir.path().join("source.db-wal");
+        let before = (std::fs::read(&source).unwrap(), std::fs::read(&wal).unwrap());
+        let dest = dir.path().join("complete.db");
+        online_backup_to(&conn, &dest).unwrap();
+        assert_eq!(before, (std::fs::read(&source).unwrap(), std::fs::read(&wal).unwrap()));
+        let copy = Connection::open_with_flags(&dest, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        assert_eq!(copy.query_row("SELECT a FROM pair", [], |r| r.get::<_, i64>(0)).unwrap(), 7);
+        assert_eq!(copy.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
+        assert_eq!(copy.query_row("PRAGMA journal_mode", [], |r| r.get::<_, String>(0)).unwrap(), "delete");
+        assert!(!dir.path().join("complete.db-wal").exists());
+    }
+
+    #[test]
+    fn online_backup_stays_consistent_during_other_connection_writes() {
+        let (dir, conn) = prepare();
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_barrier = barrier.clone();
+        let committed = Arc::new(AtomicUsize::new(0));
+        let writer_committed = committed.clone();
+        let path = dir.path().join("source.db");
+        let writer = std::thread::spawn(move || {
+            let c = Connection::open(path).unwrap();
+            c.busy_timeout(std::time::Duration::from_secs(2)).unwrap();
+            writer_barrier.wait();
+            for value in 1..=100 {
+                c.execute("UPDATE pair SET a=?1,b=?1", [value]).unwrap();
+                writer_committed.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        });
+        barrier.wait();
+        let dest = dir.path().join("concurrent.db");
+        let before = committed.load(Ordering::SeqCst);
+        online_backup_to(&conn, &dest).unwrap();
+        let after = committed.load(Ordering::SeqCst);
+        assert!(after > before, "writer must commit during the backup operation");
+        writer.join().unwrap();
+        let copy = Connection::open_with_flags(&dest, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let (a,b): (i64,i64) = copy.query_row("SELECT a,b FROM pair", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        assert_eq!(a,b); assert!((0..=100).contains(&a));
+        assert_eq!(copy.query_row("PRAGMA quick_check", [], |r| r.get::<_,String>(0)).unwrap(), "ok");
+    }
+
+    #[test]
+    fn online_backup_failure_never_removes_or_overwrites_existing_destination() {
+        let (dir, conn) = prepare();
+        let dest = dir.path().join("existing.db");
+        std::fs::write(&dest, b"synthetic-existing-backup").unwrap();
+        assert!(online_backup_to(&conn, &dest).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"synthetic-existing-backup");
+        assert!(!std::fs::read_dir(dir.path()).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".hanni-backup-")));
+    }
+
+    #[test]
+    fn online_backup_corrupt_source_does_not_publish_or_delete_source() {
+        let dir = tempfile::tempdir().unwrap(); secure_fs::ensure_private_dir(dir.path()).unwrap();
+        let source = dir.path().join("corrupt.db");
+        std::fs::write(&source, b"synthetic-not-a-database").unwrap();
+        let conn = Connection::open_with_flags(&source, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+        let dest = dir.path().join("must-not-exist.db");
+        assert!(online_backup_to(&conn, &dest).is_err());
+        assert!(!dest.exists());
+        assert_eq!(std::fs::read(&source).unwrap(), b"synthetic-not-a-database");
+        assert!(!std::fs::read_dir(dir.path()).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".hanni-backup-")));
+    }
 }
 
 pub fn init_db(conn: &rusqlite::Connection) -> Result<(), String> {

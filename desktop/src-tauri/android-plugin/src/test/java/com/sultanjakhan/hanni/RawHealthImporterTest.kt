@@ -1,6 +1,5 @@
 package com.sultanjakhan.hanni
 
-import android.database.sqlite.SQLiteDatabase
 import androidx.health.connect.client.permission.HealthPermission
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -18,17 +17,17 @@ import java.time.Instant
 @Config(sdk = [33], manifest = Config.NONE)
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class RawHealthImporterTest {
-    private lateinit var db: SQLiteDatabase
+    private lateinit var db: PlatformTestHealthDatabase
     private lateinit var store: RawHealthRecordStore
     private var backingFile: File? = null
     private val now = RawHealthTestSupport.now
     private val steps = RawHealthRecordCodec.descriptors.single { it.name == "StepsRecord" }
     private val sleep = RawHealthRecordCodec.descriptors.single { it.name == "SleepSessionRecord" }
     @Before fun open() {
-        db = SQLiteDatabase.create(null); RawHealthTestSupport.initialize(db)
+        db = PlatformTestHealthDatabase.create(null); RawHealthTestSupport.initialize(db)
         store = RawHealthRecordStore(db, RawHealthTestSupport.storeId)
     }
-    @After fun close() { db.close(); backingFile?.let { SQLiteDatabase.deleteDatabase(it) } }
+    @After fun close() { db.close(); backingFile?.let { PlatformTestHealthDatabase.deleteDatabase(it) } }
     private class Source : RawHealthSource {
         val permissions = mutableSetOf<String>()
         val calls = mutableListOf<String>()
@@ -54,7 +53,7 @@ class RawHealthImporterTest {
         db.close()
         val file = File.createTempFile("raw-hc-importer-", ".db")
         backingFile = file
-        db = SQLiteDatabase.openOrCreateDatabase(file, null)
+        db = PlatformTestHealthDatabase.openOrCreateDatabase(file, null)
         RawHealthTestSupport.initialize(db)
         store = RawHealthRecordStore(db, RawHealthTestSupport.storeId)
         val source = Source().apply {
@@ -68,7 +67,7 @@ class RawHealthImporterTest {
         assertEquals(listOf("token:StepsRecord", "page:StepsRecord:first"), source.calls)
         assertEquals("second", store.checkpoint(steps.name).pageToken)
         db.close()
-        db = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+        db = PlatformTestHealthDatabase.openDatabase(file.absolutePath, null, PlatformTestHealthDatabase.OPEN_READWRITE)
         store = RawHealthRecordStore(db, RawHealthTestSupport.storeId)
         assertTrue(engine(source).runOnce(false).morePending)
         assertEquals("replay", store.checkpoint(steps.name).phase)

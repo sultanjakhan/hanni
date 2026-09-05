@@ -1,7 +1,6 @@
 package com.sultanjakhan.hanni
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
@@ -28,8 +27,7 @@ class HanniLanSyncWorker(context: Context, params: WorkerParameters) :
             return@withContext Result.retry()
         }
         try {
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null,
-                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
+            val db = NativeHealthDatabase.openExisting(dbFile.absolutePath)
             val stats = try {
                 BackgroundLanSync.runConfigured(db)
             } finally {

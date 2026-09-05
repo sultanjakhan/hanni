@@ -1,6 +1,5 @@
 package com.sultanjakhan.hanni
 
-import android.database.sqlite.SQLiteDatabase
 import java.io.File
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -25,13 +24,13 @@ import org.robolectric.annotation.SQLiteMode
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class LanSyncReliabilityTest {
     @get:Rule val temporaryFolder = TemporaryFolder()
-    private lateinit var db: SQLiteDatabase
+    private lateinit var db: PlatformTestHealthDatabase
     private lateinit var databaseFile: File
     private val stamp = "2026-01-01T00:00:00Z"
 
     @Before fun setUp() {
         databaseFile = temporaryFolder.newFile("synthetic.db")
-        db = SQLiteDatabase.openOrCreateDatabase(databaseFile, null)
+        db = PlatformTestHealthDatabase.openOrCreateDatabase(databaseFile, null)
         db.execSQL("CREATE TABLE app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
         db.execSQL("CREATE TABLE sync_tombstones(table_name TEXT NOT NULL,row_id TEXT NOT NULL,deleted_at TEXT NOT NULL,PRIMARY KEY(table_name,row_id))")
         db.execSQL("CREATE TABLE notes(id TEXT PRIMARY KEY,title TEXT NOT NULL,updated_at TEXT NOT NULL)")
@@ -218,7 +217,7 @@ class LanSyncReliabilityTest {
         assertTrue(runCatching { BackgroundLanSync.runConfigured(db) }.isFailure)
         assertEquals(before, settings())
         db.close()
-        db = SQLiteDatabase.openOrCreateDatabase(databaseFile, null)
+        db = PlatformTestHealthDatabase.openOrCreateDatabase(databaseFile, null)
         assertEquals(setOf("local"), outboundIds(LanSyncDatabase.gather(db)))
         withServer(response().toString()) { address, request ->
             configure(address)

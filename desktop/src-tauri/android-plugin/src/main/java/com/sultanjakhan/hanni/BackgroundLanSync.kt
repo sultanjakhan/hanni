@@ -1,6 +1,5 @@
 package com.sultanjakhan.hanni
 
-import android.database.sqlite.SQLiteDatabase
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -9,7 +8,7 @@ import java.net.URL
 internal object BackgroundLanSync {
     data class Stats(val sent: Int, val received: Int, val deletes: Int)
 
-    fun runConfigured(db: SQLiteDatabase): Stats? {
+    fun runConfigured(db: HealthDatabase): Stats? {
         val config = readConfig(db) ?: return null
         val outbound = LanSyncDatabase.gather(db, config.second)
         val request = JSONObject().apply {
@@ -45,7 +44,7 @@ internal object BackgroundLanSync {
         }
     }
 
-    private fun readConfig(db: SQLiteDatabase): Pair<String, String>? {
+    private fun readConfig(db: HealthDatabase): Pair<String, String>? {
         var peer = ""
         var key = ""
         var enabled = false

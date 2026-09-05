@@ -1,6 +1,5 @@
 package com.sultanjakhan.hanni
 
-import android.database.sqlite.SQLiteDatabase
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -15,12 +14,12 @@ import org.robolectric.annotation.SQLiteMode
 @Config(sdk = [33], manifest = Config.NONE)
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class RawHealthRecordStoreTest {
-    private lateinit var db: SQLiteDatabase
+    private lateinit var db: PlatformTestHealthDatabase
     private lateinit var store: RawHealthRecordStore
     private val now = RawHealthTestSupport.now
     private val type = RawHealthTestSupport.type
     @Before fun open() {
-        db = SQLiteDatabase.create(null)
+        db = PlatformTestHealthDatabase.create(null)
         RawHealthTestSupport.initialize(db)
         store = RawHealthRecordStore(db, RawHealthTestSupport.storeId)
     }

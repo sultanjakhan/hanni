@@ -2,7 +2,6 @@ package com.sultanjakhan.hanni
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import org.json.JSONObject
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
@@ -40,15 +39,15 @@ internal data class RawHealthCheckpoint(
 }
 
 /** Source-only persistence. The common SQL asset supplies the same relay dirty triggers as Rust. */
-internal class RawHealthRecordStore(private val db: SQLiteDatabase, val sourceStoreId: String) {
+internal class RawHealthRecordStore(private val db: HealthDatabase, val sourceStoreId: String) {
     companion object {
         private val timestamp = DateTimeFormatterBuilder().appendInstant(9).toFormatter(Locale.ROOT)
         fun iso(value: Instant): String = timestamp.format(value)
-        fun initialize(db: SQLiteDatabase, context: Context) = initialize(
+        fun initialize(db: HealthDatabase, context: Context) = initialize(
             db, context.assets.open("health-records-schema.sql").bufferedReader(Charsets.UTF_8).use { it.readText() },
         )
 
-        fun initialize(db: SQLiteDatabase, sharedSql: String) {
+        fun initialize(db: HealthDatabase, sharedSql: String) {
             transaction(db) {
                 require(sharedSql.contains("-- hanni-statement"))
                 for (statement in sharedSql.split("-- hanni-statement")) {
@@ -68,7 +67,7 @@ internal class RawHealthRecordStore(private val db: SQLiteDatabase, val sourceSt
             }
         }
 
-        private fun <T> transaction(db: SQLiteDatabase, action: () -> T): T {
+        private fun <T> transaction(db: HealthDatabase, action: () -> T): T {
             try {
                 check(!db.inTransaction())
                 db.beginTransaction()
@@ -128,7 +127,7 @@ internal class RawHealthRecordStore(private val db: SQLiteDatabase, val sourceSt
             put("last_attempt_at", next.lastAttempt?.let(::iso)); put("last_success_at", next.lastSuccess?.let(::iso))
             put("not_before_utc", next.notBefore?.let(::iso))
         }
-        db.insertWithOnConflict("hc_raw_import_state", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        db.insertWithOnConflict("hc_raw_import_state", null, values, HealthDatabase.CONFLICT_REPLACE)
             .also { if (it == -1L) throw RawHealthImportException("hc_checkpoint_write_failed") }
         modified
     }
