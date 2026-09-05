@@ -5346,6 +5346,10 @@ pub fn migrate_health_sync_cleanup_v1(conn: &rusqlite::Connection) {
     ).ok().and_then(|mut s| s.exists([]).ok()).unwrap_or(false);
     if done { return; }
 
+    // Same-day sleep can be a separate nap. Retire an unstaged legacy row only
+    // when the staged row has the same interval and user-visible values.
+    // Existing tombstones have no cleanup provenance: preserve them so genuine
+    // source deletions can still reach devices that were offline.
     let result = conn.execute_batch(
         "BEGIN IMMEDIATE;
          DROP TRIGGER IF EXISTS sleep_stages_tombstone;
@@ -5365,6 +5369,13 @@ pub fn migrate_health_sync_cleanup_v1(conn: &rusqlite::Connection) {
              SELECT 1 FROM sleep_sessions AS other
              WHERE other.date=sleep_sessions.date AND other.source='health_connect'
                AND other.id<>sleep_sessions.id
+               AND length(trim(sleep_sessions.start_time))>0
+               AND length(trim(sleep_sessions.end_time))>0
+               AND other.start_time=sleep_sessions.start_time
+               AND other.end_time=sleep_sessions.end_time
+               AND other.duration_minutes=sleep_sessions.duration_minutes
+               AND other.notes IS sleep_sessions.notes
+               AND other.quality_score IS sleep_sessions.quality_score
                AND EXISTS (SELECT 1 FROM sleep_stages WHERE session_id=other.id)
            );
          DELETE FROM health_log WHERE health_log.type='steps' AND EXISTS (
@@ -5388,7 +5399,6 @@ pub fn migrate_health_sync_cleanup_v1(conn: &rusqlite::Connection) {
              AND b.date=events.date AND b.title=events.title AND b.time=events.time AND b.id>events.id
          );
 
-         DELETE FROM sync_tombstones WHERE table_name IN ('sleep_sessions','sleep_stages','health_log');
          CREATE UNIQUE INDEX IF NOT EXISTS uq_sleep_stage_natural
            ON sleep_stages(session_id,start_time,end_time,stage);
          CREATE UNIQUE INDEX IF NOT EXISTS uq_health_steps_date
@@ -5423,6 +5433,10 @@ pub fn migrate_shopping_list(conn: &rusqlite::Connection) {
         ).ok();
     }
 }
+
+#[cfg(test)]
+#[path = "health_sync_cleanup_tests.rs"]
+mod health_sync_cleanup_tests;
 
 #[cfg(test)]
 mod automation_log_security_tests {

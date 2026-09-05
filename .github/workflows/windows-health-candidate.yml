@@ -1,0 +1,144 @@
+name: Windows health candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_main_sha:
+        description: Full SHA of the reviewed current main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hanni-windows-health-candidate
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    environment: hanni-production
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Validate reviewed main and updater key
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWED_MAIN_SHA: ${{ inputs.reviewed_main_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$REVIEWED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$REVIEWED_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_MAIN_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$REVIEWED_MAIN_SHA"
+          python scripts/verify-updater-public-key.py
+          python -c 'import json,pathlib; c=json.loads(pathlib.Path("desktop/src-tauri/tauri.health-candidate.conf.json").read_text()); assert c == {"version":"1.1.15","bundle":{"android":{"versionCode":1001015}}}'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-09-01
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop/src-tauri
+          key: windows-health-candidate
+
+      - name: Ensure native crypto assembler
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm --no-progress --yes
+            if ($LASTEXITCODE -ne 0) { throw 'NASM installation failed' }
+          }
+          cmake --version
+          nasm -v
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --manifest-path desktop/src-tauri/Cargo.toml --no-deps --format-version 1 > /dev/null
+          npm --prefix desktop ci
+
+      - name: Build release executable without installer
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run tauri -- build --ci --no-bundle --config src-tauri/tauri.health-candidate.conf.json -- --locked
+
+      - name: Validate and stage executable and native dependencies
+        shell: pwsh
+        run: ./scripts/package-windows-health-candidate.ps1
+
+      - name: Sign candidate files with existing updater key
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Updater signing key missing' }
+          $stage = Join-Path $env:RUNNER_TEMP 'hanni-windows-health-candidate'
+          foreach ($file in Get-ChildItem -LiteralPath $stage -File) {
+            & npm --prefix desktop run tauri -- signer sign $file.FullName > $null
+            if ($LASTEXITCODE -ne 0) { throw 'Candidate signing failed' }
+            if (-not (Test-Path -LiteralPath ($file.FullName + '.sig'))) { throw 'Signature missing' }
+          }
+
+      - name: Upload intermediate files for independent signature verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-candidate-unverified-${{ github.sha }}
+          path: ${{ runner.temp }}/hanni-windows-health-candidate/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Install Minisign verifier
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes minisign
+
+      - name: Verify exact build and all detached signatures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-updater-public-key.py
+          STAGE="$RUNNER_TEMP/hanni-windows-health-candidate"
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "windows-candidate-unverified-$GITHUB_SHA" --dir "$STAGE"
+          for FILE in "$STAGE"/*; do
+            case "$FILE" in *.sig) continue;; esac
+            bash scripts/verify-tauri-signature.sh "$FILE" "$FILE.sig" desktop/src-tauri/updater.pub
+          done
+          python3 scripts/verify-windows-health-candidate.py "$STAGE"
+
+      - name: Upload verified Windows health candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hanni-windows-health-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/hanni-windows-health-candidate/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

@@ -59,6 +59,8 @@ jobs:
             test "$GITHUB_SHA" = "$REVIEWED_MAIN_SHA"
             test "$(git rev-parse HEAD)" = "$REVIEWED_MAIN_SHA"
             git diff --exit-code HEAD
+            EXTRA_INPUTS=$(git ls-files --others -- desktop/src desktop/src-tauri/src scripts .github/workflows)
+            test -z "$EXTRA_INPUTS"
             MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
             test "$MAIN_SHA" = "$REVIEWED_MAIN_SHA"
             test -f desktop/src-tauri/src/cloud_relay.rs
@@ -240,6 +242,9 @@ jobs:
           source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           if source != os.environ["GITHUB_SHA"]:
               raise SystemExit("checkout HEAD changed during the build")
+          extra_inputs = subprocess.check_output(["git", "ls-files", "--others", "--", "desktop/src", "desktop/src-tauri/src", "scripts", ".github/workflows"], text=True)
+          if extra_inputs.strip():
+              raise SystemExit("build introduced untracked or ignored source inputs")
           changed = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], text=True).splitlines()
           cargo_path = "desktop/src-tauri/Cargo.toml"
           if set(changed) - {cargo_path}:
