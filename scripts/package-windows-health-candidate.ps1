@@ -54,8 +54,16 @@ while ($queue.Count -gt 0) {
         elseif ($dependency -match '^api-ms-win-' -or (Test-Path -LiteralPath (Join-Path $env:SystemRoot ('System32/' + $dependency)))) { $external += $dependency }
         else { throw 'Unresolved native dependency' }
     }
-    Copy-Item -LiteralPath $path -Destination (Join-Path $stage $name)
-    $files += [ordered]@{name=$name;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant();bytes=(Get-Item -LiteralPath $path).Length;imports=$imports;system_runtime_imports=$external}
+    # ort-sys can place DLL symlinks beside the executable. FileInfo.Length
+    # describes the link (often zero); package and measure its actual payload.
+    $stagedPath = Join-Path $stage $name
+    $sourceStream = [IO.File]::OpenRead($path)
+    try {
+        $stagedStream = [IO.File]::Open($stagedPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try { $sourceStream.CopyTo($stagedStream); $payloadBytes = $stagedStream.Length }
+        finally { $stagedStream.Dispose() }
+    } finally { $sourceStream.Dispose() }
+    $files += [ordered]@{name=$name;sha256=(Get-FileHash -LiteralPath $stagedPath -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$payloadBytes;imports=$imports;system_runtime_imports=$external}
 }
 $manifest = [ordered]@{
     schema='hanni.windows-health-candidate.v1'
