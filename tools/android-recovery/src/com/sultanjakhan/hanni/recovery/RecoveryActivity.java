@@ -40,8 +40,9 @@ public final class RecoveryActivity extends Activity {
       socket.connect(new InetSocketAddress("127.0.0.1", port), 10000); socket.setSoTimeout(30000);
       Preserver.Result result = Preserver.export(root, socket.getOutputStream(), recipient);
       socket.shutdownOutput();
-      if (socket.getInputStream().read() != 0x06) throw new IOException("collector_unconfirmed");
-      show((result.complete ? "PRESERVATION_STORED files=" : "PRESERVATION_PARTIAL files=") + result.files);
+      // adb reverse may close both directions on EOF. Durable acceptance is
+      // verified by the Windows collector after fsync, GCM and inventory checks.
+      show((result.complete ? "PRESERVATION_SENT files=" : "PRESERVATION_PARTIAL_SENT files=") + result.files);
     } catch (Throwable failure) { show("PRESERVATION_FAILED"); }
     finally { closeSocket(); watchdog.shutdownNow(); }
   }
