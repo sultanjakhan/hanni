@@ -1,0 +1,68 @@
+name: Android preservation artifact
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_main_sha:
+        description: Exact reviewed main commit
+        required: true
+        type: string
+      recipient_public_key:
+        description: Public RSA 3072/4096 SPKI DER encoded as canonical base64; never a private key
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: hanni-android-preservation
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: hanni-production
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Validate reviewed main
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_main_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$REVIEWED_SHA"
+          git diff --exit-code HEAD
+          EXTRA=$(git ls-files --others -- tools/android-recovery .github/workflows/android-preservation.yml)
+          test -z "$EXTRA"
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: Install SDK platform and build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Build and verify isolated preservation APK
+        env:
+          RECIPIENT_PUBLIC_KEY: ${{ inputs.recipient_public_key }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 tools/android-recovery/build.py --sdk "$ANDROID_HOME" --java "$JAVA_HOME/bin" --output "$RUNNER_TEMP/preservation-build" --sign
+          git diff --exit-code HEAD
+          EXTRA=$(git ls-files --others -- tools/android-recovery .github/workflows/android-preservation.yml)
+          test -z "$EXTRA"
+      - name: Upload artifact only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hanni-preservation-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/preservation-build/hanni-preservation-1.1.15.apk
+            ${{ runner.temp }}/preservation-build/verification.json
