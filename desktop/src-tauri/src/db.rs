@@ -13,6 +13,16 @@ pub fn migrate_old_data_dir() -> Result<(), String> {
     secure_fs::ensure_private_dir(&new_dir)
         .map_err(|e| format!("secure data directory: {e}"))?;
     let marker = new_dir.join(".migrated");
+    if crate::types::is_isolated_dev() {
+        // An explicitly isolated debug session must never import legacy user data.
+        if !marker.exists() {
+            std::fs::write(&marker, "isolated-dev: legacy import disabled\n")
+                .map_err(|_| "Cannot mark isolated dev migration boundary")?;
+            secure_fs::restrict_file(&marker)
+                .map_err(|_| "Cannot secure isolated dev migration marker")?;
+        }
+        return Ok(());
+    }
     if marker.exists() { return Ok(()); } // already migrated — skip without touching ~/Documents
     let old_dir = dirs::home_dir().unwrap_or_default().join("Documents/Hanni");
     if !old_dir.exists() {
@@ -5282,7 +5292,7 @@ pub fn migrate_dedup_health_exercise(conn: &rusqlite::Connection) {
     conn.execute(
         "DELETE FROM health_log WHERE type='exercise' AND id NOT IN (
             SELECT MIN(id) FROM health_log WHERE type='exercise'
-            GROUP BY date, type, value, notes
+            GROUP BY date, type, COALESCE(start_time,''), value, notes
         )",
         [],
     ).ok();

@@ -1,3 +1,4 @@
+import { mayCommitHealthView, beginHealthViewRead } from './health-view-refresh.js';
 // Calendar Week/Month list — events + tasks for the period (no schedules).
 
 import { S, invoke, tabLoaders } from './state.js';
@@ -10,7 +11,7 @@ const WEEKDAYS = ['Воскресенье','Понедельник','Вторн�
 const pad2 = (n) => String(n).padStart(2, '0');
 const fmtDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 
-async function loadPeriodItems(start, end) {
+async function loadPeriodItems(start, end, strict = false) {
   const sd = new Date(start + 'T12:00:00');
   const ed = new Date(end + 'T12:00:00');
   const months = new Set();
@@ -22,13 +23,13 @@ async function loadPeriodItems(start, end) {
   }
   const eventsArrs = await Promise.all([...months].map(k => {
     const [y, m] = k.split('-').map(Number);
-    return invoke('get_events', { month: m, year: y }).catch(() => []);
+    return invoke('get_events', { month: m, year: y }).catch(error => { if (strict) throw error; return []; });
   }));
   // Exclude auto_health events (sleep) — they belong on the calendar grid,
   // not in the task list, and must not be completable.
   const events = eventsArrs.flat()
-    .filter(e => e.date >= start && e.date <= end && e.source !== 'auto_health');
-  const tasks = (await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []))
+    .filter(e => e.date >= start && e.date <= end && e.source !== 'auto_health' && !e.source?.startsWith('auto_health_raw:'));
+  const tasks = (await invoke('get_notes', { filter: 'tasks', search: null }).catch(error => { if (strict) throw error; return []; }))
     .filter(t => t.due_date && t.due_date >= start && t.due_date <= end);
   return { events, tasks };
 }
@@ -83,8 +84,9 @@ function renderPeriodToolbar(view, start, end) {
 }
 
 export async function renderPeriodMode(el, opts) {
+  const currentRead = beginHealthViewRead(el);
   const { start, end, view } = opts;
-  const { events, tasks } = await loadPeriodItems(start, end);
+  const { events, tasks } = await loadPeriodItems(start, end, !!opts?.quiet);
   const byDate = {};
   for (const e of events) (byDate[e.date] ||= { evts: [], tasks: [] }).evts.push(e);
   for (const t of tasks) (byDate[t.due_date] ||= { evts: [], tasks: [] }).tasks.push(t);
@@ -102,7 +104,9 @@ export async function renderPeriodMode(el, opts) {
     ? `<div class="ctl-empty"><div class="ctl-empty-title">${view === 'week' ? 'На этой неделе ничего не запланировано' : 'В этом месяце ничего не запланировано'}</div></div>`
     : '';
 
-  el.innerHTML = renderPeriodToolbar(view, start, end) + `<div class="ctl-body ctl-body-period">${blocks}${empty}</div>`;
+  const healthViewHtml = renderPeriodToolbar(view, start, end) + `<div class="ctl-body ctl-body-period">${blocks}${empty}</div>`;
+  if (!currentRead() || !mayCommitHealthView(el, healthViewHtml, !!opts?.quiet)) return;
+  el.innerHTML = healthViewHtml;
   wirePeriod(el, view);
 }
 

@@ -44,7 +44,10 @@ mod sync_commands;
 mod health_connect;
 mod health_connect_plugin;
 mod health_import;
+mod health_raw_sleep_projection;
 mod bg_sync;
+#[cfg(target_os = "android")]
+mod cloud_relay_android;
 mod sleep_analysis;
 mod timeline_health;
 mod calendar_health;
@@ -70,6 +73,13 @@ mod sync_github;
 mod sync_github_replay;
 mod sync_github_cmds;
 mod lan_sync;
+mod cloud_relay;
+#[cfg(not(target_os = "android"))]
+mod cloud_relay_runtime;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod desktop_sync_runtime;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod desktop_process_lease;
 mod google_auth;
 #[cfg(not(target_os = "android"))]
 mod window_state;
@@ -378,37 +388,22 @@ pub fn run() {
     // hooks are bypassed. Suitable for talking to Google/Firestore (which
     // chain to Mozilla-known CAs).
 
-    // Desktop: secure/init DB before loading any data-dir settings.
-    #[cfg(not(target_os = "android"))]
-    let hanni_db = init_database();
+    // Opt-in debug isolation is established before the first DB/settings access.
+    // Release builds do not read HANNI_DEV_DATA_DIR.
+    #[cfg(all(debug_assertions, not(target_os = "android")))]
+    types::configure_isolated_dev().expect("Cannot configure isolated Hanni dev session");
 
-    #[cfg(not(target_os = "android"))]
-    let proactive_settings = load_proactive_settings();
-    #[cfg(target_os = "android")]
-    let proactive_settings = ProactiveSettings::default();
-    let proactive_state = Arc::new(Mutex::new(ProactiveState::new(proactive_settings)));
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    if desktop_sync_runtime::sync_only_requested() {
+        desktop_sync_runtime::run_sync_only().expect("Cannot start Hanni sync runtime");
+        return;
+    }
+
+    // Desktop DB/settings are initialized only after the singleton plugin
+    // accepts this process. Secondary launches must not migrate or clean data.
+    let proactive_state = Arc::new(Mutex::new(ProactiveState::new(ProactiveSettings::default())));
 
     // MLX + OpenClaw disabled — см. memory archive/project_llm_disabled.md
-
-    #[cfg(not(target_os = "android"))]
-    std::thread::spawn(|| {
-        ensure_voice_server_launchagent();
-        for _ in 0..10 {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            let ok = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(2))
-                .build().ok()
-                .and_then(|c| c.get(&format!("{}/health", VOICE_SERVER_URL)).send().ok())
-                .map(|r| r.status().is_success())
-                .unwrap_or(false);
-            if ok {
-                eprintln!("[voice] Server ready, warming up TTS...");
-                let _ = speak_silero_core("тест", "xenia");
-                eprintln!("[voice] TTS warmup done");
-                break;
-            }
-        }
-    });
 
     // Audio recording state (capture starts lazily on first recording)
     let audio_state = Arc::new(AudioRecording(std::sync::Mutex::new(WhisperState {
@@ -439,7 +434,10 @@ pub fn run() {
         transcription_gen: 0,
     })));
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let builder = desktop_sync_runtime::configure(builder, desktop_sync_runtime::Mode::Interactive);
+    let builder = builder
         .manage(HttpClient(reqwest::Client::new()))
         .manage(LlmBusy(tokio::sync::Semaphore::new(1)))
         .manage(proactive_state.clone())
@@ -487,15 +485,16 @@ pub fn run() {
             .build(),
     );
 
-    // Desktop: manage DB state on builder (initialized before builder)
-    #[cfg(not(target_os = "android"))]
-    let builder = builder.manage(hanni_db);
-
     #[cfg(not(target_os = "android"))]
     let builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
 
     builder
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(move |invoke| {
+            if types::isolated_dev_blocks_command(invoke.message.command()) {
+                invoke.resolver.reject("External integration is disabled in isolated dev");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             // Chat
             chat::chat,
             // Tracker
@@ -966,9 +965,14 @@ pub fn run() {
             health_connect::import_health_connect_sleep,
             // Health import & analytics
             health_import::import_health_connect_all,
+            bg_sync::cloud_relay_status,
+            bg_sync::cloud_relay_pairing_source,
+            bg_sync::cloud_relay_set_config,
+            bg_sync::cloud_relay_sync_now,
             health_import::get_heart_rate_samples,
             health_import::get_health_summary,
             health_connect_plugin::health_has_permissions,
+            health_connect_plugin::health_import_raw,
             health_connect_plugin::health_request_permissions,
             health_connect_plugin::health_background_status,
             web_assets::web_ota_status,
@@ -1014,8 +1018,21 @@ pub fn run() {
             google_auth::google_auth_set_config,
             google_auth::google_auth_signout,
             google_auth::google_auth_start_signin,
-        ])
+        ];
+            handler(invoke)
+        })
         .setup(move |app| {
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            desktop_sync_runtime::setup(app.handle()).map_err(std::io::Error::other)?;
+            #[cfg(not(target_os = "android"))]
+            {
+                // Primary process only; secure the data directory before reading settings.
+                app.manage(init_database());
+                let settings = load_proactive_settings();
+                proactive_state.try_lock()
+                    .map_err(|_| std::io::Error::other("proactive_settings_busy"))?
+                    .settings = settings;
+            }
             #[cfg(target_os = "macos")]
             menu_bar_timer::setup(app)?;
 
@@ -1144,6 +1161,32 @@ pub fn run() {
                 });
             }
 
+            // Real SQLite/Tauri commands remain available, but this opt-in dev
+            // session starts no HTTP/LAN/share listeners, sync, updater, MCP,
+            // voice/LLM, global shortcuts, activity capture or background jobs.
+            if types::is_isolated_dev() { return Ok(()); }
+
+            // Start interactive voice only after single-instance owns this process.
+            #[cfg(not(target_os = "android"))]
+            if !types::is_isolated_dev() { std::thread::spawn(|| {
+                ensure_voice_server_launchagent();
+                for _ in 0..10 {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let ok = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(2))
+                        .build().ok()
+                        .and_then(|c| c.get(&format!("{}/health", VOICE_SERVER_URL)).send().ok())
+                        .map(|r| r.status().is_success())
+                        .unwrap_or(false);
+                    if ok {
+                        eprintln!("[voice] Server ready, warming up TTS...");
+                        let _ = speak_silero_core("тест", "xenia");
+                        eprintln!("[voice] TTS warmup done");
+                        break;
+                    }
+                }
+            }); }
+
             // Auto-updater (desktop only) — downloads in background and emits
             // `update-ready`; the UI shows a "Restart" button instead of
             // auto-restarting (see commands_meta::auto_check_on_startup).
@@ -1157,6 +1200,8 @@ pub fn run() {
             // Loop reads enabled/interval from app_settings each tick, so
             // toggling from UI takes effect on the next cycle without a
             // restart. No-op when not configured.
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            crate::cloud_relay::start_background_sync(app.handle());
             sync_owner_auto::start_auto_sync_loop(app.handle().clone());
 
             // Save system prompt for nightly training script
@@ -1752,6 +1797,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Hanni")
         .run(|_app_handle, _event| {
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            desktop_sync_runtime::on_event(_app_handle, &_event);
             // macOS cmd+Q does not emit per-window CloseRequested, so window-state plugin
             // never auto-persists. Force save on ExitRequested + WindowEvent::CloseRequested.
             // Also persist on Moved/Resized so the latest user-driven position survives

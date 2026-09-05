@@ -24,7 +24,8 @@ pub fn get_today_planned(date: String, db: tauri::State<'_, HanniDb>) -> Result<
     // ── 1. Calendar events on date
     let mut e_stmt = conn.prepare(
         "SELECT id, title, time, duration_minutes, category, color, completed, priority
-         FROM events WHERE date=?1 AND (source IS NULL OR source != 'auto_health')"
+         FROM events WHERE date=?1 AND (source IS NULL OR source != 'auto_health')
+         AND COALESCE(source,'') NOT GLOB 'auto_health_raw:*'"
     ).map_err(|e| format!("DB error: {}", e))?;
     let events_iter = e_stmt.query_map(rusqlite::params![date], |row| {
         let id: i64 = row.get(0)?;
@@ -275,6 +276,9 @@ pub fn start_task_block(
     db: tauri::State<'_, HanniDb>,
 ) -> Result<i64, String> {
     let conn = db.conn();
+    if source_type == "event" {
+        crate::health_raw_sleep_projection::ensure_user_editable(&conn, "events", &source_id)?;
+    }
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     let now_hm = now.format("%H:%M").to_string();
@@ -402,6 +406,7 @@ pub fn finish_task_block(
     db: tauri::State<'_, HanniDb>,
 ) -> Result<(), String> {
     let conn = db.conn();
+    crate::health_raw_sleep_projection::ensure_user_editable(&conn, "timeline_blocks", &block_id.to_string())?;
     let now = chrono::Local::now();
     let now_hm = now.format("%H:%M").to_string();
     let now_rfc = now.to_rfc3339();

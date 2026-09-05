@@ -1,10 +1,13 @@
 // health_connect_plugin.rs — Tauri mobile plugin bridge for Health Connect
 // Registers the Kotlin HealthConnectPlugin with Tauri's plugin system.
 
-use tauri::{plugin::{Builder, TauriPlugin}, Runtime};
+use tauri::{
+    plugin::{Builder, TauriPlugin},
+    Runtime,
+};
 
 #[cfg(target_os = "android")]
-use tauri::{Manager, plugin::PluginHandle};
+use tauri::{plugin::PluginHandle, Manager};
 
 #[cfg(target_os = "android")]
 pub struct HealthConnectHandle<R: Runtime>(pub PluginHandle<R>);
@@ -14,9 +17,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .setup(|app, api| {
             #[cfg(target_os = "android")]
             {
-                let handle = api.register_android_plugin(
-                    "com.sultanjakhan.hanni", "HealthConnectPlugin"
-                )?;
+                let handle =
+                    api.register_android_plugin("com.sultanjakhan.hanni", "HealthConnectPlugin")?;
                 app.manage(HealthConnectHandle(handle));
             }
             #[cfg(not(target_os = "android"))]
@@ -35,13 +37,43 @@ pub async fn health_has_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Res
     #[cfg(target_os = "android")]
     {
         let handle = app.state::<HealthConnectHandle<R>>();
-        match handle.0.run_mobile_plugin::<serde_json::Value>("hasPermissions", &()) {
+        match handle
+            .0
+            .run_mobile_plugin::<serde_json::Value>("hasPermissions", &())
+        {
             Ok(v) => Ok(v.get("granted").and_then(|g| g.as_bool()).unwrap_or(false)),
             Err(e) => Err(format!("{e}")),
         }
     }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Ok(false) }
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
+/// Bounded foreground archive pass. Only aggregate status returns to the UI.
+#[tauri::command]
+pub async fn health_import_raw<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "android")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let handle = app.state::<HealthConnectHandle<R>>();
+            handle
+                .0
+                .run_mobile_plugin::<serde_json::Value>("importRawRecords", &())
+                .map_err(|_| "hc_raw_import_failed".to_string())
+        })
+        .await
+        .map_err(|_| "hc_raw_import_failed".to_string())?
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(serde_json::json!({"available":false,"more_pending":false}))
+    }
 }
 
 /// Triggers the Health Connect permission UI on Android. Resolves with the
@@ -63,21 +95,32 @@ pub async fn health_debug_read<R: Runtime>(
         }
     }
     #[cfg(not(target_os = "android"))]
-    { let _ = (app, cmd); Err("Android-only".into()) }
+    {
+        let _ = (app, cmd);
+        Err("Android-only".into())
+    }
 }
 
 #[tauri::command]
-pub async fn health_request_permissions<R: Runtime>(app: tauri::AppHandle<R>) -> Result<bool, String> {
+pub async fn health_request_permissions<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<bool, String> {
     #[cfg(target_os = "android")]
     {
         let handle = app.state::<HealthConnectHandle<R>>();
-        match handle.0.run_mobile_plugin::<serde_json::Value>("requestHealthPermissions", &()) {
+        match handle
+            .0
+            .run_mobile_plugin::<serde_json::Value>("requestHealthPermissions", &())
+        {
             Ok(v) => Ok(v.get("granted").and_then(|g| g.as_bool()).unwrap_or(false)),
             Err(e) => Err(format!("{e}")),
         }
     }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Err("Health Connect is only available on Android".into()) }
+    {
+        let _ = app;
+        Err("Health Connect is only available on Android".into())
+    }
 }
 
 /// Whether READ_HEALTH_DATA_IN_BACKGROUND is granted — required on Android 14+
@@ -86,15 +129,23 @@ pub async fn health_request_permissions<R: Runtime>(app: tauri::AppHandle<R>) ->
 /// periodic background sync keeps HC permissions "in use" (else HC auto-revokes
 /// sleep/steps access — the "permission resets" bug).
 #[tauri::command]
-pub async fn health_background_status<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+pub async fn health_background_status<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "android")]
     {
         let handle = app.state::<HealthConnectHandle<R>>();
-        match handle.0.run_mobile_plugin::<serde_json::Value>("backgroundStatus", &()) {
+        match handle
+            .0
+            .run_mobile_plugin::<serde_json::Value>("backgroundStatus", &())
+        {
             Ok(v) => Ok(v),
             Err(e) => Err(format!("{e}")),
         }
     }
     #[cfg(not(target_os = "android"))]
-    { let _ = app; Ok(serde_json::json!({"granted": false})) }
+    {
+        let _ = app;
+        Ok(serde_json::json!({"granted": false}))
+    }
 }

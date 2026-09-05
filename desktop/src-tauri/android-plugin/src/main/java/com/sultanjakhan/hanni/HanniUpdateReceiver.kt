@@ -8,7 +8,12 @@ import android.content.Intent
 class HanniUpdateReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        HanniSleepProjectionWorker.ensureScheduled(context)
+        HanniRawHealthSyncWorker.ensureScheduled(context)
+        HanniRawHealthSyncWorker.enqueueCatchup(context)
         HanniLanSyncWorker.ensureScheduled(context)
         HanniLanSyncWorker.enqueueCatchup(context)
+        HanniRelaySyncWorker.ensureScheduled(context)
+        HanniRelaySyncWorker.enqueueCatchup(context)
     }
 }

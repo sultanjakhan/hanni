@@ -78,7 +78,9 @@ export function showEventPopover(event, x, y, { onEdit } = {}) {
   }
   const shownDur = hasActual ? event.actual_duration_minutes : dur;
   const durLabel = hasActual || event.source === 'auto_health' ? 'Факт' : 'Длительность';
-  const srcLabel = SOURCE_LABEL[event.source] || (isManual ? 'Вручную' : event.source);
+  const srcLabel = event.source?.startsWith('auto_health_raw:')
+    ? 'Health Connect · исходная запись, только просмотр'
+    : SOURCE_LABEL[event.source] || (isManual ? 'Вручную' : event.source);
   const doneRow = event.completed
     ? '<div class="cal-pop-row cal-pop-done">✓ Выполнено</div>'
     : '<div class="cal-pop-row cal-pop-muted">○ Не отмечено</div>';

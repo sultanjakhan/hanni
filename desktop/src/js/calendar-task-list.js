@@ -1,3 +1,4 @@
+import { mayCommitHealthView, beginHealthViewRead } from './health-view-refresh.js';
 // Calendar Day "Список" — flat task list with checkboxes and timer start/stop.
 
 import { S, invoke, tabLoaders } from './state.js';
@@ -48,17 +49,17 @@ function scheduleMatchesDate(sch, dateStr) {
   return false;
 }
 
-async function loadDayItems(date) {
+async function loadDayItems(date, strict = false) {
   const d = new Date(date + 'T12:00:00');
   const isViewingToday = date === todayStr();
   const yesterday = isViewingToday ? shiftDate(date, -1) : null;
   const [events, scheds, completions, tasks, blocks, yCompletions] = await Promise.all([
-    invoke('get_events', { month: d.getMonth() + 1, year: d.getFullYear() }).catch(() => []),
-    invoke('get_schedules', { category: null }).catch(() => []),
-    invoke('get_schedule_completions', { date }).catch(() => []),
-    invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []),
-    invoke('get_timeline_blocks', { date }).catch(() => []),
-    yesterday ? invoke('get_schedule_completions', { date: yesterday }).catch(() => []) : Promise.resolve([]),
+    invoke('get_events', { month: d.getMonth() + 1, year: d.getFullYear() }).catch(error => { if (strict) throw error; return []; }),
+    invoke('get_schedules', { category: null }).catch(error => { if (strict) throw error; return []; }),
+    invoke('get_schedule_completions', { date }).catch(error => { if (strict) throw error; return []; }),
+    invoke('get_notes', { filter: 'tasks', search: null }).catch(error => { if (strict) throw error; return []; }),
+    invoke('get_timeline_blocks', { date }).catch(error => { if (strict) throw error; return []; }),
+    yesterday ? invoke('get_schedule_completions', { date: yesterday }).catch(error => { if (strict) throw error; return []; }) : Promise.resolve([]),
   ]);
   const completedIds = new Set((completions || []).filter(c => c.completed).map(c => c.schedule_id));
   const skippedIds = new Set((completions || []).filter(c => c.status === 'skipped').map(c => c.schedule_id));
@@ -110,7 +111,7 @@ async function loadDayItems(date) {
     const skipped = isRefl ? false : skippedIds.has(s.id);
     groups.schedule.push({ kind: 'schedule', id: s.id, title: s.title || 'Без названия', sortKey: s.time_of_day || '99:99', icon: SCH_CAT_ICONS[s.category] || '🔁', done, skipped, priority: 0, category: s.category, planned_time: s.time_of_day, marks_previous_day: !!s.marks_previous_day, completionDate: cdate, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: s.target_minutes || null, trackingMode: s.tracking_mode || 'track', pastTime: isPastTimeToday(s.time_of_day, done || skipped, isViewingToday, !!s.track_overdue) });
   }
-  for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health')) {
+  for (const e of (events || []).filter(e => e.date === date && e.source !== 'auto_health' && !e.source?.startsWith('auto_health_raw:'))) {
     const bi = blockInfo('event', e.id);
     const done = !!e.completed;
     groups.event.push({ kind: 'event', id: e.id, title: e.title || 'Без названия', sortKey: e.time || '99:99', icon: '📅', done, priority: e.priority || 0, category: e.category, planned_time: e.time, completionDate: e.date, block: bi.activeBlock, actualMinutes: bi.actualMinutes, targetMinutes: e.duration_minutes || null, pastTime: isPastTimeToday(e.time, done, isViewingToday) });
@@ -379,6 +380,7 @@ function wire(el) {
 
 
 export async function renderCalendarTaskList(el, opts) {
+  const currentRead = beginHealthViewRead(el);
   if (opts && opts.start && opts.end && opts.start !== opts.end) {
     const { renderPeriodMode } = await import('./calendar-task-list-period.js');
     return renderPeriodMode(el, opts);
@@ -392,7 +394,7 @@ export async function renderCalendarTaskList(el, opts) {
   const dayLabel = `${d.getDate()} ${monthsGen[d.getMonth()]} · ${dayNames[d.getDay()]}`;
   const isToday = date === todayStr();
 
-  const groups = await loadDayItems(date);
+  const groups = await loadDayItems(date, !!opts?.quiet);
   const totalCount = groups.schedule.length + groups.event.length + groups.note.length;
 
   // effective_priority = manual priority + boosters. Sort by it (desc),
@@ -432,7 +434,9 @@ export async function renderCalendarTaskList(el, opts) {
     : (S.calHideDone && !remaining
         ? `<div class="ctl-empty"><div class="ctl-empty-title">Всё выполнено 🎉</div></div>`
         : SECTION_DEFS.map(def => renderSection(def, groups[def.key], date)).join(''));
-  el.innerHTML = renderToolbar(dayLabel, isToday) + `<div class="ctl-body">${bodyHtml}</div>`;
+  const healthViewHtml = renderToolbar(dayLabel, isToday) + `<div class="ctl-body">${bodyHtml}</div>`;
+  if (!currentRead() || !mayCommitHealthView(el, healthViewHtml, !!opts?.quiet)) return;
+  el.innerHTML = healthViewHtml;
   wire(el);
   startLiveTimers(el);
 }

@@ -36,27 +36,35 @@ private data class StepWalk(
     val sourcePackage: String,
 )
 
+internal suspend fun <T> collectHealthPages(
+    readPage: suspend (String?) -> Pair<List<T>, String?>,
+): List<T> {
+    val records = mutableListOf<T>()
+    var pageToken: String? = null
+    do {
+        val (page, nextToken) = readPage(pageToken)
+        records.addAll(page)
+        pageToken = nextToken
+        // Some Android 12/13 providers return an empty terminal token.
+    } while (!pageToken.isNullOrEmpty())
+    return records
+}
+
 private suspend fun <T : Record> readAllRecords(
     client: HealthConnectClient,
     recordType: kotlin.reflect.KClass<T>,
     start: Instant,
     end: Instant,
-): List<T> {
-    val records = mutableListOf<T>()
-    var pageToken: String? = null
-    do {
-        val response = client.readRecords(
-            ReadRecordsRequest(
-                recordType = recordType,
-                timeRangeFilter = TimeRangeFilter.between(start, end),
-                pageSize = 1000,
-                pageToken = pageToken,
-            )
+): List<T> = collectHealthPages { pageToken ->
+    val response = client.readRecords(
+        ReadRecordsRequest(
+            recordType = recordType,
+            timeRangeFilter = TimeRangeFilter.between(start, end),
+            pageSize = 1000,
+            pageToken = pageToken,
         )
-        records.addAll(response.records)
-        pageToken = response.pageToken
-    } while (pageToken != null)
-    return records
+    )
+    Pair(response.records, response.pageToken)
 }
 
 private suspend fun readStepRecordsByDay(
@@ -209,6 +217,10 @@ suspend fun readExerciseSessions(client: HealthConnectClient, start: Instant, en
     // only sustained, walking-cadence intervals and never overlap a real
     // exercise session. Daily step totals remain sourced from HC aggregation;
     // these synthetic rows are used only to restore the missing walk timeline.
+    val granted = client.permissionController.getGrantedPermissions()
+    if (androidx.health.connect.client.permission.HealthPermission.getReadPermission(StepsRecord::class) !in granted) {
+        return result
+    }
     val stepRecords = readStepRecordsByDay(client, start, end)
     stepRecords.groupBy { it.metadata.dataOrigin.packageName }.forEach { (source, records) ->
         val short = records.count { Duration.between(it.startTime, it.endTime).toMinutes() <= 30L }

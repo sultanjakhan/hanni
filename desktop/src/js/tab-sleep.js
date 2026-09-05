@@ -2,19 +2,22 @@
 import { invoke, IS_MOBILE } from './state.js';
 import { escapeHtml } from './utils.js';
 import { autoImportHealth } from './health-auto-sync.js';
+import { registerSleepHealthView, mayCommitHealthView, beginHealthViewRead, retryHealthViewRefresh } from './health-view-refresh.js';
 
 const STAGE_COLORS = {
   deep: 'var(--color-purple)', rem: 'var(--accent-blue)',
   light: 'var(--color-green)', awake: 'var(--color-orange, #d9730d)',
   sleeping: 'var(--text-muted)', out_of_bed: 'var(--color-red)',
-  unknown: 'var(--text-faint)',
+  unknown: 'var(--text-faint)', awake_in_bed: 'var(--color-orange, #d9730d)',
 };
 const STAGE_LABELS = {
   deep: 'Глубокий', rem: 'REM', light: 'Лёгкий',
-  awake: 'Бодрствование', sleeping: 'Сон', out_of_bed: 'Встал',
+  awake: 'Бодрствование', awake_in_bed: 'Бодрствование в постели', sleeping: 'Сон', out_of_bed: 'Встал',
 };
 
-export async function renderSleepPane(el) {
+export async function renderSleepPane(el, { quiet = false, autoImport = true } = {}) {
+  const currentRead = beginHealthViewRead(el);
+  registerSleepHealthView(el, () => renderSleepPane(el, { quiet: true, autoImport: false }));
   const today = new Date();
   const from = new Date(today); from.setDate(from.getDate() - 30);
   const toStr = fmt(today), fromStr = fmt(from);
@@ -25,7 +28,10 @@ export async function renderSleepPane(el) {
       invoke('get_sleep_sessions', { from: fromStr, to: toStr }),
       invoke('get_sleep_stats', { days: 30 }),
     ]);
-  } catch(e) { console.error('sleep load:', e); }
+  } catch(e) {
+    if (quiet) { retryHealthViewRefresh(); return; }
+    console.error('sleep load:', e);
+  }
 
   // Check Health Connect permission state on Android — drives whether we show
   // "Разрешить" or "Импорт" as the primary action
@@ -41,7 +47,7 @@ export async function renderSleepPane(el) {
     ? `<button class="btn-smallall mobile-only" id="sleep-import-btn">📱 Импорт из Samsung Health</button>`
     : `<button class="btn-smallall mobile-only" id="sleep-grant-btn">🔓 Разрешить доступ к Health Connect</button>`;
 
-  el.innerHTML = `
+  const html = `
     <div class="sleep-stats">
       <div class="sleep-stat"><div class="sleep-stat-value">${avgH}ч ${avgM}м</div><div class="sleep-stat-label">Среднее</div></div>
       <div class="sleep-stat"><div class="sleep-stat-value">${Math.round(stats.avg_deep_minutes)}м</div><div class="sleep-stat-label">Глубокий</div></div>
@@ -54,6 +60,9 @@ export async function renderSleepPane(el) {
     </div>
     <div class="sleep-list">${renderSessionList(sessions)}</div>`;
 
+  if (!currentRead() || !mayCommitHealthView(el, html, quiet)) return;
+  el.innerHTML = html;
+
   el.querySelector('#sleep-add-btn')?.addEventListener('click', () => addManualSleep(el));
   el.querySelector('#sleep-import-btn')?.addEventListener('click', () => importFromHealthConnect(el));
   el.querySelector('#sleep-grant-btn')?.addEventListener('click', () => grantAndImport(el));
@@ -65,10 +74,10 @@ export async function renderSleepPane(el) {
   // automation server. The 2-min staleness check still catches the
   // common morning case where Samsung Health writes the night's sleep to
   // HC after the user wakes up.
-  if (IS_MOBILE && hcGranted) {
+  if (autoImport && IS_MOBILE && hcGranted) {
     const lastSync = +(localStorage.getItem('hc_last_sync') || 0);
     const stale = (Date.now() - lastSync) > 2 * 60 * 1000;
-    autoImportHealth({ force: stale }).then(ok => { if (ok) renderSleepPane(el); });
+    autoImportHealth({ force: stale }).catch(() => {});
   }
 }
 
@@ -81,7 +90,7 @@ function renderSessionList(sessions) {
       <div class="sleep-session-date">${s.date}</div>
       <div class="sleep-session-time">${shortTime(s.start_time)} — ${shortTime(s.end_time)}</div>
       <div class="sleep-session-dur">${h}ч ${m}м</div>
-      <div class="sleep-session-source">${s.source === 'health_connect' ? '📱' : '✏️'}</div>
+      <div class="sleep-session-source">${(s.source === 'health_connect' || s.source.startsWith('health_connect_raw:')) ? '📱' : '✏️'}</div>
       ${stagesHtml}
     </div>`;
   }).join('');

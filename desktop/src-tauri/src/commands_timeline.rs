@@ -108,6 +108,7 @@ pub fn get_timeline_blocks(date: String, db: tauri::State<'_, HanniDb>) -> Resul
 #[tauri::command]
 pub fn update_timeline_block(id: i64, type_id: Option<i64>, start_time: Option<String>, end_time: Option<String>, notes: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
+    crate::health_raw_sleep_projection::ensure_user_editable(&conn, "timeline_blocks", &id.to_string())?;
     if let Some(v) = type_id { conn.execute("UPDATE timeline_blocks SET type_id=?1 WHERE id=?2", rusqlite::params![v, id]).ok(); }
     if let Some(ref s) = start_time {
         conn.execute("UPDATE timeline_blocks SET start_time=?1 WHERE id=?2", rusqlite::params![s, id]).ok();
@@ -130,6 +131,7 @@ pub fn update_timeline_block(id: i64, type_id: Option<i64>, start_time: Option<S
 #[tauri::command]
 pub fn delete_timeline_block(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
+    crate::health_raw_sleep_projection::ensure_user_editable(&conn, "timeline_blocks", &id.to_string())?;
     conn.execute("DELETE FROM timeline_blocks WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("DB error: {}", e))?;
     Ok(())

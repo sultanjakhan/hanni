@@ -1,0 +1,4 @@
+test-state/
+.wrangler/
+node_modules/
+.dev.vars*

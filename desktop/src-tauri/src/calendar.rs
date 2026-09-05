@@ -48,6 +48,7 @@ pub fn get_events(month: u32, year: i32, db: tauri::State<'_, HanniDb>) -> Resul
 #[tauri::command]
 pub fn delete_event(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
+    crate::health_raw_sleep_projection::ensure_user_editable(&conn, "events", &id.to_string())?;
     conn.execute("DELETE FROM events WHERE id=?1", rusqlite::params![id]).map_err(|e| format!("DB error: {}", e))?;
     Ok(())
 }
@@ -55,6 +56,7 @@ pub fn delete_event(id: i64, db: tauri::State<'_, HanniDb>) -> Result<(), String
 #[tauri::command]
 pub fn update_event(id: i64, title: Option<String>, description: Option<String>, date: Option<String>, time: Option<String>, duration_minutes: Option<i64>, category: Option<String>, color: Option<String>, completed: Option<bool>, priority: Option<i32>, linked_tab: Option<String>, db: tauri::State<'_, HanniDb>) -> Result<(), String> {
     let conn = db.conn();
+    crate::health_raw_sleep_projection::ensure_user_editable(&conn, "events", &id.to_string())?;
     let mut updates = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 1;

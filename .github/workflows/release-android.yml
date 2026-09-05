@@ -14,6 +14,16 @@ on:
       # (releases/latest excludes prereleases) ever picks it up.
       - 'android-test*'
   workflow_dispatch:
+    inputs:
+      health_candidate:
+        description: Build a compatible signed health APK as an artifact only
+        required: false
+        default: false
+        type: boolean
+      reviewed_main_sha:
+        description: Required for health_candidate; full SHA of reviewed main
+        required: false
+        type: string
 
 concurrency:
   group: hanni-android-${{ github.ref_name }}
@@ -37,9 +47,38 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          REVIEWED_MAIN_SHA: ${{ inputs.reviewed_main_sha }}
+          HEALTH_CANDIDATE: ${{ inputs.health_candidate }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$HEALTH_CANDIDATE" = true ]; then
+            test "$REF_TYPE" = branch
+            test "$REF_NAME" = main
+            [[ "$REVIEWED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$GITHUB_SHA" = "$REVIEWED_MAIN_SHA"
+            test "$(git rev-parse HEAD)" = "$REVIEWED_MAIN_SHA"
+            git diff --exit-code HEAD
+            MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+            test "$MAIN_SHA" = "$REVIEWED_MAIN_SHA"
+            test -f desktop/src-tauri/src/cloud_relay.rs
+            test -f desktop/src-tauri/android-plugin/src/main/java/com/sultanjakhan/hanni/RawHealthRecordStore.kt
+            test -f scripts/check-health-apk-permissions.py
+            python3 - <<'PY'
+          import json, pathlib, re
+
+          path = pathlib.Path("desktop/src-tauri/tauri.health-candidate.conf.json")
+          config = json.loads(path.read_text())
+          version = config.get("version", "")
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+              raise SystemExit("candidate version must be a three-part numeric version")
+          major, minor, patch = map(int, version.split("."))
+          code = major * 1000000 + minor * 1000 + patch
+          expected = {"version": version, "bundle": {"android": {"versionCode": code}}}
+          if config != expected or not 1001014 < code <= 2100000000:
+              raise SystemExit("candidate must only override a coherent version above installed 1.1.14")
+          PY
+          fi
           if [ "$EVENT_NAME" = push ] && [ "$REF_TYPE" = tag ] \
              && [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             MAIN_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
@@ -96,7 +135,7 @@ jobs:
           sudo apt-get install --no-install-recommends -y cmake ninja-build nasm
 
       - name: Install NDK 27.2.12479018
-        run: sdkmanager "ndk;27.2.12479018"
+        run: sdkmanager "ndk;27.2.12479018" "build-tools;36.0.0"
 
       - name: Setup Rust + Android targets
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-09-01
@@ -149,7 +188,90 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-        run: npx tauri android build --apk --target aarch64
+          HEALTH_CANDIDATE: ${{ inputs.health_candidate }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$HEALTH_CANDIDATE" = true ]; then
+            npx tauri android build --apk --target aarch64 \
+              --config src-tauri/tauri.health-candidate.conf.json
+          else
+            npx tauri android build --apk --target aarch64
+          fi
+
+      - name: Verify health candidate APK before publication
+        if: github.event_name == 'workflow_dispatch' && inputs.health_candidate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, shutil, subprocess, tomllib, zipfile
+
+          root = pathlib.Path.cwd()
+          config = json.loads((root / "desktop/src-tauri/tauri.health-candidate.conf.json").read_text())
+          version = config["version"]
+          code = config["bundle"]["android"]["versionCode"]
+          outputs = root / "desktop/src-tauri/gen/android/app/build/outputs/apk"
+          apks = [p for p in outputs.rglob("*.apk") if p.parent.name == "release" and "unsigned" not in p.name]
+          if len(apks) != 1:
+              raise SystemExit("expected exactly one signed release APK")
+          apk = apks[0]
+          build_tools = pathlib.Path(os.environ["ANDROID_HOME"]) / "build-tools"
+          aapt2 = build_tools / "36.0.0/aapt2"
+          apksigner = build_tools / "36.0.0/apksigner"
+          if not aapt2.is_file() or not apksigner.is_file():
+              raise SystemExit("Android build-tools 36.0.0 aapt2/apksigner are required")
+          signature = subprocess.check_output([str(apksigner), "verify", "--verbose", "--print-certs", str(apk)], text=True)
+          certs = re.findall(r"(?m)^Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]+)$", signature)
+          if len(certs) != 1 or certs[0].upper() != os.environ["TRUSTED_ANDROID_CERT_SHA256"]:
+              raise SystemExit("candidate must use the existing production Android certificate")
+          badging = subprocess.check_output([str(aapt2), "dump", "badging", str(apk)], text=True)
+          package = next((line for line in badging.splitlines() if line.startswith("package:")), "")
+          attrs = dict(re.findall(r"(\w+)='([^']*)'", package))
+          if attrs.get("name") != "com.sultanjakhan.hanni" or attrs.get("versionName") != version or attrs.get("versionCode") != str(code):
+              raise SystemExit("APK package/version does not match the reviewed candidate")
+          props_path = root / "desktop/src-tauri/gen/android/app/tauri.properties"
+          props = dict(line.split("=", 1) for line in props_path.read_text().splitlines() if "=" in line and not line.startswith("//"))
+          if props.get("tauri.android.versionName") != version or props.get("tauri.android.versionCode") != str(code):
+              raise SystemExit("generated Tauri version does not match APK metadata")
+          with zipfile.ZipFile(apk) as payload:
+              required = {"lib/arm64-v8a/libhanni_lib.so", "lib/arm64-v8a/libcrsqlite.so"}
+              if not required.issubset(payload.namelist()):
+                  raise SystemExit("required ARM64 native libraries are missing")
+          subprocess.run(["python3", "scripts/check-health-apk-permissions.py", "--apk", str(apk), "--aapt2", str(aapt2)], check=True)
+          source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if source != os.environ["GITHUB_SHA"]:
+              raise SystemExit("checkout HEAD changed during the build")
+          changed = subprocess.check_output(["git", "diff", "--name-only", "HEAD"], text=True).splitlines()
+          cargo_path = "desktop/src-tauri/Cargo.toml"
+          if set(changed) - {cargo_path}:
+              raise SystemExit("build modified tracked source beyond Cargo.toml formatting")
+          if cargo_path in changed:
+              before = subprocess.check_output(["git", "show", "HEAD:" + cargo_path], text=True)
+              if tomllib.loads(before) != tomllib.loads((root / cargo_path).read_text()):
+                  raise SystemExit("build changed Cargo.toml semantics")
+          destination = pathlib.Path(os.environ["RUNNER_TEMP"]) / "hanni-health-candidate"
+          destination.mkdir()
+          artifact = destination / f"hanni-{version}-android.apk"
+          shutil.copyfile(apk, artifact)
+          result = {"schema": "hanni.health-candidate.v1", "source_commit": source,
+                    "source_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+                    "candidate_version": version, "candidate_version_code": code,
+                    "config_sha256": hashlib.sha256((root / "desktop/src-tauri/tauri.health-candidate.conf.json").read_bytes()).hexdigest(),
+                    "apk_sha256": hashlib.file_digest(artifact.open("rb"), "sha256").hexdigest(),
+                    "apk_bytes": artifact.stat().st_size, "official_signer_matches": True,
+                    "apk_metadata_and_health_permissions": "PASS", "installed": False}
+          (destination / "verification.json").write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps(result))
+          PY
+
+      - name: Upload signed health candidate artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.health_candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hanni-health-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/hanni-health-candidate/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
       - name: Wait for release to exist (release.yml creates it)
         if: github.event_name == 'push' && startsWith(github.ref_name, 'v')
@@ -172,6 +294,7 @@ jobs:
           exit 1
 
       - name: Upload APK to release
+        if: github.event_name != 'workflow_dispatch' || !inputs.health_candidate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_REF: ${{ github.ref_name }}

@@ -11,6 +11,7 @@ import app.tauri.plugin.Plugin
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.*
@@ -26,20 +27,19 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     private var permLauncher: ActivityResultLauncher<Set<String>>? = null
     @Volatile private var pendingPermInvoke: Invoke? = null
 
-    private val requiredPermissions = setOf(
-        HealthPermission.getReadPermission(SleepSessionRecord::class),
-        HealthPermission.getReadPermission(StepsRecord::class),
-        HealthPermission.getReadPermission(HeartRateRecord::class),
-        HealthPermission.getReadPermission(ExerciseSessionRecord::class),
-    )
+    private fun requiredPermissions(client: HealthConnectClient): Set<String> =
+        RawHealthRecordCodec.descriptors.filter { descriptor ->
+            descriptor.requiredFeature == null || client.features.getFeatureStatus(descriptor.requiredFeature) ==
+                HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
+        }.map { it.readPermission }.toSet()
 
-    // Android 14+ requires this to read Health Connect data from a background
-    // context (our WorkManager HanniHealthWorker). Declared in the manifest;
-    // must also be granted at runtime. Raw string (not a client constant) to
-    // stay version-proof — getGrantedPermissions() returns these as plain
-    // strings, so set membership comparisons work either way.
     private val backgroundPermission =
-        "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
+        HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
+
+    private fun backgroundAvailable(client: HealthConnectClient): Boolean =
+        client.features.getFeatureStatus(
+            HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND
+        ) == HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
 
     override fun load(webView: WebView) {
         try {
@@ -62,7 +62,7 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
                     val invoke = pendingPermInvoke
                     pendingPermInvoke = null
                     val ret = JSObject()
-                    ret.put("granted", granted.containsAll(requiredPermissions))
+                    ret.put("granted", healthClient?.let { granted.containsAll(requiredPermissions(it)) } ?: false)
                     invoke?.resolve(ret)
                 }
             }
@@ -108,7 +108,7 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
             try {
                 val granted = client.permissionController.getGrantedPermissions()
                 val ret = JSObject()
-                ret.put("granted", granted.containsAll(requiredPermissions))
+                ret.put("granted", healthClient?.let { granted.containsAll(requiredPermissions(it)) } ?: false)
                 ret.put("available", true)
                 invoke.resolve(ret)
             } catch (e: Exception) {
@@ -119,17 +119,32 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun requestHealthPermissions(invoke: Invoke) {
-        val launcher = permLauncher
-        if (launcher == null) { invoke.reject("Permission launcher not available"); return }
-        if (pendingPermInvoke != null) { invoke.reject("Permission request already in progress"); return }
-        pendingPermInvoke = invoke
-        // Request background read alongside the foreground reads. On Android 14
-        // the HC system UI surfaces it as an extra "all the time" choice; on
-        // platforms/HC versions that don't support it the string is simply not
-        // granted (no crash). Without it the WorkManager worker can't read in
-        // the background, so HC only ever sees foreground access and eventually
-        // auto-revokes everything — the sleep-permission-resets bug.
-        activity.runOnUiThread { launcher.launch(requiredPermissions + backgroundPermission) }
+        activity.runOnUiThread {
+            val client = healthClient
+            val launcher = permLauncher
+            if (client == null) {
+                invoke.reject("Health Connect not available"); return@runOnUiThread
+            }
+            if (launcher == null) {
+                invoke.reject("Permission launcher not available"); return@runOnUiThread
+            }
+            if (pendingPermInvoke != null) {
+                invoke.reject("Permission request already in progress"); return@runOnUiThread
+            }
+            try {
+                val requested = requiredPermissions(client).toMutableSet()
+                if (backgroundAvailable(client)) requested.add(backgroundPermission)
+                if (client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) ==
+                    HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) {
+                    requested.add(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)
+                }
+                pendingPermInvoke = invoke
+                launcher.launch(requested)
+            } catch (e: Exception) {
+                pendingPermInvoke = null
+                invoke.reject("Health permission request failed: ${e.javaClass.simpleName}")
+            }
+        }
     }
 
     @Command
@@ -143,8 +158,9 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
             try {
                 val granted = client.permissionController.getGrantedPermissions()
                 val ret = JSObject()
-                ret.put("granted", granted.contains(backgroundPermission))
-                ret.put("available", true)
+                val available = backgroundAvailable(client)
+                ret.put("granted", available && granted.contains(backgroundPermission))
+                ret.put("available", available)
                 invoke.resolve(ret)
             } catch (e: Exception) {
                 invoke.reject("Health Connect error: ${e.message}")
@@ -153,13 +169,30 @@ class HealthConnectPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun readSleep(invoke: Invoke) = withClient(
-        invoke, HealthPermission.getReadPermission(SleepSessionRecord::class)
-    ) { client ->
-        val (start, end) = last30Days()
-        val ret = JSObject()
-        ret.put("sessions", readSleepSessions(client, start, end))
-        invoke.resolve(ret)
+    fun importRawRecords(invoke: Invoke) {
+        val owner = activity as? androidx.lifecycle.LifecycleOwner
+        if (owner == null || !owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            invoke.reject("hc_foreground_required"); return
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val result = RawHealthSync.runOnce(activity.applicationContext, background = false)
+                val response = JSObject()
+                for (key in result.keys()) response.put(key, result.get(key))
+                invoke.resolve(response)
+            } catch (_: Exception) {
+                invoke.reject("hc_raw_import_failed")
+            }
+        }
+    }
+
+    @Command
+    fun readSleep(invoke: Invoke) {
+        // Sleep is captured losslessly by the raw importer, then projected from
+        // the selected source. Before pairing, never recreate duplicate legacy
+        // sleep rows or request provider access from this retired reader.
+        invoke.resolve(JSObject().put("sessions", org.json.JSONArray())
+            .put("skipped", "raw_sleep_projection"))
     }
 
     @Command

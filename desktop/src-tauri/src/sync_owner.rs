@@ -225,6 +225,8 @@ pub(crate) fn dirty_rows_after(
         if !matches!(id, SqlValue::Integer(_) | SqlValue::Text(_)) {
             return Err(format!("dirty row for {table} has an unsupported id"));
         }
+        let local_id = match &id { SqlValue::Integer(v) => v.to_string(), SqlValue::Text(v) => v.clone(), _ => unreachable!() };
+        if crate::health_raw_sleep_projection::is_local_projection(conn, table, &local_id)? { continue; }
         rows.push((
             id,
             canonical_sync_timestamp(&timestamp, &format!("{table}.updated_at"))?,
@@ -340,6 +342,7 @@ pub(crate) fn dirty_tombstones_after(
     for row in mapped {
         let (table, row_id, timestamp): (String, String, String) =
             row.map_err(|error| format!("decode dirty tombstone: {error}"))?;
+        if crate::health_raw_sleep_projection::is_local_projection(conn, &table, &row_id)? { continue; }
         rows.push((
             table,
             row_id,
@@ -1624,6 +1627,25 @@ async fn push_tombstones(
 enum UpsertMode {
     BestEffort,
     FailClosed,
+    // LAN v1 has no writer id. Preserve its equal-timestamp comparison while
+    // reporting invalid rows/storage errors so transport cursors cannot skip them.
+    LanFailClosed,
+}
+
+impl UpsertMode {
+    fn strict(self) -> bool {
+        self != Self::BestEffort
+    }
+}
+
+pub(crate) fn upsert_row_lan(
+    conn: &Connection,
+    table: &str,
+    fields: &serde_json::Map<String, Value>,
+) -> Result<bool, String> {
+    with_remote_sync_apply(conn, || {
+        upsert_row_inner(conn, table, fields, UpsertMode::LanFailClosed)
+    })
 }
 
 pub(crate) fn upsert_row(
@@ -1731,7 +1753,7 @@ fn upsert_row_inner(
         .and_then(Value::as_str)
         .unwrap_or("");
     if remote_ts_raw.is_empty() {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err(format!("{}: row missing _updated_at", table));
         }
         return Ok(false);
@@ -1739,7 +1761,7 @@ fn upsert_row_inner(
     let remote_ts =
         match canonical_sync_timestamp(remote_ts_raw, &format!("remote {table}._updated_at")) {
             Ok(timestamp) => timestamp,
-            Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+            Err(error) if mode.strict() => return Err(error),
             Err(_) => return Ok(false),
         };
     let remote_device = fields
@@ -1759,7 +1781,7 @@ fn upsert_row_inner(
     // schema. We still advance the pull cursor so we don't loop forever.
     let cols = match table_columns(conn, table) {
         Ok(c) => c,
-        Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+        Err(error) if mode.strict() => return Err(error),
         Err(_) => {
             eprintln!("[sync_owner] skip remote row for missing table {}", table);
             return Ok(false);
@@ -1778,7 +1800,7 @@ fn upsert_row_inner(
         .optional()
     {
         Ok(value) => value,
-        Err(error) if mode == UpsertMode::FailClosed => {
+        Err(error) if mode.strict() => {
             return Err(format!("{}: read tombstone: {}", table, error));
         }
         Err(_) => None,
@@ -1786,7 +1808,7 @@ fn upsert_row_inner(
     if let Some(tomb) = &tomb_ts_raw {
         let tomb = match canonical_sync_timestamp(tomb, &format!("{table} tombstone")) {
             Ok(timestamp) => timestamp,
-            Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+            Err(error) if mode.strict() => return Err(error),
             Err(_) => return Ok(false),
         };
         if tomb >= remote_ts {
@@ -1804,7 +1826,7 @@ fn upsert_row_inner(
         .optional()
     {
         Ok(value) => value,
-        Err(error) if mode == UpsertMode::FailClosed => {
+        Err(error) if mode.strict() => {
             return Err(format!("{}: read local row: {}", table, error));
         }
         Err(_) => None,
@@ -1812,7 +1834,7 @@ fn upsert_row_inner(
     if let Some(local) = &local_ts_raw {
         let local = match canonical_sync_timestamp(local, &format!("local {table}.updated_at")) {
             Ok(timestamp) => timestamp,
-            Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+            Err(error) if mode.strict() => return Err(error),
             Err(_) => return Ok(false),
         };
         if local > remote_ts {
@@ -1835,7 +1857,7 @@ fn upsert_row_inner(
         .filter(|c| fields.contains_key(*c) || *c == "updated_at")
         .collect();
     if cols.is_empty() {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err(format!("{}: row has no applicable columns", table));
         }
         return Ok(false);
@@ -1873,7 +1895,7 @@ fn upsert_row_inner(
     let refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
     if let Err(e) = conn.execute(&sql, refs.as_slice()) {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err(format!("{}: upsert row {}: {}", table, id_str, e));
         }
         // Don't fail the whole pull on one bad row — log and move on.
@@ -1891,7 +1913,7 @@ fn upsert_row_inner(
         ),
         rusqlite::params![&remote_ts, &id_sql],
     ) {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err(format!(
                 "{table}: restore remote timestamp for {id_str}: {error}"
             ));
@@ -1926,7 +1948,7 @@ fn upsert_event_category(
 ) -> Result<bool, String> {
     let name = match fields.get("name").and_then(|v| v.as_str()) {
         Some(n) if !n.is_empty() => n,
-        _ if mode == UpsertMode::FailClosed => {
+        _ if mode.strict() => {
             return Err("event_categories: row missing name".into());
         }
         _ => return Ok(false),
@@ -1943,7 +1965,7 @@ fn upsert_event_category(
         .optional()
     {
         Ok(value) => value,
-        Err(error) if mode == UpsertMode::FailClosed => {
+        Err(error) if mode.strict() => {
             return Err(format!("event_categories: read tombstone: {error}"));
         }
         Err(_) => None,
@@ -1951,7 +1973,7 @@ fn upsert_event_category(
     if let Some(timestamp) = tombstone.as_deref() {
         let timestamp = match canonical_sync_timestamp(timestamp, "event_categories tombstone") {
             Ok(timestamp) => timestamp,
-            Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+            Err(error) if mode.strict() => return Err(error),
             Err(_) => return Ok(false),
         };
         if timestamp.as_str() >= remote_ts {
@@ -1969,7 +1991,7 @@ fn upsert_event_category(
         .optional()
     {
         Ok(value) => value,
-        Err(error) if mode == UpsertMode::FailClosed => {
+        Err(error) if mode.strict() => {
             return Err(format!("event_categories: read local row: {}", error));
         }
         Err(_) => None,
@@ -1977,7 +1999,7 @@ fn upsert_event_category(
     if let Some(local) = &local_ts_raw {
         let local = match canonical_sync_timestamp(local, "local event_categories.updated_at") {
             Ok(timestamp) => timestamp,
-            Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+            Err(error) if mode.strict() => return Err(error),
             Err(_) => return Ok(false),
         };
         if local.as_str() > remote_ts {
@@ -2001,7 +2023,7 @@ fn upsert_event_category(
 
     let table_cols = match table_columns(conn, "event_categories") {
         Ok(c) => c,
-        Err(error) if mode == UpsertMode::FailClosed => return Err(error),
+        Err(error) if mode.strict() => return Err(error),
         Err(_) => return Ok(false),
     };
     // Drop `id` — the local AUTOINCREMENT owns it.
@@ -2011,7 +2033,7 @@ fn upsert_event_category(
         .filter(|c| *c != "id" && (fields.contains_key(*c) || *c == "updated_at"))
         .collect();
     if cols.is_empty() {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err("event_categories: row has no applicable columns".into());
         }
         return Ok(false);
@@ -2048,7 +2070,7 @@ fn upsert_event_category(
     let refs: Vec<&dyn rusqlite::ToSql> =
         params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
     if let Err(e) = conn.execute(&sql, refs.as_slice()) {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err(format!("event_categories: upsert {}: {}", name, e));
         }
         eprintln!("[sync_owner] upsert event_categories '{}': {}", name, e);
@@ -2059,7 +2081,7 @@ fn upsert_event_category(
          WHERE name=?2 AND updated_at<>?1",
         rusqlite::params![remote_ts, name],
     ) {
-        if mode == UpsertMode::FailClosed {
+        if mode.strict() {
             return Err(format!(
                 "event_categories: restore remote timestamp for {name}: {error}"
             ));

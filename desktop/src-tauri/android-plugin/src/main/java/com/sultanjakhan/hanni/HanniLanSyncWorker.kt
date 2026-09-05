@@ -3,9 +3,11 @@ package com.sultanjakhan.hanni
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.util.Log
+import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
+import androidx.work.workDataOf
+import kotlinx.coroutines.CancellationException
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -23,7 +25,7 @@ class HanniLanSyncWorker(context: Context, params: WorkerParameters) :
         val dbFile = File(applicationContext.filesDir.parentFile, "hanni.db")
         if (!dbFile.exists() || dbFile.length() == 0L) {
             Log.i(TAG, "skip: DB not ready")
-            return@withContext Result.success()
+            return@withContext Result.retry()
         }
         try {
             val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
@@ -37,12 +39,12 @@ class HanniLanSyncWorker(context: Context, params: WorkerParameters) :
             } else {
                 Log.i(TAG, "ok: sent=${stats.sent} received=${stats.received} deletes=${stats.deletes}")
             }
-            Result.success()
+            Result.success(workDataOf("status" to if (stats == null) "not_configured" else "exchanged"))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            // The peer being asleep is expected. Keep the fixed 15-minute
-            // cadence instead of entering WorkManager's exponential backoff.
-            Log.w(TAG, "peer unavailable: ${e.message}")
-            Result.success()
+            Log.w(TAG, "exchange deferred: ${e.javaClass.simpleName}")
+            Result.retry()
         }
     }
 
@@ -53,17 +55,17 @@ class HanniLanSyncWorker(context: Context, params: WorkerParameters) :
         fun ensureScheduled(context: Context, intervalMinutes: Long = 15L) {
             val request = PeriodicWorkRequestBuilder<HanniLanSyncWorker>(
                 intervalMinutes.coerceAtLeast(15L), TimeUnit.MINUTES,
-            ).build()
+            ).setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS).build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                UNIQUE_NAME, ExistingPeriodicWorkPolicy.KEEP, request,
+                UNIQUE_NAME, ExistingPeriodicWorkPolicy.UPDATE, request,
             )
         }
 
         fun enqueueCatchup(context: Context) {
-            WorkManager.getInstance(context).enqueueUniqueWork(
+            HanniCatchupQueue.request(context,
                 "$UNIQUE_NAME-catchup",
-                ExistingWorkPolicy.REPLACE,
-                OneTimeWorkRequestBuilder<HanniLanSyncWorker>().build(),
+                OneTimeWorkRequestBuilder<HanniLanSyncWorker>()
+                    .setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS).build(),
             )
         }
     }

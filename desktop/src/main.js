@@ -33,6 +33,7 @@ import { loadNotes, renderDatabaseView, renderNoteEditor, renderLinkedNotes, cre
 // none of which the default Calendar boot view needs — keeping it off the
 // cold-start parse path is the biggest single entry-latency win.
 import { autoImportHealth, startHealthPolling, maybeRequestHealthBackground } from './js/health-auto-sync.js';
+import { startHealthViewRefresh, requestHealthViewRefresh } from './js/health-view-refresh.js';
 import { checkAndroidUpdate, checkWebUpdate, confirmWebBoot, desktopWebOTA, webAppliedToast } from './js/android-update.js';
 
 // ── One-time migration: work → jobs tab rename ──
@@ -394,6 +395,8 @@ document.addEventListener('keydown', (e) => {
   if (chat.children.length === 0) renderChatWelcomeCard();
   loadConversationsList();
 
+  startHealthViewRefresh();
+
   // Auto-sync health data from Health Connect (Android only)
   // Triggered on cold start and whenever the app returns to foreground —
   // this is the "wake up, open Hanni" path: Watch → Health Connect → Hanni
@@ -415,7 +418,10 @@ document.addEventListener('keydown', (e) => {
       setTimeout(() => {
         autoImportHealth();
         Promise.allSettled([invoke('lan_sync_now'), invoke('cloud_owner_pull')]).then(() => {
-          try { activateView(); } catch (_) {}
+          try {
+            if (S.activeTab === 'calendar' || S.activeTab === 'health') requestHealthViewRefresh();
+            else activateView();
+          } catch (_) {}
           try { window.dispatchEvent(new Event('task-state-changed')); } catch (_) {}
         });
       }, 50);

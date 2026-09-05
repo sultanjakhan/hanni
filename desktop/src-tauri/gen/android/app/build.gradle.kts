@@ -85,6 +85,8 @@ android {
         jvmTarget = "1.8"
     }
     sourceSets["main"].java.srcDirs("../../../android-plugin/src/main/java")
+    sourceSets["main"].assets.srcDirs("../../../android-plugin/src/main/assets")
+    sourceSets["test"].java.srcDirs("../../../android-plugin/src/test/java")
     buildFeatures {
         buildConfig = true
     }
@@ -107,6 +109,9 @@ dependencies {
     // the Tauri WebView/Rust process is not running.
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation("androidx.work:work-testing:2.9.1")
+    testImplementation("androidx.concurrent:concurrent-futures:1.1.0")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }

@@ -11,7 +11,7 @@ internal object BackgroundLanSync {
 
     fun runConfigured(db: SQLiteDatabase): Stats? {
         val config = readConfig(db) ?: return null
-        val outbound = LanSyncDatabase.gather(db)
+        val outbound = LanSyncDatabase.gather(db, config.second)
         val request = JSONObject().apply {
             put("key", config.first)
             put("cursors", outbound.cursors)
@@ -32,9 +32,12 @@ internal object BackgroundLanSync {
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val responseText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
-                throw IllegalStateException("LAN sync HTTP $code: $responseText")
+                throw IllegalStateException("LAN sync HTTP $code")
             }
-            val response = if (responseText.isBlank()) JSONObject() else JSONObject(responseText)
+            val response = JSONObject(responseText)
+            require(response.optJSONArray("rows") != null && response.optJSONArray("tombs") != null) {
+                "Invalid LAN sync response"
+            }
             val received = LanSyncDatabase.applyResponse(db, outbound, response)
             return Stats(outbound.rows.length(), received, response.optJSONArray("tombs")?.length() ?: 0)
         } finally {

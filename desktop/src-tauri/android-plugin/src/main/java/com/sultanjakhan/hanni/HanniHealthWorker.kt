@@ -9,10 +9,11 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
-import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -31,71 +32,84 @@ import java.time.temporal.ChronoUnit
 // Runs from WorkManager at a 15-min minimum interval — Android won't let us
 // go tighter for periodic work. Coupled with the in-app polling on
 // foreground / visibilitychange, freshness becomes ~3 min when the app is
-// open and ~15 min worst case when it isn't.
+// open. Android can delay background work beyond the requested interval.
 class HanniHealthWorker(
     context: Context,
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        Log.i(TAG, "doWork: enter")
         try {
             val ctx = applicationContext
-            val sdk = HealthConnectClient.getSdkStatus(ctx)
-            if (sdk != HealthConnectClient.SDK_AVAILABLE) {
-                Log.w(TAG, "HC SDK not available: $sdk")
-                return@withContext Result.success()
+            if (HealthConnectClient.getSdkStatus(ctx) != HealthConnectClient.SDK_AVAILABLE) {
+                return@withContext Result.failure(workDataOf("status" to "health_unavailable"))
             }
             val client = HealthConnectClient.getOrCreate(ctx)
             val granted = client.permissionController.getGrantedPermissions()
-            Log.i(TAG, "doWork: granted=${granted.size} HC permissions")
             val end = Instant.now()
             val start = end.minus(30, ChronoUnit.DAYS)
-            fun has(record: kotlin.reflect.KClass<out androidx.health.connect.client.records.Record>) =
-                granted.contains(HealthPermission.getReadPermission(record))
-
-            // Import every granted type independently. Denying heart rate must
-            // not disable sleep, steps and walks.
-            val sleep = if (has(SleepSessionRecord::class)) readSleepSessions(client, start, end) else JSONArray()
-            val exercise = if (has(ExerciseSessionRecord::class)) readExerciseSessions(client, start, end) else JSONArray()
-            val steps = if (has(StepsRecord::class)) readDailySteps(client, start, end) else JSONArray()
-            val heartRate = if (has(HeartRateRecord::class)) readHeartRateSamples(client, start, end) else JSONArray()
-
-            // Hanni keeps the DB in app_data_dir (Tauri's path resolver), not
-            // the standard `databases/` sub-dir, so getDatabasePath() misses it.
-            // app_data_dir on Android = filesDir's parent = /data/user/0/<pkg>/.
-            val dbFile = File(ctx.filesDir.parentFile, "hanni.db")
-            // Race-guard: Worker may fire before Rust ever created the DB (fresh
-            // install, or after corruption-recovery the file briefly disappears).
-            // Returning success() — not retry() — avoids WorkManager backoff storm
-            // while Hanni isn't even running; next 15-min tick will see the file.
-            if (!dbFile.exists() || dbFile.length() == 0L) {
-                Log.i(TAG, "doWork skip: DB not ready yet (exists=${dbFile.exists()} size=${dbFile.length()})")
-                return@withContext Result.success()
+            val readings = linkedMapOf<String, JSONArray>()
+            var temporaryFailure = false
+            var permissionFailure = false
+            suspend fun readType(
+                name: String,
+                record: kotlin.reflect.KClass<out androidx.health.connect.client.records.Record>,
+                reader: suspend () -> JSONArray,
+            ) {
+                if (HealthPermission.getReadPermission(record) !in granted) return
+                try {
+                    readings[name] = reader()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: SecurityException) {
+                    permissionFailure = true
+                } catch (e: Exception) {
+                    temporaryFailure = true
+                    Log.w(TAG, "read failed: type=$name reason=${e.javaClass.simpleName}")
+                }
             }
-            val db = SQLiteDatabase.openDatabase(
-                dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE
-            )
+            // The raw importer captures sleep before pairing. Only the selected
+            // source projection may materialize it; never add legacy duplicates
+            // during the first-launch window before authority is configured.
+            readType("exercise", ExerciseSessionRecord::class) { readExerciseSessions(client, start, end) }
+            readType("steps", StepsRecord::class) { readDailySteps(client, start, end) }
+            readType("heart_rate", HeartRateRecord::class) { readHeartRateSamples(client, start, end) }
+            if (readings.isEmpty()) {
+                return@withContext if (temporaryFailure) Result.retry()
+                else Result.failure(workDataOf("status" to "health_permission_required"))
+            }
+            val dbFile = File(ctx.filesDir.parentFile, "hanni.db")
+            if (!dbFile.exists() || dbFile.length() == 0L) return@withContext Result.retry()
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
             try {
-                insertSleep(db, sleep)
-                insertExercise(db, exercise)
-                insertSteps(db, steps)
-                insertHeartRate(db, heartRate)
+                db.beginTransaction()
+                try {
+                    readings["exercise"]?.let { insertExercise(db, it) }
+                    readings["steps"]?.let { insertSteps(db, it) }
+                    readings["heart_rate"]?.let { insertHeartRate(db, it) }
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
             } finally {
                 db.close()
             }
-            Log.i(TAG, "doWork ok: sleep=${sleep.length()} exercise=${exercise.length()} steps=${steps.length()} hr=${heartRate.length()}")
-            Result.success()
-        } catch (se: SecurityException) {
-            // Background read not permitted — READ_HEALTH_DATA_IN_BACKGROUND not
-            // granted (required on Android 14+ for HC reads off the foreground).
-            // Don't retry-storm: the app re-requests it on next foreground open;
-            // succeed quietly until then so we don't churn WorkManager backoff.
-            Log.w(TAG, "background read not permitted yet: ${se.message}")
-            Result.success()
+            // Durable WorkManager delivery is enqueued only after DB commit.
+            // Its independent periodic worker also runs when HC cannot be read.
+            HanniLanSyncWorker.enqueueCatchup(ctx)
+            HanniRelaySyncWorker.enqueueCatchup(ctx)
+            Log.i(TAG, "import committed: readTypes=${readings.size} temporaryFailure=$temporaryFailure permissionFailure=$permissionFailure")
+            if (temporaryFailure) Result.retry()
+            else Result.success(workDataOf(
+                "status" to if (permissionFailure) "partial_permission_required" else "imported",
+                "read_types" to readings.keys.toTypedArray(),
+            ))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: SecurityException) {
+            Result.failure(workDataOf("status" to "health_permission_required"))
         } catch (e: Exception) {
-            Log.e(TAG, "doWork failed", e)
-            // retry with WorkManager's default backoff
+            Log.w(TAG, "import failed: ${e.javaClass.simpleName}")
             Result.retry()
         }
     }
@@ -136,12 +150,17 @@ class HanniHealthWorker(
                     ).use { if (it.moveToFirst()) sessionId = it.getString(0) }
                 }
             }
-            sessionId?.let { sid ->
+            requireNotNull(sessionId) { "Sleep record could not be stored" }.let { sid ->
                 val patch = ContentValues().apply {
+                    put("date", date)
+                    put("start_time", startTime)
                     put("end_time", endTime)
                     put("duration_minutes", dur)
                 }
-                db.update("sleep_sessions", patch, "id=?", arrayOf(sid))
+                // A repeated HC window must not stamp unchanged rows or enqueue them again.
+                db.update("sleep_sessions", patch,
+                    "id=? AND (date IS NOT ? OR start_time IS NOT ? OR end_time IS NOT ? OR duration_minutes IS NOT ?)",
+                    arrayOf(sid, date, startTime, endTime, dur.toString()))
                 reconcileSleepStages(db, sid, s.optJSONArray("stages") ?: JSONArray())
             }
         }
@@ -193,20 +212,26 @@ class HanniHealthWorker(
             val title = s.optString("title", "")
             val startTime = s.optString("start_time", "")
             val notes = "$etype: $title"
+            val recordId = s.optString("record_id")
+            val stableId = if (recordId.isEmpty()) "health:exercise:$date:$startTime:$notes" else "health:exercise:$recordId"
             val cur = db.rawQuery(
                 "SELECT id FROM health_log " +
-                "WHERE type='exercise' AND date=? AND COALESCE(start_time,'')=? AND notes=? LIMIT 1",
-                arrayOf(date, startTime, notes)
+                "WHERE id=? OR (type='exercise' AND date=? AND COALESCE(start_time,'')=? AND notes=?) " +
+                    "ORDER BY (id=?) DESC LIMIT 1",
+                arrayOf(stableId, date, startTime, notes, stableId)
             )
             val existingId: String? = if (cur.moveToFirst()) cur.getString(0) else null
             cur.close()
             if (existingId != null) {
-                val patch = ContentValues().apply { put("value", dur) }
-                db.update("health_log", patch, "id=?", arrayOf(existingId))
+                val patch = ContentValues().apply {
+                    put("value", dur); put("date", date); put("start_time", startTime); put("notes", notes)
+                }
+                db.update("health_log", patch,
+                    "id=? AND (value IS NOT ? OR date IS NOT ? OR start_time IS NOT ? OR notes IS NOT ?)",
+                    arrayOf(existingId, dur.toString(), date, startTime, notes))
             } else {
                 val cv = ContentValues().apply {
-                    val recordId = s.optString("record_id")
-                    put("id", if (recordId.isEmpty()) "health:exercise:$date:$startTime:$notes" else "health:exercise:$recordId")
+                    put("id", stableId)
                     put("date", date)
                     put("type", "exercise")
                     put("value", dur)
@@ -215,7 +240,7 @@ class HanniHealthWorker(
                     put("start_time", startTime)
                     put("created_at", now)
                 }
-                db.insert("health_log", null, cv)
+                db.insertOrThrow("health_log", null, cv)
             }
         }
     }
@@ -238,7 +263,8 @@ class HanniHealthWorker(
             cur.close()
             if (existingId != null) {
                 val patch = ContentValues().apply { put("value", steps) }
-                db.update("health_log", patch, "id=?", arrayOf(existingId))
+                db.update("health_log", patch, "id=? AND value IS NOT ?",
+                    arrayOf(existingId, steps.toString()))
             } else {
                 val cv = ContentValues().apply {
                     put("id", "health:steps:$date")
@@ -250,7 +276,7 @@ class HanniHealthWorker(
                     put("start_time", "")
                     put("created_at", now)
                 }
-                db.insert("health_log", null, cv)
+                db.insertOrThrow("health_log", null, cv)
             }
         }
     }
@@ -269,6 +295,11 @@ class HanniHealthWorker(
                 put("id", id); put("date", date); put("time", time); put("bpm", bpm)
             }
             db.insertWithOnConflict("heart_rate_samples", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+            // The same HC sample can be corrected later; preserve its stable ID.
+            val patch = ContentValues().apply { put("date", date); put("time", time); put("bpm", bpm) }
+            db.update("heart_rate_samples", patch,
+                "id=? AND (date IS NOT ? OR time IS NOT ? OR bpm IS NOT ?)",
+                arrayOf(id, date, time, bpm.toString()))
         }
     }
 

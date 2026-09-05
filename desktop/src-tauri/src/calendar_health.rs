@@ -100,7 +100,7 @@ pub fn sync_health_to_calendar(date: String, db: tauri::State<'_, HanniDb>) -> R
     // Sleep sessions → events
     if let Ok(mut stmt) = conn.prepare(
         "SELECT start_time, duration_minutes FROM sleep_sessions
-         WHERE date=?1 AND source='health_connect'"
+         WHERE date=?1 AND source='health_connect' AND id NOT GLOB 'raw-sleep:*'"
     ) {
         let sessions: Vec<(String, i64)> = stmt.query_map(
             rusqlite::params![date], |row| Ok((row.get(0)?, row.get(1)?))
@@ -281,7 +281,7 @@ pub(crate) fn auto_complete_from_health(conn: &rusqlite::Connection, date: &str,
         rusqlite::params![date], |r| r.get::<_, f64>(0),
     ).unwrap_or(0.0) as i64;
     let sleep_min: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(duration_minutes),0) FROM sleep_sessions WHERE date=?1 AND source='health_connect'",
+        "SELECT COALESCE(SUM(duration_minutes),0) FROM sleep_sessions WHERE date=?1 AND source='health_connect' AND id NOT GLOB 'raw-sleep:*'",
         rusqlite::params![date], |r| r.get(0),
     ).unwrap_or(0);
 

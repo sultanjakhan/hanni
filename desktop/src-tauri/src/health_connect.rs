@@ -118,6 +118,7 @@ pub fn add_sleep_session(db: State<'_, HanniDb>, session: SleepSession) -> Resul
 #[tauri::command]
 pub fn delete_sleep_session(db: State<'_, HanniDb>, id: String) -> Result<(), String> {
     let conn = db.conn();
+    crate::health_raw_sleep_projection::ensure_user_editable(&conn, "sleep_sessions", &id)?;
     conn.execute("DELETE FROM sleep_stages WHERE session_id=?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM sleep_sessions WHERE id=?1", rusqlite::params![id])

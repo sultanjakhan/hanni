@@ -1,3 +1,4 @@
+import { canRefreshHealthView, mayCommitHealthView, beginHealthViewRead, retryHealthViewRefresh } from './health-view-refresh.js';
 // ── js/tab-calendar.js — Calendar tab: unified layout with sub-views ──
 
 import { S, invoke, tabLoaders } from './state.js';
@@ -28,7 +29,10 @@ let calDayScrolled = false;
 
 // Modal triggers refresh through window event so we don't need to inject the
 // callback into the imported module.
-window.addEventListener('hanni:calendar-refresh', () => { refreshCalendarInner().catch(() => {}); });
+window.addEventListener('hanni:calendar-refresh', event => {
+  const quiet = !!event.detail?.quietHealth;
+  refreshCalendarInner(quiet).catch(() => { if (quiet) retryHealthViewRefresh(); });
+});
 
 // Keep the red current-time marker accurate without re-rendering the calendar.
 // Re-rendering every minute would re-query events and can disturb transient UI;
@@ -195,33 +199,36 @@ async function renderDashSub(contentEl) {
 }
 
 // Lightweight refresh: only updates #calendar-inner-content, no layout re-render
-async function refreshCalendarInner() {
+async function refreshCalendarInner(quiet = false) {
   const innerEl = document.getElementById('calendar-inner-content');
-  if (!innerEl) return;
+  if (!innerEl || (quiet && !canRefreshHealthView(innerEl))) return;
+  const currentRead = beginHealthViewRead(innerEl);
   const activeView = S._calendarInner || 'month';
   if (activeView === 'integrations') {
+    if (quiet) return;
     await renderCalendarIntegrations(innerEl);
     return;
   }
   if (getViewMode(activeView) === 'list') {
     const { renderCalendarTaskList } = await import('./calendar-task-list.js');
     if (activeView === 'day') {
-      await renderCalendarTaskList(innerEl);
+      await renderCalendarTaskList(innerEl, { quiet });
     } else {
       const { start, end } = getViewPeriod(activeView);
-      await renderCalendarTaskList(innerEl, { start, end, includeSchedules: false, view: activeView });
+      await renderCalendarTaskList(innerEl, { start, end, includeSchedules: false, view: activeView, quiet });
     }
     return;
   }
   // Idempotent: collapse any auto_health duplicates that may have crept in
   // from earlier code paths before this side restarted with the startup
   // dedup migration. Cheap, runs every refresh, ms-level even on big DBs.
-  invoke('dedup_auto_health_events').catch(() => {});
-  const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(() => []);
-  const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(() => []);
-  if (activeView === 'week') await renderWeekCalendar(innerEl, events || []);
-  else if (activeView === 'day') await renderDayCalendar(innerEl, events || []);
-  else await renderCalendar(innerEl, events || [], tasks || []);
+  if (!quiet) invoke('dedup_auto_health_events').catch(() => {});
+  const events = await invoke('get_events', { month: S.calendarMonth + 1, year: S.calendarYear }).catch(error => { if (quiet) throw error; return []; });
+  const tasks = await invoke('get_notes', { filter: 'tasks', search: null }).catch(error => { if (quiet) throw error; return []; });
+  if (!currentRead()) return;
+  if (activeView === 'week') await renderWeekCalendar(innerEl, events || [], quiet);
+  else if (activeView === 'day') await renderDayCalendar(innerEl, events || [], quiet);
+  else await renderCalendar(innerEl, events || [], tasks || [], quiet);
 }
 
 function getViewMode(view) {
@@ -351,7 +358,8 @@ async function autoSyncCalendar(viewName) {
 // Category → color class mapping
 const CAT_COLORS = { health: 'blue', sport: 'green', hygiene: 'pink', practice: 'purple', challenge: 'red', growth: 'orange', work: 'yellow', home: 'gray', other: 'blue' };
 
-async function renderCalendar(el, events, tasks) {
+async function renderCalendar(el, events, tasks, quiet = false) {
+  const currentRead = beginHealthViewRead(el);
   tasks = tasks || [];
   // Calendar grid shows only events with explicit time. Time-less events live in Day-view list.
   events = (events || []).filter(e => e.time && e.time.trim());
@@ -359,9 +367,9 @@ async function renderCalendar(el, events, tasks) {
   const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const MAX_PILLS = 4;
 
-  const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
+  const schedules = await invoke('get_schedules', { category: null }).catch(error => { if (quiet) throw error; return []; });
   const selDate = S.selectedCalendarDate;
-  const selCompletions = selDate ? await invoke('get_schedule_completions', { date: selDate }).catch(() => []) : [];
+  const selCompletions = selDate ? await invoke('get_schedule_completions', { date: selDate }).catch(error => { if (quiet) throw error; return []; }) : [];
   const completedIds = new Set(selCompletions.filter(c => c.completed).map(c => c.schedule_id));
   const skippedIds = new Set(selCompletions.filter(c => c.status === 'skipped').map(c => c.schedule_id));
   // Challenges: load completions for previous day
@@ -370,7 +378,7 @@ async function renderCalendar(el, events, tasks) {
   if (selDate) {
     const prevD = new Date(selDate + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
     const prevDate = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}-${String(prevD.getDate()).padStart(2,'0')}`;
-    const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
+    const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(error => { if (quiet) throw error; return []; });
     challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
     challengeSkippedIds = new Set(prevComps.filter(c => c.status === 'skipped').map(c => c.schedule_id));
   }
@@ -482,7 +490,7 @@ async function renderCalendar(el, events, tasks) {
     </div>`;
   }
 
-  el.innerHTML = `
+  const healthViewHtml = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="cal-prev">&lt;</button>
       <div class="calendar-month-label">${monthNames[S.calendarMonth]} ${S.calendarYear}</div>
@@ -494,6 +502,8 @@ async function renderCalendar(el, events, tasks) {
     <div class="cal-weekdays">${weekdays.map(d => `<div class="cal-weekday">${d}</div>`).join('')}</div>
     <div class="cal-grid">${daysHtml}</div>
     ${dayPanelHtml}`;
+  if (!currentRead() || !mayCommitHealthView(el, healthViewHtml, quiet)) return;
+  el.innerHTML = healthViewHtml;
   wireViewModeToggle(el, 'month');
 
   // Nav
@@ -591,7 +601,8 @@ async function renderCalendar(el, events, tasks) {
   });
 }
 
-async function renderWeekCalendar(el, events) {
+async function renderWeekCalendar(el, events, quiet = false) {
+  const currentRead = beginHealthViewRead(el);
   events = (events || []).filter(e => e.time && e.time.trim());
   const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const monthsShort = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
@@ -606,7 +617,7 @@ async function renderWeekCalendar(el, events) {
 
   const eventsByDate = {};
   for (const ev of events) { if (!eventsByDate[ev.date]) eventsByDate[ev.date] = []; eventsByDate[ev.date].push(ev); }
-  const schedules = await invoke('get_schedules', { category: null }).catch(() => []);
+  const schedules = await invoke('get_schedules', { category: null }).catch(error => { if (quiet) throw error; return []; });
 
   // Build day dates & header
   const dayDates = [];
@@ -709,7 +720,7 @@ async function renderWeekCalendar(el, events) {
   endDate.setDate(weekStart.getDate() + 6);
   const endLabel = `${endDate.getDate()} ${monthsShort[endDate.getMonth()]}`;
 
-  el.innerHTML = `
+  const healthViewHtml = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="week-prev">&lt;</button>
       <div class="calendar-month-label">${startLabel} — ${endLabel} ${weekStart.getFullYear()}</div>
@@ -723,6 +734,8 @@ async function renderWeekCalendar(el, events) {
     <div class="wk-scroll">
       <div class="wk-grid">${gridHtml}</div>
     </div>`;
+  if (!currentRead() || !mayCommitHealthView(el, healthViewHtml, quiet)) return;
+  el.innerHTML = healthViewHtml;
   wireViewModeToggle(el, 'week');
 
   // Auto-scroll to current hour
@@ -793,21 +806,22 @@ function layoutOverlappingDayEvents(root) {
   }
 }
 
-async function renderDayCalendar(el, events) {
+async function renderDayCalendar(el, events, quiet = false) {
+  const currentRead = beginHealthViewRead(el);
   events = (events || []).filter(e => e.time && e.time.trim());
   const today = new Date();
   if (!S.calDayDate) S.calDayDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   // Pull Health-Connect-sourced sleep into events for this date so the Day-view
   // shows it alongside manual entries. Idempotent (DELETE+INSERT by source).
-  try {
+  if (!quiet) try {
     const added = await invoke('sync_health_to_calendar', { date: S.calDayDate });
     if (added > 0) {
       const dayD = new Date(S.calDayDate + 'T00:00:00');
-      const fresh = await invoke('get_events', { month: dayD.getMonth() + 1, year: dayD.getFullYear() }).catch(() => []);
+      const fresh = await invoke('get_events', { month: dayD.getMonth() + 1, year: dayD.getFullYear() }).catch(error => { if (quiet) throw error; return []; });
       events = (fresh || []).filter(e => e.time && e.time.trim());
     }
   } catch (_) {}
-  const timelineBlocks = await invoke('get_timeline_blocks', { date: S.calDayDate }).catch(() => []);
+  const timelineBlocks = await invoke('get_timeline_blocks', { date: S.calDayDate }).catch(error => { if (quiet) throw error; return []; });
   const actualByEvent = new Map();
   for (const block of timelineBlocks || []) {
     if (block.is_active || block.source_type !== 'event' || block.source_id == null) continue;
@@ -840,13 +854,13 @@ async function renderDayCalendar(el, events) {
   // Calendar grid shows only events with explicit time. Schedules live in Day-view "Список" only.
   const schedules = [];
   const dayScheds = [];
-  const completions = await invoke('get_schedule_completions', { date: S.calDayDate }).catch(() => []);
+  const completions = await invoke('get_schedule_completions', { date: S.calDayDate }).catch(error => { if (quiet) throw error; return []; });
   const completedIds = new Set(completions.filter(c => c.completed).map(c => c.schedule_id));
   const skippedIds = new Set(completions.filter(c => c.status === 'skipped').map(c => c.schedule_id));
   // Challenges mark completion for previous day
   const prevD = new Date(S.calDayDate + 'T12:00:00'); prevD.setDate(prevD.getDate() - 1);
   const prevDate = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,'0')}-${String(prevD.getDate()).padStart(2,'0')}`;
-  const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(() => []);
+  const prevComps = await invoke('get_schedule_completions', { date: prevDate }).catch(error => { if (quiet) throw error; return []; });
   const challengeDoneIds = new Set(prevComps.filter(c => c.completed).map(c => c.schedule_id));
   const challengeSkippedIds = new Set(prevComps.filter(c => c.status === 'skipped').map(c => c.schedule_id));
 
@@ -958,7 +972,7 @@ async function renderDayCalendar(el, events) {
   const mealPlanHtml = await renderMealPlanBlock(S.calDayDate);
 
   const dayMode = getViewMode('day');
-  el.innerHTML = `
+  const healthViewHtml = `
     <div class="calendar-nav">
       <button class="calendar-nav-btn" id="day-prev">&lt;</button>
       <div class="calendar-month-label">${d.getDate()} ${monthNames[d.getMonth()]} · ${dayNames[d.getDay()]}</div>
@@ -970,6 +984,8 @@ async function renderDayCalendar(el, events) {
     ${mealPlanHtml}
     ${allDayHtml}
     <div class="day-timeline" data-date="${S.calDayDate}" style="--day-hour-px:${pxPerHour}px">${timelineHtml}${eventLayerHtml}${nowLineHtml}</div>`;
+  if (!currentRead() || !mayCommitHealthView(el, healthViewHtml, quiet)) return;
+  el.innerHTML = healthViewHtml;
 
   // Percentage positioning is unreliable here because an absolutely-positioned
   // layer with height:100% sits inside an auto-height timeline; WebKit can

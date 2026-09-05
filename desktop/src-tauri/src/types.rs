@@ -229,6 +229,113 @@ pub fn set_data_dir(path: PathBuf) {
     let _ = DATA_DIR.set(path);
 }
 
+#[cfg(debug_assertions)]
+mod isolated_dev_policy {
+    // Exact std-only module proposed for types.rs; also compiled by the invariant harness.
+    use std::path::{Path, PathBuf};
+
+    pub const MARKER: &str = ".hanni-isolated-dev";
+    pub const MARKER_CONTENT: &str = "hanni-isolated-dev-v1\n";
+
+    fn canonical_with_missing_suffix(path: &Path) -> Result<PathBuf, String> {
+        if path.exists() {
+            return std::fs::canonicalize(path).map_err(|_| "Cannot resolve isolation path".into());
+        }
+        let parent = path.parent().ok_or("Isolation path has no existing ancestor")?;
+        let name = path.file_name().ok_or("Invalid isolation path component")?;
+        Ok(canonical_with_missing_suffix(parent)?.join(name))
+    }
+
+    fn comparison_key(path: &Path) -> String {
+        let value = path.to_string_lossy().replace('\\', "/");
+        #[cfg(windows)]
+        let value = value.to_lowercase();
+        value.trim_end_matches('/').to_owned()
+    }
+
+    fn overlaps(a: &Path, b: &Path) -> bool {
+        let a = comparison_key(a);
+        let b = comparison_key(b);
+        a == b || a.starts_with(&(b.clone() + "/")) || b.starts_with(&(a + "/"))
+    }
+
+    pub fn validate_directory(candidate: &Path, forbidden: &[PathBuf]) -> Result<PathBuf, String> {
+        if !candidate.is_absolute() || candidate.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err("HANNI_DEV_DATA_DIR must be an absolute path without parent traversal".into());
+        }
+        if !candidate.is_dir() {
+            return Err("Create an empty isolated dev directory before starting Hanni".into());
+        }
+        let resolved = canonical_with_missing_suffix(candidate)?;
+        for path in forbidden {
+            if overlaps(&resolved, &canonical_with_missing_suffix(path)?) {
+                return Err("HANNI_DEV_DATA_DIR overlaps production or legacy data".into());
+            }
+        }
+        let marker = resolved.join(MARKER);
+        if marker.exists() {
+            let metadata = std::fs::symlink_metadata(&marker).map_err(|_| "Cannot inspect isolated dev marker")?;
+            if metadata.file_type().is_symlink() || !metadata.is_file()
+                || std::fs::read_to_string(marker).map_err(|_| "Cannot read isolated dev marker")? != MARKER_CONTENT {
+                return Err("Invalid isolated dev marker".into());
+            }
+        } else if std::fs::read_dir(&resolved).map_err(|_| "Cannot inspect isolated dev directory")?.next().is_some() {
+            return Err("Refusing an unmarked non-empty isolated dev directory".into());
+        }
+        Ok(resolved)
+    }
+
+    // These families are invoked by frontend startup and write-triggered sync.
+    // Local calendar and SQLite commands remain real; external integrations are outside this dev session.
+    pub fn external_command(command: &str) -> bool {
+        ["cloud_", "lan_sync_", "web_ota_", "web_ls_", "google_auth_", "mcp_", "health_", "import_health_connect", "bg_sync_"].iter().any(|prefix| command.starts_with(prefix))
+            || matches!(command,
+                "chat" | "get_integrations" | "sync_apple_calendar" | "sync_google_ics" | "request_calendar_access"
+                | "check_update" | "install_update" | "download_update" | "restart_app"
+                | "check_apk_update" | "download_apk" | "install_apk" | "web_origin_ok"
+                | "start_recording" | "start_call_mode" | "start_wakeword" | "speak_text"
+                | "bg_sync_enable" | "health_connect_request_permissions")
+    }
+}
+
+#[cfg(debug_assertions)]
+static ISOLATED_DEV: AtomicBool = AtomicBool::new(false);
+
+pub fn is_isolated_dev() -> bool {
+    #[cfg(debug_assertions)]
+    { ISOLATED_DEV.load(Ordering::Acquire) }
+    #[cfg(not(debug_assertions))]
+    { false }
+}
+
+pub fn isolated_dev_blocks_command(command: &str) -> bool {
+    #[cfg(debug_assertions)]
+    { is_isolated_dev() && isolated_dev_policy::external_command(command) }
+    #[cfg(not(debug_assertions))]
+    { let _ = command; false }
+}
+
+#[cfg(all(debug_assertions, not(target_os = "android")))]
+pub fn configure_isolated_dev() -> Result<(), String> {
+    let Some(raw) = std::env::var_os("HANNI_DEV_DATA_DIR") else { return Ok(()); };
+    let production = hanni_data_dir();
+    let legacy = dirs::home_dir().ok_or("Cannot resolve legacy data boundary")?.join("Documents/Hanni");
+    let path = isolated_dev_policy::validate_directory(&PathBuf::from(raw), &[production, legacy])?;
+    crate::secure_fs::ensure_private_dir(&path).map_err(|_| "Cannot secure isolated dev data")?;
+    let marker = path.join(isolated_dev_policy::MARKER);
+    if !marker.exists() {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&marker)
+            .map_err(|_| "Cannot create isolated dev marker")?;
+        file.write_all(isolated_dev_policy::MARKER_CONTENT.as_bytes())
+            .map_err(|_| "Cannot write isolated dev marker")?;
+    }
+    crate::secure_fs::restrict_file(&marker).map_err(|_| "Cannot secure isolated dev marker")?;
+    DATA_DIR.set(path).map_err(|_| "Hanni data directory was already configured")?;
+    ISOLATED_DEV.store(true, Ordering::Release);
+    Ok(())
+}
+
 pub fn hanni_data_dir() -> PathBuf {
     if let Some(dir) = DATA_DIR.get() {
         return dir.clone();

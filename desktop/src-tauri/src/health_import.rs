@@ -73,11 +73,11 @@ pub async fn import_health_connect_all<R: Runtime>(
 // Samsung Health writes one night of sleep to Health Connect as several
 // separate SleepSessionRecords (split by wake-ups, plus naps). Segments less
 // than this many minutes apart are treated as one sleep.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 const SLEEP_MERGE_GAP_MINUTES: i64 = 180;
 
 /// One sleep, possibly assembled from several Health Connect segments.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 struct SleepNight {
     date: String,
     start_time: String,
@@ -90,7 +90,7 @@ struct SleepNight {
 
 /// Sort raw HC sleep segments by start instant and merge adjacent ones whose
 /// gap is below the threshold (or that overlap) into single nights.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn merge_sleep_segments(sessions: &[serde_json::Value]) -> Vec<SleepNight> {
     let mut segs: Vec<SleepNight> = sessions.iter().filter_map(|s| {
         let start = chrono::DateTime::parse_from_rfc3339(s["start_iso"].as_str()?).ok()?;
@@ -124,7 +124,7 @@ fn merge_sleep_segments(sessions: &[serde_json::Value]) -> Vec<SleepNight> {
     nights
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn import_sleep_sessions(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
     let conn = db.conn();
     let mut count = 0;
@@ -132,18 +132,22 @@ fn import_sleep_sessions(db: &HanniDb, sessions: &[serde_json::Value]) -> usize 
         // Wall-clock span so a fragmented night shows as one continuous block.
         let dur = (night.end - night.start).num_minutes().max(0);
 
-        // Idempotency: dedup by (date, start_time, source). Since Phase 1
-        // sleep_sessions has UNIQUE(date, start_time, source) — use that.
+        // Prefer the HC ID so corrected start/date updates the same row.
+        // Natural-key fallback preserves already imported legacy IDs.
         let existing: Option<String> = conn.query_row(
-            "SELECT id FROM sleep_sessions WHERE date=?1 AND start_time=?2 AND source='health_connect'",
-            rusqlite::params![night.date, night.start_time], |r| r.get(0),
+            "SELECT id FROM sleep_sessions
+             WHERE (id=?1 AND ?1<>'') OR (date=?2 AND start_time=?3 AND source='health_connect')
+             ORDER BY (id=?1) DESC LIMIT 1",
+            rusqlite::params![night.record_id, night.date, night.start_time], |r| r.get(0),
         ).ok();
 
         let sid: String = if let Some(id) = existing {
-            let _ = conn.execute(
-                "UPDATE sleep_sessions SET end_time=?1, duration_minutes=?2 WHERE id=?3",
-                rusqlite::params![night.end_time, dur, &id],
-            );
+            // A UNIQUE conflict must leave this session and its stages intact.
+            if conn.execute(
+                "UPDATE sleep_sessions SET date=?1,start_time=?2,end_time=?3,duration_minutes=?4
+                 WHERE id=?5 AND (date IS NOT ?1 OR start_time IS NOT ?2 OR end_time IS NOT ?3 OR duration_minutes IS NOT ?4)",
+                rusqlite::params![night.date, night.start_time, night.end_time, dur, &id],
+            ).is_err() { continue; }
             id
         } else {
             let new_id = if night.record_id.is_empty() {
@@ -163,7 +167,7 @@ fn import_sleep_sessions(db: &HanniDb, sessions: &[serde_json::Value]) -> usize 
     count
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn reconcile_sleep_stages(
     conn: &rusqlite::Connection,
     session_id: &str,
@@ -201,7 +205,7 @@ fn reconcile_sleep_stages(
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn import_steps(db: &HanniDb, days: &[serde_json::Value]) -> usize {
     let conn = db.conn();
     let mut count = 0;
@@ -213,7 +217,7 @@ fn import_steps(db: &HanniDb, days: &[serde_json::Value]) -> usize {
             "SELECT id FROM health_log WHERE date=?1 AND type='steps'", [date], |r| r.get(0),
         ).ok();
         if let Some(id) = existing {
-            let _ = conn.execute("UPDATE health_log SET value=?1 WHERE id=?2", rusqlite::params![steps, id]);
+            let _ = conn.execute("UPDATE health_log SET value=?1 WHERE id=?2 AND value IS NOT ?1", rusqlite::params![steps, id]);
         } else {
             let new_id = format!("health:steps:{date}");
             let _ = conn.execute(
@@ -227,7 +231,7 @@ fn import_steps(db: &HanniDb, days: &[serde_json::Value]) -> usize {
     count
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn import_heart_rate(db: &HanniDb, samples: &[serde_json::Value]) -> usize {
     let conn = db.conn();
     let mut count = 0;
@@ -243,12 +247,20 @@ fn import_heart_rate(db: &HanniDb, samples: &[serde_json::Value]) -> usize {
         if conn.execute(
             "INSERT OR IGNORE INTO heart_rate_samples (id, date, time, bpm) VALUES (?1,?2,?3,?4)",
             rusqlite::params![new_id, date, time, bpm],
-        ).is_ok() { count += 1; }
+        ).is_ok() {
+            // INSERT OR IGNORE alone would silently discard corrected samples.
+            let _ = conn.execute(
+                "UPDATE heart_rate_samples SET date=?1,time=?2,bpm=?3
+                 WHERE id=?4 AND (date IS NOT ?1 OR time IS NOT ?2 OR bpm IS NOT ?3)",
+                rusqlite::params![date, time, bpm, new_id],
+            );
+            count += 1;
+        }
     }
     count
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn import_exercise(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
     let conn = db.conn();
     let now = chrono::Local::now().to_rfc3339();
@@ -280,8 +292,9 @@ fn import_exercise(db: &HanniDb, sessions: &[serde_json::Value]) -> usize {
         ).ok();
         if let Some(id) = existing {
             let _ = conn.execute(
-                "UPDATE health_log SET value=?1 WHERE id=?2",
-                rusqlite::params![dur, id],
+                "UPDATE health_log SET value=?1,date=?2,start_time=?3,notes=?4
+                 WHERE id=?5 AND (value IS NOT ?1 OR date IS NOT ?2 OR start_time IS NOT ?3 OR notes IS NOT ?4)",
+                rusqlite::params![dur, date, start_time, notes, id],
             );
         } else {
             let _ = conn.execute(
@@ -357,3 +370,7 @@ pub fn get_health_summary(db: State<'_, HanniDb>, days: i64) -> HealthSummary {
     }).unwrap_or_default();
     HealthSummary { avg_sleep_minutes: avg_sleep, avg_steps, avg_resting_hr: avg_hr, sleep_sessions: sleep_count, days_with_steps: days_steps, hr_samples: hr_count, steps }
 }
+
+#[cfg(test)]
+#[path = "health_import_tests.rs"]
+mod tests;

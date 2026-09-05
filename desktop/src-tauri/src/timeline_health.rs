@@ -24,7 +24,7 @@ pub fn sync_health_to_timeline(date: String, db: tauri::State<'_, HanniDb>) -> R
 fn sync_sleep(conn: &rusqlite::Connection, date: &str, type_id: i64) -> i64 {
     let mut stmt = match conn.prepare(
         "SELECT start_time, end_time, duration_minutes FROM sleep_sessions
-         WHERE date=?1 AND source='health_connect'"
+         WHERE date=?1 AND source='health_connect' AND id NOT GLOB 'raw-sleep:*'"
     ) { Ok(s) => s, Err(_) => return 0 };
 
     let sessions: Vec<(String, String, i64)> = stmt.query_map(

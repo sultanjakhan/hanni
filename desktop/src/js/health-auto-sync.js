@@ -5,6 +5,7 @@
 
 import { invoke, IS_MOBILE } from './state.js';
 import { localDate } from './utils.js';
+import { requestHealthViewRefresh } from './health-view-refresh.js';
 
 const LS_KEY = 'hc_last_sync';
 const PERMISSION_PROMPT_KEY = 'hc_permission_prompted_at';
@@ -16,6 +17,9 @@ const PROMPT_RETRY_MS = 24 * 60 * 60 * 1000;
 const MIN_INTERVAL_MS = 60 * 1000;
 
 let inflight = null;
+let permissionRequest = null;
+let rawInflight = null;
+let rawContinuation = null;
 
 function promptIsDue(key) {
   const last = Number(localStorage.getItem(key) || 0);
@@ -23,12 +27,38 @@ function promptIsDue(key) {
 }
 
 async function requestPermissionsIfDue(key) {
-  if (!promptIsDue(key)) return null;
-  const result = await invoke('health_request_permissions').catch(() => null);
-  // Old builds stored "1" forever in hc_bg_asked. Replacing it with a real
-  // timestamp lets Hanni recover if Health Connect revokes access later.
-  if (result !== null) localStorage.setItem(key, String(Date.now()));
-  return result;
+  if (permissionRequest) return permissionRequest;
+  if (!promptIsDue(key) || !promptIsDue(PERMISSION_PROMPT_KEY) || !promptIsDue(BG_PROMPT_KEY)) return null;
+  // One combined request covers available record types, history and background.
+  // Stamp both paths before opening the system UI to avoid a second dialog on resume.
+  for (const promptKey of [PERMISSION_PROMPT_KEY, BG_PROMPT_KEY]) {
+    localStorage.setItem(promptKey, String(Date.now()));
+  }
+  permissionRequest = invoke('health_request_permissions').catch(() => null);
+  try { return await permissionRequest; } finally { permissionRequest = null; }
+}
+
+async function importRawHealth() {
+  if (document.visibilityState !== 'visible') return false;
+  if (rawInflight) return rawInflight;
+  clearTimeout(rawContinuation);
+  rawContinuation = null;
+  rawInflight = (async () => {
+    try {
+      const result = await invoke('health_import_raw');
+      if (result?.more_pending && document.visibilityState === 'visible') {
+        // Drain bounded pages without waiting for the next foreground poll.
+        // A real error backs off; ordinary backlog continues immediately.
+        rawContinuation = setTimeout(() => { importRawHealth().catch(() => {}); },
+          result.retry_needed ? 30_000 : 1000);
+      }
+      const viewsChanged = (result?.projection?.records || 0) > 0;
+      if (viewsChanged) requestHealthViewRefresh();
+      return (result?.modified_records || 0) > 0 || viewsChanged;
+    } catch (_) { return false; }
+    finally { rawInflight = null; }
+  })();
+  return rawInflight;
 }
 
 /**
@@ -42,7 +72,7 @@ async function requestPermissionsIfDue(key) {
  * the pipeline permanently disabled.
  */
 export async function autoImportHealth(opts = {}) {
-  if (!IS_MOBILE) return false;
+  if (!IS_MOBILE || document.visibilityState !== 'visible') return false;
   if (inflight) return inflight;
   if (!opts.force) {
     const last = +(localStorage.getItem(LS_KEY) || 0);
@@ -58,8 +88,11 @@ export async function autoImportHealth(opts = {}) {
         // permission recovery forever.
         await requestPermissionsIfDue(PERMISSION_PROMPT_KEY);
       }
-      const imported = await invoke('import_health_connect_all');
-      if (!imported?.successful_types?.length) return false;
+      // Archive and Calendar projections have independent permissions/progress.
+      // A failed four-type projection must not stop the remaining archive types.
+      const archived = await importRawHealth();
+      const imported = await invoke('import_health_connect_all').catch(() => null);
+      if (!imported?.successful_types?.length) return archived;
       const dates = Array.from({ length: 7 }, (_, i) => localDate(-i));
       await Promise.all(dates.flatMap(date => [
         invoke('sync_health_to_calendar', { date }).catch(() => {}),
@@ -94,7 +127,7 @@ export async function maybeRequestHealthBackground() {
   const fg = await invoke('health_has_permissions').catch(() => false);
   if (!fg) return;
   const st = await invoke('health_background_status').catch(() => null);
-  if (st?.granted) return;
+  if (!st?.available || st.granted) return;
   // Re-check the actual permission before consulting the cooldown. A previous
   // "asked" marker must not permanently hide a later Android auto-revocation.
   await requestPermissionsIfDue(BG_PROMPT_KEY);
@@ -110,5 +143,9 @@ let pollHandle = null;
 export function startHealthPolling() {
   if (!IS_MOBILE) return;
   if (pollHandle) return;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') autoImportHealth({ force: true }).catch(() => {});
+    else { clearTimeout(rawContinuation); rawContinuation = null; }
+  });
   pollHandle = setInterval(() => { autoImportHealth().catch(() => {}); }, 3 * 60 * 1000);
 }
