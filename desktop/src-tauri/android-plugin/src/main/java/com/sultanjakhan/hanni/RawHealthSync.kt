@@ -24,10 +24,15 @@ internal object RawHealthSync {
                     .put("retry_needed", false).put("types", JSONArray()).put("projection", priorProjection)
             }
             val file = File(context.filesDir.parentFile, "hanni.db")
-            if (!file.isFile || file.length() == 0L) throw RawHealthImportException("hc_database_not_ready")
-            val result = SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            if (!file.isFile || file.length() == 0L) {
+                android.util.Log.w("HanniWorkerDiag", "raw_bootstrap_file_missing")
+                throw RawHealthImportException("hc_database_not_ready")
+            }
+            val result = SQLiteDatabase.openDatabase(file.absolutePath, null,
+                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING).use { db ->
                 db.rawQuery("PRAGMA journal_mode", null).use { cursor ->
                     if (!cursor.moveToFirst() || cursor.getString(0) != "wal") {
+                        android.util.Log.w("HanniWorkerDiag", "raw_bootstrap_wal_required")
                         throw RawHealthImportException("hc_database_not_ready")
                     }
                 }

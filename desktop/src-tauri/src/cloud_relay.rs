@@ -945,10 +945,11 @@ pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
     let conn = sql(Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
-    ))?;
+    )).map_err(|code| { eprintln!("[hanni-worker] relay_bootstrap=open_failed"); code })?;
     sql(conn.busy_timeout(Duration::from_secs(5)))?;
     let mode: String = sql(conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)))?;
     if mode != "wal" {
+        eprintln!("[hanni-worker] relay_bootstrap=wal_required");
         return Err("relay_database_not_ready".into());
     }
     sql(conn.pragma_update(None, "foreign_keys", "ON"))?;
@@ -967,6 +968,7 @@ pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
             |r| r.get(0),
         ))?;
         if count != 1 {
+            eprintln!("[hanni-worker] relay_bootstrap=sync_schema_missing");
             return Err("relay_database_not_ready".into());
         }
     }
@@ -1020,6 +1022,7 @@ pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
                 .get("id")
                 .is_none_or(|kind| !kind.eq_ignore_ascii_case("TEXT"))
         {
+            eprintln!("[hanni-worker] relay_bootstrap=projection_schema_mismatch");
             return Err("relay_database_not_ready".into());
         }
     }
@@ -1030,7 +1033,8 @@ pub(crate) fn open_existing(path: &str) -> Result<Connection, String> {
     if crsql > 0 {
         unsafe {
             let guard = sql(rusqlite::LoadExtensionGuard::new(&conn))?;
-            sql(conn.load_extension(crate::crsqlite_lib_path(), Some("sqlite3_crsqlite_init")))?;
+            sql(conn.load_extension(crate::crsqlite_lib_path(), Some("sqlite3_crsqlite_init")))
+                .map_err(|code| { eprintln!("[hanni-worker] relay_bootstrap=crsqlite_load_failed"); code })?;
             drop(guard);
         }
     }

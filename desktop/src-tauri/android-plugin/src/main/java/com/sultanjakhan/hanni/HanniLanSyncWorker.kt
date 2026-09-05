@@ -28,7 +28,8 @@ class HanniLanSyncWorker(context: Context, params: WorkerParameters) :
             return@withContext Result.retry()
         }
         try {
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null,
+                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
             val stats = try {
                 BackgroundLanSync.runConfigured(db)
             } finally {

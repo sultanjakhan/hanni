@@ -80,7 +80,8 @@ class HanniHealthWorker(
             }
             val dbFile = File(ctx.filesDir.parentFile, "hanni.db")
             if (!dbFile.exists() || dbFile.length() == 0L) return@withContext Result.retry()
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null,
+                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
             try {
                 db.beginTransaction()
                 try {

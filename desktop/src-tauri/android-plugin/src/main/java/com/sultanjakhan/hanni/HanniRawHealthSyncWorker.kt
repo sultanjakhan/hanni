@@ -25,7 +25,16 @@ class HanniRawHealthSyncWorker(context: Context, params: WorkerParameters) : Cor
         else Result.success(workDataOf("status" to "checked", "pages" to result.optInt("pages")))
     } catch (error: CancellationException) {
         throw error
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        val code = when ((error as? RawHealthImportException)?.code) {
+            "hc_database_not_ready" -> "hc_database_not_ready"
+            "hc_database_page_failed" -> "hc_database_page_failed"
+            "hc_permissions_timeout" -> "hc_permissions_timeout"
+            "hc_permissions_unavailable" -> "hc_permissions_unavailable"
+            "hc_checkpoint_unavailable" -> "hc_checkpoint_unavailable"
+            else -> "hc_unclassified_retry"
+        }
+        android.util.Log.w("HanniWorkerDiag", code)
         Result.retry()
     }
 
