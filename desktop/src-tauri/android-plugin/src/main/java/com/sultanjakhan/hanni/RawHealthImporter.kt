@@ -70,7 +70,9 @@ internal class RawHealthImporter(
         for (type in ordered) {
             var state = store.checkpoint(type.name)
             fun commit(next: RawHealthCheckpoint, changes: List<RawHealthChange> = emptyList(), now: Instant = clock()) {
-                modified += store.commit(state, next, changes, now)
+                modified += observeRawHealthFailure(type, state.phase, RawHealthFailureStage.COMMIT) {
+                    store.commit(state, next, changes, now)
+                }
                 state = next.copy(version = state.version + 1)
             }
             val permitted = type.readPermission in granted
@@ -138,6 +140,11 @@ internal class RawHealthImporter(
                 catch (_: RawHealthImportException) { }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
+                // Source/commit boundaries already report their own failures. These originate here.
+                if (error is RawHealthImportException && error.code in setOf("hc_token_invalid",
+                    "hc_page_token_repeated", "hc_changes_token_invalid", "hc_checkpoint_phase_invalid")) {
+                    recordRawHealthFailure(type, state.phase, RawHealthFailureStage.CURSOR, error)
+                }
                 val status = when (error) {
                     is SecurityException -> { deniedDuringRead.add(type.name); "permission_required" }
                     is RawHealthImportException -> error.code
