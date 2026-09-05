@@ -4,7 +4,9 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const WORKER = 'hanni-personal-relay-v2';
-const SAFE_ENV = { CI: 'true', WRANGLER_WRITE_LOGS: 'false', WRANGLER_LOG: 'none',
+// Wrangler emits --json through its log channel. Keep that channel enabled in
+// the captured child pipe; never forward it or write Wrangler logs to disk.
+const SAFE_ENV = { CI: 'true', WRANGLER_WRITE_LOGS: 'false', WRANGLER_LOG: 'log',
   WRANGLER_LOG_SANITIZE: 'true', WRANGLER_SEND_METRICS: 'false' };
 
 export function validateHashes(value) {
